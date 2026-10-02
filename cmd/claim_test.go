@@ -187,3 +187,38 @@ func TestSameEnvironment(t *testing.T) {
 		}
 	}
 }
+
+func TestClaimEnvironmentShare_OwnShareResolvesDocument(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/platform/document/v1/environment-shares/share-1/claim", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"owners cannot claim their own shares"}}`))
+	})
+	mux.HandleFunc("/platform/document/v1/environment-shares/share-1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"share-1","documentId":"doc-123","access":["read"],"claimCount":2}`))
+	})
+	mux.HandleFunc("/platform/document/v1/documents/doc-123/metadata", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"doc-123","name":"Prod overview","type":"dashboard","version":1,"access":["read","write","delete"]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	setupShareCmdTest(t, srv)
+
+	out := captureExtStdout(t, func() {
+		if err := claimEnvironmentShareCmd.RunE(claimEnvironmentShareCmd, []string{"share-1"}); err != nil {
+			t.Fatalf("owner lookup should resolve the document, got: %v", err)
+		}
+	})
+	for _, want := range []string{"doc-123", "dashboard", "Prod overview", "read,write,delete"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output %q lacks %q", out, want)
+		}
+	}
+}

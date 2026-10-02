@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -40,7 +41,10 @@ so a recipient claims it and gets back the document's ID, name, type, the
 access now held and its URL (-o wide). Accepts the bare ID or the pasted URL.
 
 Claiming cannot be undone by the claimer (only the owner can delete the
-share). Claiming your own share fails; claiming twice changes nothing.
+share). Claiming twice changes nothing. Claiming your own share is rejected by
+the API, so dtctl looks the share up as its owner instead and prints the
+document it points to without claiming anything (this needs the
+document:environment-shares:read scope, i.e. a readwrite-all context).
 
 Examples:
   dtctl claim environment-share 018f1234-abcd-7000-8000-000000000000
@@ -72,16 +76,28 @@ Examples:
 		}
 
 		h := document.NewHandler(c)
+		var warnings []string
 		claim, err := h.ClaimEnvironmentShare(shareID)
 		if err != nil {
-			return claimError(err, cfg, shareID)
+			// A 400 means the caller owns the share. Only the owner can look a
+			// share up, so resolve it that way instead of failing.
+			if isOwnShareError(err) {
+				var note string
+				if claim, note = resolveOwnShare(h, shareID); claim != nil {
+					warnings = append(warnings, note)
+				}
+			}
+			if claim == nil {
+				return claimError(err, cfg, shareID)
+			}
 		}
 
-		var warnings []string
-		if meta, merr := h.GetMetadata(claim.DocumentID); merr == nil {
-			claim.Name = meta.Name
-		} else {
-			warnings = append(warnings, fmt.Sprintf("claimed, but reading the document's name failed: %v", merr))
+		if claim.Name == "" {
+			if meta, merr := h.GetMetadata(claim.DocumentID); merr == nil {
+				claim.Name = meta.Name
+			} else {
+				warnings = append(warnings, fmt.Sprintf("claimed, but reading the document's name failed: %v", merr))
+			}
 		}
 		claim.URL = document.UIURL(c.BaseURL(), claim.DocumentType, claim.DocumentID)
 
@@ -120,6 +136,31 @@ func shareHostMismatch(cfg *config.Config, linkHost, environmentURL string) erro
 		Message:     fmt.Sprintf("share link is for %s, but the current context targets %s", linkHost, urls.Host(environmentURL)),
 		Suggestions: suggestions,
 	}
+}
+
+// isOwnShareError reports whether the claim endpoint rejected the call because
+// the caller owns the share.
+func isOwnShareError(err error) bool {
+	var apiErr *httpclient.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == 400
+}
+
+// resolveOwnShare looks up a share the caller owns and describes the document
+// it points to, with the access the caller holds on it. It returns nil when the
+// lookup is not possible (no environment-shares:read scope, share gone), so the
+// caller can fall back to the own-share error.
+func resolveOwnShare(h *document.Handler, shareID string) (*document.EnvironmentShareClaim, string) {
+	share, err := h.GetEnvironmentShare(shareID)
+	if err != nil {
+		return nil, ""
+	}
+	claim := &document.EnvironmentShareClaim{DocumentID: share.DocumentID}
+	note := fmt.Sprintf("you own this share, so nothing was claimed; it gives recipients %s access", strings.Join(share.Access, ","))
+	if meta, merr := h.GetMetadata(share.DocumentID); merr == nil {
+		claim.Name, claim.DocumentType = meta.Name, meta.Type
+		claim.Access, claim.AccessLevel = meta.Access, strings.Join(meta.Access, ",")
+	}
+	return claim, note
 }
 
 // claimError replaces the claim endpoint's bare 400/403/404 with what each
