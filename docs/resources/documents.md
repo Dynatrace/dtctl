@@ -47,6 +47,81 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 
 `get document -o yaml` emits the plain document (type, id, labels, and content) — use this form, not `-o json`, when the output will be fed back into `apply`/`update document`: JSON is wrapped in a result envelope that those commands cannot read back.
 
+## Opening a share link
+
+A link someone sends you from the Dynatrace UI looks like
+`https://<environment>/ui/document/v0/#share=<share-id>`. It carries only the
+share ID, not the document ID, so you resolve it by *claiming* the share. This
+gives you the access the owner chose to share and tells you which document it
+points to. [Experimental](../STABILITY.md).
+
+```bash
+# Paste the whole link, or just the ID after "#share="
+dtctl claim environment-share 'https://abc12345.apps.dynatrace.com/ui/document/v0/#share=018f1234-abcd-7000-8000-000000000000'
+
+# -o wide adds the document's UI URL
+dtctl claim environment-share 018f1234-abcd-7000-8000-000000000000 -o wide
+```
+
+The result names the document and the access you now hold (`read` or
+`read,write`). Then read it with the follow-up command dtctl suggests:
+
+```bash
+dtctl get notebook <document-id> -o yaml
+```
+
+With `--agent` the same call returns the standard envelope. `access` is an
+array, and `context.suggestions` carries the follow-up command:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "documentId": "<document-id>",
+    "name": "Quarterly review",
+    "documentType": "notebook",
+    "access": ["read", "write"],
+    "url": "https://abc12345.apps.dynatrace.com/ui/apps/dynatrace.notebooks/notebook/<document-id>"
+  },
+  "context": {
+    "verb": "claim",
+    "resource": "environment-share",
+    "suggestions": ["dtctl get notebook <document-id>"]
+  }
+}
+```
+
+Things worth knowing:
+
+- **The link must match the context.** A link for a different environment is
+  rejected before any request is sent, with the `--context` to use instead.
+- **Claiming twice is harmless.** It changes nothing and returns the same
+  result. Only the share's owner can remove a share; a recipient cannot undo a
+  claim.
+- **Your own shares.** The API refuses to let an owner claim their own share
+  (HTTP 400). dtctl then looks the share up as its owner and prints the document
+  it points to, with a warning that nothing was claimed. That lookup needs
+  `document:environment-shares:read`, which `readwrite-all` and
+  `dangerously-unrestricted` contexts have. Elsewhere you get the original error;
+  find the document with `dtctl get documents --mine`.
+- **Not found.** A 404 (exit code `4`, `not_found`) means the owner deleted the
+  share, or the context points at a different environment than the link.
+- **Preview.** `--dry-run` prints what would be claimed without sending it.
+
+### Scope
+
+Claiming needs the `document:environment-shares:claim` scope, which every
+safety level requests at login. Without it the API answers `403`
+(`permission_denied`, exit code `5`):
+
+- **OAuth login:** run `dtctl auth login` again. A session created before the
+  scope was added does not carry it.
+- **Platform token:** create it with `document:environment-shares:claim`.
+
+`dtctl claim environment-share <id> --check-scopes` reports the scope the command
+needs. It cannot verify it for API and platform tokens, whose scopes are not
+introspectable, so it reports the status `unknown` there.
+
 ## Examples
 
 Every document carries a `type`; `dashboard` and `notebook` are built in, anything else (`launchpad`, `acme:config`, ...) is a custom type:
