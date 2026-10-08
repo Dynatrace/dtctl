@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "billing.fullname" . }}
+  labels:
+    {{- include "billing.labels" . | nindent 4 }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: billing
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

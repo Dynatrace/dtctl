@@ -1,0 +1,16 @@
+- name: checkout
+  path: services/checkout
+  services:
+    - SERVICE-0123456789ABCDEF
+  process-groups:
+    - PROCESS_GROUP-FEDCBA9876543210
+  service-names:
+    - checkout
+  workloads:
+    - namespace: payments
+      name: checkout
+- name: ledger
+  path: services/ledger
+  workloads:
+    - namespace: payments
+      name: ledger

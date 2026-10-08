@@ -73,6 +73,10 @@ var hostFileAccessAllowlist = map[string]string{
 	"pkg/plugin/plugin.go":    "stats plugin executables on the host PATH (PluginDispatch capability, never granted embedded)",
 	"pkg/skills/installer.go": "installs skill files for locally installed assistants — host state, and `skills` is blocked in a service",
 
+	// The repo scope file is found by walking up from the working directory
+	// to the enclosing git repository: the CLI's own host state.
+	"pkg/reposcope/store.go": "the repo scope file (.dtctl-repo-scope.yaml) is host state found by walking up from the working directory — reachable only with the HostWorkingDirectory capability, which embedded callers do not grant, and `repo-scope` is blocked in a service",
+
 	// The seam itself: osFS is what "the host filesystem" means.
 	"pkg/vfs/vfs.go": "the vfs seam's own host-filesystem implementation",
 }

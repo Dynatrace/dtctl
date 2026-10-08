@@ -31,18 +31,25 @@ type Capabilities struct {
 	// get subcommands and --follow on logs. The service engine leaves this
 	// false so a streaming request cannot hold the execution slot forever.
 	LongRunningStreams bool
+	// HostWorkingDirectory allows commands to read the process working
+	// directory and walk up from it to the enclosing git repository, which is
+	// where the repo scope file (.dtctl-repo-scope.yaml) lives. The working
+	// directory and that file are host state: a service request has neither,
+	// so an embedded invocation never scopes a query to a repository.
+	HostWorkingDirectory bool
 }
 
 // AllCapabilities is the CLI default: everything granted.
 func AllCapabilities() Capabilities {
 	return Capabilities{
-		PluginDispatch:     true,
-		ShellAliases:       true,
-		ApplyHooks:         true,
-		Editor:             true,
-		BrowserOpen:        true,
-		HostDiskSpill:      true,
-		LongRunningStreams: true,
+		PluginDispatch:       true,
+		ShellAliases:         true,
+		ApplyHooks:           true,
+		Editor:               true,
+		BrowserOpen:          true,
+		HostDiskSpill:        true,
+		LongRunningStreams:   true,
+		HostWorkingDirectory: true,
 	}
 }
 

@@ -126,7 +126,7 @@ func (e *DQLExecutor) fitToBudget(query string, result *DQLQueryResponse, resp o
 		ctx.NextOffset = &next
 		ctx.BudgetBytes = budget
 		if path != "" {
-			ctx.Next = fmt.Sprintf("dtctl inspect %s --page --offset %d --limit %d", shellQuote(path), k, max(k, 1))
+			ctx.Next = fmt.Sprintf("dtctl inspect %s --page --offset %d --limit %d", ShellQuote(path), k, max(k, 1))
 		}
 		res, used, _ := inlineResult(encoding, auto && rechoose, rows, k)
 		if auto {
@@ -180,12 +180,13 @@ func (e *DQLExecutor) fitToBudget(query string, result *DQLQueryResponse, resp o
 	return build(best, false, false)
 }
 
-// shellQuote returns s as a single POSIX shell word, so context.next runs as
-// written even when the spill location (DTCTL_SPILL_DIR, the user's cache dir)
-// contains spaces or shell metacharacters — an agent that hands the command to
-// a shell must never have part of a path interpreted. Paths made only of
-// characters no shell treats specially stay bare, which is the common case.
-func shellQuote(s string) string {
+// ShellQuote returns s as a single POSIX shell word, so a command line dtctl
+// suggests runs as written even when a value in it (a spill path under
+// DTCTL_SPILL_DIR, a service name) contains spaces or shell metacharacters:
+// an agent that hands the command to a shell must never have part of a value
+// interpreted. Values made only of characters no shell treats specially stay
+// bare, which is the common case.
+func ShellQuote(s string) string {
 	if s != "" && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_-./:@%+=,", r))
 	}) < 0 {

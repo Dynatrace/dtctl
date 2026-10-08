@@ -297,6 +297,76 @@ and `note` says so, because a count over 2h reads exactly like a count over
            "note": "the query names no window, so it read the default last 2h; widen it with fetch ..., from: now()-24h"}
 ```
 
+### Repo scope: `context.repo_scope`
+
+Inside a git repository linked to the entities that run its code by a
+`.dtctl-repo-scope.yaml` at its root (see `dtctl repo-scope --help`),
+`dtctl query`, `wait query` and `verify query` narrow `fetch logs` and
+`fetch spans` to the entry covering the working directory, by inserting one
+`| filter (...)` after the `fetch` stage. `dtctl query`'s envelope says so;
+`wait query` and `verify query` have no agent envelope, and report the scope
+only in the stderr line every scoped run prints:
+
+```json
+"repo_scope": {"name": "checkout", "file": ".dtctl-repo-scope.yaml", "environment": "abc12345.apps.dynatrace.com",
+               "applied": true, "data_object": "logs",
+               "filter": "service.name == \"checkout\" or (k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")",
+               "code": "applied"}
+```
+
+and `context.suggestions` names the opt-out (`run unscoped: add
+--no-repo-scope`). When an applied scope returns no records, the first
+suggestion is to run the same query with `--no-repo-scope`: a binding the
+records do not carry looks exactly like a quiet service.
+
+`applied: false` means the query was sent exactly as typed; `code` and
+`reason` say why:
+
+| Code | The query ran unscoped because |
+|---|---|
+| `not_fetch` | it does not start with `fetch <data object>` |
+| `unsupported_object` | repo scopes do not filter the fetched data object (they filter `logs` and `spans`) |
+| `no_binding` | the entry binds nothing that data object is filtered by; `reason` says which binding to add |
+| `user_filter` | a `filter`/`filterOut` stage compares a field the scope filters on, and the query's own filter wins |
+| `subquery` | the data object is fetched again inside `[...]`, which the scope cannot reach |
+| `unscannable` | dtctl cannot read the text safely (an unterminated string or comment, unbalanced brackets, a single quote) |
+| `no_entry` | no entry covers the working directory; pick one with `--repo-scope <name>` |
+| `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
+
+When the scope file holds keys this dtctl does not know (a typo, or a newer
+dtctl's), the entry still applies and `reason` names the keys.
+
+There is no `repo_scope` key at all outside a linked repository, in a
+repository whose file has no entry for the active context's environment, with
+`--no-repo-scope`, with `DTCTL_NO_REPO_SCOPE=1` and no `--repo-scope`; without
+`--repo-scope` in a context whose stability floor hides either repo-scope flag
+on the command (`min-stability: stable` without an exception for each); and in
+server mode, which has no working directory. Every run that resolved a scope
+also prints a line about it on stderr, in every mode.
+
+Naming an entry with `--repo-scope <name>` makes resolution an error rather
+than a notice: `not_found` for a name, file or environment that does not
+resolve (`suggestions` lists the names that do), `validation_error` for a scope
+file that fails validation or a working directory outside a git repository,
+and `capability_disabled` where the working directory is not available. An
+entry that resolves but cannot narrow the query is a `validation_error` too,
+and nothing is sent: the message names the code (`not_fetch`,
+`unsupported_object`, `no_binding`, `subquery` or `unscannable`) and the
+reason. `user_filter` is not an error: the query runs as typed, with
+`applied: false`, because the query's own filter on a scoped field is what was
+asked for. A scoped query that fails keeps the query's own error code and
+position, which points into the text that was sent; `suggestions` shows that
+text and the `--no-repo-scope` retry.
+
+`dtctl repo-scope discover` returns its report as `result`: `verdict` is the
+overall answer and `verdicts` has one per kind of binding (`service`,
+`processGroup`, `workload`, `serviceName`). A per-kind verdict can be
+`ambiguous` while the overall one is `match`: a single candidate whose logs
+name two process groups is one candidate but two process groups. Each
+candidate's `setCommand` is the line that saves it; a candidate without one has
+no binding that selects it alone, and `suggestions` then says what to do
+instead.
+
 ### Result notes: samples and durations
 
 Two suggestions describe what a non-empty result is *not*:

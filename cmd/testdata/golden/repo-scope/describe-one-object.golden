@@ -1,0 +1,9 @@
+Name:           billing
+Path:           services/billing
+Environment:    abc12345.apps.dynatrace.com
+File:           .dtctl-repo-scope.yaml
+Services:       SERVICE-0123456789ABCDEF
+Filters:
+  fetch logs   not scoped: entry "billing" binds nothing fetch logs is filtered by (dt.entity.process_group, service.name, or k8s.namespace.name with k8s.workload.name)
+  fetch spans  | filter (in(dt.entity.service, array("SERVICE-0123456789ABCDEF")))
+Other entries:  checkout, ledger

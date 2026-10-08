@@ -1,0 +1,16 @@
+Unit: .
+
+#  SERVICE                   PROCESS GROUP                   WORKLOAD                  SERVICE NAME     TIER
+1  SERVICE-0123456789ABCDEF  PROCESS_GROUP-FEDCBA9876543210  payments/checkout         checkout         exact
+   k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   12400 spans in 24h
+2  -                         -                               payments/checkout-ledger  checkout-ledger  exact
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   40 spans in 24h
+
+Verdict: ambiguous (candidates: 2)
+2 of 4 queries ran in 0.6s. Nothing was written. Save the one that runs this code with its line:
+  1  dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout
+  2  dtctl repo-scope set checkout-ledger --namespace payments --workload checkout-ledger --service-name checkout-ledger

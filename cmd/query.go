@@ -293,6 +293,12 @@ Examples:
 				query = rendered
 			}
 
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+			query = scoped.Query
+
 			// Fail fast, before any request, when the query provably needs a
 			// storage scope the token lacks — instead of one NOT_AUTHORIZED_FOR_TABLE
 			// per query an agent fans out.
@@ -513,7 +519,10 @@ Examples:
 				Decorate: func(ctx *output.ResponseContext, result *exec.DQLQueryResponse, _ []map[string]interface{}) {
 					named := defaultTimeframeStart != "" || defaultTimeframeEnd != "" || queryNamesWindow(query)
 					ctx.Window = queryWindowContext(result, named)
+					scoped.decorate(ctx)
 				},
+				OnRows:     scoped.onRows,
+				TypedQuery: scoped.typed,
 				// The progress bar is a user-facing affordance of the `query`
 				// command only; opt in here (subject to --no-progress) so internal
 				// query callers stay silent by default.
@@ -599,7 +608,7 @@ Examples:
 				return livePrinter.RunLive(ctx, fetcher)
 			}
 
-			return executor.ExecuteWithContext(ctx, query, opts)
+			return scoped.wrapError(executor.ExecuteWithContext(ctx, query, opts))
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read query from file")
@@ -665,6 +674,7 @@ default: never for a bare command, auto in agent mode`)
 	stability.MarkStable(c)
 	addQueryLimitFlags(c)
 	addQuerySeriesFlags(c)
+	addRepoScopeFlags(c)
 	registerFlagCompletion(c, "metadata", metadataFieldCompletion)
 	registerFlagCompletion(c, "decode-snapshots", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{

@@ -1,0 +1,13 @@
+Unit: .
+
+#  SERVICE  PROCESS GROUP                   WORKLOAD           SERVICE NAME  TIER
+1  -        PROCESS_GROUP-FEDCBA9876543210  payments/checkout  checkout      exact
+   k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   88000 logs in 24h
+
+Verdict: ambiguous (candidates: 1)
+2 of 4 queries ran in 0.6s. Nothing was written. Save the one that runs this code with its line:
+  1  dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout
+Note: spans by workload or service name failed, so the result may be incomplete: query failed (SCAN_LIMIT): Scan limit exceeded.

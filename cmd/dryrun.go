@@ -306,6 +306,7 @@ var dryRunCommands = []*cobra.Command{
 	enableAzureMonitoringCmd,
 	enableGCPMonitoringCmd,
 	execAPICmd,
+	repoScopeDiscoverCmd,
 	restoreDashboardCmd,
 	restoreDocumentCmd,
 	restoreNotebookCmd,

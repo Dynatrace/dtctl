@@ -1,0 +1,50 @@
+{
+  "environment": "abc12345.apps.dynatrace.com",
+  "dir": "services/checkout",
+  "unit": ".",
+  "verdict": "none",
+  "verdicts": {
+    "processGroup": "none",
+    "service": "none",
+    "serviceName": "none",
+    "workload": "none"
+  },
+  "candidates": [],
+  "queries": [
+    {
+      "purpose": "spans by workload or service name",
+      "dataObject": "spans",
+      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(), by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity.service, dt.entity.process_group}\n| sort records desc\n| limit 200",
+      "error": "context deadline exceeded",
+      "cause": "timeout"
+    },
+    {
+      "purpose": "logs by workload or service name",
+      "dataObject": "logs",
+      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(), by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity.service, dt.entity.process_group}\n| sort records desc\n| limit 200"
+    },
+    {
+      "purpose": "services by entity name",
+      "dataObject": "dt.entity.service",
+      "dql": "fetch dt.entity.service, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
+      "error": "query failed (NOT_AUTHORIZED_FOR_TABLE): not authorized",
+      "cause": "auth"
+    },
+    {
+      "purpose": "process groups by entity name",
+      "dataObject": "dt.entity.process_group",
+      "dql": "fetch dt.entity.process_group, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
+      "error": "query failed (UNKNOWN_DATA_OBJECT): dt.entity.process_group",
+      "cause": "unknown_object"
+    }
+  ],
+  "sent": [
+    "checkout"
+  ],
+  "notes": [
+    "discovery ran out of time; a narrower directory or an explicit name sends less",
+    "the token cannot read dt.entity.service",
+    "dt.entity.process_group is not available on this environment; the record queries are what applies here"
+  ],
+  "partial": true
+}

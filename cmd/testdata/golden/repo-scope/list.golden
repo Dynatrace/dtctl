@@ -1,0 +1,4 @@
+NAME       PATH                SERVICES                   PROCESS GROUPS   SERVICE NAMES   WORKLOADS         
+checkout   services/checkout                                               checkout                          
+ledger     services/ledger                                                                 payments/ledger   
+billing    services/billing    SERVICE-0123456789ABCDEF                                                      

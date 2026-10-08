@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 17 experimental, 14 development
+- commands: 269 stable, 24 experimental, 14 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 938
+- entries below (commands + flags): 960
 
 ## Surface
 
@@ -945,7 +945,9 @@ query                                stable
   --metadata                         stable
   --no-progress                      stable
   --no-query-limits                  stable
+  --no-repo-scope                    experimental  since 0.43.0  (declared)
   --precision                        experimental  since 0.40.0  (declared)
+  --repo-scope                       experimental  since 0.43.0  (declared)
   --segment                          stable
   --segment-var                      stable
   --segments-file                    stable
@@ -958,6 +960,22 @@ query                                stable
   --timezone                         stable
   --typed                            stable
   --width                            stable
+repo-scope                           experimental  since 0.43.0
+repo-scope current                   experimental
+repo-scope delete                    experimental
+repo-scope describe                  experimental
+repo-scope discover                  experimental
+  --dry-run                          experimental
+  --path                             experimental
+  --term                             experimental
+repo-scope list                      experimental
+repo-scope set                       experimental
+  --namespace                        experimental
+  --path                             experimental
+  --process-group                    experimental
+  --service                          experimental
+  --service-name                     experimental
+  --workload                         experimental
 restore                              stable
 restore dashboard                    stable
   --dry-run                          stable
@@ -1129,6 +1147,8 @@ verify query                         stable
   --fail-on-warn                     stable
   --file                             stable
   --locale                           stable
+  --no-repo-scope                    experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.43.0  (declared)
   --set                              stable
   --timezone                         stable
 version                              stable
@@ -1150,7 +1170,9 @@ wait query                           stable
   --max-result-records               stable
   --min-interval                     stable
   --no-query-limits                  stable
+  --no-repo-scope                    experimental  since 0.43.0  (declared)
   --quiet                            stable
+  --repo-scope                       experimental  since 0.43.0  (declared)
   --set                              stable
   --timeout                          stable
   --timezone                         stable

@@ -116,6 +116,9 @@ func runCLI(t *testing.T, exe, cfgPath, command string) (int, string, string) {
 	require.NoError(t, err)
 
 	cli := exec.Command(exe, args...)
+	// Outside any git repository, so a repo scope file in the checkout cannot
+	// narrow the CLI's queries: the engine never resolves one.
+	cli.Dir = t.TempDir()
 	cli.Env = scrubbedEnviron(map[string]string{
 		"DTCTL_CONFIG":          cfgPath,
 		"DTCTL_DISABLE_KEYRING": "1",

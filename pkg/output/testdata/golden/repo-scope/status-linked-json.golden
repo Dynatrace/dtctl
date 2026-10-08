@@ -1,0 +1,36 @@
+{
+  "linked": true,
+  "file": ".dtctl-repo-scope.yaml",
+  "environment": "abc12345.apps.dynatrace.com",
+  "dir": "services/checkout/internal",
+  "entry": {
+    "name": "checkout",
+    "path": "services/checkout",
+    "services": [
+      "SERVICE-0123456789ABCDEF"
+    ],
+    "processGroups": [
+      "PROCESS_GROUP-FEDCBA9876543210"
+    ],
+    "serviceNames": [
+      "checkout"
+    ],
+    "workloads": [
+      {
+        "namespace": "payments",
+        "name": "checkout"
+      }
+    ]
+  },
+  "filters": {
+    "logs": "in(dt.entity.process_group, array(\"PROCESS_GROUP-FEDCBA9876543210\")) or service.name == \"checkout\" or (k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")",
+    "spans": "in(dt.entity.service, array(\"SERVICE-0123456789ABCDEF\")) or service.name == \"checkout\" or (k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")"
+  },
+  "others": [
+    "ledger"
+  ],
+  "hosts": [
+    "abc12345.apps.dynatrace.com",
+    "stg98765.apps.dynatrace.com"
+  ]
+}

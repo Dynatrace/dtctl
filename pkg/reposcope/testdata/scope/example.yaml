@@ -1,0 +1,25 @@
+# dtctl repo scope: links this repository to the Dynatrace entities that run its code.
+# Written by 'dtctl repo-scope set'; see docs/REPO_SCOPE.md. Commit it to share it.
+environments:
+  abc12345.apps.dynatrace.com:
+    - name: checkout
+      path: services/checkout
+      services:
+        - SERVICE-0123456789ABCDEF
+      process-groups:
+        - PROCESS_GROUP-FEDCBA9876543210
+      service-names:
+        - checkout
+      workloads:
+        - namespace: payments
+          name: checkout
+    - name: ledger
+      path: services/ledger
+      workloads:
+        - namespace: payments
+          name: ledger
+  stg98765.apps.dynatrace.com:
+    - name: checkout
+      path: services/checkout
+      service-names:
+        - checkout

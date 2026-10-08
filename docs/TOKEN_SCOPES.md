@@ -369,6 +369,8 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | classic-pipelines | `settings:objects:read` |
 | copilot-skill | `davis-copilot:conversations:execute` |
 | dashboard | `document:documents:read` |
+| discover | `storage:logs:read` |
+| discover | `storage:spans:read` |
 | document | `document:documents:read` |
 | edgeconnect | `app-engine:edge-connects:read` |
 | environment | `app-engine:apps:run` |

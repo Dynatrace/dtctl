@@ -116,7 +116,7 @@ Examples:
 				return fmt.Errorf("unsupported output format %q for verify query (supported: json, yaml, toon)", outputFmt)
 			}
 
-			_, c, err := setupClient(cmdContext(cmd))
+			cfg, c, err := setupClient(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
@@ -145,6 +145,14 @@ Examples:
 
 				query = rendered
 			}
+
+			// Verify what `query` would send. The human output points carets
+			// into this text, so it must be the scoped one as well.
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+			query = scoped.Query
 
 			// Get verify options
 			canonical, _ := cmd.Flags().GetBool("canonical")
@@ -221,6 +229,7 @@ Examples:
 useful for AI agents or scripts to declare their intent (e.g. "root-cause-analysis")`)
 	stability.MarkStable(c)
 	rejectEmptyFlag(c, "file")
+	addRepoScopeFlags(c)
 	return c
 }
 

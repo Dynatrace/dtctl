@@ -1,0 +1,12 @@
+No entity matched unit "." on 127.0.0.1
+Tried:
+  spans by workload or service name  0 matched  fetch spans, from:now()-24h, scanLimitGBytes:5
+  logs by workload or service name   0 matched  fetch logs, from:now()-24h, scanLimitGBytes:5
+  services by entity name            0 matched  fetch dt.entity.service, from:now()-24h
+  process groups by entity name      0 matched  fetch dt.entity.process_group, from:now()-24h
+Values sent: "checkout"
+4 of 4 queries ran in 0.6s. Nothing was written.
+You can add a name you know with --term <name>, or discover for another directory with --path <dir>; or link by hand:
+  dtctl repo-scope set <name> --namespace <namespace> --workload <workload>
+  dtctl repo-scope set <name> --service-name <service.name>
+  dtctl repo-scope set <name> --service SERVICE-… --process-group PROCESS_GROUP-…

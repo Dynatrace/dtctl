@@ -1,0 +1,10 @@
+[
+  {
+    "k8s.namespace.name": null,
+    "k8s.workload.name": null,
+    "service.name": "checkout",
+    "dt.entity.service": null,
+    "dt.entity.process_group": null,
+    "records": 7
+  }
+]

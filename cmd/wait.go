@@ -122,6 +122,11 @@ Examples:
 				return err
 			}
 
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+
 			// Parse timing flags
 			timeout, _ := cmd.Flags().GetDuration("timeout")
 			maxAttempts, _ := cmd.Flags().GetInt("max-attempts")
@@ -176,7 +181,7 @@ Examples:
 
 			// Create wait config
 			waitConfig := wait.WaitConfig{
-				Query:        query,
+				Query:        scoped.Query,
 				Condition:    condition,
 				Timeout:      timeout,
 				MaxAttempts:  maxAttempts,
@@ -195,7 +200,7 @@ Examples:
 
 			result, err := waiter.Wait(cmdContext(cmd))
 			if err != nil && err != context.DeadlineExceeded {
-				return fmt.Errorf("wait failed: %w", err)
+				return fmt.Errorf("wait failed: %w", scoped.wrapError(err))
 			}
 
 			// Print results if output format specified and condition was met
@@ -245,6 +250,7 @@ Examples:
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
+	addRepoScopeFlags(c)
 	rejectEmptyFlag(c, "file")
 	return c
 }

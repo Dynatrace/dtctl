@@ -49,15 +49,15 @@ func filterEquals(c *queryContext) (hint, bool) {
 	if !(c.arg(0) == "a boolean" || c.arg(0) == "`=`") {
 		return hint{}, false
 	}
-	if seg := c.segmentAt(c.start); seg == nil || !isFilterCommand(seg.cmd) {
+	if seg := c.segmentAt(c.start); seg == nil || !isFilterCommand(seg.Command) {
 		return hint{}, false
 	}
 	var edits []edit
 	for _, seg := range c.segs {
-		if !isFilterCommand(seg.cmd) {
+		if !isFilterCommand(seg.Command) {
 			continue
 		}
-		for i := seg.start; i < seg.end; i++ {
+		for i := seg.Start; i < seg.End; i++ {
 			if c.code[i] != '=' {
 				continue
 			}
@@ -98,10 +98,10 @@ func byParameter(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	seg := c.segmentAt(c.start)
-	if seg == nil || !slices.Contains(groupingCommands, seg.cmd) {
+	if seg == nil || !slices.Contains(groupingCommands, seg.Command) {
 		return hint{}, false
 	}
-	rest := strings.TrimSpace(c.q[c.start+len("by") : seg.end])
+	rest := strings.TrimSpace(c.q[c.start+len("by") : seg.End])
 	rest = strings.TrimSpace(strings.TrimPrefix(rest, ":"))
 	if strings.HasPrefix(rest, "{") && strings.HasSuffix(rest, "}") {
 		rest = strings.TrimSpace(rest[1 : len(rest)-1])
@@ -109,16 +109,16 @@ func byParameter(c *queryContext) (hint, bool) {
 	if !fieldListRe.MatchString(rest) {
 		return hint{}, false
 	}
-	head := strings.TrimRight(c.q[seg.start:c.start], " \t\r\n")
+	head := strings.TrimRight(c.q[seg.Start:c.start], " \t\r\n")
 	sep := ", "
 	if strings.HasSuffix(head, ",") {
 		sep = " "
 	}
-	tail := trailingSpace.FindString(c.q[seg.start:seg.end])
+	tail := trailingSpace.FindString(c.q[seg.Start:seg.End])
 	fields := strings.Join(fieldSplitRe.Split(rest, -1), ", ")
 	return hint{
 		reason: "group with the by: parameter, by:{field, …}, not a trailing by keyword",
-		query:  apply(c.q, []edit{{seg.start, seg.end, head + sep + "by:{" + fields + "}" + tail}}),
+		query:  apply(c.q, []edit{{seg.Start, seg.End, head + sep + "by:{" + fields + "}" + tail}}),
 	}, true
 }
 
@@ -143,12 +143,12 @@ func colonAssignment(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	seg := c.segmentAt(c.start)
-	if seg == nil || !slices.Contains(assigningCommands, seg.cmd) {
+	if seg == nil || !slices.Contains(assigningCommands, seg.Command) {
 		return hint{}, false
 	}
 	var edits []edit
-	for _, m := range namedArgRe.FindAllStringSubmatchIndex(c.code[seg.start:seg.end], -1) {
-		ks, ke, colon := seg.start+m[2], seg.start+m[3], seg.start+m[1]
+	for _, m := range namedArgRe.FindAllStringSubmatchIndex(c.code[seg.Start:seg.End], -1) {
+		ks, ke, colon := seg.Start+m[2], seg.Start+m[3], seg.Start+m[1]
 		key := c.q[ks:ke]
 		if c.depth[ks] != 0 || (ks > 0 && isIdentByte(c.code[ks-1])) {
 			continue
@@ -220,12 +220,12 @@ func rollupDuration(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	seg := c.segmentAt(c.start)
-	if seg == nil || seg.cmd != "timeseries" || intervalRe.MatchString(c.code[seg.start:seg.end]) {
+	if seg == nil || seg.Command != "timeseries" || intervalRe.MatchString(c.code[seg.Start:seg.End]) {
 		return hint{}, false
 	}
-	for _, m := range rollupRe.FindAllStringSubmatchIndex(c.code[seg.start:seg.end], -1) {
-		from, to := seg.start+m[0], seg.start+m[1]
-		vs, ve := seg.start+m[2], seg.start+m[3]
+	for _, m := range rollupRe.FindAllStringSubmatchIndex(c.code[seg.Start:seg.End], -1) {
+		from, to := seg.Start+m[0], seg.Start+m[1]
+		vs, ve := seg.Start+m[2], seg.Start+m[3]
 		if c.start < vs || c.start >= ve || !durationRe.MatchString(c.code[vs:ve]) {
 			continue
 		}
@@ -235,10 +235,10 @@ func rollupDuration(c *queryContext) (hint, bool) {
 		if c.depth[key] == 0 {
 			return hint{reason: reason, query: apply(c.q, []edit{{key, key + len("rollup"), "interval"}})}, true
 		}
-		body := strings.TrimRight(c.q[seg.start:seg.end], " \t\r\n")
-		tail := c.q[seg.start+len(body) : seg.end]
-		fixed := c.q[seg.start:from] + c.q[to:seg.start+len(body)] + ", interval: " + value + tail
-		return hint{reason: reason, query: apply(c.q, []edit{{seg.start, seg.end, fixed}})}, true
+		body := strings.TrimRight(c.q[seg.Start:seg.End], " \t\r\n")
+		tail := c.q[seg.Start+len(body) : seg.End]
+		fixed := c.q[seg.Start:from] + c.q[to:seg.Start+len(body)] + ", interval: " + value + tail
+		return hint{reason: reason, query: apply(c.q, []edit{{seg.Start, seg.End, fixed}})}, true
 	}
 	return hint{}, false
 }
@@ -258,15 +258,15 @@ func timeseriesCondition(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	seg := c.segmentAt(c.start)
-	if seg == nil || seg.cmd != "timeseries" || c.depth[c.start] != 0 ||
-		filterParam.MatchString(c.code[seg.start:seg.end]) {
+	if seg == nil || seg.Command != "timeseries" || c.depth[c.start] != 0 ||
+		filterParam.MatchString(c.code[seg.Start:seg.End]) {
 		return hint{}, false
 	}
 	text := c.code[c.start : c.end+1]
 	if !comparisonRe.MatchString(text) || strings.Contains(strings.NewReplacer("==", "", "!=", "", "<=", "", ">=", "").Replace(text), "=") {
 		return hint{}, false
 	}
-	if before := strings.TrimRight(c.code[seg.start:c.start], " \t\r\n"); !strings.HasSuffix(before, ",") {
+	if before := strings.TrimRight(c.code[seg.Start:c.start], " \t\r\n"); !strings.HasSuffix(before, ",") {
 		return hint{}, false
 	}
 	return hint{
@@ -291,7 +291,7 @@ func timeseriesAggregation(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	seg := c.segmentAt(c.start)
-	if seg == nil || seg.cmd != "timeseries" || c.depth[c.start] != 0 {
+	if seg == nil || seg.Command != "timeseries" || c.depth[c.start] != 0 {
 		return hint{}, false
 	}
 	m := aggregationRe.FindStringSubmatch(c.q[c.start : c.end+1])
@@ -302,7 +302,7 @@ func timeseriesAggregation(c *queryContext) (hint, bool) {
 	if name == "" {
 		// Grail's span starts at the function; the field name, if any, is
 		// just before it.
-		if n := assignedNameRe.FindStringSubmatch(c.code[seg.start:c.start]); n != nil {
+		if n := assignedNameRe.FindStringSubmatch(c.code[seg.Start:c.start]); n != nil {
 			name = n[1]
 		}
 	}
@@ -336,7 +336,7 @@ var (
 // nodes carry the name as name rather than entity.name.
 func entityTable(c *queryContext) (hint, bool) {
 	first := c.segs[0]
-	m := bareFetchRe.FindStringSubmatch(c.code[first.start:first.end])
+	m := bareFetchRe.FindStringSubmatch(c.code[first.Start:first.End])
 	if m == nil || m[1] != c.arg(0) || c.segmentAt(c.start) != &c.segs[0] {
 		return hint{}, false
 	}
@@ -344,11 +344,11 @@ func entityTable(c *queryContext) (hint, bool) {
 	if !ok {
 		return hint{}, false
 	}
-	seg := c.q[first.start:first.end]
+	seg := c.q[first.Start:first.End]
 	lead := seg[:len(seg)-len(strings.TrimLeft(seg, " \t\r\n"))]
-	edits := []edit{{first.start, first.end, lead + `smartscapeNodes "` + nodeType + `"` + trailingSpace.FindString(seg)}}
-	for _, loc := range entityNameRe.FindAllStringIndex(c.code[first.end:], -1) {
-		s := first.end + loc[0]
+	edits := []edit{{first.Start, first.End, lead + `smartscapeNodes "` + nodeType + `"` + trailingSpace.FindString(seg)}}
+	for _, loc := range entityNameRe.FindAllStringIndex(c.code[first.End:], -1) {
+		s := first.End + loc[0]
 		if wordAt(c.code, s, "entity.name") {
 			edits = append(edits, edit{s, s + len("entity.name"), "name"})
 		}

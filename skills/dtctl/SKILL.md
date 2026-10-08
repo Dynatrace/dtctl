@@ -152,6 +152,10 @@ content:
 
 Gotchas: set `davis.enabled: false` on data tiles; `makeTimeseries` for log/span series, `timeseries` for metrics; `id` present → update, absent → create; the `version` warning on create is benign.
 
+## Repo scope
+
+Inside a git checkout, run `dtctl repo-scope current -A` first: a linked repository (`.dtctl-repo-scope.yaml`) scopes `fetch logs`/`fetch spans` to its own services, and `context.repo_scope` on every `dtctl query` says so. To link one, `dtctl repo-scope discover -A`, show the user the candidates, and run the `setCommand` only once they confirm. On 0 scoped records, compare with `--no-repo-scope`. Procedure: [references/repo-scope.md](references/repo-scope.md).
+
 ## Permissions & safety
 
 - Verify before mutating: `dtctl auth can-i <verb> <resource>`. Scopes: [TOKEN_SCOPES.md](https://github.com/dynatrace-oss/dtctl/blob/main/docs/TOKEN_SCOPES.md).
@@ -177,4 +181,4 @@ step that prints a token has leaked exactly what it was told to destroy.
 
 ## More
 
-[troubleshooting](references/troubleshooting.md) · [multi-tenant config](references/config-management.md) · [DQL](references/DQL-reference.md) · [notebooks](references/resources/notebooks.md) · [extensions](references/resources/extensions.md) · `dtctl --help`, `dtctl <command> --help`
+[troubleshooting](references/troubleshooting.md) · [multi-tenant config](references/config-management.md) · [DQL](references/DQL-reference.md) · [repo scope](references/repo-scope.md) · [notebooks](references/resources/notebooks.md) · [extensions](references/resources/extensions.md) · `dtctl --help`, `dtctl <command> --help`

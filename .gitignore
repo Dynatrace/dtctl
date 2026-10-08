@@ -7,7 +7,7 @@ releases/
 *.dll
 *.so
 *.dylib
-dtctl
+/dtctl
 
 # Test binary
 *.test

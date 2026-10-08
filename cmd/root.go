@@ -27,6 +27,7 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/exec"
 	"github.com/dynatrace-oss/dtctl/pkg/inspect"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
 	resapi "github.com/dynatrace-oss/dtctl/pkg/resources/api"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
 	"github.com/dynatrace-oss/dtctl/pkg/safety"
@@ -255,6 +256,7 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 		return client.ExitUsageError
 	}
 	applyStabilityFloor(root, policy)
+	setCurrentStabilityPolicy(cmdContext(root), policy)
 	// Badge what survived, so a caller reading help is told the guarantee
 	// rather than left to infer it from the tier's name.
 	applyStabilityBadges(root)
@@ -701,6 +703,17 @@ func queryStateErrorDetail(err error, state string) *output.ErrorDetail {
 // errorToDetail converts any error into a structured ErrorDetail for agent/plain mode output.
 // It uses errors.As to extract rich context from typed errors when available.
 func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
+	// ScopedQueryError — a query that failed after a repo scope rewrote it.
+	// First, because it wraps the query's own error and every case below would
+	// match through it: the inner error decides the code and its hints, and the
+	// wrapper adds the text that was actually sent and how to send it as typed.
+	var scopedErr *ScopedQueryError
+	if errors.As(err, &scopedErr) {
+		detail := errorToDetail(ctx, scopedErr.Err)
+		detail.Suggestions = append(detail.Suggestions, scopedErr.Suggestions()...)
+		return detail
+	}
+
 	// diagnostic.Error — wraps API errors with operation context and suggestions
 	var diagErr *diagnostic.Error
 	if errors.As(err, &diagErr) {
@@ -831,6 +844,24 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		return &output.ErrorDetail{
 			Code:    "capability_disabled",
 			Message: capErr.Error(),
+		}
+	}
+
+	// reposcope errors — the repo scope file and the names in it. A name the
+	// file does not define is not_found, with the defined names to pick from.
+	// Everything else (a value the file or a flag cannot hold, keys a save
+	// would drop, a working directory outside any repository) is a validation
+	// error: each is fixed in the input or the checkout, never by a retry.
+	var repoScopeNotFound *reposcope.NotFoundError
+	if errors.As(err, &repoScopeNotFound) {
+		return repoScopeNotFoundDetail(repoScopeNotFound)
+	}
+	var repoScopeInvalid *reposcope.InvalidError
+	if errors.As(err, &repoScopeInvalid) {
+		return &output.ErrorDetail{
+			Code:        "validation_error",
+			Message:     repoScopeInvalid.Error(),
+			Suggestions: repoScopeInvalid.Suggestions,
 		}
 	}
 
@@ -1032,6 +1063,21 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		Code:    classifyGenericError(ctx, err),
 		Message: err.Error(),
 	}
+}
+
+// repoScopeNotFoundDetail lists the names the environment does define, with
+// the closest one first when the request looks like a typo of it.
+func repoScopeNotFoundDetail(e *reposcope.NotFoundError) *output.ErrorDetail {
+	detail := &output.ErrorDetail{Code: "not_found", Message: e.Error()}
+	if len(e.Known) == 0 {
+		detail.Suggestions = []string{repoScopeDiscoverHint}
+		return detail
+	}
+	if s := suggest.FindClosest(e.Name, e.Known); s != nil {
+		detail.Suggestions = append(detail.Suggestions, fmt.Sprintf("did you mean %q?", s.Value))
+	}
+	detail.Suggestions = append(detail.Suggestions, fmt.Sprintf("entries for %s: %s", e.Host, strings.Join(e.Known, ", ")))
+	return detail
 }
 
 // classifyGenericError attempts to classify an error by inspecting its message
@@ -1661,15 +1707,20 @@ func loadConfig(ctx context.Context) (*config.Config, error) {
 		return nil, err
 	}
 
-	override := contextName
-	if override == "" {
-		override = getenv(ctx, "DTCTL_CONTEXT")
-	}
-	if override != "" {
+	if override := contextOverride(ctx); override != "" {
 		cfg.CurrentContext = override
 	}
 
 	return withInvocationEnv(ctx, cfg), nil
+}
+
+// contextOverride is the context this invocation was pointed at in place of
+// the config's current one: --context, else DTCTL_CONTEXT, else "".
+func contextOverride(ctx context.Context) string {
+	if contextName != "" {
+		return contextName
+	}
+	return getenv(ctx, "DTCTL_CONTEXT")
 }
 
 // NewClientFromConfig creates a new client from config with verbose mode configured
