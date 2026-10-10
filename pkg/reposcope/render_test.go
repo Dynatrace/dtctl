@@ -110,3 +110,12 @@ func TestFilters(t *testing.T) {
 	assert.Equal(t, dql.Subquery, dql.InsertFilter("fetch spans | append [fetch logs]", filters).Outcome,
 		"an unfiltered logs subquery still counts as one")
 }
+
+func TestRenderMultipleServiceNames(t *testing.T) {
+	for _, object := range DataObjects() {
+		filter, ok, reason := Render(&Entry{Name: "checkout", ServiceNames: []string{"checkout", "ledger"}}, object)
+		require.True(t, ok, reason)
+		assert.Equal(t, `in(service.name, array("checkout", "ledger"))`, filter.Expr)
+		assert.Equal(t, []string{"service.name"}, filter.Fields)
+	}
+}

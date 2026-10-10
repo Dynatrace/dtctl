@@ -235,3 +235,21 @@ func TestUpsertRemove(t *testing.T) {
 	assert.True(t, f.Remove(prodHost, "ledger"))
 	assert.True(t, f.Empty())
 }
+
+func TestCheckInvalidUTF8ServiceName(t *testing.T) {
+	f := &File{}
+	f.Upsert(prodHost, Entry{Name: "checkout", ServiceNames: []string{string([]byte{0xff})}})
+	err := f.check()
+	require.NotNil(t, err)
+	assert.Contains(t, err.Msg, "is not valid UTF-8")
+}
+
+func TestCheckHostWithPathOrQuery(t *testing.T) {
+	for _, suffix := range []string{"/path", "?query=value", "#fragment"} {
+		f := &File{}
+		f.Upsert(prodHost+suffix, Entry{Name: "checkout", ServiceNames: []string{"checkout"}})
+		err := f.check()
+		require.NotNil(t, err)
+		assert.Contains(t, err.Msg, prodHost)
+	}
+}

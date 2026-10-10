@@ -117,7 +117,10 @@ func TestListingSeesChangedFiles(t *testing.T) {
 	rewritten := listing(t, dir)
 	require.NotEqual(t, before, rewritten, "a rewritten file")
 
-	require.NoError(t, os.Chmod(goMod, 0o600))
+	// Windows only honors the owner-write bit. Read-only changes the mode
+	// on every platform, unlike changing group/other read permissions.
+	t.Cleanup(func() { _ = os.Chmod(goMod, 0o644) })
+	require.NoError(t, os.Chmod(goMod, 0o444))
 	require.NotEqual(t, rewritten, listing(t, dir), "a changed mode")
 }
 

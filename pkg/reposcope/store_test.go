@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -128,7 +129,7 @@ func TestSave(t *testing.T) {
 
 		data, err := os.ReadFile(loc.Path)
 		require.NoError(t, err)
-		assert.Equal(t, string(readFixture(t, "example.yaml")), string(data))
+		assert.Equal(t, strings.ReplaceAll(string(readFixture(t, "example.yaml")), "\r\n", "\n"), string(data))
 		info, err := os.Stat(loc.Path)
 		require.NoError(t, err)
 		if runtime.GOOS != "windows" {

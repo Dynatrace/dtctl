@@ -49,3 +49,16 @@ func TestLoad_OnlyARegularFile(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadUnreadableFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission bits do not stop root")
+	}
+	root := newRepo(t)
+	loc := Location{Path: filepath.Join(root, FileName)}
+	require.NoError(t, os.WriteFile(loc.Path, []byte("environments: {}"), 0o000))
+	t.Cleanup(func() { _ = os.Chmod(loc.Path, 0o644) })
+	_, err := Load(loc)
+	require.ErrorIs(t, err, os.ErrPermission)
+	require.ErrorContains(t, err, "read "+loc.Path)
+}
