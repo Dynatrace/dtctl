@@ -293,3 +293,63 @@ func TestWorkspaceHasFilters(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildFilterSets(t *testing.T) {
+	labels := func(set map[string]interface{}) []map[string]interface{} {
+		t.Helper()
+		list, ok := set["labels"].([]map[string]interface{})
+		if !ok {
+			t.Fatalf("labels: got %T, want []map[string]interface{}", set["labels"])
+		}
+		return list
+	}
+
+	t.Run("fields are sorted", func(t *testing.T) {
+		sets := BuildFilterSets(map[string][]string{
+			"k8s.workload.name":  {"checkout"},
+			"dt.entity.service":  {"SERVICE-0000000000000001"},
+			"k8s.namespace.name": {"payments"},
+		})
+		if len(sets) != 1 {
+			t.Fatalf("got %d filter sets, want 1", len(sets))
+		}
+		var fields []string
+		for _, label := range labels(sets[0]) {
+			fields = append(fields, label["field"].(string))
+		}
+		want := []string{"dt.entity.service", "k8s.namespace.name", "k8s.workload.name"}
+		if strings.Join(fields, ",") != strings.Join(want, ",") {
+			t.Fatalf("fields = %v, want %v", fields, want)
+		}
+	})
+
+	t.Run("one filter set per map, in order", func(t *testing.T) {
+		sets := BuildFilterSets(
+			map[string][]string{"k8s.namespace.name": {"payments"}},
+			map[string][]string{},
+			map[string][]string{"service.name": {"checkout"}},
+		)
+		if len(sets) != 2 {
+			t.Fatalf("got %d filter sets, want 2 (the empty map adds none)", len(sets))
+		}
+		for i, want := range []string{"k8s.namespace.name", "service.name"} {
+			if got := labels(sets[i])[0]["field"]; got != want {
+				t.Errorf("set %d field = %v, want %s", i, got, want)
+			}
+			if filters, ok := sets[i]["filters"].([]interface{}); !ok || len(filters) != 0 {
+				t.Errorf("set %d filters = %#v, want an empty list", i, sets[i]["filters"])
+			}
+		}
+	})
+
+	t.Run("no labels gives an empty slice", func(t *testing.T) {
+		for name, sets := range map[string][]map[string]interface{}{
+			"empty map": BuildFilterSets(map[string][]string{}),
+			"no maps":   BuildFilterSets(),
+		} {
+			if sets == nil || len(sets) != 0 {
+				t.Errorf("%s: got %#v, want an empty non-nil slice", name, sets)
+			}
+		}
+	})
+}
