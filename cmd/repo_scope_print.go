@@ -22,6 +22,10 @@ import (
 // prints; -o json has them all.
 const repoScopeShownCandidates = 5
 
+// repoScopeShownIDs is how many ids of one kind a candidate's row lists; -o
+// json has every id discovery collected.
+const repoScopeShownIDs = 2
+
 // printRepoScopeCurrent is `repo-scope current`: one line, the way
 // `ctx current` answers.
 func printRepoScopeCurrent(w io.Writer, s *reposcope.Status) {
@@ -165,6 +169,9 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 	for _, n := range p.sharedNotes {
 		fmt.Fprintf(w, "Note: %s\n", n)
 	}
+	for _, n := range p.lineNotes {
+		fmt.Fprintf(w, "Note: %s\n", n)
+	}
 	for _, n := range r.Notes {
 		fmt.Fprintf(w, "Note: %s\n", n)
 	}
@@ -181,8 +188,8 @@ func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 		if c.Workload != "" {
 			workload = reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}.String()
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", c.Rank, cmp.Or(strings.Join(c.Services, ","), "-"),
-			cmp.Or(strings.Join(c.ProcessGroups, ","), "-"), cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"), c.Tier)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", c.Rank, idsColumn(c.Services, c.ServiceCount, c.Sampled),
+			idsColumn(c.ProcessGroups, c.ProcessGroupCount, c.Sampled), cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"), c.Tier)
 	}
 	_ = tw.Flush()
 	rows := strings.SplitAfter(buf.String(), "\n")
@@ -198,14 +205,40 @@ func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 	fmt.Fprintln(w)
 }
 
+// idsColumn is a candidate's ids of one kind in the table: the first few,
+// then how many more the count says there are. The count is the source of
+// truth, so the column reads the same whether the collected list was cut or
+// not. A sampled candidate's ids are the ones its sample carried.
+func idsColumn(ids []string, count int64, sampled bool) string {
+	shown := ids[:min(len(ids), repoScopeShownIDs)]
+	var parts []string
+	if len(shown) > 0 {
+		parts = append(parts, strings.Join(shown, ","))
+	}
+	if more := max(count, int64(len(ids))) - int64(len(shown)); more > 0 {
+		parts = append(parts, fmt.Sprintf("+%d more", more))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	if sampled {
+		parts = append(parts, "(sampled)")
+	}
+	return strings.Join(parts, " ")
+}
+
 // printRepoScopeNoMatch reports a discovery that found nothing: what it
-// tried, what it sent, and what to do instead.
+// tried, what it sent, and what to do instead. A sampled retry the record
+// query made unnecessary was never tried, so it is left out.
 func printRepoScopeNoMatch(w io.Writer, r *reposcope.DiscoveryReport, p repoScopeProposal, took string) {
 	fmt.Fprintf(w, "No entity matched unit %q on %s\n", r.Unit, r.Environment)
 	if len(r.Queries) > 0 {
 		fmt.Fprintln(w, "Tried:")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, q := range r.Queries {
+			if q.SampledRetry() && q.Skipped && q.Cause == "" {
+				continue
+			}
 			first, _, _ := strings.Cut(q.DQL, "\n")
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", q.Purpose, repoScopeQueryOutcome(q), first)
 		}
@@ -230,12 +263,16 @@ func writeRepoScopeHandLinks(w io.Writer, p repoScopeProposal) {
 // repoScopeQueryOutcome is one query's result in the "Tried" list.
 func repoScopeQueryOutcome(q reposcope.Query) string {
 	switch {
+	case q.Skipped && q.Cause != "":
+		return "skipped (" + q.Cause + ")"
 	case q.Skipped:
 		return "skipped"
 	case q.Error != "":
 		return "failed (" + q.Cause + ")"
 	case q.Truncated:
 		return strconv.Itoa(q.Rows) + " matched, capped"
+	case q.Cause != "":
+		return strconv.Itoa(q.Rows) + " matched (" + q.Cause + ")"
 	}
 	return strconv.Itoa(q.Rows) + " matched"
 }

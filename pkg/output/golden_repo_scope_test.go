@@ -3,6 +3,7 @@ package output
 import (
 	"bytes"
 	"testing"
+	"testing/fstest"
 
 	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
 )
@@ -45,26 +46,14 @@ func repoScopeStatusLinked() reposcope.Status {
 }
 
 // repoScopeQueries is the discovery plan for a unit named checkout, with the
-// given outcome applied to each query in turn.
+// given outcome applied to each query in turn: two record queries, each
+// followed by its three sampled retries, then the two entity searches.
 func repoScopeQueries(outcomes ...func(*reposcope.Query)) []reposcope.Query {
-	plan := []reposcope.Query{
-		{
-			Purpose: "spans by workload or service name", DataObject: "spans",
-			DQL: "fetch spans, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(), by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity.service, dt.entity.process_group}\n| sort records desc\n| limit 200",
-		},
-		{
-			Purpose: "logs by workload or service name", DataObject: "logs",
-			DQL: "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(), by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity.service, dt.entity.process_group}\n| sort records desc\n| limit 200",
-		},
-		{
-			Purpose: "services by entity name", DataObject: "dt.entity.service",
-			DQL: "fetch dt.entity.service, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
-		},
-		{
-			Purpose: "process groups by entity name", DataObject: "dt.entity.process_group",
-			DQL: "fetch dt.entity.process_group, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
-		},
+	p, err := reposcope.PlanDiscovery(fstest.MapFS{}, ".", []string{"checkout"})
+	if err != nil {
+		panic(err)
 	}
+	plan := p.Queries
 	for i, apply := range outcomes {
 		apply(&plan[i])
 	}
@@ -73,6 +62,7 @@ func repoScopeQueries(outcomes ...func(*reposcope.Query)) []reposcope.Query {
 
 func repoScopeRows(n int) func(*reposcope.Query) { return func(q *reposcope.Query) { q.Rows = n } }
 func repoScopeSkipped(q *reposcope.Query)        { q.Skipped = true }
+func repoScopeCapped(q *reposcope.Query)         { q.Truncated, q.Cause = true, "truncated" }
 func repoScopeFailed(cause, msg string) func(*reposcope.Query) {
 	return func(q *reposcope.Query) { q.Cause, q.Error = cause, msg }
 }
@@ -89,16 +79,18 @@ func repoScopeDiscoveryMatch() reposcope.DiscoveryReport {
 		Verdict:     reposcope.VerdictMatch,
 		Verdicts:    repoScopeVerdicts(reposcope.VerdictMatch),
 		Candidates: []reposcope.Candidate{{
-			Rank:          1,
-			Name:          "checkout",
-			Services:      []string{repoScopeSvc},
-			ProcessGroups: []string{repoScopePG},
-			ServiceName:   "checkout",
-			Namespace:     "payments",
-			Workload:      "checkout",
-			Tier:          "exact",
-			Spans:         12400,
-			Logs:          88000,
+			Rank:              1,
+			Name:              "checkout",
+			Services:          []string{repoScopeSvc},
+			ServiceCount:      1,
+			ProcessGroups:     []string{repoScopePG},
+			ProcessGroupCount: 1,
+			ServiceName:       "checkout",
+			Namespace:         "payments",
+			Workload:          "checkout",
+			Tier:              "exact",
+			Spans:             12400,
+			Logs:              88000,
 			Evidence: []string{
 				`k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
 				`service.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
@@ -106,8 +98,49 @@ func repoScopeDiscoveryMatch() reposcope.DiscoveryReport {
 			},
 			SetCommand: "dtctl repo-scope set checkout --service SERVICE-0123456789ABCDEF --process-group PROCESS_GROUP-FEDCBA9876543210 --namespace payments --workload checkout --service-name checkout",
 		}},
-		Queries: repoScopeQueries(repoScopeRows(1), repoScopeRows(1), repoScopeSkipped, repoScopeSkipped),
-		Sent:    []string{"checkout"},
+		Queries: repoScopeQueries(repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped,
+			repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped),
+		Sent: []string{"checkout"},
+	}
+}
+
+// repoScopeDiscoverySampled is a match on an environment where a day of
+// spans scans past the cap: the first sampled retry answered, the rest were
+// not needed, and the logs were read whole.
+func repoScopeDiscoverySampled() reposcope.DiscoveryReport {
+	return reposcope.DiscoveryReport{
+		Environment: repoScopeHost,
+		Dir:         ".",
+		Unit:        ".",
+		Verdict:     reposcope.VerdictMatch,
+		Verdicts:    repoScopeVerdicts(reposcope.VerdictMatch),
+		Candidates: []reposcope.Candidate{{
+			Rank:              1,
+			Name:              "checkout",
+			Services:          []string{repoScopeSvc, "SERVICE-0123456789ABCDF0"},
+			ServiceCount:      212,
+			ServicesCapped:    true,
+			ProcessGroups:     []string{repoScopePG},
+			ProcessGroupCount: 1,
+			ServiceName:       "checkout",
+			Namespace:         "payments",
+			Workload:          "checkout",
+			Tier:              "exact",
+			Spans:             1200000,
+			Logs:              88000,
+			Sampled:           true,
+			Evidence: []string{
+				`k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
+				"~1200000 spans in 1h (sampled 1-in-100000), 88000 logs in 24h",
+			},
+			SetCommand: "dtctl repo-scope set checkout --namespace payments --workload checkout",
+		}},
+		Queries: repoScopeQueries(repoScopeCapped, repoScopeRows(1), repoScopeSkipped, repoScopeSkipped,
+			repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped),
+		Sent: []string{"checkout"},
+		Notes: []string{
+			"spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing",
+		},
 	}
 }
 
@@ -134,7 +167,9 @@ func repoScopeDiscoveryPartial() reposcope.DiscoveryReport {
 		Candidates:  []reposcope.Candidate{},
 		Queries: repoScopeQueries(
 			repoScopeFailed("timeout", "context deadline exceeded"),
+			repoScopeSkipped, repoScopeSkipped, repoScopeSkipped,
 			repoScopeRows(0),
+			repoScopeSkipped, repoScopeSkipped, repoScopeSkipped,
 			repoScopeFailed("auth", "query failed (NOT_AUTHORIZED_FOR_TABLE): not authorized"),
 			repoScopeFailed("unknown_object", "query failed (UNKNOWN_DATA_OBJECT): dt.entity.process_group"),
 		),
@@ -163,6 +198,7 @@ func TestGolden_RepoScope(t *testing.T) {
 		"discovery-match":   {repoScopeDiscoveryMatch(), all},
 		"discovery-none":    {repoScopeDiscoveryNone(), []string{"json"}},
 		"discovery-partial": {repoScopeDiscoveryPartial(), []string{"json"}},
+		"discovery-sampled": {repoScopeDiscoverySampled(), []string{"json"}},
 	}
 	for name, single := range singles {
 		obj := single.obj

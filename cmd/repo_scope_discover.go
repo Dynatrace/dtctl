@@ -149,7 +149,7 @@ func runDiscovery(cmd *cobra.Command, plan *reposcope.Plan) error {
 	report, err := reposcope.Discover(runCtx, runner, plan, host)
 	selectors := repoScopeSelectors(ctx)
 	for i, c := range report.Candidates {
-		report.Candidates[i].SetCommand = repoScopeSetCommand(c, repoScopeDir(report, c), selectors)
+		report.Candidates[i].SetCommand = repoScopeSetCommand(report, c, selectors)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		// The report marks the query that ran out of time and says the
@@ -197,10 +197,16 @@ func printRepoScopeDiscoveryPlan(cmd *cobra.Command, plan *reposcope.Plan) error
 		Linef("Dry run: discovery for unit %q would send %d queries to the current context's environment; nothing was sent", plan.Unit, len(plan.Queries)).
 		Linef("Values it would send: %s", quotedValues(plan.Sent)).
 		Detail("sent", "%s", strings.Join(plan.Sent, ", "))
+	record := 0 // the number of the record query a rung retries
 	for i, q := range plan.Queries {
 		label := q.Purpose
-		if !slices.Contains(reposcope.DataObjects(), q.DataObject) {
+		switch {
+		case q.SampledRetry():
+			label += fmt.Sprintf(" (only if the scan cap stops query %d)", record)
+		case !slices.Contains(reposcope.DataObjects(), q.DataObject):
 			label += " (only if the record queries find nothing)"
+		default:
+			record = i + 1
 		}
 		report.Linef("").Linef("%d. %s", i+1, label)
 		for _, line := range strings.Split(q.DQL, "\n") {
@@ -224,7 +230,14 @@ func printRepoScopeDiscoveryPlan(cmd *cobra.Command, plan *reposcope.Plan) error
 // for a candidate the other two cannot select. A service name another
 // candidate also reports is left out: it would select that candidate's
 // records as well, and the bindings are alternatives.
-func repoScopeSetCommand(c reposcope.Candidate, dir string, selectors []string) string {
+//
+// When any record query was sampled, a candidate gets its workload binding
+// only, whether its own records were sampled or read whole: another
+// candidate sharing its service name could sit below the sample's floor, so
+// ServiceNameShared cannot be trusted. No id binding is proposed for a
+// sampled or capped candidate either: it would bind only the ids discovery
+// happened to list.
+func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
 	var bindings []string
 	flag := func(name string, values ...string) {
 		for _, v := range values {
@@ -235,17 +248,20 @@ func repoScopeSetCommand(c reposcope.Candidate, dir string, selectors []string) 
 		flag("--namespace", c.Namespace)
 		flag("--workload", c.Workload)
 	}
-	if c.ServiceName != "" && !c.ServiceNameShared {
+	if c.ServiceName != "" && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() {
 		flag("--service-name", c.ServiceName)
 	}
 	if len(bindings) == 0 {
+		if c.Sampled || c.ServicesCapped || c.ProcessGroupsCapped {
+			return ""
+		}
 		flag("--service", c.Services...)
 		flag("--process-group", c.ProcessGroups...)
 		if len(bindings) == 0 {
 			return ""
 		}
 	}
-	return repoScopeSetLine(exec.ShellQuote(c.Name), bindings, dir, selectors)
+	return repoScopeSetLine(exec.ShellQuote(c.Name), bindings, repoScopeDir(r, c), selectors)
 }
 
 // repoScopeSetLine assembles a `repo-scope set` line from its parts, each
@@ -313,6 +329,9 @@ type repoScopeProposal struct {
 	selectAll []repoScopeSelectAll
 	// sharedNotes explain each service name the candidates' lines leave out.
 	sharedNotes []string
+	// lineNotes explain each candidate that has no line because it was
+	// sampled or lists only some of its ids.
+	lineNotes []string
 }
 
 type repoScopeSelectAll struct {
@@ -324,7 +343,7 @@ type repoScopeSelectAll struct {
 // newRepoScopeProposal works out what r proposes beyond its candidates'
 // lines, which must already be set.
 func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repoScopeProposal {
-	var p repoScopeProposal
+	p := repoScopeProposal{lineNotes: repoScopeNoLineNotes(r)}
 	lines := 0
 	for _, c := range r.Candidates {
 		if c.SetCommand != "" {
@@ -376,11 +395,10 @@ func repoScopeSelectAllLines(r *reposcope.DiscoveryReport, selectors []string) [
 		}
 		c.ServiceNameShared = false
 		c.Namespace, c.Workload, c.Services, c.ProcessGroups = "", "", nil, nil
-		out = append(out, repoScopeSelectAll{
-			serviceName: c.ServiceName,
-			all:         reporting == len(r.Candidates),
-			line:        repoScopeSetCommand(c, repoScopeDir(r, c), selectors),
-		})
+		// A sampled candidate's service name is never proposed alone.
+		if line := repoScopeSetCommand(r, c, selectors); line != "" {
+			out = append(out, repoScopeSelectAll{serviceName: c.ServiceName, all: reporting == len(r.Candidates), line: line})
+		}
 	}
 	return out
 }
@@ -408,6 +426,24 @@ func repoScopeSharedNameNotes(r *reposcope.DiscoveryReport) []string {
 	return notes
 }
 
+// repoScopeNoLineNotes explains, in rank order, each candidate that has no
+// line because of how it was found rather than because nothing describes it.
+func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
+	var notes []string
+	for _, c := range r.Candidates {
+		switch {
+		case c.SetCommand != "":
+		case c.Sampled:
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it was found by sampling, which can miss another candidate sharing its service name or ids, so only --namespace with --workload is proposed, and its records name no workload",
+				c.Rank))
+		case c.ServicesCapped || c.ProcessGroupsCapped:
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records carry more entity ids than discovery lists, so no --service or --process-group binding is proposed",
+				c.Rank))
+		}
+	}
+	return notes
+}
+
 // repoScopeDiscoverySuggestions are the next steps an agent reading a
 // discovery report can take. Saving is the user's call, so a line is offered
 // for confirmation rather than as something to run.
@@ -430,11 +466,12 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, selectors []str
 		s = append(s, "show the user the candidates and ask which runs this code, then run its setCommand")
 	}
 	s = append(s, p.sharedNotes...)
+	s = append(s, p.lineNotes...)
 	if len(r.Candidates) > 0 {
 		s = append(s, "nothing has been saved; running the set command is the confirmation")
 	}
 	if r.Partial {
-		s = append(s, "the result is partial (see notes): a query failed, timed out, was capped or was interrupted, so a missing candidate is not evidence that nothing runs this code")
+		s = append(s, "the result is partial (see notes): a query failed, timed out, was capped or was interrupted, or a sample matched nothing, so a missing candidate is not evidence that nothing runs this code")
 	}
 	return s
 }

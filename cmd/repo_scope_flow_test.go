@@ -41,6 +41,45 @@ var checkoutRows = map[string]string{
 		`"serviceCount":"0","services":[],"processGroupCount":"1","processGroups":[["` + flowProcessGroup + `"]]}`,
 }
 
+// sampledCheckoutRows are what the sampled retries of the record queries
+// return for the checkout workload: sampled counts what the sample matched,
+// records extrapolates it.
+var sampledCheckoutRows = map[string]string{
+	"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","sampled":"12","records":"1200000",` +
+		`"serviceCount":"1","services":["` + flowService + `"],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`,
+	"logs": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","sampled":"30","records":"3000000",` +
+		`"serviceCount":"0","services":[],"processGroupCount":"1","processGroups":[["` + flowProcessGroup + `"]]}`,
+}
+
+// cappedThenSampled is an environment where a day of spans or logs scans
+// past the cap: each record query is stopped by it with no rows, and each
+// sampled retry returns rows for its data object, sampled, having read
+// 100 MB.
+func cappedThenSampled(rows map[string]string) func(*http.Request, string) (int, string) {
+	return func(r *http.Request, query string) (int, string) {
+		object := strings.TrimSuffix(strings.Fields(query + " ,")[1], ",")
+		switch {
+		case strings.Contains(query, "samplingRatio:"):
+			return http.StatusOK, fmt.Sprintf(`{"state":"SUCCEEDED","result":{"records":[%s],"metadata":{"grail":{"sampled":true,"scannedBytes":100000000}}}}`, rows[object])
+		case object == "spans" || object == "logs":
+			return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[],"metadata":{"grail":{"notifications":[` +
+				`{"notificationType":"SCAN_LIMIT_GBYTES","severity":"WARN","message":"Scan limit of 5 gigabytes reached"}]}}}}`
+		}
+		return rowsByObject(nil)(r, query)
+	}
+}
+
+// manyIDRows is a workload that runs as 200 service ids, of which the record
+// query lists 50.
+func manyIDRows() map[string]string {
+	ids := make([]string, 50)
+	for i := range ids {
+		ids[i] = fmt.Sprintf(`"SERVICE-%016X"`, 0xC000+i)
+	}
+	return map[string]string{"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"5400000",` +
+		`"serviceCount":"200","services":[` + strings.Join(ids, ",") + `],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`}
+}
+
 // chdirCheckoutRepo is a single-service repository whose go.mod and
 // Kubernetes manifest both name it checkout.
 func chdirCheckoutRepo(t *testing.T) string {
@@ -188,6 +227,9 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		respond func(*http.Request, string) (int, string)
 	}{
 		{"discover-match", rowsByObject(checkoutRows)},
+		{"discover-sampled", cappedThenSampled(sampledCheckoutRows)},
+		{"discover-sampled-empty", cappedThenSampled(nil)},
+		{"discover-many-ids", rowsByObject(manyIDRows())},
 		{"discover-ambiguous", rowsByObject(map[string]string{"spans": checkoutRows["spans"] + "," + ledger})},
 		{"discover-none", rowsByObject(nil)},
 		{"discover-partial", func(r *http.Request, query string) (int, string) {
@@ -206,6 +248,41 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 			testutil.AssertGolden(t, "repo-scope/"+tc.golden, out.String())
 		})
 	}
+}
+
+// A sampled match is complete at its floor, but a quieter candidate sharing
+// its service name could sit below it: the line binds the workload alone,
+// and the floor is said to the agent too. A sampled candidate with no
+// workload gets no line, and a note says why.
+func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", cappedThenSampled(sampledCheckoutRows))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Len(t, srv.queries(), 4, "each record query and its first rung")
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.False(t, report.Partial)
+	require.True(t, report.Candidates[0].Sampled)
+	const line = "dtctl repo-scope set checkout --namespace payments --workload checkout"
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	require.Equal(t, "confirm with the user, then: "+line, suggestions[0])
+	var sampling []string
+	for _, n := range report.Notes {
+		if strings.Contains(n, "so they were sampled 1-in-") {
+			sampling = append(sampling, n)
+			require.NotContains(t, suggestions, n, "the notes carry it once")
+		}
+	}
+	require.Len(t, sampling, 2, "the floor is in the notes on a match too")
+
+	newDQLRecorder(t, "readonly", cappedThenSampled(map[string]string{
+		"spans": `{"service.name":"checkout","sampled":"12","records":"1200000","serviceCount":"1","services":["` + flowService + `"]}`,
+	}))
+	report, suggestions = discoverReport(t)
+	require.Len(t, report.Candidates, 1)
+	require.Empty(t, report.Candidates[0].SetCommand, "neither a service name nor an id from a sample")
+	require.True(t, strings.HasPrefix(suggestions[1], "link by hand: "), suggestions[1])
+	require.Contains(t, suggestions, "candidate 1 has no set line: it was found by sampling, which can miss another candidate sharing its service name or ids, so only --namespace with --workload is proposed, and its records name no workload")
 }
 
 // A repository nothing in the environment matches: every query is tried, and
@@ -264,6 +341,9 @@ func TestRepoScopeDiscoverDryRunNeedsNoToken(t *testing.T) {
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Contains(t, stdout, "\n   "+strings.ReplaceAll(recordQuery("spans"), "\n", "\n   ")+"\n")
+	require.Contains(t, stdout, "\n2. spans by workload or service name (sampled 1-in-100000 over 1h) (only if the scan cap stops query 1)\n")
+	require.Contains(t, stdout, "\n8. logs by workload or service name (sampled 1-in-1000 over 24h) (only if the scan cap stops query 5)\n")
+	require.Contains(t, stdout, "\n9. services by entity name (only if the record queries find nothing)\n")
 
 	code, stdout, stderr = runRepoScoped([]string{"--dry-run", "repo-scope", "discover", "--agent"}, RunOptions{})
 	require.Zero(t, code, stderr)

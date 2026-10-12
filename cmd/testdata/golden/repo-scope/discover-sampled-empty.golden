@@ -1,0 +1,22 @@
+No entity matched unit "." on 127.0.0.1
+Tried:
+  spans by workload or service name                                 0 matched, capped        fetch spans, from:now()-24h, scanLimitGBytes:5
+  spans by workload or service name (sampled 1-in-100000 over 1h)   0 matched                fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000
+  spans by workload or service name (sampled 1-in-100000 over 24h)  0 matched                fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000
+  spans by workload or service name (sampled 1-in-1000 over 24h)    skipped (predicted_cap)  fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000
+  logs by workload or service name                                  0 matched, capped        fetch logs, from:now()-24h, scanLimitGBytes:5
+  logs by workload or service name (sampled 1-in-100000 over 1h)    0 matched                fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000
+  logs by workload or service name (sampled 1-in-100000 over 24h)   0 matched                fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000
+  logs by workload or service name (sampled 1-in-1000 over 24h)     skipped (predicted_cap)  fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000
+  services by entity name                                           0 matched                fetch dt.entity.service, from:now()-24h
+  process groups by entity name                                     0 matched                fetch dt.entity.process_group, from:now()-24h
+Values sent: "checkout"
+8 of 10 queries ran in 0.6s. Nothing was written.
+You can add a name you know with --term <name>, or discover for another directory with --path <dir>; or link by hand:
+  dtctl repo-scope set <name> --namespace <namespace> --workload <workload>
+  dtctl repo-scope set <name> --service-name <service.name>
+  dtctl repo-scope set <name> --service SERVICE-… --process-group PROCESS_GROUP-…
+Note: spans stopped at the 5 GB scan cap, so the verdict is capped at ambiguous
+Note: logs stopped at the 5 GB scan cap, so the verdict is capped at ambiguous
+Note: spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 24h and matched nothing; a service with fewer than about 300000 spans over 24h may be missing, so the result is partial
+Note: logs scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 24h and matched nothing; a service with fewer than about 300000 logs over 24h may be missing, so the result is partial

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/dynatrace-oss/dtctl/pkg/dql"
@@ -101,9 +102,9 @@ func (q *Query) fallback() bool {
 	return q.DataObject == objectServices || q.DataObject == objectProcessGroups
 }
 
-// rung reports a sampled retry, run only when the scan cap stopped the
-// record query before it.
-func (q *Query) rung() bool {
+// SampledRetry reports a sampled retry, run only when the scan cap stopped
+// the record query before it.
+func (q *Query) SampledRetry() bool {
 	return q.SamplingRatio > 0
 }
 
@@ -288,7 +289,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 	for i := range r.Queries {
 		q := &r.Queries[i]
 		switch {
-		case q.rung():
+		case q.SampledRetry():
 			// Decided together with the record query it retries.
 			continue
 		case q.fallback() && len(d.records) > 0:
@@ -311,7 +312,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 			r.runRecordQuery(ctx, runner, q, r.rungsAfter(i), d)
 		}
 	}
-	for _, n := range r.SamplingNotes() {
+	for _, n := range r.samplingNotes() {
 		r.note(n)
 	}
 	d.finish(r)
@@ -321,7 +322,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 // rungsAfter is the sampled retries planned right after query i.
 func (r *DiscoveryReport) rungsAfter(i int) []*Query {
 	var rungs []*Query
-	for j := i + 1; j < len(r.Queries) && r.Queries[j].rung(); j++ {
+	for j := i + 1; j < len(r.Queries) && r.Queries[j].SampledRetry(); j++ {
 		rungs = append(rungs, &r.Queries[j])
 	}
 	return rungs
@@ -464,7 +465,7 @@ func (r *DiscoveryReport) fold(q *Query, res *inventory.RunResult, d *discovery)
 		if q.fallback() {
 			d.addEntity(q.DataObject, rec)
 		} else {
-			d.addRecord(q.DataObject, rec, q.rung())
+			d.addRecord(q.DataObject, rec, q.SampledRetry())
 		}
 	}
 }
@@ -480,17 +481,17 @@ func collectedArrayCut(q *Query, res *inventory.RunResult) bool {
 	return !q.fallback() && res.TruncationCause == inventory.TruncationResultLimit
 }
 
-// SamplingNotes states, for each data object discovery had to sample, what
+// samplingNotes states, for each data object discovery had to sample, what
 // the sample can have missed. The floor comes from the ratio a rung asked
 // for: Grail only ever samples more finely than asked, so it is the
 // conservative bound, and it is defined when the sample matched nothing.
 // A sampled match is complete at that floor; a sampled miss is a bound, not
 // an absence, so the report stays partial.
-func (r *DiscoveryReport) SamplingNotes() []string {
+func (r *DiscoveryReport) samplingNotes() []string {
 	var answered []*Query
 	for i := range r.Queries {
 		q := &r.Queries[i]
-		if !q.rung() || q.Skipped || q.Error != "" || (q.Cause != "" && q.Cause != causeRowLimit) {
+		if !q.SampledRetry() || q.Skipped || q.Error != "" || (q.Cause != "" && q.Cause != causeRowLimit) {
 			continue
 		}
 		// The last rung of an object that answered is the finest: it is
@@ -506,6 +507,16 @@ func (r *DiscoveryReport) SamplingNotes() []string {
 		notes[i] = samplingNote(q)
 	}
 	return notes
+}
+
+// SampledRecords reports whether a sampled retry read the records of a data
+// object, whatever it matched. A candidate quieter than its floor may then
+// be missing from the report, read whole or not, so a service name the
+// report shows to be unshared may still be shared.
+func (r *DiscoveryReport) SampledRecords() bool {
+	return slices.ContainsFunc(r.Queries, func(q Query) bool {
+		return q.SampledRetry() && !q.Skipped && q.Error == "" && q.Cause != causeSamplingRefused
+	})
 }
 
 func samplingNote(q *Query) string {

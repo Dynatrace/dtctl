@@ -812,7 +812,7 @@ func TestDiscover_ScanCapFallsBackToSampling(t *testing.T) {
 	assert.True(t, c.Sampled)
 	assert.Equal(t, int64(1200000), c.Spans, "the sample's extrapolation, not the capped scan's count")
 	assert.Equal(t, "~1200000 spans in 1h (sampled 1-in-100000), 88000 logs in 24h", c.Evidence[len(c.Evidence)-1])
-	assert.Equal(t, r.Notes, r.SamplingNotes())
+	assert.Equal(t, r.Notes, r.samplingNotes())
 }
 
 // Before each rung is sent, the last scan is scaled by how much more the rung
@@ -850,7 +850,7 @@ func TestDiscover_EmptySampledAnswerIsPartial(t *testing.T) {
 	assert.False(t, r.Queries[8].Skipped, "the records found nothing, so the fallbacks ran")
 	assert.Equal(t, []string{
 		"spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-1000 over 24h and matched nothing; a service with fewer than about 3000 spans over 24h may be missing, so the result is partial",
-	}, r.SamplingNotes())
+	}, r.samplingNotes())
 }
 
 // A rung's collected id array cut at maxLength is no more a cut page than the
@@ -930,7 +930,7 @@ func TestDiscover_SamplingRefusedByGrail(t *testing.T) {
 		"this environment did not sample spans, so there is no cheaper query than the capped one",
 		"spans stopped at the 5 GB scan cap, so the verdict is capped at ambiguous",
 	}, r.Notes)
-	assert.Empty(t, r.SamplingNotes())
+	assert.Empty(t, r.samplingNotes())
 }
 
 // Spans sampled over an hour and logs read over a day are compared per hour:
