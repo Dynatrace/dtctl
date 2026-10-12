@@ -12,6 +12,9 @@ package reposcope
 // bindings use them until apiVersion v2 of the file migrates ids to their
 // successors. A binding by workload or service name is unaffected by that
 // migration.
+//
+// Live Debugger workspace filter labels use the same keys, so these constants
+// name them too rather than a second set of names.
 const (
 	fieldService      = "dt.entity.service"
 	fieldProcessGroup = "dt.entity.process_group"

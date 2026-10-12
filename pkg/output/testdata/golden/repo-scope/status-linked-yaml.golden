@@ -17,6 +17,15 @@ entry:
 filters:
   logs: in(dt.entity.process_group, array("PROCESS_GROUP-FEDCBA9876543210")) or service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout")
   spans: in(dt.entity.service, array("SERVICE-0123456789ABCDEF")) or service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout")
+liveDebuggerFilters:
+  - k8s.namespace.name:
+      - payments
+    k8s.workload.name:
+      - checkout
+  - service.name:
+      - checkout
+  - dt.entity.process_group:
+      - PROCESS_GROUP-FEDCBA9876543210
 others:
   - ledger
 hosts:

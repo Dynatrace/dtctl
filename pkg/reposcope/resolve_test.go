@@ -137,6 +137,11 @@ func TestResolve_Status(t *testing.T) {
 			"logs":  `in(dt.entity.process_group, array("PROCESS_GROUP-FEDCBA9876543210")) or service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout")`,
 			"spans": `in(dt.entity.service, array("SERVICE-0123456789ABCDEF")) or service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout")`,
 		},
+		LiveDebuggerFilters: []map[string][]string{
+			{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout"}},
+			{"service.name": {"checkout"}},
+			{"dt.entity.process_group": {pgID}},
+		},
 		Warning: `unknown key "discovered" on line 8 (a typo, or written by a newer dtctl)`,
 		Others:  []string{"ledger"},
 		Hosts:   []string{prodHost, stgHost},
