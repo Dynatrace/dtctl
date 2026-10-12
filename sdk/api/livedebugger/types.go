@@ -125,6 +125,18 @@ func ExtractRuleStatuses(resp map[string]interface{}) ([]RuleStatusNode, error) 
 	return decoded.Data.Org.RuleStatuses, nil
 }
 
+// WorkspaceFilterSets returns the filter sets of the workspace in a
+// getOrCreateUserWorkspaceV2 response, as the environment holds them, so a
+// caller can compare them with the sets it would send. A workspace without
+// filters has none.
+func WorkspaceFilterSets(resp map[string]interface{}) ([]FilterSet, error) {
+	var decoded GraphQLWorkspaceResponse
+	if err := decodeGraphQLResponse(resp, &decoded); err != nil {
+		return nil, err
+	}
+	return decoded.Data.Org.GetOrCreateWorkspace.FilterSets, nil
+}
+
 // WorkspaceHasFilters reports whether the getOrCreateUserWorkspaceV2 response
 // contains at least one filterSet with at least one label or filter with values.
 func WorkspaceHasFilters(resp map[string]interface{}) (bool, error) {
