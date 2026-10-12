@@ -47,6 +47,7 @@ dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20' -A
 
 - **0 records under a scope** — run the same query with `--no-repo-scope` before concluding the service is quiet; the bindings may not match what the records carry.
 - **Unbounded scan under a scope** — the scope narrows rows, not the scan; when a suggestion says only the environment's default cap applies, add `scanLimitGBytes:` to the `fetch` or pass `--default-scan-limit-gbytes`.
+- **Check the scope** — compare a few counts (`summarize count(), by:{k8s.workload.name}`) with and without `--no-repo-scope`, and check the discovery evidence showed logs before trusting scoped `fetch logs`.
 - **Environment-wide question** — add `--no-repo-scope`.
 - **Monorepo, other service** — add `--repo-scope <name>`.
 

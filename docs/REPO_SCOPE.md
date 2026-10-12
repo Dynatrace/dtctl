@@ -189,6 +189,15 @@ With `--repo-scope <name>` each of these is an error instead, and nothing is sen
 
 `dtctl exec dql` is the raw passthrough and is never scoped.
 
+### Check your scope
+
+A scope can be valid and still miss the records you care about, so check it once against real data. For a breakpoint, `dtctl describe breakpoint <id>` lists the hostnames of the rooks (agents) it reached; compare them with the nodes the workload runs on. Under the scope, count what `fetch logs` and `fetch spans` reach, and before relying on scoped `fetch logs`, check that the discovery evidence showed logs as well as spans. Then rerun one query with `--no-repo-scope` and compare.
+
+```bash
+dtctl query 'fetch logs | summarize count(), by:{k8s.workload.name}'
+dtctl query 'fetch logs | summarize count(), by:{k8s.workload.name}' --no-repo-scope
+```
+
 ## Monorepos
 
 Give each service its own entry with `--path`:
