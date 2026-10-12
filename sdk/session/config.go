@@ -315,15 +315,46 @@ func (c *Config) EffectiveQueryLimits() QueryLimits {
 }
 
 // UsageTrackingEnabled reports whether the current context opted into the
-// local usage ledger (Context.UsageTracking). A config without a resolvable
-// current context reports false: tracking is opt-in, so anything ambiguous
-// resolves to "write nothing".
+// local usage ledger. A config without a resolvable current context reports
+// false: tracking is opt-in, so anything ambiguous resolves to "write nothing".
 func (c *Config) UsageTrackingEnabled() bool {
-	ctx, err := c.CurrentContextObj()
-	if err != nil {
+	return c.UsageTrackingOn(c.CurrentContext)
+}
+
+// UsageTrackingOn reports whether the named context opted into the local usage
+// ledger (Context.UsageTracking). The ledger writes to the user's disk, so like
+// aliases and hooks the opt-in is honored only from the global config,
+// --config, or DTCTL_CONFIG. An auto-discovered local .dtctl.yaml cannot turn
+// it on; its context is tracked when the global context that binds the same
+// token-ref and environment is.
+func (c *Config) UsageTrackingOn(name string) bool {
+	for i := range c.Contexts {
+		if c.Contexts[i].Name != name {
+			continue
+		}
+		ctx := c.Contexts[i].Context
+		if !c.IsLocal() {
+			return ctx.UsageTracking
+		}
+		b, ok := c.globalBindings[ctx.TokenRef]
+		return ok && slices.Contains(b.tracked, urls.Host(ctx.Environment))
+	}
+	return false
+}
+
+// IgnoredUsageTracking reports whether the named context sets usage-tracking in
+// an auto-discovered local config without the global config opting in, so the
+// setting has no effect. See UsageTrackingOn.
+func (c *Config) IgnoredUsageTracking(name string) bool {
+	if !c.IsLocal() {
 		return false
 	}
-	return ctx.UsageTracking
+	for _, nc := range c.Contexts {
+		if nc.Name == name {
+			return nc.Context.UsageTracking && !c.UsageTrackingOn(name)
+		}
+	}
+	return false
 }
 
 // NamedToken holds a token with its name
@@ -479,6 +510,10 @@ func (c *Config) markLocal(path string) {
 type globalBinding struct {
 	hosts []string
 	level SafetyLevel
+	// tracked is the subset of hosts whose global context also opted into the
+	// usage ledger. A local config inherits the opt-in from there; it cannot
+	// grant it itself (see UsageTrackingOn).
+	tracked []string
 }
 
 // allows reports whether host is one of the hosts this token-ref is bound to.
@@ -506,7 +541,13 @@ func buildGlobalBindings() map[string]globalBinding {
 		level := nc.Context.GetEffectiveSafetyLevel()
 		b, seen := bindings[ref]
 		if !seen {
-			bindings[ref] = globalBinding{hosts: []string{host}, level: level}
+			b = globalBinding{hosts: []string{host}, level: level}
+		}
+		if nc.Context.UsageTracking && !slices.Contains(b.tracked, host) {
+			b.tracked = append(b.tracked, host)
+		}
+		if !seen {
+			bindings[ref] = b
 			continue
 		}
 		if !b.allows(host) {

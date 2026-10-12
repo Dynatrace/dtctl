@@ -45,6 +45,13 @@ contexts:
 
 `dtctl ctx describe` shows `Usage: tracked locally` for a context that has it on.
 
+Only the global config (or one named with `--config` / `DTCTL_CONFIG`) can turn
+tracking on. A project-local `.dtctl.yaml` cannot, because the ledger writes to
+your disk: `usage-tracking: true` there is ignored (`dtctl usage` says so), and
+`set-context --usage-tracking` refuses to write it into one; add `--global`. A
+local context is tracked when the global context that binds the same token-ref
+and environment has tracking on.
+
 ## Read it
 
 ```bash

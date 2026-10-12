@@ -176,7 +176,7 @@ func runUsage(ctx context.Context, allContexts bool, now time.Time) error {
 
 	tracked := map[string]bool{}
 	for _, nc := range cfg.Contexts {
-		tracked[nc.Name] = nc.Context.UsageTracking
+		tracked[nc.Name] = cfg.UsageTrackingOn(nc.Name)
 	}
 
 	names := []string{cfg.CurrentContext}
@@ -203,7 +203,10 @@ func runUsage(ctx context.Context, allContexts bool, now time.Time) error {
 		}
 	}
 
-	if !allContexts && !tracked[cfg.CurrentContext] {
+	if !allContexts && cfg.IgnoredUsageTracking(cfg.CurrentContext) {
+		warnings = append(warnings, fmt.Sprintf("usage-tracking in the local config %s is ignored: only the global config can turn it on", cfg.LocalConfigPath()))
+		suggestions = append(suggestions, fmt.Sprintf("turn it on in the global config: dtctl config set-context %s --usage-tracking --global", cfg.CurrentContext))
+	} else if !allContexts && !tracked[cfg.CurrentContext] {
 		warnings = append(warnings, fmt.Sprintf("usage tracking is off for context %q, so dtctl records nothing for it", cfg.CurrentContext))
 		suggestions = append(suggestions, fmt.Sprintf("turn it on: dtctl config set-context %s --usage-tracking", cfg.CurrentContext))
 	}
@@ -243,7 +246,7 @@ func runUsage(ctx context.Context, allContexts bool, now time.Time) error {
 func usageContextNames(cfg *config.Config, days usage.Days) []string {
 	seen := map[string]bool{}
 	for _, nc := range cfg.Contexts {
-		if nc.Context.UsageTracking {
+		if cfg.UsageTrackingOn(nc.Name) {
 			seen[nc.Name] = true
 		}
 	}

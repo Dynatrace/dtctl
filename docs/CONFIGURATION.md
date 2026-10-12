@@ -552,7 +552,8 @@ own discovery cap (`--scan-limit-gbytes`, default 25).
 
 A context can opt in to a local tally of the DQL queries dtctl runs and the
 data they scan, shown by `dtctl usage` (today, 7d, 30d). It is off by default,
-and with it off dtctl writes nothing.
+and with it off dtctl writes nothing. Only the global config can turn it on; a
+project-local `.dtctl.yaml` cannot.
 
 ```bash
 dtctl config set-context prod --usage-tracking   # adds usage-tracking: true to the context

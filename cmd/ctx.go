@@ -343,7 +343,7 @@ func describeContext(ctx context.Context, name string) error {
 		output.FprintDescribeKV(currentStdout(ctx), "Description:", w, "%s", found.Context.Description)
 	}
 
-	if found.Context.UsageTracking {
+	if cfg.UsageTrackingOn(found.Name) {
 		output.FprintDescribeKV(currentStdout(ctx), "Usage:", w, "%s", "tracked locally (see 'dtctl usage')")
 	}
 
@@ -488,6 +488,12 @@ func setContext(ctx context.Context, name string, s contextSettings) error {
 	}
 	if _, err := stability.ParseExceptions(s.stabilityExceptions); err != nil {
 		return err
+	}
+
+	// The usage ledger writes to the user's disk, so only the global config can
+	// opt in (see Config.UsageTrackingOn); turning it off locally is harmless.
+	if s.usageTracking != nil && *s.usageTracking && cfg.IsLocal() {
+		return fmt.Errorf("usage tracking can only be turned on in the global config, not the local config %s; re-run with --global", cfg.LocalConfigPath())
 	}
 
 	opts := &config.ContextOptions{
