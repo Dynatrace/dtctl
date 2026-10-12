@@ -7,4 +7,6 @@ Service names:  proxy
 Filters:
   fetch logs   | filter (service.name == "proxy")
   fetch spans  | filter (service.name == "proxy")
+Live Debugger filters:
+  service.name:proxy
 Other entries:  billing, checkout, ledger

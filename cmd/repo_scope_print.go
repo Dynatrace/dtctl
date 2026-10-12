@@ -74,6 +74,15 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 			fmt.Fprintf(w, "  fetch %-6s not scoped: %s\n", object, reason)
 		}
 	}
+	// One line per filter set, spelled the way --filters takes one.
+	output.FprintDescribeSection(w, "Live Debugger filters:")
+	if sets, ok, reason := s.LiveDebuggerFilterSets(); ok {
+		for _, set := range sets {
+			fmt.Fprintf(w, "  %s\n", formatFilters(set))
+		}
+	} else {
+		fmt.Fprintf(w, "  none: %s\n", reason)
+	}
 	kv("Other entries:", s.Others...)
 }
 

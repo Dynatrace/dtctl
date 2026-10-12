@@ -20,7 +20,7 @@ The commands that manage the file:
 - `dtctl repo-scope discover` finds the entities that run this repository's code and prints the line that saves them
 - `dtctl repo-scope set <name>` saves an entry
 - `dtctl repo-scope current` shows the entry that applies in the working directory, or why none does
-- `dtctl repo-scope describe [name]` shows an entry's bindings and the DQL filter they render
+- `dtctl repo-scope describe [name]` shows an entry's bindings, the DQL filter they render, and the Live Debugger workspace filters they set
 - `dtctl repo-scope list` lists the entries for the current context's environment (also bare `dtctl repo-scope`)
 - `dtctl repo-scope delete <name>` removes an entry
 
