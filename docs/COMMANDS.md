@@ -531,6 +531,17 @@ Subcommands:
 | gcp | Update GCP resources (Preview) |
 
 
+## usage
+
+[Experimental] Show the DQL queries dtctl ran here and the data they scanned (opt-in)
+
+_read-only | access: read_
+
+| Resource | Required scopes |
+| --- | --- |
+| reset | _(none declared)_ |
+
+
 ## verify
 
 Verify resources without executing them

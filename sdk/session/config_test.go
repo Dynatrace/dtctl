@@ -670,6 +670,45 @@ func TestConfig_SetContextWithOptions(t *testing.T) {
 	}
 }
 
+func TestConfig_SetContextWithOptions_UsageTracking(t *testing.T) {
+	cfg := NewConfig()
+	on, off := true, false
+
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "tok", nil)
+	cfg.CurrentContext = "prod"
+	if cfg.UsageTrackingEnabled() {
+		t.Fatal("usage tracking must be off by default")
+	}
+
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "", &ContextOptions{UsageTracking: &on})
+	if !cfg.UsageTrackingEnabled() {
+		t.Fatal("UsageTracking=&true must enable tracking")
+	}
+
+	// An update that does not mention tracking must leave it alone.
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "", &ContextOptions{Description: "x"})
+	if !cfg.UsageTrackingEnabled() {
+		t.Fatal("an unrelated update must not switch tracking off")
+	}
+
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "", &ContextOptions{UsageTracking: &off})
+	if cfg.UsageTrackingEnabled() {
+		t.Fatal("UsageTracking=&false must disable tracking")
+	}
+
+	// A new context can be created with tracking on.
+	cfg.SetContextWithOptions("dev", "https://dev.dt.com", "tok", &ContextOptions{UsageTracking: &on})
+	cfg.CurrentContext = "dev"
+	if !cfg.UsageTrackingEnabled() {
+		t.Fatal("new context created with tracking on must report enabled")
+	}
+
+	cfg.CurrentContext = "missing"
+	if cfg.UsageTrackingEnabled() {
+		t.Fatal("an unresolvable current context must report tracking off")
+	}
+}
+
 func TestConfig_SetContextWithOptions_NilOpts(t *testing.T) {
 	cfg := NewConfig()
 

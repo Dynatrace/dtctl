@@ -188,6 +188,12 @@ type Context struct {
 	// QueryLimits overrides the global query limits for this context. Unset
 	// fields inherit the global query-limits block.
 	QueryLimits *QueryLimits `yaml:"query-limits,omitempty"`
+	// UsageTracking opts this context into dtctl's local usage ledger: a
+	// per-day tally of the DQL queries dtctl ran and the data they scanned,
+	// kept under the XDG state directory. Off (false) by default, and when
+	// off nothing is written. Only aggregate counters are stored, never query
+	// text, results, identities, or tokens. See docs/USAGE_TRACKING.md.
+	UsageTracking bool `yaml:"usage-tracking,omitempty" table:"-"`
 }
 
 // SpillConfig holds the result-spill settings (D15). Threshold and TTL are kept
@@ -306,6 +312,18 @@ func (c *Config) EffectiveQueryLimits() QueryLimits {
 		merged.SamplingRatio = ov.SamplingRatio
 	}
 	return merged
+}
+
+// UsageTrackingEnabled reports whether the current context opted into the
+// local usage ledger (Context.UsageTracking). A config without a resolvable
+// current context reports false: tracking is opt-in, so anything ambiguous
+// resolves to "write nothing".
+func (c *Config) UsageTrackingEnabled() bool {
+	ctx, err := c.CurrentContextObj()
+	if err != nil {
+		return false
+	}
+	return ctx.UsageTracking
 }
 
 // NamedToken holds a token with its name
@@ -1008,6 +1026,10 @@ type ContextOptions struct {
 	// untouched; an empty non-nil slice clears it, which is how a caller
 	// withdraws every exception at once.
 	StabilityExceptions []string
+	// UsageTracking sets the context's usage-tracking opt-in. nil leaves the
+	// existing value untouched (the caller did not ask to change it), so a
+	// plain update cannot silently switch tracking off.
+	UsageTracking *bool
 }
 
 // SetContext creates or updates a context
@@ -1041,6 +1063,9 @@ func (c *Config) SetContextWithOptions(name, environment, tokenRef string, opts 
 				if opts.StabilityExceptions != nil {
 					c.Contexts[i].Context.StabilityExceptions = opts.StabilityExceptions
 				}
+				if opts.UsageTracking != nil {
+					c.Contexts[i].Context.UsageTracking = *opts.UsageTracking
+				}
 			}
 			return
 		}
@@ -1056,6 +1081,9 @@ func (c *Config) SetContextWithOptions(name, environment, tokenRef string, opts 
 		ctx.Profile = opts.Profile
 		ctx.MinStability = opts.MinStability
 		ctx.StabilityExceptions = opts.StabilityExceptions
+		if opts.UsageTracking != nil {
+			ctx.UsageTracking = *opts.UsageTracking
+		}
 	}
 
 	c.Contexts = append(c.Contexts, NamedContext{

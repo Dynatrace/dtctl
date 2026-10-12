@@ -454,6 +454,11 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 	wait := newWaitCmd()
 	wait.AddCommand(newWaitQueryCmd())
 
+	// --- usage ---
+	usage := newUsageCmd()
+	usage.AddCommand(newUsageResetCmd())
+	root.AddCommand(usage)
+
 	// Wire all verbs onto root
 	root.AddCommand(
 		alias, apply, auth, claim, commands, newCompletionCmd(), cfg, create, ctx,

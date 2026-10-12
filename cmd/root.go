@@ -1706,6 +1706,9 @@ func newClientFromConfig(ctx context.Context, cfg *config.Config) (*client.Clien
 	if tc := currentTracingCtx(ctx); tc != nil {
 		client.InjectTraceContext(c, tc)
 	}
+	// Opt-in local usage tally: every DQL executor built on this client
+	// records its scan volume (see cmd/usage.go).
+	bindUsageTracking(ctx, cfg, c)
 	return c, nil
 }
 

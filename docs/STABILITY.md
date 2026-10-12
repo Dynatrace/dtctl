@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 17 experimental, 14 development
+- commands: 269 stable, 19 experimental, 14 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 938
+- entries below (commands + flags): 945
 
 ## Surface
 
@@ -334,6 +334,7 @@ config set-context                   stable
   --safety-level                     stable
   --stability-exception              stable
   --token-ref                        stable
+  --usage-tracking                   experimental  since 0.43.0  (declared)
 config set-credentials               stable
   --global                           stable
   --token                            stable
@@ -479,6 +480,7 @@ ctx set                              stable
   --safety-level                     stable
   --stability-exception              stable
   --token-ref                        stable
+  --usage-tracking                   experimental  since 0.43.0  (declared)
 ctx token                            stable
 delete                               stable
 delete anomaly-detector              stable
@@ -1111,6 +1113,11 @@ update gcp monitoring                experimental  since 0.39.0
   --locationFiltering                experimental  since 0.39.0  (declared)
   --name                             experimental
 update settings                      stable
+usage                                experimental  since 0.43.0
+  --all-contexts                     experimental
+usage reset                          experimental  since 0.43.0
+  --all-contexts                     experimental
+  --yes                              experimental
 verify                               stable
 verify analyzer                      stable
   --file                             stable

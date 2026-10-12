@@ -31,6 +31,9 @@ var unsupportedCommands = map[string]string{
 	// results come back inline), and the path it takes would resolve on the
 	// server's disk rather than in the request — host state on both counts.
 	"inspect": "it reads result files spilled to the local disk; a service request receives its rows inline instead",
+	// usage reads and clears the local usage ledger, which a service request
+	// never writes (the HostUsageLedger capability is not granted).
+	"usage": "it reports the usage tally dtctl keeps on the local disk; a service request records none",
 }
 
 // UnsupportedCommands returns the top-level commands the engine blocks, keyed
