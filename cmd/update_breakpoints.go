@@ -33,6 +33,8 @@ or update workspace filters for the current project.
 Filters are workspace-scoped, so updating them with --filters also re-scopes
 every existing breakpoint in the workspace. When active breakpoints would be
 affected you are asked to confirm; pass --yes (-y) to skip the prompt.
+--repo-scope <name> sets them from an entry of the repository's
+.dtctl-repo-scope.yaml instead (see 'dtctl repo-scope describe <name>').
 
 Condition expressions (--condition):
   Conditions limit data collection to moments when the expression is true.
@@ -65,6 +67,9 @@ Examples:
   # Update workspace filters
 	 dtctl update breakpoint --filters k8s.namespace.name:prod
 	 dtctl update breakpoint --filters k8s.namespace.name:prod,dt.entity.host:HOST-123
+
+  # Update workspace filters from a repo scope entry
+	 dtctl update breakpoint --repo-scope checkout
 `,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -84,15 +89,21 @@ Examples:
 				return err
 			}
 
-			if filtersChanged {
-				if err := requireFiltersValue(filters); err != nil {
+			scopeName, _ := cmd.Flags().GetString(repoScopeFlag)
+			if filtersChanged || scopeName != "" {
+				// --filters and --repo-scope are exclusive, so source names the
+				// one given.
+				source := "--filters"
+				if scopeName != "" {
+					source = "--" + repoScopeFlag
+				} else if err := requireFiltersValue(filters); err != nil {
 					return err
 				}
 				if conditionChanged || enabledChanged || logMessageChanged {
-					return fmt.Errorf("--filters cannot be combined with --condition, --log-message, or --enabled")
+					return fmt.Errorf("%s sets the workspace's filters, shared by every breakpoint in it; change --condition, --log-message, or --enabled in a separate call", source)
 				}
 				if len(args) > 0 {
-					return fmt.Errorf("--filters does not accept a breakpoint identifier")
+					return fmt.Errorf("%s sets the workspace's filters, shared by every breakpoint in it; run it without the breakpoint identifier", source)
 				}
 
 				cfg, err := loadConfig(cmdContext(cmd))
@@ -109,13 +120,23 @@ Examples:
 					return err
 				}
 
-				parsed, err := parseFilters(filters)
-				if err != nil {
-					return err
+				var sets []map[string][]string
+				var origin string // " from repo scope <name>", or empty
+				if scopeName != "" {
+					if sets, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
+						return err
+					}
+					origin = " from repo scope " + scopeName
+				} else {
+					parsed, err := parseFilters(filters)
+					if err != nil {
+						return err
+					}
+					sets = []map[string][]string{parsed}
 				}
 
 				if dryRun(cmdContext(cmd)) {
-					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update Live Debugger workspace filters (%s) (note: this also re-scopes existing breakpoints in the workspace)", formatFilters(parsed)))
+					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update Live Debugger workspace filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", origin, filterSetsSummary(sets)))
 				}
 
 				c, err := newClientFromConfig(cmdContext(cmd), cfg)
@@ -141,7 +162,7 @@ Examples:
 					}
 				}
 
-				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, []map[string][]string{parsed}, false, skipConfirm, false)
+				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, sets, workspaceFilterChange{skipConfirm: skipConfirm})
 				if err != nil {
 					return err
 				}
@@ -149,6 +170,9 @@ Examples:
 					return printBreakpointMessage(cmdContext(cmd), "update", "Cancelled")
 				}
 
+				if scopeName != "" {
+					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Updated Live Debugger workspace filters%s (%s)", origin, filterSetsSummary(sets)))
+				}
 				return printBreakpointMessage(cmdContext(cmd), "update", "Updated Live Debugger workspace filters")
 			}
 
@@ -291,6 +315,10 @@ Examples:
 	c.Flags().String("filters", "", "workspace filters to apply (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
 	c.Flags().Lookup("enabled").NoOptDefVal = "true"
+	// update applies a scope only when one is named, so there is no default
+	// to opt out of and no --no-repo-scope.
+	addRepoScopeFlags(c, updateBreakpointRepoScopeUsage, "")
+	c.MarkFlagsMutuallyExclusive(repoScopeFlag, "filters")
 	markLiveDebuggerExperimental(c)
 	return c
 }

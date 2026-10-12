@@ -359,6 +359,28 @@ func TestConfirmWith_UsesItsOwnStreams(t *testing.T) {
 	}
 }
 
+func TestConfirmAnswered_TellsAClosedInputFromANo(t *testing.T) {
+	for _, tt := range []struct {
+		name                string
+		input               string
+		confirmed, answered bool
+	}{
+		{"y", "y\n", true, true},
+		{"n", "n\n", false, true},
+		{"empty answer", "\n", false, true},
+		{"closed input", "", false, false},
+		{"input ending before the newline", "y", false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			confirmed, answered := ConfirmAnswered(strings.NewReader(tt.input), &out, "Proceed?")
+			if confirmed != tt.confirmed || answered != tt.answered {
+				t.Errorf("ConfirmAnswered = (%v, %v), want (%v, %v)", confirmed, answered, tt.confirmed, tt.answered)
+			}
+		})
+	}
+}
+
 func TestConfirmDeletionWith_DescribesTheResourceOnItsWriter(t *testing.T) {
 	var out bytes.Buffer
 	if !ConfirmDeletionWith(strings.NewReader("y\n"), &out, "workflow", "nightly", "wf-1") {

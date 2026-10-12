@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -163,8 +164,8 @@ type filterOpsStub struct {
 	updated     bool
 }
 
-func (s *filterOpsStub) ops() workspaceFilterOps {
-	return workspaceFilterOps{
+func (s *filterOpsStub) deps() liveDebuggerDeps {
+	return liveDebuggerDeps{
 		getWorkspaceRules: func(_ *livedebugger.Handler, _ string) (map[string]interface{}, error) {
 			s.counted = true
 			rules := make([]interface{}, 0, s.activeRules)
@@ -190,8 +191,7 @@ func TestApplyWorkspaceFilters(t *testing.T) {
 	}
 	// run calls the helper on an invocation of its own, so the plain-mode
 	// switch and the answer typed at the prompt stay out of the process.
-	run := func(t *testing.T, stub *filterOpsStub, plain, skipConfirm, countAlways bool, answer string) (bool, string) {
-		t.Helper()
+	call := func(stub *filterOpsStub, plain bool, change workspaceFilterChange, answer string) (bool, string, error) {
 		var out bytes.Buffer
 		ctx := withInvocation(context.Background(), &invocation{
 			concurrent: true,
@@ -199,16 +199,22 @@ func TestApplyWorkspaceFilters(t *testing.T) {
 			stdin:      strings.NewReader(answer),
 			stdout:     &out,
 		})
-		cancelled, err := applyWorkspaceFiltersWithOps(ctx, nil, "ws-1", sets, true, skipConfirm, countAlways, stub.ops())
+		change.creating = true
+		cancelled, err := applyWorkspaceFiltersWithDeps(ctx, nil, "ws-1", sets, change, stub.deps())
+		return cancelled, out.String(), err
+	}
+	run := func(t *testing.T, stub *filterOpsStub, plain bool, change workspaceFilterChange, answer string) (bool, string) {
+		t.Helper()
+		cancelled, out, err := call(stub, plain, change, answer)
 		if err != nil {
 			t.Fatalf("applyWorkspaceFilters: %v", err)
 		}
-		return cancelled, out.String()
+		return cancelled, out
 	}
 
 	t.Run("a declined confirmation changes nothing", func(t *testing.T) {
 		stub := &filterOpsStub{activeRules: 2}
-		cancelled, out := run(t, stub, false, false, false, "n\n")
+		cancelled, out := run(t, stub, false, workspaceFilterChange{}, "n\n")
 		if !cancelled || stub.updated {
 			t.Fatalf("cancelled=%t updated=%t, want a cancel and no update", cancelled, stub.updated)
 		}
@@ -219,7 +225,7 @@ func TestApplyWorkspaceFilters(t *testing.T) {
 
 	t.Run("an accepted confirmation sends every set", func(t *testing.T) {
 		stub := &filterOpsStub{activeRules: 1}
-		if cancelled, _ := run(t, stub, false, false, false, "y\n"); cancelled {
+		if cancelled, _ := run(t, stub, false, workspaceFilterChange{}, "y\n"); cancelled {
 			t.Fatal("cancelled after the confirmation was accepted")
 		}
 		if want := livedebugger.BuildFilterSets(sets...); !reflect.DeepEqual(stub.sent, want) {
@@ -229,7 +235,7 @@ func TestApplyWorkspaceFilters(t *testing.T) {
 
 	t.Run("no active breakpoints asks nothing", func(t *testing.T) {
 		stub := &filterOpsStub{}
-		cancelled, out := run(t, stub, false, false, false, "")
+		cancelled, out := run(t, stub, false, workspaceFilterChange{}, "")
 		if cancelled || !stub.counted || !stub.updated || out != "" {
 			t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want a silent count and an update", cancelled, stub.counted, stub.updated, out)
 		}
@@ -244,18 +250,45 @@ func TestApplyWorkspaceFilters(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			stub := &filterOpsStub{activeRules: 3}
-			cancelled, out := run(t, stub, tt.plain, tt.skipConfirm, false, "")
+			cancelled, out := run(t, stub, tt.plain, workspaceFilterChange{skipConfirm: tt.skipConfirm}, "")
 			if cancelled || stub.counted || !stub.updated || out != "" {
 				t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want no count, no prompt and an update", cancelled, stub.counted, stub.updated, out)
 			}
 		})
 	}
 
-	t.Run("countAlways declines a non-interactive re-scope", func(t *testing.T) {
+	t.Run("an unasked change is declined where nobody can confirm it", func(t *testing.T) {
 		stub := &filterOpsStub{activeRules: 1}
-		cancelled, _ := run(t, stub, true, false, true, "")
-		if !cancelled || !stub.counted || stub.updated {
-			t.Fatalf("cancelled=%t counted=%t updated=%t, want a count, a cancel and no update", cancelled, stub.counted, stub.updated)
+		cancelled, out, err := call(stub, true, workspaceFilterChange{unasked: true}, "y\n")
+		if !errors.Is(err, errFiltersDeclined) || cancelled || !stub.counted || stub.updated || out != "" {
+			t.Fatalf("err=%v cancelled=%t counted=%t updated=%t prompt=%q, want a count, errFiltersDeclined, no update and no prompt", err, cancelled, stub.counted, stub.updated, out)
+		}
+	})
+
+	// Outside plain mode with stdin at its end, as from /dev/null or a closed
+	// pipe, the prompt reads nothing: that is nobody to ask, as in plain mode,
+	// not a user who said no.
+	t.Run("an unasked change at a prompt whose input ended is declined", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 1}
+		cancelled, _, err := call(stub, false, workspaceFilterChange{unasked: true}, "")
+		if !errors.Is(err, errFiltersDeclined) || cancelled || stub.updated {
+			t.Fatalf("err=%v cancelled=%t updated=%t, want errFiltersDeclined and no update", err, cancelled, stub.updated)
+		}
+	})
+
+	t.Run("a typed change at a prompt whose input ended is cancelled", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 1}
+		cancelled, _ := run(t, stub, false, workspaceFilterChange{}, "")
+		if !cancelled || stub.updated {
+			t.Fatalf("cancelled=%t updated=%t, want a cancel and no update", cancelled, stub.updated)
+		}
+	})
+
+	t.Run("an unasked change that re-scopes nothing is applied without asking", func(t *testing.T) {
+		stub := &filterOpsStub{}
+		cancelled, out := run(t, stub, true, workspaceFilterChange{unasked: true}, "")
+		if cancelled || !stub.counted || !stub.updated || out != "" {
+			t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want a silent count and an update", cancelled, stub.counted, stub.updated, out)
 		}
 	})
 }

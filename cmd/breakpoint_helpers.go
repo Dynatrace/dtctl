@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -49,6 +50,7 @@ type liveDebuggerDeps struct {
 	getOrCreateWorkspace   func(*livedebugger.Handler, string) (map[string]interface{}, string, error)
 	getWorkspaceRules      func(*livedebugger.Handler, string) (map[string]interface{}, error)
 	getRuleStatusBreakdown func(*livedebugger.Handler, string) (map[string]interface{}, error)
+	updateWorkspaceFilters func(*livedebugger.Handler, string, []map[string]interface{}) (map[string]interface{}, error)
 }
 
 func defaultLiveDebuggerDeps() liveDebuggerDeps {
@@ -64,6 +66,9 @@ func defaultLiveDebuggerDeps() liveDebuggerDeps {
 		},
 		getRuleStatusBreakdown: func(handler *livedebugger.Handler, ruleID string) (map[string]interface{}, error) {
 			return handler.GetRuleStatusBreakdown(ruleID)
+		},
+		updateWorkspaceFilters: func(handler *livedebugger.Handler, workspaceID string, filterSets []map[string]interface{}) (map[string]interface{}, error) {
+			return handler.UpdateWorkspaceFilters(workspaceID, filterSets)
 		},
 	}
 }
@@ -323,47 +328,48 @@ func countActiveRules(resp map[string]interface{}) (int, error) {
 	return count, nil
 }
 
-// workspaceFilterOps are the Live Debugger calls applyWorkspaceFilters makes,
-// split out so tests can stand in for the handler.
-type workspaceFilterOps struct {
-	getWorkspaceRules      func(handler *livedebugger.Handler, workspaceID string) (map[string]interface{}, error)
-	updateWorkspaceFilters func(handler *livedebugger.Handler, workspaceID string, filterSets []map[string]interface{}) (map[string]interface{}, error)
+// workspaceFilterChange is how applyWorkspaceFilters asks before it
+// changes a workspace's filters.
+type workspaceFilterChange struct {
+	// creating says the same operation also creates a breakpoint, for the
+	// prompt.
+	creating bool
+	// skipConfirm is --yes: nothing is counted and nobody is asked.
+	skipConfirm bool
+	// unasked is a change nobody typed (create's repo scope default): the
+	// active breakpoints are counted even in a non-interactive run, and a
+	// re-scope nobody can confirm, in --plain or agent mode or at a prompt
+	// whose input ended, fails with errFiltersDeclined.
+	unasked bool
 }
 
-func defaultWorkspaceFilterOps() workspaceFilterOps {
-	return workspaceFilterOps{
-		getWorkspaceRules: func(handler *livedebugger.Handler, workspaceID string) (map[string]interface{}, error) {
-			return handler.GetWorkspaceRules(workspaceID)
-		},
-		updateWorkspaceFilters: func(handler *livedebugger.Handler, workspaceID string, filterSets []map[string]interface{}) (map[string]interface{}, error) {
-			return handler.UpdateWorkspaceFilters(workspaceID, filterSets)
-		},
-	}
-}
+// errFiltersDeclined is a re-scope of active breakpoints that nobody could be
+// asked to confirm. The workspace is unchanged.
+var errFiltersDeclined = errors.New("changing the workspace filters re-scopes its active breakpoints, and nobody could confirm it")
 
 // applyWorkspaceFilters replaces the workspace's filters with sets, one filter
 // set per map. It is the one place create and update breakpoint change
 // workspace filters.
 //
 // Changing them re-scopes every existing active breakpoint in the workspace,
-// not just one being created, so it confirms first; creating says whether the
-// same operation also creates a breakpoint, for the prompt. --yes
-// (skipConfirm) skips the confirmation, and so does a non-interactive
-// (--plain/agent) run unless countAlways is set: then a re-scope nobody
-// confirms is declined rather than made. The extra read that counts the
-// active breakpoints is only paid when the run might prompt.
+// not just one being created, so it confirms first. A non-interactive
+// (--plain/agent) run skips the confirmation, unless the change is unasked:
+// then a re-scope nobody can confirm is declined without a prompt, which in
+// agent mode would land in the envelope on stdout. The extra read that counts
+// the active breakpoints is only paid when the run might prompt or decline.
 //
-// cancelled reports a declined confirmation; the workspace is unchanged then,
-// and the caller says so.
-func applyWorkspaceFilters(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, creating, skipConfirm, countAlways bool) (cancelled bool, err error) {
-	return applyWorkspaceFiltersWithOps(ctx, handler, workspaceID, sets, creating, skipConfirm, countAlways, defaultWorkspaceFilterOps())
+// cancelled reports a confirmation the user declined; the workspace is
+// unchanged then, and the caller says so.
+func applyWorkspaceFilters(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, change workspaceFilterChange) (cancelled bool, err error) {
+	return applyWorkspaceFiltersWithDeps(ctx, handler, workspaceID, sets, change, defaultLiveDebuggerDeps())
 }
 
-func applyWorkspaceFiltersWithOps(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, creating, skipConfirm, countAlways bool, ops workspaceFilterOps) (bool, error) {
+func applyWorkspaceFiltersWithDeps(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, change workspaceFilterChange, deps liveDebuggerDeps) (bool, error) {
 	verbose := isDebugVerbose(ctx)
 
-	if !skipConfirm && (!plainMode(ctx) || countAlways) {
-		rulesResp, err := ops.getWorkspaceRules(handler, workspaceID)
+	interactive := !plainMode(ctx)
+	if !change.skipConfirm && (interactive || change.unasked) {
+		rulesResp, err := deps.getWorkspaceRules(handler, workspaceID)
 		if err != nil {
 			return false, err
 		}
@@ -371,12 +377,21 @@ func applyWorkspaceFiltersWithOps(ctx context.Context, handler *livedebugger.Han
 		if err != nil {
 			return false, err
 		}
-		if count > 0 && !prompt.ConfirmWith(currentStdin(ctx), currentStdout(ctx), filterChangeConfirmMessage(count, creating)) {
-			return true, nil
+		if count > 0 {
+			if !interactive {
+				return false, errFiltersDeclined
+			}
+			confirmed, answered := prompt.ConfirmAnswered(currentStdin(ctx), currentStdout(ctx), filterChangeConfirmMessage(count, change.creating))
+			switch {
+			case !answered && change.unasked:
+				return false, errFiltersDeclined
+			case !confirmed:
+				return true, nil
+			}
 		}
 	}
 
-	updateResp, err := ops.updateWorkspaceFilters(handler, workspaceID, livedebugger.BuildFilterSets(sets...))
+	updateResp, err := deps.updateWorkspaceFilters(handler, workspaceID, livedebugger.BuildFilterSets(sets...))
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(ctx, "updateWorkspaceV2", updateResp)

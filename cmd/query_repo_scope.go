@@ -163,6 +163,14 @@ func resolveRepoScope(cmd *cobra.Command, cfg *config.Config, name string) (*rep
 	return res, nil
 }
 
+// warnRepoScopeFile reports keys the scope file holds that this dtctl does
+// not know, for every command that reads it.
+func warnRepoScopeFile(w io.Writer, warning string) {
+	if warning != "" {
+		output.FprintWarning(w, "%s: %s", reposcope.FileName, warning)
+	}
+}
+
 // repoScopedQuery is one invocation's query after repo scoping: the text to
 // send, and what the notices, the envelope and a failure say about it.
 type repoScopedQuery struct {
@@ -263,9 +271,7 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	if q.scope == nil {
 		return
 	}
-	if q.warning != "" {
-		output.FprintWarning(q.stderr, "%s: %s", reposcope.FileName, q.warning)
-	}
+	warnRepoScopeFile(q.stderr, q.warning)
 	s := q.scope
 	if s.Applied {
 		clause := ""

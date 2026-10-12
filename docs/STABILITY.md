@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 24 experimental, 14 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 960
+- entries below (commands + flags): 963
 
 ## Surface
 
@@ -376,6 +376,8 @@ create azure monitoring              stable
 create breakpoint                    experimental  since 0.39.0
   --dry-run                          experimental
   --filters                          experimental
+  --no-repo-scope                    experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.43.0  (declared)
   --yes                              experimental
 create bucket                        stable
   --display-name                     stable
@@ -1093,6 +1095,7 @@ update breakpoint                    experimental  since 0.39.0
   --enabled                          experimental
   --filters                          experimental
   --log-message                      experimental
+  --repo-scope                       experimental  since 0.43.0  (declared)
   --yes                              experimental
 update document                      stable
   --create-snapshot                  stable
