@@ -41,10 +41,16 @@ type Candidate struct {
 	Namespace         string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	Workload          string `json:"workload,omitempty" yaml:"workload,omitempty"`
 	Tier              string `json:"tier" yaml:"tier"`
-	// Spans and Logs are record counts over the window each was read in,
-	// which the evidence names; a sampled count is an extrapolation.
-	Spans int64 `json:"spans,omitempty" yaml:"spans,omitempty"`
-	Logs  int64 `json:"logs,omitempty" yaml:"logs,omitempty"`
+	// Spans and Logs count the records of a data object read whole, over the
+	// discovery window. SpansSampled and LogsSampled are, for an object a
+	// sampled retry read instead, the records the sample matched over that
+	// retry's window. No population is reported for a sample: on a busy
+	// environment the extrapolation came out hundreds of times above the
+	// rate the records were written at.
+	Spans        int64 `json:"spans,omitempty" yaml:"spans,omitempty"`
+	Logs         int64 `json:"logs,omitempty" yaml:"logs,omitempty"`
+	SpansSampled int64 `json:"spansSampled,omitempty" yaml:"spansSampled,omitempty"`
+	LogsSampled  int64 `json:"logsSampled,omitempty" yaml:"logsSampled,omitempty"`
 	// Sampled reports that some of the candidate's records were read by a
 	// sampled retry, so a candidate quieter than the stated floor could
 	// have been missed beside it.
@@ -67,7 +73,7 @@ type Candidate struct {
 	// weighs independent files, not repetition.
 	sources map[string]bool
 	matched string  // the token an entity matched
-	rate    float64 // records per hour, which ranks candidates read over different windows
+	rate    float64 // records, or sampled hits, per hour: see before
 }
 
 // tier is how well a candidate's name matches, best first. Records found by
@@ -172,19 +178,15 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 		*f.capped = *f.capped || n > int64(collected)
 		*f.count = max(*f.count, n, int64(len(*f.ids)))
 	}
-	n := countField(rec, fieldRecords)
+	spans, logs, n := &c.Spans, &c.Logs, countField(rec, fieldRecords)
 	if sampled {
-		// A count that does not divide into a ratio is reported as what the
-		// sample matched, as inventory does, rather than extrapolated.
-		if matched := countField(rec, fieldSampled); matched <= 0 || n < matched {
-			n = matched
-		}
+		spans, logs = &c.SpansSampled, &c.LogsSampled
 		c.Sampled = true
 	}
 	if object == objectSpans {
-		c.Spans += n
+		*spans += n
 	} else {
-		c.Logs += n
+		*logs += n
 	}
 }
 
@@ -286,13 +288,14 @@ func (d *discovery) explain(c *Candidate) {
 
 // counts is a record candidate's evidence line for its record counts. Counts
 // read whole share one window: "12400 spans, 88000 logs in 24h". A sampled
-// count is an estimate over its own window and says so: "~1200000 spans in
-// 1h (sampled 1-in-100000), 88000 logs in 24h".
+// object's hits say so, with the ratio asked for: "17 sampled span hits in
+// 1h (1 in 100000 requested), 88000 logs in 24h".
 func (d *discovery) counts(c *Candidate) string {
 	var whole, all []string
 	for _, n := range c.recordCounts() {
 		if q := d.samples[n.object]; q != nil {
-			all = append(all, fmt.Sprintf("~%d %s in %s (sampled 1-in-%d)", n.count, n.object, d.window(n.object), q.SamplingRatio))
+			all = append(all, fmt.Sprintf("%d sampled %s hits in %s (1 in %d requested)",
+				n.count, strings.TrimSuffix(n.object, "s"), d.window(n.object), q.SamplingRatio))
 			continue
 		}
 		whole = append(whole, fmt.Sprintf("%d %s", n.count, n.object))
@@ -331,11 +334,12 @@ type recordCount struct {
 	count  int64
 }
 
-// recordCounts is the candidate's record count per data object, leaving out
-// the objects that had none.
+// recordCounts is the candidate's record count, or sampled hits, per data
+// object, leaving out the objects that had none. An object is read whole or
+// sampled, never both, so one of each pair is zero.
 func (c *Candidate) recordCounts() []recordCount {
 	var out []recordCount
-	for _, n := range []recordCount{{objectSpans, c.Spans}, {objectLogs, c.Logs}} {
+	for _, n := range []recordCount{{objectSpans, c.Spans + c.SpansSampled}, {objectLogs, c.Logs + c.LogsSampled}} {
 		if n.count > 0 {
 			out = append(out, n)
 		}
@@ -429,7 +433,10 @@ func sharedServiceNames(cs []*Candidate) map[string]bool {
 // before orders candidates: better tier, more repository files naming them,
 // more records per hour, then by identity, so the order never depends on the
 // order rows arrived in. Records are compared per hour because a sampled
-// object may have been read over a shorter window than the other.
+// object may have been read over a shorter window than the other. A sampled
+// object counts its hits: every candidate of one object was read by the same
+// retry, so their order is the population's, while across objects hits and
+// whole counts are compared as they are.
 func before(c, o *Candidate) bool {
 	switch {
 	case c.tier != o.tier:

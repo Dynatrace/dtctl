@@ -129,7 +129,7 @@ func TestPlan(t *testing.T) {
 		SamplingRatio: 100000,
 		DQL: "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n" + ids +
+			"| summarize records = count(),\n" + ids +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[1])
@@ -173,8 +173,7 @@ func TestPlan_IncludesSamplingRungs(t *testing.T) {
 		assert.True(t, strings.HasPrefix(q.DQL, first+"\n"), q.DQL)
 		_, rest, _ := strings.Cut(q.DQL, "\n")
 		_, unsampled, _ := strings.Cut(p.Queries[0].DQL, "\n")
-		assert.Equal(t, strings.Replace(unsampled, "records = count()", "sampled = count(), records = sum(dt.system.sampling_ratio)", 1), rest,
-			"a rung differs from its record query only in what it reads and how it counts")
+		assert.Equal(t, unsampled, rest, "a rung differs from its record query only in what it reads")
 	}
 
 	runner := &fakeRunner{answers: map[string][]answer{
@@ -197,7 +196,6 @@ func TestPlan_NamesOnlyGrailTableFields(t *testing.T) {
 	known := map[string]bool{
 		fieldService: true, fieldProcessGroup: true, fieldServiceName: true, fieldNamespace: true,
 		fieldWorkload: true, fieldEntityName: true, // the entity-table objects share the id fields' names
-		fieldSamplingRatio: true,
 	}
 	dotted := regexp.MustCompile(`[a-z][a-z0-9_]*(\.[a-z0-9_]+)+`)
 	for _, q := range singleGo(t).Queries {
@@ -849,8 +847,10 @@ func TestDiscover_ScanCapFallsBackToSampling(t *testing.T) {
 	require.Len(t, r.Candidates, 1)
 	c := r.Candidates[0]
 	assert.True(t, c.Sampled)
-	assert.Equal(t, int64(1200000), c.Spans, "the sample's extrapolation, not the capped scan's count")
-	assert.Equal(t, "~1200000 spans in 1h (sampled 1-in-100000), 88000 logs in 24h", c.Evidence[len(c.Evidence)-1])
+	assert.Equal(t, int64(17), c.SpansSampled, "the sample's hits, not the capped scan's count")
+	assert.Zero(t, c.Spans, "no population is estimated from a sample")
+	assert.Equal(t, int64(88000), c.Logs)
+	assert.Equal(t, "17 sampled span hits in 1h (1 in 100000 requested), 88000 logs in 24h", c.Evidence[len(c.Evidence)-1])
 	assert.Equal(t, r.Notes, r.samplingNotes())
 }
 
@@ -911,7 +911,7 @@ func TestDiscover_SampledRungCollectedArrayCapIsNotACutPage(t *testing.T) {
 	assert.False(t, r.Partial)
 	require.Len(t, r.Candidates, 1)
 	assert.True(t, r.Candidates[0].Sampled)
-	assert.Equal(t, int64(1200000), r.Candidates[0].Spans, "the sample's rows, not the capped scan's")
+	assert.Equal(t, int64(17), r.Candidates[0].SpansSampled, "the sample's rows, not the capped scan's")
 }
 
 // A rung that reports no scan size keeps the prediction scaled from the last
@@ -972,21 +972,21 @@ func TestDiscover_SamplingRefusedByGrail(t *testing.T) {
 	assert.Empty(t, r.samplingNotes())
 }
 
-// Spans sampled over an hour and logs read over a day are compared per hour:
-// 1.2M spans in an hour is busier than 20M logs in a day.
-func TestDiscover_RanksByRate(t *testing.T) {
+// Sampled candidates rank by the hits the sample matched.
+func TestDiscover_RanksSampledCandidatesByHits(t *testing.T) {
 	p, err := PlanDiscovery(fstest.MapFS{}, ".", []string{"checkout", "ledger"})
 	require.NoError(t, err)
 	runner := &fakeRunner{answers: map[string][]answer{
 		"spans": {capped(nil), sampledAnswer([]map[string]interface{}{
-			{fieldServiceName: "checkout", fieldSampled: "12", fieldRecords: "1200000"},
+			{fieldServiceName: "checkout", fieldRecords: "12"},
+			{fieldServiceName: "ledger", fieldRecords: "30"},
 		}, 0)},
-		"logs": {{records: []map[string]interface{}{{fieldServiceName: "ledger", fieldRecords: "20000000"}}}},
 	}}
 	r, err := Discover(context.Background(), runner, p, prodHost)
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 2)
-	assert.Equal(t, "checkout", r.Candidates[0].ServiceName)
-	assert.Equal(t, "ledger", r.Candidates[1].ServiceName)
-	assert.Equal(t, `20000000 logs in 24h`, r.Candidates[1].Evidence[len(r.Candidates[1].Evidence)-1])
+	assert.Equal(t, "ledger", r.Candidates[0].ServiceName)
+	assert.Equal(t, int64(30), r.Candidates[0].SpansSampled)
+	assert.Equal(t, "checkout", r.Candidates[1].ServiceName)
+	assert.Equal(t, "12 sampled span hits in 1h (1 in 100000 requested)", r.Candidates[1].Evidence[len(r.Candidates[1].Evidence)-1])
 }

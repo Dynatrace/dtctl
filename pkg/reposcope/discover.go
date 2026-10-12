@@ -211,9 +211,8 @@ func recordQuery(object, purpose string, values []string) Query {
 }
 
 // sampledRecordQuery is a record query's retry at one rung. Its records
-// column sums dt.system.sampling_ratio, which is the population the sample
-// stands for whatever ratio Grail actually applied; sampled is what the
-// sample matched.
+// column counts what the sample matched, the hits discovery reports, never
+// the population Grail would extrapolate them to.
 func sampledRecordQuery(object, purpose string, values []string, rung samplingRung) Query {
 	return Query{
 		Purpose:       fmt.Sprintf("%s (sampled 1-in-%d over %s)", purpose, rung.ratio, rung.window),
@@ -223,7 +222,7 @@ func sampledRecordQuery(object, purpose string, values []string, rung samplingRu
 		step:          rung.step,
 		DQL: recordDQL(
 			fmt.Sprintf("fetch %s, from:now()-%s, scanLimitGBytes:%d, samplingRatio:%d", object, rung.window, ScanLimitGB, rung.ratio),
-			fmt.Sprintf("%s = count(), %s = sum(%s)", fieldSampled, fieldRecords, fieldSamplingRatio),
+			fmt.Sprintf("%s = count()", fieldRecords),
 			values),
 	}
 }

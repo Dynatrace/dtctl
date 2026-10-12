@@ -5,7 +5,7 @@ Unit: .
    k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
    service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
    k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
-   ~1200000 spans in 1h (sampled 1-in-100000), ~3000000 logs in 1h (sampled 1-in-100000)
+   12 sampled span hits in 1h (1 in 100000 requested), 30 sampled log hits in 1h (1 in 100000 requested)
 
 Verdict: match: process group, service, service name, workload
 4 of 10 queries ran in 0.6s. Nothing was written. Save it with:
