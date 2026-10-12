@@ -15,6 +15,7 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/client"
 	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/dynatrace-oss/dtctl/pkg/prompt"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
@@ -262,19 +263,6 @@ func parseFilters(input string) (map[string][]string, error) {
 	return filters, nil
 }
 
-// buildWorkspaceFilterSets parses a raw "key:value,key:value" filter string and
-// converts it into the GraphQL filter-set payload expected by
-// UpdateWorkspaceFilters. It is pure: no network calls and no side effects, so
-// callers (create and update) reuse it and run the network update at their own
-// call site.
-func buildWorkspaceFilterSets(raw string) ([]map[string]interface{}, error) {
-	parsed, err := parseFilters(raw)
-	if err != nil {
-		return nil, err
-	}
-	return livedebugger.BuildFilterSets(parsed), nil
-}
-
 // formatFilters renders parsed filters as a canonical, deterministic
 // "key:value,key:value" string. Keys are sorted (values are already sorted by
 // parseFilters), so dry-run previews show exactly what will be sent rather than
@@ -315,21 +303,10 @@ func requireFiltersValue(filters string) error {
 	return nil
 }
 
-// countActiveWorkspaceBreakpoints returns how many enabled breakpoints currently
-// exist in the workspace. Disabled rules are excluded on purpose: a breakpoint
-// that reached its hit limit is auto-disabled by the runtime, so it should not
+// countActiveRules counts the enabled breakpoint rules in a GetWorkspaceRules
+// GraphQL response. Disabled rules are excluded on purpose: a breakpoint that
+// reached its hit limit is auto-disabled by the runtime, so it should not
 // inflate the confirmation count shown before workspace filters are changed.
-func countActiveWorkspaceBreakpoints(handler *livedebugger.Handler, workspaceID string) (int, error) {
-	resp, err := handler.GetWorkspaceRules(workspaceID)
-	if err != nil {
-		return 0, err
-	}
-	return countActiveRules(resp)
-}
-
-// countActiveRules counts the enabled (non-disabled) breakpoint rules in a
-// GetWorkspaceRules GraphQL response. Split out from the network call so the
-// active-only counting logic can be unit tested without a live handler.
 func countActiveRules(resp map[string]interface{}) (int, error) {
 	rules, err := livedebugger.ExtractWorkspaceRules(resp)
 	if err != nil {
@@ -342,6 +319,74 @@ func countActiveRules(resp map[string]interface{}) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// workspaceFilterOps are the Live Debugger calls applyWorkspaceFilters makes,
+// split out so tests can stand in for the handler.
+type workspaceFilterOps struct {
+	getWorkspaceRules      func(handler *livedebugger.Handler, workspaceID string) (map[string]interface{}, error)
+	updateWorkspaceFilters func(handler *livedebugger.Handler, workspaceID string, filterSets []map[string]interface{}) (map[string]interface{}, error)
+}
+
+func defaultWorkspaceFilterOps() workspaceFilterOps {
+	return workspaceFilterOps{
+		getWorkspaceRules: func(handler *livedebugger.Handler, workspaceID string) (map[string]interface{}, error) {
+			return handler.GetWorkspaceRules(workspaceID)
+		},
+		updateWorkspaceFilters: func(handler *livedebugger.Handler, workspaceID string, filterSets []map[string]interface{}) (map[string]interface{}, error) {
+			return handler.UpdateWorkspaceFilters(workspaceID, filterSets)
+		},
+	}
+}
+
+// applyWorkspaceFilters replaces the workspace's filters with sets, one filter
+// set per map. It is the one place create and update breakpoint change
+// workspace filters.
+//
+// Changing them re-scopes every existing active breakpoint in the workspace,
+// not just one being created, so it confirms first; creating says whether the
+// same operation also creates a breakpoint, for the prompt. --yes
+// (skipConfirm) skips the confirmation, and so does a non-interactive
+// (--plain/agent) run unless countAlways is set: then a re-scope nobody
+// confirms is declined rather than made. The extra read that counts the
+// active breakpoints is only paid when the run might prompt.
+//
+// cancelled reports a declined confirmation; the workspace is unchanged then,
+// and the caller says so.
+func applyWorkspaceFilters(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, creating, skipConfirm, countAlways bool) (cancelled bool, err error) {
+	return applyWorkspaceFiltersWithOps(ctx, handler, workspaceID, sets, creating, skipConfirm, countAlways, defaultWorkspaceFilterOps())
+}
+
+func applyWorkspaceFiltersWithOps(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, creating, skipConfirm, countAlways bool, ops workspaceFilterOps) (bool, error) {
+	verbose := isDebugVerbose(ctx)
+
+	if !skipConfirm && (!plainMode(ctx) || countAlways) {
+		rulesResp, err := ops.getWorkspaceRules(handler, workspaceID)
+		if err != nil {
+			return false, err
+		}
+		count, err := countActiveRules(rulesResp)
+		if err != nil {
+			return false, err
+		}
+		if count > 0 && !prompt.ConfirmWith(currentStdin(ctx), currentStdout(ctx), filterChangeConfirmMessage(count, creating)) {
+			return true, nil
+		}
+	}
+
+	updateResp, err := ops.updateWorkspaceFilters(handler, workspaceID, livedebugger.BuildFilterSets(sets...))
+	if err != nil {
+		if verbose {
+			_ = printGraphQLResponse(ctx, "updateWorkspaceV2", updateResp)
+		}
+		return false, err
+	}
+	if verbose {
+		if err := printGraphQLResponse(ctx, "updateWorkspaceV2", updateResp); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // filterChangeConfirmMessage builds the prompt shown before changing workspace
