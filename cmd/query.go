@@ -674,7 +674,7 @@ default: never for a bare command, auto in agent mode`)
 	stability.MarkStable(c)
 	addQueryLimitFlags(c)
 	addQuerySeriesFlags(c)
-	addRepoScopeFlags(c)
+	addRepoScopeFlags(c, queryRepoScopeUsage, queryNoRepoScopeUsage)
 	registerFlagCompletion(c, "metadata", metadataFieldCompletion)
 	registerFlagCompletion(c, "decode-snapshots", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{

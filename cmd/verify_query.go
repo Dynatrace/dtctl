@@ -229,7 +229,7 @@ Examples:
 useful for AI agents or scripts to declare their intent (e.g. "root-cause-analysis")`)
 	stability.MarkStable(c)
 	rejectEmptyFlag(c, "file")
-	addRepoScopeFlags(c)
+	addRepoScopeFlags(c, queryRepoScopeUsage, queryNoRepoScopeUsage)
 	return c
 }
 

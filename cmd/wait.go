@@ -250,7 +250,7 @@ Examples:
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
-	addRepoScopeFlags(c)
+	addRepoScopeFlags(c, queryRepoScopeUsage, queryNoRepoScopeUsage)
 	rejectEmptyFlag(c, "file")
 	return c
 }

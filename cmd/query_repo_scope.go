@@ -49,36 +49,117 @@ var repoScopeRefusals = []string{
 	string(dql.NotFetch), string(dql.UnsupportedObject), repoScopeNoBinding, string(dql.Subquery), string(dql.Unscannable),
 }
 
-// addRepoScopeFlags registers the entry selector and the opt-out on a command
-// that sends DQL a user wrote.
-func addRepoScopeFlags(c *cobra.Command) {
-	c.Flags().String(repoScopeFlag, "", `narrow fetch logs/spans to this entry of the repository's .dtctl-repo-scope.yaml
-default: the entry covering the working directory`)
-	c.Flags().Bool(noRepoScopeFlag, false, "run the query exactly as typed, ignoring the repository's .dtctl-repo-scope.yaml (env: "+noRepoScopeEnv+"=1)")
+// The usage of the two flags on the commands that send DQL a user wrote.
+const (
+	queryRepoScopeUsage = `narrow fetch logs/spans to this entry of the repository's .dtctl-repo-scope.yaml
+default: the entry covering the working directory`
+	queryNoRepoScopeUsage = "run the query exactly as typed, ignoring the repository's .dtctl-repo-scope.yaml (env: " + noRepoScopeEnv + "=1)"
+)
+
+// addRepoScopeFlags registers the entry selector and, unless optOutUsage is
+// empty, the opt-out. A command that applies a scope only when asked has no
+// default to opt out of, so it registers --repo-scope alone.
+func addRepoScopeFlags(c *cobra.Command, scopeUsage, optOutUsage string) {
+	c.Flags().String(repoScopeFlag, "", scopeUsage)
 	rejectEmptyFlag(c, repoScopeFlag)
-	c.MarkFlagsMutuallyExclusive(repoScopeFlag, noRepoScopeFlag)
 	stability.MarkFlag(c, repoScopeFlag, stability.Experimental, repoScopeSince)
+	if optOutUsage == "" {
+		return
+	}
+	c.Flags().Bool(noRepoScopeFlag, false, optOutUsage)
+	c.MarkFlagsMutuallyExclusive(repoScopeFlag, noRepoScopeFlag)
 	stability.MarkFlag(c, noRepoScopeFlag, stability.Experimental, repoScopeSince)
 }
 
 // repoScopeAdmitted reports whether the stability policy in force lets cmd
-// scope a query nobody asked it to.
+// apply a scope nobody asked it to.
 //
-// Scoping by default changes what a stable command returns, and only its two
-// flags carry the experimental mark. A floor that hides them would otherwise
-// leave the behaviour running while refusing its opt-out, so the default is on
-// only where both flags are usable: an exception for each admits it again. An
-// explicit --repo-scope needs no such check; the floor already refused it if
-// it was hidden.
-func repoScopeAdmitted(cmd *cobra.Command) bool {
+// Scoping by default changes what a stable command does, and only the repo
+// scope flags carry the experimental mark. A floor that hides them would
+// otherwise leave the behaviour running while refusing its opt-out, so the
+// default is on only where every flag named is registered and usable: an
+// exception for each admits it again. An explicit --repo-scope needs no such
+// check; the floor already refused it if it was hidden.
+func repoScopeAdmitted(cmd *cobra.Command, names ...string) bool {
 	policy := currentStabilityPolicy(cmdContext(cmd))
 	path := commandPathRelative(cmd, cmd.Root())
-	for _, name := range []string{repoScopeFlag, noRepoScopeFlag} {
-		if _, ok := flagAdmitted(cmd, path, cmd.Flags().Lookup(name), policy); !ok {
+	for _, name := range names {
+		f := cmd.Flags().Lookup(name)
+		if f == nil {
+			return false
+		}
+		if _, ok := flagAdmitted(cmd, path, f, policy); !ok {
 			return false
 		}
 	}
 	return true
+}
+
+// repoScopeResolution is the repo scope a command runs under, before anything
+// consumes it: the decision shared by every command that applies a scope.
+type repoScopeResolution struct {
+	// Status is the resolved scope; its Entry is nil when no entry covers the
+	// working directory. Status is nil when the file failed to load.
+	Status *reposcope.Status
+	// Scope is what the envelope reports for a scope that resolved without an
+	// entry to apply (invalid_file, no_entry). It is nil when an entry
+	// resolved: what applying it does is the consumer's to say.
+	Scope *output.RepoScope
+	// Warning names keys the file holds that this dtctl does not know.
+	Warning string
+}
+
+// resolveRepoScope decides which repo scope cmd runs under: the entry name
+// asks for, or with no name the one covering the working directory. The
+// checks run cheapest first; the disk is touched only from the .git walk on:
+//
+//	--no-repo-scope, or DTCTL_NO_REPO_SCOPE without a name → off
+//	no name, and the stability floor hides either flag     → off
+//	context has no environment URL                         → off (--repo-scope: the error)
+//	HostWorkingDirectory not granted, a session            → off (--repo-scope: CapabilityError)
+//	no .git at or above the working directory              → off (--repo-scope: InvalidError)
+//	no scope file, or no entry for this host               → off (--repo-scope: NotFoundError)
+//	the file fails to load                                 → warning, invalid_file (--repo-scope: the error)
+//	no entry covers the directory                          → warning, no_entry
+//	an entry                                               → the consumer applies it
+//
+// "Off" is a nil resolution and a nil error, and the consumer says nothing,
+// so outside a linked repository every command behaves as if repo scopes did
+// not exist. A file that cannot be used resolves rather than fails, because it
+// is committed and one bad edit would otherwise break every command run in
+// the repository. A name asks for one entry, so there what does not resolve
+// is the error.
+func resolveRepoScope(cmd *cobra.Command, cfg *config.Config, name string) (*repoScopeResolution, error) {
+	ctx := cmdContext(cmd)
+	if off, _ := cmd.Flags().GetBool(noRepoScopeFlag); off || (name == "" && truthyEnv(ctx, noRepoScopeEnv)) {
+		return nil, nil
+	}
+	if name == "" && !repoScopeAdmitted(cmd, repoScopeFlag, noRepoScopeFlag) {
+		return nil, nil
+	}
+
+	scope, err := openRepoScope(ctx, cfg)
+	var status *reposcope.Status
+	// Switching to a context the file does not mention must not start a
+	// warning on every command.
+	if err == nil && (name != "" || len(scope.file.Entries(scope.host)) > 0) {
+		status, err = scope.resolve(name)
+	}
+	switch {
+	case err != nil && name != "":
+		return nil, err
+	case err != nil && scope != nil:
+		return &repoScopeResolution{Scope: &output.RepoScope{
+			File: reposcope.FileName, Environment: scope.host, Code: repoScopeInvalidFile, Reason: err.Error(),
+		}}, nil
+	case status == nil:
+		return nil, nil
+	}
+	res := &repoScopeResolution{Status: status, Warning: status.Warning}
+	if status.Entry == nil {
+		res.Scope = &output.RepoScope{File: status.File, Environment: status.Environment, Code: repoScopeNoEntry, Reason: status.Reason}
+	}
+	return res, nil
 }
 
 // repoScopedQuery is one invocation's query after repo scoping: the text to
@@ -100,59 +181,27 @@ type repoScopedQuery struct {
 	zeroRows bool
 }
 
-// applyRepoScope narrows query to the repo scope in effect for the working
-// directory, if any. The checks run cheapest first; the disk is touched only
-// from the .git walk on:
+// applyRepoScope narrows query to the repo scope resolveRepoScope picks for
+// the working directory, if any; dql.InsertFilter decides what an entry does
+// to it.
 //
-//	--no-repo-scope, or DTCTL_NO_REPO_SCOPE without a name → off
-//	no name, and the stability floor hides either flag     → off
-//	context has no environment URL                         → off (--repo-scope: the error)
-//	HostWorkingDirectory not granted, a session            → off (--repo-scope: CapabilityError)
-//	no .git at or above the working directory              → off (--repo-scope: InvalidError)
-//	no scope file, or no entry for this host               → off (--repo-scope: NotFoundError)
-//	the file fails to load                                 → warning, invalid_file (--repo-scope: the error)
-//	no entry covers the directory                          → warning, no_entry
-//	an entry                                               → dql.InsertFilter decides
-//
-// "Off" is silence, so outside a linked repository every command behaves as
-// if repo scopes did not exist. Anything else is reported on stderr in every
-// mode and at every verbosity: a scoped run must say so whatever reads
-// stdout. A file that cannot be used warns rather than fails, because it is
-// committed and one bad edit would otherwise break every query run in the
-// repository.
+// Anything but "off" is reported on stderr in every mode and at every
+// verbosity: a scoped run must say so whatever reads stdout, and a scope that
+// resolved but was not applied warns, and the query runs unscoped.
 //
 // A name asks for one entry, so a scope that resolves but cannot narrow this
 // query is an error rather than an unscoped run; only the user's own filter
 // on a bound field still runs, because it wins over the scope by design.
 func applyRepoScope(cmd *cobra.Command, cfg *config.Config, query string) (*repoScopedQuery, error) {
-	ctx := cmdContext(cmd)
-	q := &repoScopedQuery{Query: query, typed: query, stderr: currentStderr(ctx)}
+	q := &repoScopedQuery{Query: query, typed: query, stderr: currentStderr(cmdContext(cmd))}
 	name, _ := cmd.Flags().GetString(repoScopeFlag)
-	if off, _ := cmd.Flags().GetBool(noRepoScopeFlag); off || (name == "" && truthyEnv(ctx, noRepoScopeEnv)) {
-		return q, nil
+	res, err := resolveRepoScope(cmd, cfg, name)
+	if err != nil || res == nil {
+		return q, err
 	}
-	if name == "" && !repoScopeAdmitted(cmd) {
-		return q, nil
-	}
-
-	scope, err := openRepoScope(ctx, cfg)
-	var status *reposcope.Status
-	// Switching to a context the file does not mention must not start a
-	// warning on every query.
-	if err == nil && (name != "" || len(scope.file.Entries(scope.host)) > 0) {
-		status, err = scope.resolve(name)
-	}
-	switch {
-	case err != nil && name != "":
-		return nil, err
-	case err != nil && scope != nil:
-		q.scope = &output.RepoScope{File: reposcope.FileName, Environment: scope.host, Code: repoScopeInvalidFile, Reason: err.Error()}
-	case status == nil:
-		return q, nil
-	case status.Entry == nil:
-		q.scope = &output.RepoScope{File: status.File, Environment: status.Environment, Code: repoScopeNoEntry, Reason: status.Reason}
-	default:
-		q.rewrite(status)
+	q.scope = res.Scope
+	if q.scope == nil {
+		q.rewrite(res.Status)
 		if name != "" && slices.Contains(repoScopeRefusals, q.scope.Code) {
 			return nil, &reposcope.InvalidError{
 				Source:      "--" + repoScopeFlag,
@@ -161,9 +210,9 @@ func applyRepoScope(cmd *cobra.Command, cfg *config.Config, query string) (*repo
 			}
 		}
 	}
-	if status != nil && status.Warning != "" {
-		q.warning = status.Warning
-		q.scope.Reason = strings.TrimPrefix(q.scope.Reason+"; "+status.Warning, "; ")
+	if res.Warning != "" {
+		q.warning = res.Warning
+		q.scope.Reason = strings.TrimPrefix(q.scope.Reason+"; "+res.Warning, "; ")
 	}
 	q.announce()
 	return q, nil
