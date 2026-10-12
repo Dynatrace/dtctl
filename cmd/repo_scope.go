@@ -319,9 +319,7 @@ func showRepoScope(cmd *cobra.Command, verb, name string) error {
 		return err
 	}
 	if outputFormat(ctx) == "table" && !agentMode(ctx) {
-		if status.Warning != "" {
-			output.FprintWarning(currentStderr(ctx), "%s: %s", reposcope.FileName, status.Warning)
-		}
+		warnRepoScopeFile(currentStderr(ctx), status.Warning)
 		if verb == "current" {
 			printRepoScopeCurrent(currentStdout(ctx), status)
 		} else {
