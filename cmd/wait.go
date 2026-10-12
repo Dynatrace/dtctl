@@ -157,6 +157,7 @@ Examples:
 			if err != nil {
 				return err
 			}
+			scoped.announce(&queryLimits)
 			fetchTimeoutSeconds, _ := cmd.Flags().GetInt32("fetch-timeout-seconds")
 			defaultTimeframeStart, _ := cmd.Flags().GetString("default-timeframe-start")
 			defaultTimeframeEnd, _ := cmd.Flags().GetString("default-timeframe-end")
@@ -174,6 +175,9 @@ Examples:
 				DefaultTimeframeEnd:    defaultTimeframeEnd,
 				Locale:                 locale,
 				Timezone:               timezone,
+				// The waiter calls this on every attempt; zero rows are the
+				// condition not met yet, so only the scan-cap line applies.
+				OnResult: scoped.noticeScanCap,
 				// ShowProgress is left false: the waiter drives its own per-attempt
 				// progress output on stderr, and a per-query progress bar (plus a
 				// completion summary per attempt) would fight it.

@@ -2,6 +2,7 @@ package dql
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -37,7 +38,15 @@ type Rewrite struct {
 	DataObject string
 	Filter     string
 	Reason     string // one sentence for a person, when not applied
+	// ScanBounded reports that the fetch stage itself bounds what Grail
+	// scans, with samplingRatio or a scanLimitGBytes that is not negative
+	// (-1 lifts the limit). The inserted filter does not, so a caller can say
+	// so before sending.
+	ScanBounded bool
 }
+
+// scanBounds are the fetch parameters that bound what a fetch scans.
+var scanBounds = []string{"scanLimitGBytes", "samplingRatio"}
 
 // filteringCommands are the stages that drop records by a condition. A user's
 // condition on a bound field in one of them wins over the inserted filter. A
@@ -95,6 +104,9 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 		Outcome:    Applied,
 		DataObject: object,
 		Filter:     f.Expr,
+		ScanBounded: slices.ContainsFunc(scanBounds, func(p string) bool {
+			return boundsScan(m.Code[first.Start:first.End], p)
+		}),
 	}
 }
 
@@ -207,6 +219,25 @@ func nameEnd(code string, i int) int {
 		i++
 	}
 	return i
+}
+
+// boundsScan reports whether the masked fetch stage sets param to a value
+// that bounds the scan: any, except a negative scanLimitGBytes.
+func boundsScan(stage, param string) bool {
+	for off := 0; ; {
+		i := strings.Index(stage[off:], param)
+		if i < 0 {
+			return false
+		}
+		at := off + i
+		off = at + 1
+		if !isWholeWord(stage, at, param) {
+			continue
+		}
+		v := strings.TrimLeft(stage[at+len(param):], " \t\n\r")
+		v = strings.TrimLeft(strings.TrimPrefix(v, ":"), " \t\n\r")
+		return param != "scanLimitGBytes" || !strings.HasPrefix(v, "-")
+	}
 }
 
 func containsWholeWord(s, word string) bool {

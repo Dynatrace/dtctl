@@ -140,6 +140,27 @@ func assertOnlyInserted(t *testing.T, input, got string) {
 	assert.Equal(t, input, got[:at]+got[at+added:])
 }
 
+// Only a parameter of the fetch stage itself bounds the scan; the word in a
+// comment, a literal or a later stage does not, and neither does
+// scanLimitGBytes: -1, which lifts the limit.
+func TestInsertFilter_ScanBounded(t *testing.T) {
+	for query, want := range map[string]bool{
+		"fetch logs | limit 5":                                false,
+		"fetch logs,\n  scanLimitGBytes: 10 | limit 5":        true,
+		"fetch spans, samplingRatio: 100":                     true,
+		"fetch logs /* scanLimitGBytes: 10 */ | limit 5":      false,
+		`fetch logs | filter content == "samplingRatio: 100"`: false,
+		"fetch logs | fieldsAdd scanLimitGBytes = 1":          false,
+		"fetch logs, scanLimitGBytes: -1 | limit 5":           false,
+	} {
+		t.Run(query, func(t *testing.T) {
+			got := InsertFilter(query, testFilters)
+			require.Equal(t, Applied, got.Outcome)
+			assert.Equal(t, want, got.ScanBounded)
+		})
+	}
+}
+
 func TestInsertFilter_Reasons(t *testing.T) {
 	tests := []struct {
 		query  string

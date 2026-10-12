@@ -299,6 +299,15 @@ Examples:
 			}
 			query = scoped.Query
 
+			// Query limits resolve flag -> context config -> global config -> server
+			// default, so a context-level ceiling also covers invocations that never
+			// passed the flags. See resolveQueryLimits.
+			queryLimits, err := resolveQueryLimits(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			scoped.announce(&queryLimits)
+
 			// Fail fast, before any request, when the query provably needs a
 			// storage scope the token lacks — instead of one NOT_AUTHORIZED_FOR_TABLE
 			// per query an agent fans out.
@@ -312,14 +321,6 @@ Examples:
 			width, _ := cmd.Flags().GetInt("width")
 			height, _ := cmd.Flags().GetInt("height")
 			fullscreen, _ := cmd.Flags().GetBool("fullscreen")
-
-			// Query limits resolve flag -> context config -> global config -> server
-			// default, so a context-level ceiling also covers invocations that never
-			// passed the flags. See resolveQueryLimits.
-			queryLimits, err := resolveQueryLimits(cmd, cfg)
-			if err != nil {
-				return err
-			}
 
 			// Get query execution options
 			fetchTimeoutSeconds, _ := cmd.Flags().GetInt32("fetch-timeout-seconds")
@@ -519,7 +520,7 @@ Examples:
 				Decorate: func(ctx *output.ResponseContext, result *exec.DQLQueryResponse, _ []map[string]interface{}) {
 					named := defaultTimeframeStart != "" || defaultTimeframeEnd != "" || queryNamesWindow(query)
 					ctx.Window = queryWindowContext(result, named)
-					scoped.decorate(ctx)
+					scoped.decorate(ctx, result)
 				},
 				OnResult:   scoped.onResult,
 				TypedQuery: scoped.typed,

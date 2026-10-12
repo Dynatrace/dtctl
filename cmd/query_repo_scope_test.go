@@ -36,8 +36,12 @@ const checkoutLogsFilter = `service.name == "checkout" or (k8s.namespace.name ==
 const (
 	repoScopeTypedQuery  = "fetch logs | limit 5"
 	repoScopeScopedQuery = "fetch logs | filter (" + checkoutLogsFilter + ")\n| limit 5"
-	repoScopeNotice      = "applying repo scope checkout to fetch logs: " + checkoutLogsFilter + " (use --no-repo-scope to ignore it)\n"
-	oneRecord            = `{"state":"SUCCEEDED","result":{"records":[{"content":"hello"}]}}`
+	repoScopeApplying    = "applying repo scope checkout to fetch logs: " + checkoutLogsFilter + " (use --no-repo-scope to ignore it)"
+	repoScopeScanClause  = "the repo scope filters early with ==, but no scan limit is set for this query, so the environment's default cap applies: add scanLimitGBytes: or --default-scan-limit-gbytes to scan less"
+	// repoScopeNotice is the line for a run nothing bounds the scan of, as
+	// in a test that sets no limit.
+	repoScopeNotice = repoScopeApplying + "; " + repoScopeScanClause + "\n"
+	oneRecord       = `{"state":"SUCCEEDED","result":{"records":[{"content":"hello"}]}}`
 )
 
 // repoScopeContext decodes context.repo_scope from an agent envelope, or nil.
@@ -391,6 +395,85 @@ func TestQueryRepoScope_ZeroRowsHint(t *testing.T) {
 	require.Contains(t, agentEnvelope(t, stdout).Context.Suggestions[0], "--no-repo-scope")
 }
 
+// scanCappedRecord is one record from a scan the 5 GB cap stopped.
+const scanCappedRecord = `{"state":"SUCCEEDED","result":{"records":[{"content":"hello"}],"metadata":{"grail":{"notifications":[` +
+	`{"notificationType":"SCAN_LIMIT_GBYTES","severity":"WARN","message":"Scan limit of 5 gigabytes reached"}]}}}}`
+
+const repoScopeScanCapNotice = "repo scope checkout already filters early with ==, and the scan still hit its cap; scan less another way the scan-limit hint lists"
+
+// A scoped query nothing bounds the scan of says so before it is sent: in the
+// scope line, and as the envelope's one scan suggestion. A positive scan limit
+// (ScanCapNotice runs with one) or a sampling ratio above 1 bounds it; -1, as
+// a flag or in the query, is no bound. The clause makes the post-run notice
+// redundant.
+func TestQueryRepoScope_ScanClause(t *testing.T) {
+	optInRepoScope(t)
+	newDQLRecorder(t, "readonly", answer(http.StatusOK, scanCappedRecord))
+	chdirTestRepo(t, checkoutScope)
+
+	for _, tc := range []struct {
+		name   string
+		query  string
+		args   []string
+		clause bool
+	}{
+		{"no limit", repoScopeTypedQuery, nil, true},
+		{"unlimited", repoScopeTypedQuery, []string{"--default-scan-limit-gbytes", "-1"}, true},
+		{"unlimited in the query", "fetch logs, scanLimitGBytes: -1 | limit 5", nil, true},
+		{"a sampling ratio", repoScopeTypedQuery, []string{"--default-sampling-ratio", "100"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runRepoScoped(append([]string{"query", tc.query, "--agent"}, tc.args...), RunOptions{})
+			require.Zero(t, code, stderr)
+			suggestions := agentEnvelope(t, stdout).Context.Suggestions
+			if !tc.clause {
+				require.NotContains(t, stderr, repoScopeScanClause)
+				require.NotContains(t, suggestions, repoScopeScanClause)
+				return
+			}
+			require.Equal(t, repoScopeNotice, stderr)
+			require.Contains(t, suggestions, repoScopeScanClause)
+			require.NotContains(t, suggestions, repoScopeScanCapNotice, "one scan suggestion")
+		})
+	}
+}
+
+// A scope's filter helps the scan but cannot by itself keep a wide timeframe
+// under the cap, so a scoped query the cap stopped says so once: on stderr in
+// every mode and as a suggestion in the envelope, on the buffered and the
+// streamed (-o jsonl) path alike. wait query polls, and still says it once.
+func TestQueryRepoScope_ScanCapNotice(t *testing.T) {
+	optInRepoScope(t)
+	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, scanCappedRecord))
+	chdirTestRepo(t, checkoutScope)
+	bounded := []string{"--default-scan-limit-gbytes", "5"}
+
+	for _, mode := range [][]string{{"--plain"}, {"--agent"}, {"-o", "jsonl"}} {
+		code, stdout, stderr := runRepoScoped(append(append([]string{"query", repoScopeTypedQuery}, bounded...), mode...), RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, 1, strings.Count(stderr, repoScopeScanCapNotice), "%v: %s", mode, stderr)
+		if mode[0] == "--agent" {
+			require.Contains(t, agentEnvelope(t, stdout).Context.Suggestions, repoScopeScanCapNotice)
+		}
+	}
+
+	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--no-repo-scope"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.NotContains(t, stderr, "repo scope")
+	require.NotContains(t, stdout, "under repo scope")
+
+	wait := []string{"wait", "query", repoScopeTypedQuery, "--for=count-gte=5",
+		"--max-attempts", "2", "--min-interval", "1ms", "--max-interval", "1ms"}
+	srv.reset()
+	_, _, stderr = runRepoScoped(append(append([]string{}, wait...), bounded...), RunOptions{})
+	require.Len(t, srv.queries(), 2)
+	require.Equal(t, 1, strings.Count(stderr, repoScopeScanCapNotice), stderr)
+
+	_, _, stderr = runRepoScoped(wait, RunOptions{})
+	require.Equal(t, 1, strings.Count(stderr, repoScopeScanClause), stderr)
+	require.NotContains(t, stderr, repoScopeScanCapNotice)
+}
+
 // A scoped query that fails keeps the query's own error code and adds what was
 // sent and how to rule the scope out: a position points into the sent text.
 func TestQueryRepoScope_ErrorWrapsScope(t *testing.T) {
@@ -437,16 +520,18 @@ func TestExecDQLIsNeverRepoScoped(t *testing.T) {
 // wait query and verify query take the same input path as query, so they
 // send (and verify checks) the same scoped text, and honour the opt-out.
 // Neither has an agent envelope, so in agent mode too the stderr line is all
-// that reports the scope.
+// that reports the scope. Verifying scans nothing, so its line has no scan
+// clause.
 func TestWaitQueryAndVerifyQueryApplyRepoScope(t *testing.T) {
 	optInRepoScope(t)
 	for _, tc := range []struct {
-		name string
-		argv []string
-		body string
+		name   string
+		argv   []string
+		body   string
+		notice string
 	}{
-		{"wait query", []string{"wait", "query", repoScopeTypedQuery, "--for=any"}, oneRecord},
-		{"verify query", []string{"verify", "query", repoScopeTypedQuery}, `{"valid":true}`},
+		{"wait query", []string{"wait", "query", repoScopeTypedQuery, "--for=any"}, oneRecord, repoScopeNotice},
+		{"verify query", []string{"verify", "query", repoScopeTypedQuery}, `{"valid":true}`, repoScopeApplying + "\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, tc.body))
@@ -455,14 +540,14 @@ func TestWaitQueryAndVerifyQueryApplyRepoScope(t *testing.T) {
 			code, _, stderr := runRepoScoped(tc.argv, RunOptions{})
 			require.Zero(t, code, stderr)
 			require.Equal(t, repoScopeScopedQuery, srv.first(t))
-			require.True(t, strings.HasPrefix(stderr, repoScopeNotice), stderr)
+			require.True(t, strings.HasPrefix(stderr, tc.notice), stderr)
 
 			for _, mode := range [][]string{{"--agent"}, {"--agent", "-o", "json"}} {
 				srv.reset()
 				code, stdout, stderr := runRepoScoped(append(append([]string{}, tc.argv...), mode...), RunOptions{})
 				require.Zero(t, code, stderr)
 				require.Equal(t, repoScopeScopedQuery, srv.first(t))
-				require.True(t, strings.HasPrefix(stderr, repoScopeNotice), "%v: %s", mode, stderr)
+				require.True(t, strings.HasPrefix(stderr, tc.notice), "%v: %s", mode, stderr)
 				require.NotContains(t, stdout, "repo_scope", "%v: only query has an envelope to carry it", mode)
 			}
 
@@ -554,7 +639,7 @@ func TestQueryRepoScope_StableFloor(t *testing.T) {
 					return
 				}
 				require.Equal(t, repoScopeScopedQuery, srv.first(t))
-				require.True(t, strings.HasPrefix(stderr, repoScopeNotice), stderr)
+				require.True(t, strings.HasPrefix(stderr, repoScopeApplying), stderr)
 			})
 		}
 	}

@@ -157,7 +157,7 @@ dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20'
 ```
 
 ```text
-applying repo scope checkout to fetch logs: service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout") (use --no-repo-scope to ignore it)
+applying repo scope checkout to fetch logs: service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout") (use --no-repo-scope to ignore it); the repo scope filters early with ==, but no scan limit is set for this query, so the environment's default cap applies: add scanLimitGBytes: or --default-scan-limit-gbytes to scan less
 ```
 
 The text sent is the query with one stage inserted after `fetch`:
@@ -168,6 +168,14 @@ fetch logs | filter (service.name == "checkout" or (k8s.namespace.name == "payme
 ```
 
 When a scoped query returns no records, a second line says so, `0 records under repo scope checkout; compare with --no-repo-scope`, because a binding the records do not carry looks exactly like a quiet service.
+
+### What a scope costs
+
+A scope narrows the rows a query returns, not what Grail reads. Its `==` filter right after `fetch` helps the scan, but on a busy environment a day of logs is far more than the cap, scoped or not. So when nothing bounds the scan (no `scanLimitGBytes:` or `samplingRatio:` in the `fetch`, and no positive `--default-scan-limit-gbytes` or `query-limits` in the context), the scope line says so before the query is sent, as above. A bounded scoped query that the cap still stops gets one line afterwards; `wait query` prints either line once:
+
+```text
+repo scope checkout already filters early with ==, and the scan still hit its cap; scan less another way the scan-limit hint lists
+```
 
 The scope is applied only where dtctl is sure of the result. The query runs exactly as typed, with a warning that says why, when:
 

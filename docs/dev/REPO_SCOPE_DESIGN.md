@@ -100,6 +100,8 @@ Two invariants are tested on every row of the rewrite table: when not applied, t
 
 A scoped query that returns nothing is diagnosed on the text the user typed, not the one sent, so the empty-result diagnosis never blames a field the scope inserted.
 
+**Scope and scan cost.** The inserted filter narrows the rows and, as an equality filter right after `fetch`, helps the scan, but it cannot by itself keep a wide timeframe under the scan limit. `sdk/inventory/sampling.go` records the measurement: a scoped, unsampled 15-minute count of logs still scanned 341 GB on a large environment, against 500 GB for the capped unscoped read. Nothing honest can be inserted to change that: a timeframe changes the question, `samplingRatio` makes every scoped result approximate, and a scan cap is not scoping. So the rewrite sends what it always sent, and says so before sending: when neither the fetch stage (a `scanLimitGBytes` other than `-1`, `samplingRatio`; `Rewrite.ScanBounded`) nor the resolved scan limit or sampling ratio bounds the scan, the scope line ends with a clause that only the environment's default cap applies, and `decorate` repeats the same string as the one scan suggestion. A bounded scoped query the cap still stopped gets one line after the run instead, worded to agree with the executor's "filter early with ==" hint, which lists the other levers. `wait query` says either once; `verify query` sends no query and has no clause.
+
 ## Discovery
 
 ### Record aggregates first

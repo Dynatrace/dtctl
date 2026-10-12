@@ -317,7 +317,9 @@ only in the stderr line every scoped run prints:
 and `context.suggestions` names the opt-out (`run unscoped: add
 --no-repo-scope`). When an applied scope returns no records, the first
 suggestion is to run the same query with `--no-repo-scope`: a binding the
-records do not carry looks exactly like a quiet service.
+records do not carry looks exactly like a quiet service. One suggestion says
+when nothing bounds an applied scope's scan, or, for a bounded scan the limit
+still stopped, points at the executor's scan-limit advice.
 
 `applied: false` means the query was sent exactly as typed; `code` and
 `reason` say why:

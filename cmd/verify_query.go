@@ -152,6 +152,8 @@ Examples:
 			if err != nil {
 				return err
 			}
+			// Verifying scans nothing, so the line has no scan limit to weigh.
+			scoped.announce(nil)
 			query = scoped.Query
 
 			// Get verify options

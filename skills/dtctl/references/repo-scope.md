@@ -46,6 +46,7 @@ dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20' -A
 `context.repo_scope` says what happened: `applied: true` with the `filter` inserted after `fetch`, or `applied: false` with a `code` and `reason` (the query then ran exactly as typed). Your own `filter` on a scoped field (`service.name`, `k8s.workload.name`, ...) wins over the scope. With `--repo-scope <name>`, a scope that cannot narrow the query is a `validation_error` and nothing is sent. `wait query` and `verify query` are scoped too, but report it only on stderr.
 
 - **0 records under a scope** — run the same query with `--no-repo-scope` before concluding the service is quiet; the bindings may not match what the records carry.
+- **Unbounded scan under a scope** — the scope narrows rows, not the scan; when a suggestion says only the environment's default cap applies, add `scanLimitGBytes:` to the `fetch` or pass `--default-scan-limit-gbytes`.
 - **Environment-wide question** — add `--no-repo-scope`.
 - **Monorepo, other service** — add `--repo-scope <name>`.
 
