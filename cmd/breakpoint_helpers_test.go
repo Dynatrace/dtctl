@@ -507,8 +507,19 @@ func TestCurrentProjectPath(t *testing.T) {
 		t.Fatalf("failed to chdir: %v", err)
 	}
 
-	if got := currentProjectPath(); got == "" || got == "no-project" {
+	if got := currentProjectPath(context.Background()); got == "" || got == "no-project" {
 		t.Fatalf("expected project name from cwd, got %q", got)
+	}
+
+	// An embedded invocation has no working directory of its own, so it never
+	// names its workspace after the server's.
+	for name, inv := range map[string]*invocation{
+		"without HostWorkingDirectory": {concurrent: true},
+		"serving a session":            {concurrent: true, caps: Capabilities{HostWorkingDirectory: true}, session: &Session{}},
+	} {
+		if got := currentProjectPath(withInvocation(context.Background(), inv)); got != "no-project" {
+			t.Errorf("%s: currentProjectPath = %q, want no-project", name, got)
+		}
 	}
 }
 
