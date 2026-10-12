@@ -20,7 +20,7 @@ dtctl repo-scope current -A
    dtctl repo-scope discover -A
    ```
 
-   `result.verdict` is `match`, `ambiguous` or `none`. Each `result.candidates[]` has the ids and names it found, `evidence` (which repository file named it, which record field matched, how many records), and a ready-to-run `setCommand`. `result.sent` lists every value that left the machine. `result.partial: true` means a query failed, timed out, was capped or was interrupted: `none` is then not evidence that nothing runs this code.
+   `result.verdict` is `match`, `ambiguous` or `none`. Each `result.candidates[]` has the ids and names it found, `evidence` (which repository file named it, which record field matched, how many records), and a ready-to-run `setCommand`. `result.sent` lists every value that left the machine. `result.partial: true` means a query failed, timed out, was capped or was interrupted, or a sample matched nothing: `none` is then not evidence that nothing runs this code. On a busy environment discovery samples instead of scanning the whole day: a candidate with `sampled: true` was found that way, and a `context.suggestions` entry states the floor below which a service may be missing; tell the user. `serviceCount` is how many service ids a candidate has, of which `services` lists up to 50.
 
 2. Show the user the candidate(s) and the evidence, and ask. Do not save on your own initiative: the scope changes what every later query in this repository returns, for everyone who clones it.
 

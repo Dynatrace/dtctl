@@ -52,7 +52,7 @@ Unit: .
    12400 spans, 88000 logs in 24h
 
 Verdict: match: process group, service, service name, workload
-2 of 4 queries ran in 0.6s. Nothing was written. Save it with:
+2 of 10 queries ran in 0.6s. Nothing was written. Save it with:
   dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout
 ```
 
@@ -67,7 +67,8 @@ dtctl repo-scope discover --path services/ledger    # another service of a monor
 
 The `set` line saves exactly the candidate shown:
 
-- It binds the workload and the service name. Entity ids are proposed only for a candidate neither describes, because both id fields are deprecated (see [Save an entry](#2-save-an-entry)).
+- It binds the workload and the service name. Entity ids are proposed only for a candidate neither describes, because both id fields are deprecated (see [Save an entry](#2-save-an-entry)), and never for one whose ids discovery could not list in full: a workload that runs as 200 service ids shows two of them and `+198 more`, and gets no `--service` line.
+- A candidate found by sampling (see [What discovery sends](#what-discovery-sends)) gets its `--namespace`/`--workload` binding only: a quieter candidate sharing its service name or ids could sit below the sample's floor. One with no workload gets no line, and a note says why. When spans or logs were sampled, a candidate read whole gets no `--service-name` either, since a candidate sharing the name could be the one below the other data object's floor.
 - When more than one candidate reports the same service name (two namespaces, or a canary beside its main workload), their lines leave `--service-name` out and a note says so: the bindings of an entry are alternatives, and that name would select every such candidate's records. A candidate no other binding selects alone gets no line; when no candidate has one, discovery says nothing tells them apart and offers the `--service-name` line as selecting all of them.
 - It carries `--context` when discovery ran in a context other than the config's current one (`--context` or `DTCTL_CONTEXT`), and `--config` when discovery was given one, so it saves under the environment discovery asked.
 
@@ -87,17 +88,32 @@ Test content is not read, because the names in it describe what the tests deploy
 dtctl repo-scope discover --dry-run
 ```
 
-A run sends at most four queries. The first two always run:
+A run sends at most ten queries: two record queries, three sampled retries of each (only when the scan cap stops the record query, and only until one answers), and two entity searches (only when the records find nothing). The record queries always run:
 
 ```text
 fetch spans, from:now()-24h, scanLimitGBytes:5
 | filter in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>))
-| summarize records = count(), by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity.service, dt.entity.process_group}
+| summarize records = count(),
+    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
+    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+    by:{k8s.namespace.name, k8s.workload.name, service.name}
 | sort records desc
 | limit 200
 ```
 
-and the same over `logs`. Only when those find nothing are entity names searched:
+and the same over `logs`. Each row is one namespace, workload and service name. Its entity ids are counted exactly and listed up to 50, so a workload that runs as hundreds of service ids is one candidate, not a page of them.
+
+On a busy environment a day of spans or logs scans more than the 5 GB cap even with the filter, and a capped scan covers an unknown part of the window. Discovery then retries the record query sampled, coarsest first, and stops at the first retry that finds a candidate:
+
+| Retry | Window | Sampling | For | Floor |
+|---|---|---|---|---|
+| 1 | 1h | 1-in-100000 | the largest environments: an hour is what fits | about 300000 records in the hour |
+| 2 | 24h | 1-in-100000 | large environments: the whole window | about 300000 records in the day |
+| 3 | 24h | 1-in-1000 | medium environments: quieter services | about 3000 records in the day |
+
+`sampled = count(), records = sum(dt.system.sampling_ratio)` replaces `records = count()`, so the count is the population the sample stands for. A retry whose scan the previous one predicts to exceed the cap is skipped rather than sent, and a retry the environment does not sample ends the walk with the capped answer. A sample can miss a quiet service but not invent one, so a sampled answer with candidates is complete at the floor it states (one note, one agent suggestion: `a service with fewer than about 300000 spans over 1h may be missing`), while a sampled answer with none is a bound, not an absence, and stays partial. A sampled count is marked in the evidence (`~1200000 spans in 1h (sampled 1-in-100000)`), and candidates read over different windows rank by records per hour.
+
+Only when the record queries find nothing are entity names searched:
 
 ```text
 fetch dt.entity.service, from:now()-24h
@@ -108,7 +124,7 @@ fetch dt.entity.service, from:now()-24h
 | limit 200
 ```
 
-and the same over `dt.entity.process_group`. A run stops after 60 seconds and reports what it found. A query that returns 200 rows, or that Grail reports as cut short, caps the verdict at `ambiguous` and marks the result partial, as does a run that times out or is interrupted. A token that provably cannot read spans or logs is refused before the first query is sent; one that cannot read the entity tables gets a note in place of those two queries.
+and the same over `dt.entity.process_group`. A run stops after 60 seconds and reports what it found. A query that returns 200 rows, or that Grail reports as cut short (other than a capped scan a sampled retry answered), caps the verdict at `ambiguous` and marks the result partial, as does a run that times out or is interrupted. A token that provably cannot read spans or logs is refused before the first query is sent; one that cannot read the entity tables gets a note in place of those two queries.
 
 ## 2. Save an entry
 
@@ -252,5 +268,6 @@ In agent mode `discover` returns its report as the envelope `result`, with each 
 ## Limits
 
 - Only `fetch logs` and `fetch spans` are scoped. Metrics (`timeseries`), events and business events are not; their queries run unscoped with a warning.
-- Discovery looks at the last 24 hours. A service that has been quiet longer, or that runs under a name the repository does not spell out, needs `--term` or a `set` by hand.
+- Discovery looks at the last 24 hours, or the last hour when it has to sample, and says so in its notes. A service that has been quiet longer, quieter than a sample's floor, or that runs under a name the repository does not spell out, needs `--term` or a `set` by hand.
+- Entity ids per candidate are counted exactly and listed up to 50; `-o json` has the list and the count (`serviceCount`, `servicesCapped`).
 - `inventory arrivals --scope` does not use the repo scope.
