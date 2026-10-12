@@ -1271,3 +1271,115 @@ func TestSkillsUninstall_ForCrossClient(t *testing.T) {
 		t.Error("skill directory should not exist after uninstall")
 	}
 }
+
+// --- Dynatrace for AI companion hint ---
+
+// runSkillsInstallCapture runs `dtctl skills install --for claude <extra>` in a
+// fresh project dir and HOME through Run, returning the exit code and the
+// separate stdout/stderr streams. withCompanion pre-installs the
+// dt-dql-essentials marker skill next to where dtctl will land.
+func runSkillsInstallCapture(t *testing.T, withCompanion bool, extra ...string) (int, string, string) {
+	t.Helper()
+	isolatedConfig(t, "contexts: []\n")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if withCompanion {
+		dir := filepath.Join(tmpDir, ".claude", "skills", "dt-dql-essentials")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: dt-dql-essentials\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	argv := append([]string{"skills", "install", "--for", "claude"}, extra...)
+	code := Run(argv, RunOptions{Stdout: &stdout, Stderr: &stderr})
+	t.Cleanup(func() { resetSkillsFlags(t) })
+	return code, stdout.String(), stderr.String()
+}
+
+func TestSkillsInstall_CompanionHint_Human(t *testing.T) {
+	code, stdout, stderr := runSkillsInstallCapture(t, false, "--no-agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "Hint:") || !strings.Contains(stderr, skills.CompanionInstallCommand) {
+		t.Errorf("stderr should carry the Dynatrace for AI hint, got: %q", stderr)
+	}
+	if strings.Contains(stdout, skills.CompanionInstallCommand) {
+		t.Errorf("hint must not go to stdout, got: %q", stdout)
+	}
+}
+
+func TestSkillsInstall_CompanionHint_HumanAlreadyInstalled(t *testing.T) {
+	code, _, stderr := runSkillsInstallCapture(t, true, "--no-agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	if strings.Contains(stderr, skills.CompanionInstallCommand) {
+		t.Errorf("no hint expected when dt-dql-essentials is installed, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "Installed Claude Code skill") {
+		t.Errorf("install confirmation should still print, got: %q", stderr)
+	}
+}
+
+// decodeInstallEnvelope parses the agent envelope from stdout.
+func decodeInstallEnvelope(t *testing.T, stdout string) output.Response {
+	t.Helper()
+	var resp output.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a single JSON envelope: %v\n%s", err, stdout)
+	}
+	if !resp.OK || resp.Context == nil {
+		t.Fatalf("expected ok envelope with context, got: %s", stdout)
+	}
+	return resp
+}
+
+func TestSkillsInstall_CompanionHint_AgentMode(t *testing.T) {
+	code, stdout, stderr := runSkillsInstallCapture(t, false, "--agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	if strings.Contains(stderr, skills.CompanionInstallCommand) {
+		t.Errorf("agent mode must not print the hint as stray stderr text, got: %q", stderr)
+	}
+	resp := decodeInstallEnvelope(t, stdout)
+	found := false
+	for _, s := range resp.Context.Suggestions {
+		if strings.Contains(s, skills.CompanionInstallCommand) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("context.suggestions should carry the hint, got: %v", resp.Context.Suggestions)
+	}
+}
+
+func TestSkillsInstall_CompanionHint_AgentModeAlreadyInstalled(t *testing.T) {
+	code, stdout, stderr := runSkillsInstallCapture(t, true, "--agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	resp := decodeInstallEnvelope(t, stdout)
+	for _, s := range resp.Context.Suggestions {
+		if strings.Contains(s, skills.CompanionInstallCommand) {
+			t.Errorf("no hint expected when dt-dql-essentials is installed, got: %v", resp.Context.Suggestions)
+		}
+	}
+	if len(resp.Context.Suggestions) == 0 {
+		t.Error("the existing 'skills status' suggestion should remain")
+	}
+}
