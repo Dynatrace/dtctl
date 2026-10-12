@@ -116,9 +116,12 @@ type Plan struct {
 	// repository root; Unit is the build unit holding it. They differ in a
 	// monorepo with one build file at the top, where Dir's own name is
 	// among what was sent but Unit is the whole repository.
-	Dir     string   `json:"dir" yaml:"dir"`
-	Unit    string   `json:"unit" yaml:"unit"`
-	Sent    []string `json:"sent" yaml:"sent"`
+	Dir  string   `json:"dir" yaml:"dir"`
+	Unit string   `json:"unit" yaml:"unit"`
+	Sent []string `json:"sent" yaml:"sent"`
+	// Dropped are the unit's names held back because they look like test
+	// fixtures; a --term sends one anyway.
+	Dropped []string `json:"dropped,omitempty" yaml:"dropped,omitempty"`
 	Queries []Query  `json:"queries" yaml:"queries"`
 	tokens  []token
 }
@@ -141,6 +144,7 @@ func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 		return nil, err
 	}
 	p := &Plan{Dir: path.Clean(dir), Unit: s.unit, Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens}
+	p.Dropped = heldBack(s.dropped, p.Sent)
 	if len(p.Sent) == 0 {
 		return p, nil
 	}
@@ -158,6 +162,18 @@ func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 		entityQuery(objectProcessGroups, "process groups by entity name", p.Sent),
 	)
 	return p, nil
+}
+
+// heldBack is the dropped names a term did not send after all, so the
+// "not sent" note never names a value the queries carry.
+func heldBack(dropped, sent []string) []string {
+	var out []string
+	for _, d := range dropped {
+		if !slices.Contains(sent, d) {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func sendValues(tokens []token, terms []string) []string {
@@ -285,6 +301,9 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 	d := newDiscovery(p)
 	if len(p.Queries) == 0 {
 		r.note(fmt.Sprintf("no usable name found for unit %q", p.Unit))
+	}
+	if len(p.Dropped) > 0 {
+		r.note(fmt.Sprintf("names that look like test fixtures are not sent: %s; use --term to send one", strings.Join(p.Dropped, ", ")))
 	}
 	for i := range r.Queries {
 		q := &r.Queries[i]

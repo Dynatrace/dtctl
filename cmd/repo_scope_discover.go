@@ -190,13 +190,22 @@ func (r scopeCheckedRunner) RunQuery(ctx context.Context, dql string) (*inventor
 // queries as its payload.
 func printRepoScopeDiscoveryPlan(cmd *cobra.Command, plan *reposcope.Plan) error {
 	report := newDryRunReport(cmd).As("discover", "repo-scope").Detail("unit", "%s", plan.Unit)
+	noteDropped := func() {
+		if len(plan.Dropped) > 0 {
+			report.Linef("Names that look like test fixtures are not sent: %s; use --term to send one", quotedValues(plan.Dropped)).
+				Detail("dropped", "%s", strings.Join(plan.Dropped, ", "))
+		}
+	}
 	if len(plan.Queries) == 0 {
-		return report.Linef("Dry run: no usable name found for unit %q; %s", plan.Unit, repoScopeNarrowHint).Print()
+		report.Linef("Dry run: no usable name found for unit %q; %s", plan.Unit, repoScopeNarrowHint)
+		noteDropped()
+		return report.Print()
 	}
 	report.
 		Linef("Dry run: discovery for unit %q would send %d queries to the current context's environment; nothing was sent", plan.Unit, len(plan.Queries)).
 		Linef("Values it would send: %s", quotedValues(plan.Sent)).
 		Detail("sent", "%s", strings.Join(plan.Sent, ", "))
+	noteDropped()
 	record := 0 // the number of the record query a rung retries
 	for i, q := range plan.Queries {
 		label := q.Purpose

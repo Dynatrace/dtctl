@@ -229,6 +229,29 @@ func TestPlan_Terms(t *testing.T) {
 		"a term is sent as given, lowercased, and in its variants")
 }
 
+// A name that looks like a test fixture is held back, but a --term never
+// passes through that rule: a user who means it can send it.
+func TestPlan_TermsBypassTestNames(t *testing.T) {
+	p, err := PlanDiscovery(fixture(t, "test-noise"), ".", nil)
+	require.NoError(t, err)
+	assert.NotContains(t, p.Sent, "test-platform-service-smoke")
+	assert.Contains(t, p.Dropped, "test-platform-service-smoke")
+
+	p, err = PlanDiscovery(fixture(t, "test-noise"), ".", []string{"test-platform-service-smoke"})
+	require.NoError(t, err)
+	assert.Contains(t, p.Sent, "test-platform-service-smoke")
+	assert.NotContains(t, p.Dropped, "test-platform-service-smoke", "a name a term sends is not reported as held back")
+}
+
+// The names held back are named, so the drop is never silent.
+func TestDiscover_NotesDroppedNames(t *testing.T) {
+	p := singleGo(t)
+	p.Dropped = []string{"mock-ledger", "test-platform-service-a"}
+	r, err := Discover(context.Background(), &fakeRunner{}, p, prodHost)
+	require.NoError(t, err)
+	assert.Contains(t, r.Notes, "names that look like test fixtures are not sent: mock-ledger, test-platform-service-a; use --term to send one")
+}
+
 // Record fields compare case-sensitively, so a name the repository spells in
 // capitals is sent that way too, and a record carrying it is credited to the
 // file it came from.

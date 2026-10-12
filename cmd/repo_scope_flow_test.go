@@ -359,6 +359,36 @@ func TestRepoScopeDiscoverDryRunNeedsNoToken(t *testing.T) {
 	require.Equal(t, before, listing(t, repo))
 }
 
+// The names discovery holds back as test fixtures are named in the dry run,
+// so the drop is never silent, and a --term that sends one takes it off the
+// list.
+func TestRepoScopeDiscoverDryRunNamesHeldBackNames(t *testing.T) {
+	fixture, err := filepath.Abs(filepath.Join("..", "pkg", "reposcope", "testdata", "repos", "test-noise"))
+	require.NoError(t, err)
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "Names that look like test fixtures are not sent: \"test-platform-service-smoke\", \"test-runner\"; use --term to send one\n")
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+	details := plan["details"].(map[string]interface{})
+	require.Equal(t, "test-platform-service-smoke, test-runner", details["dropped"])
+	for _, q := range plan["payload"].([]interface{}) {
+		require.NotContains(t, q.(map[string]interface{})["dql"], "test-platform-service-smoke", "a held-back name is in no query")
+	}
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--term", "test-runner", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	details = agentEnvelope(t, stdout).Result.(map[string]interface{})["details"].(map[string]interface{})
+	require.Equal(t, "test-platform-service-smoke", details["dropped"])
+	require.Contains(t, details["sent"], "test-runner")
+}
+
 // A token that provably cannot read spans is refused before the first query
 // leaves. One that cannot read the entity tables still gets the record
 // queries' answer; the fallbacks are reported as unreadable, not sent.
