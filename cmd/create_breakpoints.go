@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/prompt"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 	"github.com/dynatrace-oss/dtctl/pkg/safety"
 )
@@ -57,7 +56,7 @@ Examples:
 			// Validate --filters up front, before any config or network call, so
 			// format errors surface immediately. Filters are optional for create:
 			// only validate when the flag was actually provided.
-			var filterSets []map[string]interface{}
+			var filterSets []map[string][]string
 			var filterSummary string
 			if filtersChanged {
 				if err := requireFiltersValue(filters); err != nil {
@@ -67,7 +66,7 @@ Examples:
 				if err != nil {
 					return err
 				}
-				filterSets = livedebugger.BuildFilterSets(parsed)
+				filterSets = []map[string][]string{parsed}
 				filterSummary = formatFilters(parsed)
 			}
 
@@ -112,31 +111,12 @@ Examples:
 			}
 
 			if filtersChanged {
-				// Changing workspace filters re-scopes every existing active
-				// breakpoint in the workspace, not just the one being created.
-				// Confirm first, unless --yes or a non-interactive (--plain/agent)
-				// context. The extra read is only paid when we might prompt.
-				if !skipConfirm && !plainMode(cmdContext(cmd)) {
-					count, err := countActiveWorkspaceBreakpoints(handler, workspaceID)
-					if err != nil {
-						return err
-					}
-					if count > 0 && !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), filterChangeConfirmMessage(count, true)) {
-						return printBreakpointMessage(cmdContext(cmd), "create", "Cancelled")
-					}
-				}
-
-				updateResp, err := handler.UpdateWorkspaceFilters(workspaceID, filterSets)
+				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, filterSets, true, skipConfirm, false)
 				if err != nil {
-					if verbose {
-						_ = printGraphQLResponse(cmdContext(cmd), "updateWorkspaceV2", updateResp)
-					}
 					return err
 				}
-				if verbose {
-					if err := printGraphQLResponse(cmdContext(cmd), "updateWorkspaceV2", updateResp); err != nil {
-						return err
-					}
+				if cancelled {
+					return printBreakpointMessage(cmdContext(cmd), "create", "Cancelled")
 				}
 			} else {
 				hasFilters, err := livedebugger.WorkspaceHasFilters(workspaceResp)

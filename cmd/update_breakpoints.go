@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/prompt"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 	"github.com/dynatrace-oss/dtctl/pkg/safety"
 )
@@ -110,11 +109,12 @@ Examples:
 					return err
 				}
 
+				parsed, err := parseFilters(filters)
+				if err != nil {
+					return err
+				}
+
 				if dryRun(cmdContext(cmd)) {
-					parsed, err := parseFilters(filters)
-					if err != nil {
-						return err
-					}
 					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update Live Debugger workspace filters (%s) (note: this also re-scopes existing breakpoints in the workspace)", formatFilters(parsed)))
 				}
 
@@ -141,36 +141,12 @@ Examples:
 					}
 				}
 
-				filterSets, err := buildWorkspaceFilterSets(filters)
+				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, []map[string][]string{parsed}, false, skipConfirm, false)
 				if err != nil {
 					return err
 				}
-
-				// Changing workspace filters re-scopes every existing active
-				// breakpoint in the workspace. Confirm first, unless --yes or a
-				// non-interactive (--plain/agent) context. The extra read is only
-				// paid when we might prompt.
-				if !skipConfirm && !plainMode(cmdContext(cmd)) {
-					count, err := countActiveWorkspaceBreakpoints(handler, workspaceID)
-					if err != nil {
-						return err
-					}
-					if count > 0 && !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), filterChangeConfirmMessage(count, false)) {
-						return printBreakpointMessage(cmdContext(cmd), "update", "Cancelled")
-					}
-				}
-
-				updateResp, err := handler.UpdateWorkspaceFilters(workspaceID, filterSets)
-				if err != nil {
-					if verbose {
-						_ = printGraphQLResponse(cmdContext(cmd), "updateWorkspaceV2", updateResp)
-					}
-					return err
-				}
-				if verbose {
-					if err := printGraphQLResponse(cmdContext(cmd), "updateWorkspaceV2", updateResp); err != nil {
-						return err
-					}
+				if cancelled {
+					return printBreakpointMessage(cmdContext(cmd), "update", "Cancelled")
 				}
 
 				return printBreakpointMessage(cmdContext(cmd), "update", "Updated Live Debugger workspace filters")

@@ -3,8 +3,10 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -152,57 +154,108 @@ func TestParseFilters(t *testing.T) {
 	}
 }
 
-func TestBuildWorkspaceFilterSets(t *testing.T) {
-	t.Run("valid single filter", func(t *testing.T) {
-		sets, err := buildWorkspaceFilterSets("k8s.namespace.name:prod")
+// filterOpsStub stands in for the Live Debugger handler behind
+// applyWorkspaceFilters, recording which calls were made.
+type filterOpsStub struct {
+	activeRules int
+	counted     bool
+	sent        []map[string]interface{}
+	updated     bool
+}
+
+func (s *filterOpsStub) ops() workspaceFilterOps {
+	return workspaceFilterOps{
+		getWorkspaceRules: func(_ *livedebugger.Handler, _ string) (map[string]interface{}, error) {
+			s.counted = true
+			rules := make([]interface{}, 0, s.activeRules)
+			for i := 0; i < s.activeRules; i++ {
+				rules = append(rules, map[string]interface{}{"id": fmt.Sprintf("bp-%d", i), "is_disabled": false})
+			}
+			return map[string]interface{}{"data": map[string]interface{}{"org": map[string]interface{}{
+				"workspace": map[string]interface{}{"rules": rules},
+			}}}, nil
+		},
+		updateWorkspaceFilters: func(_ *livedebugger.Handler, _ string, filterSets []map[string]interface{}) (map[string]interface{}, error) {
+			s.updated = true
+			s.sent = filterSets
+			return map[string]interface{}{}, nil
+		},
+	}
+}
+
+func TestApplyWorkspaceFilters(t *testing.T) {
+	sets := []map[string][]string{
+		{"k8s.workload.name": {"checkout"}, "k8s.namespace.name": {"payments"}},
+		{"service.name": {"checkout"}},
+	}
+	// run calls the helper on an invocation of its own, so the plain-mode
+	// switch and the answer typed at the prompt stay out of the process.
+	run := func(t *testing.T, stub *filterOpsStub, plain, skipConfirm, countAlways bool, answer string) (bool, string) {
+		t.Helper()
+		var out bytes.Buffer
+		ctx := withInvocation(context.Background(), &invocation{
+			concurrent: true,
+			flags:      rootFlags{plainMode: plain},
+			stdin:      strings.NewReader(answer),
+			stdout:     &out,
+		})
+		cancelled, err := applyWorkspaceFiltersWithOps(ctx, nil, "ws-1", sets, true, skipConfirm, countAlways, stub.ops())
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("applyWorkspaceFilters: %v", err)
 		}
-		if len(sets) != 1 {
-			t.Fatalf("expected 1 filter set, got %d", len(sets))
-		}
+		return cancelled, out.String()
+	}
 
-		filtersField, ok := sets[0]["filters"].([]interface{})
-		if !ok || len(filtersField) != 0 {
-			t.Fatalf("expected empty filters slice, got %#v", sets[0]["filters"])
+	t.Run("a declined confirmation changes nothing", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 2}
+		cancelled, out := run(t, stub, false, false, false, "n\n")
+		if !cancelled || stub.updated {
+			t.Fatalf("cancelled=%t updated=%t, want a cancel and no update", cancelled, stub.updated)
 		}
-
-		labels, ok := sets[0]["labels"].([]map[string]interface{})
-		if !ok || len(labels) != 1 {
-			t.Fatalf("expected 1 label, got %#v", sets[0]["labels"])
-		}
-		if labels[0]["field"] != "k8s.namespace.name" {
-			t.Fatalf("unexpected field: %#v", labels[0]["field"])
-		}
-		values, ok := labels[0]["values"].([]string)
-		if !ok || len(values) != 1 || values[0] != "prod" {
-			t.Fatalf("unexpected values: %#v", labels[0]["values"])
+		if !strings.Contains(out, filterChangeConfirmMessage(2, true)) {
+			t.Fatalf("prompt = %q, want the creating confirmation for 2 breakpoints", out)
 		}
 	})
 
-	t.Run("multiple filters yield one set with multiple labels", func(t *testing.T) {
-		sets, err := buildWorkspaceFilterSets("k8s.namespace.name:prod,dt.entity.host:HOST-1")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	t.Run("an accepted confirmation sends every set", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 1}
+		if cancelled, _ := run(t, stub, false, false, false, "y\n"); cancelled {
+			t.Fatal("cancelled after the confirmation was accepted")
 		}
-		if len(sets) != 1 {
-			t.Fatalf("expected 1 filter set, got %d", len(sets))
-		}
-		labels, ok := sets[0]["labels"].([]map[string]interface{})
-		if !ok || len(labels) != 2 {
-			t.Fatalf("expected 2 labels, got %#v", sets[0]["labels"])
+		if want := livedebugger.BuildFilterSets(sets...); !reflect.DeepEqual(stub.sent, want) {
+			t.Fatalf("sent %#v, want %#v", stub.sent, want)
 		}
 	})
 
-	t.Run("invalid format returns error", func(t *testing.T) {
-		if _, err := buildWorkspaceFilterSets("no-separator"); err == nil {
-			t.Fatalf("expected error for invalid filter format")
+	t.Run("no active breakpoints asks nothing", func(t *testing.T) {
+		stub := &filterOpsStub{}
+		cancelled, out := run(t, stub, false, false, false, "")
+		if cancelled || !stub.counted || !stub.updated || out != "" {
+			t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want a silent count and an update", cancelled, stub.counted, stub.updated, out)
 		}
 	})
 
-	t.Run("empty input returns error", func(t *testing.T) {
-		if _, err := buildWorkspaceFilterSets(""); err == nil {
-			t.Fatalf("expected error for empty filter input")
+	for _, tt := range []struct {
+		name               string
+		plain, skipConfirm bool
+	}{
+		{"--yes skips the count", false, true},
+		{"a non-interactive run skips the count", true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &filterOpsStub{activeRules: 3}
+			cancelled, out := run(t, stub, tt.plain, tt.skipConfirm, false, "")
+			if cancelled || stub.counted || !stub.updated || out != "" {
+				t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want no count, no prompt and an update", cancelled, stub.counted, stub.updated, out)
+			}
+		})
+	}
+
+	t.Run("countAlways declines a non-interactive re-scope", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 1}
+		cancelled, _ := run(t, stub, true, false, true, "")
+		if !cancelled || !stub.counted || stub.updated {
+			t.Fatalf("cancelled=%t counted=%t updated=%t, want a count, a cancel and no update", cancelled, stub.counted, stub.updated)
 		}
 	})
 }
