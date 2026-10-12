@@ -21,6 +21,20 @@ const (
 var skippedDirs = keySet(".git", "node_modules", "vendor", "target", "build", "dist",
 	".venv", "__pycache__", ".idea", ".terraform")
 
+// excludedDirs hold test content, compared case-insensitively so .NET's
+// Tests/ counts too: Go's testdata, Jest's __tests__, end-to-end suites, and
+// examples, whose manifests deploy a demonstration rather than the service.
+// Unlike skippedDirs they are entered when discovery was asked about a
+// directory inside one (see onPath). dev is deliberately absent: it names
+// an environment, and deploy/overlays/dev describes exactly what runs on the
+// environment developers use most.
+var excludedDirs = union(testWords, "testdata", "__tests__", "e2e", "examples")
+
+// testFileWords mark a test's own file beside a real one when they are a
+// whole word of its name: Dockerfile.test, deployment-e2e.yaml,
+// docker-compose.test.yml.
+var testFileWords = union(testWords, "e2e")
+
 // source is one kind of file names are read from. A build file or Dockerfile
 // makes its directory a unit; a Kubernetes manifest or Helm chart does not,
 // and is attributed to a unit instead (see attribute).
@@ -72,11 +86,16 @@ type sourceNames struct {
 type signals struct {
 	unit   string
 	tokens []token
+	// dropped are the unit's names held back as test names (see
+	// token.testName), sorted, so that holding them back is never silent.
+	dropped []string
 }
 
 // extract reads the names the repository at fsys gives the unit holding dir,
-// walking within maxDepth, maxFiles and maxFileBytes and never entering
-// skippedDirs. Nothing leaves the machine here.
+// walking within maxDepth, maxFiles and maxFileBytes, never entering
+// skippedDirs, and leaving test content unread: excludedDirs other than those
+// on the way to dir, and test files (see testFile). Nothing leaves the
+// machine here.
 //
 // The unit is the nearest directory at or above dir that holds a build file
 // or a Dockerfile, or the repository root when none does. Its directory name
@@ -85,7 +104,7 @@ type signals struct {
 // in is often what the service is called.
 func extract(fsys fs.FS, dir string) (*signals, error) {
 	dir = path.Clean(dir)
-	files, err := listSources(fsys)
+	files, err := listSources(fsys, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -95,17 +114,6 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 			units[path.Dir(f)] = true
 		}
 	}
-	s := &signals{unit: nearestUnit(units, dir)}
-	nameDir := s.unit
-	if nameDir == "." {
-		nameDir = dir
-	}
-	if nameDir != "." {
-		if t, ok := newToken(kindDir, path.Base(nameDir), dirSource(nameDir), 0); ok {
-			s.tokens = append(s.tokens, t)
-		}
-	}
-
 	var found []sourceNames
 	for _, f := range files {
 		if data, err := readRegular(fsys, f); err == nil {
@@ -113,12 +121,46 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 		}
 	}
 	found = append(found, readRemote(fsys)...)
-	for _, f := range found {
-		if attribute(units, f) == s.unit {
-			s.tokens = append(s.tokens, f.tokens...)
+
+	unit := nearestUnit(units, dir)
+	nameDir := unit
+	if nameDir == "." {
+		nameDir = dir
+	}
+	return unitSignals(units, found, unit, nameDir), nil
+}
+
+// unitSignals collects the names of unit: nameDir's own name unless it is the
+// repository root, then the names of every source attributed to the unit.
+// A test name is held back here rather than where it is read, so that what
+// is reported as held back is this unit's, not every unit's.
+func unitSignals(units map[string]bool, found []sourceNames, unit, nameDir string) *signals {
+	var tokens []token
+	if nameDir != "." {
+		if t, ok := newToken(kindDir, path.Base(nameDir), dirSource(nameDir), 0); ok {
+			tokens = append(tokens, t)
 		}
 	}
-	return s, nil
+	for _, f := range found {
+		if attribute(units, f) == unit {
+			tokens = append(tokens, f.tokens...)
+		}
+	}
+	s := &signals{unit: unit}
+	dropped := map[string]bool{}
+	for _, t := range tokens {
+		// A namespace is never sent, only matched, so holding one back
+		// would only take it out of the evidence.
+		if t.kind != kindNamespace && t.testName() {
+			dropped[t.value] = true
+		} else {
+			s.tokens = append(s.tokens, t)
+		}
+	}
+	if len(dropped) > 0 {
+		s.dropped = sortedKeys(dropped)
+	}
+	return s
 }
 
 // dirSource is the source recorded for a directory's own name: the directory
@@ -127,7 +169,8 @@ func dirSource(dir string) string {
 	return dir + "/"
 }
 
-func listSources(fsys fs.FS) ([]string, error) {
+// listSources lists the files a source reads, for discovery from dir.
+func listSources(fsys fs.FS, dir string) ([]string, error) {
 	var files []string
 	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		switch {
@@ -137,11 +180,12 @@ func listSources(fsys fs.FS) ([]string, error) {
 			}
 			return nil
 		case d.IsDir():
-			if p != "." && (skippedDirs[d.Name()] || strings.Count(p, "/")+1 > maxDepth) {
+			if p != "." && (skippedDirs[d.Name()] || strings.Count(p, "/")+1 > maxDepth ||
+				(excludedDirs[strings.ToLower(d.Name())] && !onPath(p, dir))) {
 				return fs.SkipDir
 			}
 			return nil
-		case !d.Type().IsRegular() || sourceFor(p) == nil:
+		case !d.Type().IsRegular() || sourceFor(p) == nil || testFile(d.Name()):
 			return nil
 		case len(files) == maxFiles:
 			return fs.SkipAll
@@ -153,6 +197,31 @@ func listSources(fsys fs.FS) ([]string, error) {
 		return nil, fmt.Errorf("read repository: %w", err)
 	}
 	return files, nil
+}
+
+// onPath reports whether p is dir or one of its ancestors. Discovery asked
+// about a directory reads it whatever it is called: a repository that keeps
+// its deployables under examples/<name> still discovers from
+// examples/checkout.
+func onPath(p, dir string) bool {
+	return p == dir || strings.HasPrefix(dir, p+"/")
+}
+
+// testFile reports whether a file is a test's own: a word of its name, split
+// at '.', '-' and '_', is in testFileWords (Dockerfile.test,
+// deployment-e2e.yaml), or a word after the first is spec
+// (checkout.spec.yaml). spec counts only after the first word, because a
+// manifest may well be called spec.yaml.
+func testFile(name string) bool {
+	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return r == '.' || r == '-' || r == '_'
+	})
+	for i, w := range words {
+		if testFileWords[w] || (i > 0 && w == "spec") {
+			return true
+		}
+	}
+	return false
 }
 
 func nearestUnit(units map[string]bool, dir string) string {

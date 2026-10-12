@@ -49,6 +49,15 @@ func (t token) source() string {
 var stopWords = keySet("app", "api", "server", "service", "svc", "web", "worker", "main",
 	"backend", "frontend", "test", "demo", "example", "default", "system", "k8s", "chart")
 
+// testWords name test content. A repository keeps its tests' manifests,
+// Dockerfiles and build files beside the real ones, and the names in them
+// describe what the tests deploy, not what runs: test-platform-service-a is a
+// fixture of platform-service and must not be matched against environments
+// as if it were one. The directories and files discovery leaves unread extend
+// this set (see excludedDirs and testFileWords); a name is held back when it
+// starts with one of these words (see testName).
+var testWords = keySet("test", "tests", "mock", "mocks", "fixture", "fixtures")
+
 // minTokenRunes is the shortest name worth sending: two letters match far too
 // much to be evidence of anything.
 const minTokenRunes = 3
@@ -146,6 +155,15 @@ func newToken(kind, raw, file string, line int) (token, bool) {
 	return token{kind: kind, value: v[0], variants: v, file: file, line: line}, true
 }
 
+// testName reports whether the name's first word is one of testWords, as in
+// test-platform-service-a or mockLedger. Only the first whole word counts:
+// load-test-runner and testkube are names of things that run. A --term is
+// never held to this, so a user who means such a name can still send it.
+func (t token) testName() bool {
+	first, _, _ := strings.Cut(t.value, "-")
+	return testWords[first]
+}
+
 // PlainName reports whether s is made only of letters, digits, '-', '_' and
 // '.': the characters a name is sent in. A spelling read from the repository
 // with anything else is not sent, only its variants are, and a --term with
@@ -169,6 +187,15 @@ func sameName(a, b string) bool {
 func keySet(keys ...string) map[string]bool {
 	set := make(map[string]bool, len(keys))
 	for _, k := range keys {
+		set[k] = true
+	}
+	return set
+}
+
+// union is base with keys added, for a word set that extends another.
+func union(base map[string]bool, keys ...string) map[string]bool {
+	set := keySet(keys...)
+	for k := range base {
 		set[k] = true
 	}
 	return set

@@ -112,7 +112,9 @@ The queries are fixed, at most four, capped in their own text (`scanLimitGBytes:
 
 ### What leaves the machine
 
-Only names derived from the repository and the user's `--term` values, in their match variants; namespaces are evidence, never sent. Generic words are dropped, and a `--term` is held to the characters the repository's names are made of. The disclosure is the plan itself: `PlanDiscovery` needs no network, and `--dry-run` prints its exact output and returns before a client is built, so it works with no token and in any safety level.
+Only names derived from the repository and the user's `--term` values, in their match variants; namespaces are evidence, never sent. Generic words are dropped, and a `--term` is held to the characters the repository's names are made of.
+
+Test content is not a source of names: a `kind: Deployment` under `test/fixtures/` or a `Dockerfile.test` describes what a test deploys, not what runs, and a candidate found under `test-platform-service-a` would link the repository to a test double. One word set in `tokens.go` (`testWords`) drives three rules, each extending it by name: `excludedDirs` adds `testdata`, `__tests__`, `e2e` and `examples`; `testFileWords` adds `e2e`, for files with such a word in their name (`spec` counts only after the first word, since a manifest may be called `spec.yaml`); and a name whose first word is one of `testWords` is held back after attribution, so the report lists the unit's held-back names and the drop is never silent. Holding back is a drop, not a demotion, because ranking has no weight to demote by; `--term` never goes through the rule, so it is the way to send such a name. A directory on the path to the one discovery was asked about is never excluded, so `examples/checkout` still discovers. `dev` is deliberately not excluded: it names an environment, and an overlay for it describes exactly what runs on the environment developers use most. The disclosure is the plan itself: `PlanDiscovery` needs no network, and `--dry-run` prints its exact output and returns before a client is built, so it works with no token and in any safety level.
 
 ### Never writes
 

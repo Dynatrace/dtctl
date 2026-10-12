@@ -43,7 +43,9 @@ build files and the origin remote) and compares them to k8s.workload.name and
 service.name in the last 24 hours of spans and logs; entity names are searched
 only when the records find nothing. It names every value before sending it,
 and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
-that saves it.
+that saves it. Test content (test, testdata, e2e, examples and similar
+directories, and files such as Dockerfile.test) is not read, and a name that
+starts with test, mock or fixture is not sent unless given with --term.
 
 Discovery is per unit: the nearest directory at or above the working directory
 (or --path) that holds a build file (go.mod, package.json, pom.xml,

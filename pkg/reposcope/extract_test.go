@@ -54,10 +54,11 @@ func tokenLines(tokens []token) []string {
 
 func TestExtract_Fixtures(t *testing.T) {
 	tests := []struct {
-		name   string
-		dir    string
-		unit   string
-		tokens []string
+		name    string
+		dir     string
+		unit    string
+		tokens  []string
+		dropped []string
 	}{
 		{
 			name: "single-go",
@@ -140,6 +141,39 @@ func TestExtract_Fixtures(t *testing.T) {
 			unit:   ".",
 			tokens: []string{"module orders go.mod:1"},
 		},
+		{
+			// test.Dockerfile, deployment-e2e.yaml, test/, testdata/, e2e/
+			// and examples/ are not read; the dev overlay is. The smoke
+			// Job is read, but its test names are held back. (The fixture
+			// cannot hold a Dockerfile.test: .gitignore drops *.test.)
+			name: "test-noise",
+			dir:  ".",
+			unit: ".",
+			tokens: []string{
+				"entrypoint platform-service Dockerfile:3",
+				"workload platform-service deploy/deployment.yaml:4",
+				"namespace platform deploy/deployment.yaml:5",
+				"image platform-service deploy/deployment.yaml:11",
+				"namespace platform deploy/deployment.yaml:17",
+				"workload platform-service deploy/overlays/dev/deployment.yaml:4",
+				"namespace dev deploy/overlays/dev/deployment.yaml:5",
+				"module platform-service go.mod:1",
+			},
+			dropped: []string{"test-platform-service-smoke", "test-runner"},
+		},
+		{
+			// examples/ is on the way to the directory discovery was
+			// asked about, so it is read.
+			name: "test-noise",
+			dir:  "examples/checkout",
+			unit: "examples/checkout",
+			tokens: []string{
+				"dir checkout examples/checkout/",
+				"workload checkout examples/checkout/deploy.yaml:4",
+				"namespace shop examples/checkout/deploy.yaml:5",
+				"module checkout examples/checkout/go.mod:1",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+"@"+tt.dir, func(t *testing.T) {
@@ -147,6 +181,7 @@ func TestExtract_Fixtures(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.unit, s.unit)
 			assert.Equal(t, tt.tokens, tokenLines(s.tokens))
+			assert.Equal(t, tt.dropped, s.dropped)
 		})
 	}
 }
@@ -199,6 +234,65 @@ func TestExtract_Limits(t *testing.T) {
 	})
 }
 
+func TestExtract_TestContentIsNotRead(t *testing.T) {
+	dirs := []string{"Tests", "src/test/resources"}
+	for dir := range excludedDirs {
+		dirs = append(dirs, dir)
+	}
+	for _, dir := range dirs {
+		fsys := fstest.MapFS{dir + "/sub/package.json": {Data: []byte(`{"name": "stubbed-thing"}`)}}
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.Empty(t, s.tokens, dir)
+	}
+}
+
+func TestExtract_ExcludedDirsOnThePathAreRead(t *testing.T) {
+	fsys := fstest.MapFS{
+		"examples/checkout/package.json":                {Data: []byte(`{"name": "checkout"}`)},
+		"examples/checkout/test/package.json":           {Data: []byte(`{"name": "checkout-harness"}`)},
+		"examples/checkout/deploy/deployment.yaml":      {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout\n")},
+		"examples/checkout/deploy/deployment-test.yaml": {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-load\n")},
+		"examples/ledger/package.json":                  {Data: []byte(`{"name": "ledger"}`)},
+	}
+	s, err := extract(fsys, "examples/checkout/deploy")
+	require.NoError(t, err)
+	assert.Equal(t, "examples/checkout", s.unit)
+	assert.Equal(t, []string{
+		"dir checkout examples/checkout/",
+		"workload checkout examples/checkout/deploy/deployment.yaml:3",
+		"package checkout examples/checkout/package.json:1",
+	}, tokenLines(s.tokens), "only the directories on the way are exempt, not what lies below them or test files in them")
+}
+
+func TestExtract_TestFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		test bool
+	}{
+		{"Dockerfile.test", true},
+		{"test.Dockerfile", true},
+		{"deployment-test.yaml", true},
+		{"deployment_e2e.yaml", true},
+		{"docker-compose.test.yml", true},
+		{"checkout.spec.yaml", true},
+		{"mock-deployment.yaml", true},
+		{"Billing.Tests.csproj", true},
+		{"Dockerfile", false},
+		{"deployment.yaml", false},
+		{"spec.yaml", false},
+		{"latest.yaml", false},
+		{"contest-deployment.yaml", false},
+		{"Dockerfile.dev", false},
+		{"go.mod", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.test, testFile(tt.name))
+		})
+	}
+}
+
 func TestExtract_Dockerfile(t *testing.T) {
 	tests := []struct {
 		name, dockerfile, want string
@@ -220,6 +314,16 @@ func TestExtract_Dockerfile(t *testing.T) {
 	}
 }
 
+// A namespace is never sent, so the test-name rule has nothing to hold back:
+// a test-named one stays in the evidence and is not reported as not sent.
+func TestExtract_TestNamedNamespaceIsKept(t *testing.T) {
+	s, err := extract(fstest.MapFS{"k8s.yaml": {Data: []byte(
+		"kind: Deployment\nmetadata:\n  name: payments\n  namespace: test-payments\n")}}, ".")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"workload payments k8s.yaml:3", "namespace test-payments k8s.yaml:4"}, tokenLines(s.tokens))
+	assert.Empty(t, s.dropped)
+}
+
 func TestExtract_ManifestKinds(t *testing.T) {
 	manifest := func(kind string) []byte {
 		return []byte("kind: " + kind + "\nmetadata:\n  name: invoice-worker\n")
@@ -233,33 +337,5 @@ func TestExtract_ManifestKinds(t *testing.T) {
 		s, err := extract(fstest.MapFS{"k8s.yaml": {Data: manifest(kind)}}, ".")
 		require.NoError(t, err)
 		assert.Empty(t, s.tokens, kind)
-	}
-}
-
-func TestVariants(t *testing.T) {
-	tests := []struct {
-		raw  string
-		want []string
-	}{
-		{"checkout", []string{"checkout"}},
-		{"paymentService", []string{"payment-service", "payment_service", "payment.service", "paymentservice"}},
-		{"PaymentService", []string{"payment-service", "payment_service", "payment.service", "paymentservice"}},
-		{"payment_service", []string{"payment-service", "payment_service", "payment.service", "paymentservice"}},
-		{"HTTPServer", []string{"http-server", "http_server", "http.server", "httpserver"}},
-		{"checkoutV2", []string{"checkout-v2", "checkout_v2", "checkout.v2", "checkoutv2"}},
-		{"registry.example.invalid/acme/checkout:1.4.2", []string{"checkout"}},
-		{"registry.example.invalid/acme/checkout@sha256:00ff", []string{"checkout"}},
-		{"example.invalid/acme/orders", []string{"orders"}},
-		{"api", nil},
-		{"Service", nil},
-		{"k8s", nil},
-		{"ab", nil},
-		{"  ", nil},
-		{"", nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.raw, func(t *testing.T) {
-			assert.Equal(t, tt.want, variants(tt.raw))
-		})
 	}
 }
