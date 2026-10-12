@@ -153,7 +153,10 @@ Candidates are keyed by namespace, workload and service name, so the result does
 1. Metrics: `timeseries` scoping on `dt.service.*` and `dt.process.*` through the `filter:` parameter. Until then metric queries run unscoped with a warning.
 2. `fetch events` and `fetch bizevents`; `inventory arrivals --scope` defaulting to the repo scope.
 3. Rendering an entry onto a filter segment, so the platform applies it.
-4. Discovery narrowing by cluster, host or deploy time, and a configurable window.
+4. Discovery narrowing by cluster, host or deploy time, and a configurable window; a `--cluster` binding, which touches six layers.
 5. A per-user overlay, export/import, staleness checks, and mapping profiling frames back to source.
 6. Rebuilding `stripDQLLiterals` (`pkg/exec`) and `dqlCode` (`cmd/query_window.go`) on `dql.Scan`, so one scanner remains.
 7. Promotion criteria for `repo-scope` and the query flags.
+8. One entry for every environment a service runs in (`set --all-contexts`, or a shared section), and token readiness in `repo-scope current`.
+9. `catalog-info.yaml` and `skaffold.yaml` as name sources (a Gradle build's chart already supplies the deployed name, and `--term` covers the rest); stripping naming prefixes, which is organisation-specific.
+10. A Maven multi-module build as one unit, like a Gradle settings build: the asymmetry is deliberate until field data asks for it.
