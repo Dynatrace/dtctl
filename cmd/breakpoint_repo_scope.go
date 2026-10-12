@@ -28,7 +28,7 @@ import (
 const (
 	createBreakpointRepoScopeUsage = `set the workspace filters from this entry of the repository's .dtctl-repo-scope.yaml
 default: the workload filter of the entry covering the working directory, when the workspace has no filters`
-	createBreakpointNoRepoScopeUsage = "leave the workspace filters to --filters, ignoring the repository's .dtctl-repo-scope.yaml (env: " + noRepoScopeEnv + "=1)"
+	createBreakpointNoRepoScopeUsage = "leave the workspace filters to --filters; the workspace is still named after the repository and its entry (env: " + noRepoScopeEnv + "=1)"
 	updateBreakpointRepoScopeUsage   = "set the workspace filters from this entry of the repository's .dtctl-repo-scope.yaml"
 )
 
@@ -70,12 +70,15 @@ type coveringFilters struct {
 }
 
 // defaultBreakpointFilters is the entry covering the working directory,
-// under resolveRepoScope's off rules.
+// under resolveRepoScope's off rules. A file that does not load is not
+// reported: workspaceName, which every create calls first, has warned.
 func defaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config) (coveringFilters, error) {
 	res, err := resolveRepoScope(cmd, cfg, "")
 	switch {
 	case err != nil || res == nil:
 		return coveringFilters{}, err
+	case res.Scope != nil && res.Scope.Code == repoScopeInvalidFile:
+		return coveringFilters{}, nil
 	case res.Scope != nil:
 		return coveringFilters{skipped: res.Scope.Reason}, nil
 	}

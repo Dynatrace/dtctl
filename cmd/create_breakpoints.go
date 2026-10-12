@@ -123,7 +123,8 @@ Examples:
 
 			verbose := isDebugVerbose(cmdContext(cmd))
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath(cmdContext(cmd)))
+			workspace := workspaceName(cmdContext(cmd), cfg)
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -184,7 +185,7 @@ Examples:
 			if appliedScope != "" {
 				msg += fmt.Sprintf("; workspace filters set from repo scope %s: %s", appliedScope, filterSummary)
 			}
-			return printBreakpointMessageWith(cmdContext(cmd), "create", msg, suggestions)
+			return printBreakpointMessageWith(cmdContext(cmd), "create", inWorkspace(msg, workspace), suggestions)
 		},
 	}
 	c.Flags().String("filters", "", "workspace filters to set before creating the breakpoint (comma-separated key:value pairs)")
@@ -212,7 +213,7 @@ func previewCreateBreakpoint(cmd *cobra.Command, cfg *config.Config, location, s
 		}
 		cfg = loaded
 	}
-	preview.workspace = currentProjectPath(ctx)
+	preview.workspace = workspaceName(ctx, cfg)
 	if filtersChanged || scopeName != "" {
 		return preview.message(), nil
 	}

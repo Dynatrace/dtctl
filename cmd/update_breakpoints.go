@@ -111,11 +111,6 @@ Examples:
 					return err
 				}
 
-				ctx, err := cfg.CurrentContextObj()
-				if err != nil {
-					return err
-				}
-
 				if err := checkSafety(cmdContext(cmd), cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
 					return err
 				}
@@ -135,21 +130,17 @@ Examples:
 					sets = []map[string][]string{parsed}
 				}
 
+				workspace := workspaceName(cmdContext(cmd), cfg)
 				if dryRun(cmdContext(cmd)) {
-					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update Live Debugger workspace filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", origin, filterSetsSummary(sets)))
+					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update workspace %s's filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", workspace, origin, filterSetsSummary(sets)))
 				}
 
-				c, err := newClientFromConfig(cmdContext(cmd), cfg)
+				handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
 				if err != nil {
 					return err
 				}
 
-				handler, err := livedebugger.NewHandler(c, ctx.Environment)
-				if err != nil {
-					return err
-				}
-
-				workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath(cmdContext(cmd)))
+				workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 				if err != nil {
 					if verbose {
 						_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -171,9 +162,9 @@ Examples:
 				}
 
 				if scopeName != "" {
-					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Updated Live Debugger workspace filters%s (%s)", origin, filterSetsSummary(sets)))
+					return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace(fmt.Sprintf("Updated Live Debugger workspace filters%s (%s)", origin, filterSetsSummary(sets)), workspace))
 				}
-				return printBreakpointMessage(cmdContext(cmd), "update", "Updated Live Debugger workspace filters")
+				return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace("Updated Live Debugger workspace filters", workspace))
 			}
 
 			if len(args) == 0 {
@@ -195,31 +186,22 @@ Examples:
 				return err
 			}
 
-			ctx, err := cfg.CurrentContextObj()
-			if err != nil {
-				return err
-			}
-
 			if err := checkSafety(cmdContext(cmd), cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
 				return err
 			}
 
+			workspace := workspaceName(cmdContext(cmd), cfg)
 			if dryRun(cmdContext(cmd)) {
 				changes := describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)
-				return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes))
+				return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace(fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes), workspace))
 			}
 
-			c, err := newClientFromConfig(cmdContext(cmd), cfg)
+			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
 			if err != nil {
 				return err
 			}
 
-			handler, err := livedebugger.NewHandler(c, ctx.Environment)
-			if err != nil {
-				return err
-			}
-
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath(cmdContext(cmd)))
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -257,7 +239,7 @@ Examples:
 
 			if conditionChanged || logMessageChanged {
 				if len(targetRules) == 0 {
-					return fmt.Errorf("breakpoint %q not found in the current workspace", identifier)
+					return fmt.Errorf("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				for _, rule := range targetRules {
 					ruleSettings, err := buildEditBreakpointSettings(rule, condition, conditionChanged, logMessage, logMessageChanged)
@@ -290,7 +272,7 @@ Examples:
 					ruleIDs = append(ruleIDs, identifier)
 				}
 				if len(ruleIDs) == 0 {
-					return fmt.Errorf("breakpoint %q not found in the current workspace", identifier)
+					return fmt.Errorf("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				enableResp, err := handler.EnableOrDisableBreakpoints(workspaceID, ruleIDs, !enabled)
 				if err != nil {
@@ -306,7 +288,7 @@ Examples:
 				}
 			}
 
-			return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Updated breakpoint %s (%s)", targetDescription, describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)))
+			return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace(fmt.Sprintf("Updated breakpoint %s (%s)", targetDescription, describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)), workspace))
 		},
 	}
 	c.Flags().String("condition", "", `Condition expression (e.g. "a==1 && b!='bbb'", "'val' in arr", "x>0 && y<=10")`)

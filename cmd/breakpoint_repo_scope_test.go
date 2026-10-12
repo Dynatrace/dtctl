@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -179,6 +180,20 @@ func (s *liveDebuggerStub) sentFilterSets(t *testing.T) string {
 	}
 	t.Fatal("no workspace update was sent")
 	return ""
+}
+
+// projectPaths lists the workspaces the stub was asked for, in order.
+func (s *liveDebuggerStub) projectPaths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var paths []string
+	for _, c := range s.calls {
+		if input, ok := c.variables["workspaceInput"].(map[string]interface{}); ok && c.op == "GetOrCreateWorkspaceV2" {
+			path, _ := input["projectPath"].(string)
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func (s *liveDebuggerStub) reset() {
@@ -464,22 +479,25 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newLiveDebuggerStub(t, "readonly", tc.filters...)
-			chdirTestRepo(t, breakpointScope)
+			repo := filepath.Base(chdirTestRepo(t, breakpointScope))
+			entry := "checkout"
 			if tc.dir != "" {
 				chdirSubdir(t, tc.dir)
+				entry = filepath.Base(tc.dir)
 			}
 			code, stdout, stderr := runRepoScoped(append([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, tc.args...), RunOptions{})
 			require.Zero(t, code, stderr)
-			require.Equal(t, fmt.Sprintf(tc.want, currentProjectPath(context.Background())), breakpointMessage(t, stdout))
+			require.Equal(t, fmt.Sprintf(tc.want, repo+"/"+entry), breakpointMessage(t, stdout))
 			require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops(), "the preview reads the workspace and writes nothing")
 		})
 	}
 
 	srv := newLiveDebuggerStub(t, "readonly")
-	chdirTestRepo(t, breakpointScope)
+	repo := filepath.Base(chdirTestRepo(t, breakpointScope))
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run", "--repo-scope", "ledger"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, fmt.Sprintf("Dry run: would set workspace %s's filters from repo scope ledger (service.name:ledger) and create breakpoint at A.java:1", currentProjectPath(context.Background())))
+	require.Contains(t, stdout, "Dry run: would set workspace "+repo+"/checkout's filters from repo scope ledger (service.name:ledger) and create breakpoint at A.java:1",
+		"the workspace is the covering entry's, whichever entry sets its filters")
 	require.Empty(t, srv.ops())
 
 	code, stdout, _ = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
@@ -515,6 +533,39 @@ func breakpointMessage(t *testing.T, stdout string) string {
 	var out breakpointCommandOutput
 	require.NoError(t, json.Unmarshal([]byte(stdout), &out), "stdout: %s", stdout)
 	return out.Message
+}
+
+// Naming is not scoping: opted out of the repo scope or not, every breakpoint
+// command uses the workspace named after the repository and the entry
+// covering the working directory, and says which.
+func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
+	srv := newLiveDebuggerStub(t, "readwrite-all", ledgerFilterSet)
+	root := chdirTestRepo(t, breakpointScope)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"),
+		[]byte("[remote \"origin\"]\n\turl = git@example.invalid:shop/storefront.git\n"), 0o644))
+	chdirSubdir(t, filepath.Join("services", "ledger", "src"))
+
+	for _, tc := range []struct {
+		name   string
+		argv   []string
+		stdout string
+		stderr string
+	}{
+		{"create", []string{"create", "breakpoint", "A.java:1", "--plain"}, "(workspace storefront/ledger)", ""},
+		{"create --no-repo-scope", []string{"create", "breakpoint", "A.java:1", "--plain", "--no-repo-scope"}, "(workspace storefront/ledger)", ""},
+		{"update", []string{"update", "breakpoint", "--plain", "--filters", "service.name:ledger", "--yes"}, "(workspace storefront/ledger)", ""},
+		{"get", []string{"get", "breakpoints", "--no-agent"}, "", "workspace: storefront/ledger\n"},
+		{"get --plain", []string{"get", "breakpoints", "--no-agent", "--plain"}, "", "workspace: storefront/ledger\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv.reset()
+			code, stdout, stderr := runRepoScoped(tc.argv, RunOptions{})
+			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+			require.Equal(t, []string{"storefront/ledger"}, srv.projectPaths())
+			require.Contains(t, stdout, tc.stdout)
+			require.Equal(t, tc.stderr, stderr)
+		})
+	}
 }
 
 // update applies a scope only when one is named, so it has no opt-out.

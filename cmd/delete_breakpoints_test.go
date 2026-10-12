@@ -179,12 +179,12 @@ func TestRunDeleteAllBreakpoints_NoRows(t *testing.T) {
 	gFlags.plainMode = true
 
 	output := captureStdout(t, func() {
-		if err := runDeleteAllBreakpoints(context.Background(), nil, "workspace-1", nil, true, false); err != nil {
+		if err := runDeleteAllBreakpoints(context.Background(), nil, "workspace-1", "checkout/checkout", nil, true, false); err != nil {
 			t.Fatalf("runDeleteAllBreakpoints returned error: %v", err)
 		}
 	})
 
-	if !strings.Contains(output, "No breakpoints found in the current workspace") {
+	if !strings.Contains(output, "No breakpoints found in workspace checkout/checkout") {
 		t.Fatalf("unexpected output: %q", output)
 	}
 }
@@ -212,7 +212,7 @@ func TestRunDeleteBreakpointRows_DryRun(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		if err := runDeleteBreakpointRows(context.Background(), nil, "workspace-1", rows, true, false); err != nil {
+		if err := runDeleteBreakpointRows(context.Background(), nil, "workspace-1", "checkout/checkout", rows, true, false); err != nil {
 			t.Fatalf("runDeleteBreakpointRows returned error: %v", err)
 		}
 	})
@@ -257,7 +257,7 @@ func TestRunDeleteAllBreakpoints_Success(t *testing.T) {
 
 	rows := []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}
 	output := captureStdout(t, func() {
-		if err := runDeleteAllBreakpointsWithOps(context.Background(), nil, "workspace-1", rows, true, false, ops); err != nil {
+		if err := runDeleteAllBreakpointsWithOps(context.Background(), nil, "workspace-1", "checkout/checkout", rows, true, false, ops); err != nil {
 			t.Fatalf("runDeleteAllBreakpoints returned error: %v", err)
 		}
 	})
@@ -281,7 +281,7 @@ func TestRunDeleteAllBreakpoints_MalformedResponse(t *testing.T) {
 	}
 
 	rows := []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}
-	err := runDeleteAllBreakpointsWithOps(context.Background(), nil, "workspace-1", rows, true, false, ops)
+	err := runDeleteAllBreakpointsWithOps(context.Background(), nil, "workspace-1", "checkout/checkout", rows, true, false, ops)
 	if err == nil {
 		t.Fatalf("expected error for malformed deleteAll response")
 	}
@@ -291,7 +291,7 @@ func TestRunDeleteAllBreakpoints_MalformedResponse(t *testing.T) {
 }
 
 func TestRunDeleteBreakpointRows_Empty(t *testing.T) {
-	if err := runDeleteBreakpointRows(context.Background(), nil, "workspace-1", nil, true, false); err != nil {
+	if err := runDeleteBreakpointRows(context.Background(), nil, "workspace-1", "checkout/checkout", nil, true, false); err != nil {
 		t.Fatalf("expected nil error for empty rows, got: %v", err)
 	}
 }
@@ -327,7 +327,7 @@ func TestRunDeleteBreakpointRows_PartialFailure(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		err := runDeleteBreakpointRowsWithOps(context.Background(), nil, "workspace-1", rows, true, false, ops)
+		err := runDeleteBreakpointRowsWithOps(context.Background(), nil, "workspace-1", "checkout/checkout", rows, true, false, ops)
 		if err == nil {
 			t.Fatalf("expected partial failure error")
 		}
@@ -336,7 +336,7 @@ func TestRunDeleteBreakpointRows_PartialFailure(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(output, "Deleted breakpoint bp-1 (OrderController.java:306)") {
+	if !strings.Contains(output, "Deleted breakpoint bp-1 (OrderController.java:306) (workspace checkout/checkout)") {
 		t.Fatalf("missing success output: %q", output)
 	}
 	if !strings.Contains(output, "Failed to delete 1 breakpoint(s) after deleting 1 successfully") {
@@ -367,7 +367,7 @@ func TestRunDeleteBreakpointRows_CancelledConfirmation(t *testing.T) {
 	os.Stdin = r
 
 	output := captureStdout(t, func() {
-		if err := runDeleteBreakpointRows(context.Background(), nil, "workspace-1", []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}, false, false); err != nil {
+		if err := runDeleteBreakpointRows(context.Background(), nil, "workspace-1", "checkout/checkout", []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}, false, false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -392,7 +392,7 @@ func TestRunDeleteBreakpointRows_VerbosePrintError(t *testing.T) {
 		},
 	}
 
-	err := runDeleteBreakpointRowsWithOps(context.Background(), nil, "workspace-1", []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}, true, true, ops)
+	err := runDeleteBreakpointRowsWithOps(context.Background(), nil, "workspace-1", "checkout/checkout", []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}, true, true, ops)
 	if err == nil {
 		t.Fatalf("expected printGraphQLResponse marshal error")
 	}
@@ -414,7 +414,7 @@ func TestRunDeleteAllBreakpoints_VerbosePrintError(t *testing.T) {
 		},
 	}
 
-	err := runDeleteAllBreakpointsWithOps(context.Background(), nil, "workspace-1", []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}, true, true, ops)
+	err := runDeleteAllBreakpointsWithOps(context.Background(), nil, "workspace-1", "checkout/checkout", []breakpointRow{{ID: "bp-1", Filename: "A.java", Line: 10}}, true, true, ops)
 	if err == nil {
 		t.Fatalf("expected printGraphQLResponse marshal error")
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
 	"github.com/dynatrace-oss/dtctl/pkg/prompt"
+	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
@@ -108,7 +109,8 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath(cmdContext(cmd)))
+	workspace := workspaceName(cmdContext(cmd), cfg)
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -137,6 +139,7 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 	if err != nil {
 		return err
 	}
+	printWorkspaceName(cmdContext(cmd), workspace)
 
 	// This printer writes to rootCmd's writer rather than going through
 	// NewPrinter, so it opts into the get-wide --limit/--fields itself.
@@ -218,13 +221,41 @@ func breakpointRowFromRule(rule livedebugger.BreakpointRule) (breakpointRow, boo
 	return breakpointRow{ID: id, Filename: filename, Line: line, Active: !isDisabled, LogMessage: logMessage}, true
 }
 
-// currentProjectPath names the Live Debugger workspace of this invocation: the
-// base name of its working directory, or "no-project" when it has none (an
-// embedded invocation, see currentWorkDir) or that directory is the root.
-func currentProjectPath(ctx context.Context) string {
+// workspaceName names the Live Debugger workspace of this invocation. In a
+// checkout with a scope file it is named after the repository: the origin
+// remote's repository name, or the checkout directory's base name when
+// .git/config cannot be read (a worktree). Where an entry covers the working
+// directory it is <repo>/<entry>, so every directory an entry covers shares
+// one workspace, under the same name on every machine, and two entries never
+// share one; any other directory of that checkout, one that two entries tie
+// on included, is <repo>. Without a scope file, and outside a checkout, it is
+// the base name of the working directory, the name breakpoint commands have
+// always used, or "no-project" when there is none (an embedded invocation,
+// see currentWorkDir) or that directory is the root.
+//
+// Naming is not scoping: --no-repo-scope, DTCTL_NO_REPO_SCOPE and the
+// stability floor leave the name alone, so every breakpoint command, whether
+// or not it has the repo scope flags, finds the same workspace. A scope file
+// that does not load names no entry, and is warned about here.
+func workspaceName(ctx context.Context, cfg *config.Config) string {
 	cwd, err := currentWorkDir(ctx)
 	if err != nil {
 		return "no-project"
+	}
+	scope, err := openRepoScope(ctx, cfg)
+	if scope != nil && (err != nil || scope.loc.Exists) {
+		repo := reposcope.RepositoryName(reposcope.RepoFS(scope.loc))
+		if repo == "" {
+			repo = filepath.Base(scope.loc.Root)
+		}
+		if err != nil {
+			output.FprintWarning(currentStderr(ctx), "%v; the Live Debugger workspace is named after the repository", err)
+			return repo
+		}
+		if status, err := scope.resolve(""); err == nil && status.Entry != nil {
+			return repo + "/" + status.Entry.Name
+		}
+		return repo
 	}
 	project := filepath.Base(cwd)
 	if project == "" || project == "." || project == string(filepath.Separator) {
