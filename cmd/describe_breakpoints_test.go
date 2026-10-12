@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -203,6 +204,7 @@ func TestPrintBreakpointStatusResult(t *testing.T) {
 	result := breakpointStatusResult{
 		ID:          "bp-1",
 		Location:    "OrderController.java:306",
+		Workspace:   "storefront/ledger",
 		Enabled:     true,
 		Status:      "Warning",
 		ActiveRooks: []breakpointRookInfo{{ID: "rook-1", Hostname: "host-a", Executable: "java"}},
@@ -223,6 +225,7 @@ func TestPrintBreakpointStatusResult(t *testing.T) {
 		"bp-1",
 		"Location:",
 		"OrderController.java:306",
+		"Workspace:      storefront/ledger",
 		"Status:",
 		"Warning",
 		"Active rooks:",
@@ -337,7 +340,9 @@ func TestRunDescribeBreakpoint_StructuredSuccess(t *testing.T) {
 	}
 	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
+	var workspace string
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
+		workspace = projectPath
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
 	}
 	deps.getWorkspaceRules = func(handler *livedebugger.Handler, workspaceID string) (map[string]interface{}, error) {
@@ -377,6 +382,10 @@ func TestRunDescribeBreakpoint_StructuredSuccess(t *testing.T) {
 
 	if !strings.Contains(output, "\"id\": \"bp-1\"") {
 		t.Fatalf("unexpected structured output: %q", output)
+	}
+	// The result names the workspace the breakpoint was read from.
+	if want := fmt.Sprintf("\"workspace\": %q", workspace); workspace == "" || !strings.Contains(output, want) {
+		t.Fatalf("structured output does not carry %s: %q", want, output)
 	}
 }
 

@@ -283,7 +283,7 @@ func TestGetBreakpoints_HonorsLimitAndFields(t *testing.T) {
 
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
-	require.NoError(t, runGetBreakpointsWithDeps(nil, nil, deps))
+	require.NoError(t, runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps))
 	// Rows come out sorted by file and line, so bp-2 (line 42) is first.
 	require.Equal(t, "lineNumber,id\n42,bp-2\n", out.String())
 }

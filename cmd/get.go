@@ -21,6 +21,7 @@ func newGetBreakpointsCmd() *cobra.Command {
 		Short: "List all breakpoints in the current workspace",
 		RunE:  runGetBreakpoints,
 	}
+	addRepoScopeFlags(c, breakpointWorkspaceRepoScopeUsage, "")
 	markLiveDebuggerExperimental(c)
 	return c
 }

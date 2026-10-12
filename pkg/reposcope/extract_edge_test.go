@@ -115,6 +115,17 @@ func TestExtractRemoteWithoutUsableOrigin(t *testing.T) {
 	}
 }
 
+// RepositoryName names the repository even when discovery would hold the
+// name back.
+func TestRepositoryName(t *testing.T) {
+	for config, want := range map[string]string{
+		"[remote \"origin\"]\nurl = git@example.invalid:shop/checkout.git\n": "checkout",
+		"[remote \"origin\"]\nurl = https://example.invalid/api.git\n":       "api",
+	} {
+		require.Equal(t, want, RepositoryName(fstest.MapFS{".git/config": {Data: []byte(config)}}), config)
+	}
+}
+
 func TestExtractTemplateNamesAreNotSent(t *testing.T) {
 	for _, name := range []string{"${SERVICE_NAME}", "{{ .Values.name }}"} {
 		p, err := PlanDiscovery(fstest.MapFS{"package.json": {Data: []byte(`{"name":"` + name + `"}`)}}, ".", nil)

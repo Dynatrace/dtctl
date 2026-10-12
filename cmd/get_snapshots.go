@@ -70,7 +70,11 @@ Use -o json / -o yaml for structured output.`,
 				return err
 			}
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath(cmdContext(cmd)))
+			workspace, err := workspaceName(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if isDebugVerbose(cmdContext(cmd)) {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -107,6 +111,7 @@ Use -o json / -o yaml for structured output.`,
 				dqlQuery += fmt.Sprintf(" | limit %d", limit)
 			}
 
+			printWorkspaceName(cmdContext(cmd), workspace)
 			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: Snapshots from the latest version of the breakpoint will be shown")
 
 			decodeVal, _ := cmd.Flags().GetString("decode-snapshots")
@@ -165,6 +170,7 @@ bare --decode-snapshots simplifies variant wrappers to plain values;
 	c.Flags().StringP("metadata", "M", "", `include query metadata in output (use = for field selection)
 bare --metadata or -M shows all fields; --metadata=field1,field2 selects specific fields`)
 	c.Flags().Lookup("metadata").NoOptDefVal = "all"
+	addRepoScopeFlags(c, breakpointWorkspaceRepoScopeUsage, "")
 	markLiveDebuggerExperimental(c)
 	return c
 }

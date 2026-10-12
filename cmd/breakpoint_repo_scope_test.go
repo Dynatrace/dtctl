@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -72,7 +73,9 @@ type liveDebuggerStub struct {
 	calls []graphQLCall
 	// filterSets are the workspace's filters, in the response's shape.
 	filterSets []interface{}
-	// activeRules is how many enabled breakpoints the workspace holds.
+	// rules are breakpoints the workspace holds, in the response's shape.
+	rules []interface{}
+	// activeRules is how many more enabled breakpoints it holds.
 	activeRules int
 }
 
@@ -83,6 +86,7 @@ var liveDebuggerOperations = []string{
 	"mutation UpdateWorkspaceV2(",
 	"mutation CreateRule(",
 	"query GetWorkspaceRules(",
+	"mutation EnableOrDisableRules(",
 }
 
 // newLiveDebuggerStub starts the stub and points an isolated config's only
@@ -124,11 +128,13 @@ func newLiveDebuggerStub(t *testing.T, safetyLevel string, filterSets ...map[str
 				"createRuleV2": map[string]interface{}{"id": "dtctl-rule-0001"},
 			}}}
 		case "GetWorkspaceRules":
-			rules := []interface{}{}
+			rules := append([]interface{}{}, s.rules...)
 			for i := 0; i < s.activeRules; i++ {
 				rules = append(rules, map[string]interface{}{"id": fmt.Sprintf("bp-%d", i), "is_disabled": false})
 			}
 			body = map[string]interface{}{"org": map[string]interface{}{"workspace": map[string]interface{}{"rules": rules}}}
+		case "EnableOrDisableRules":
+			body = map[string]interface{}{"org": map[string]interface{}{"workspace": map[string]interface{}{"enableOrDisableRules": []interface{}{}}}}
 		default:
 			t.Errorf("unexpected GraphQL request: %.80s", req.Query)
 			w.WriteHeader(http.StatusBadRequest)
@@ -142,6 +148,15 @@ func newLiveDebuggerStub(t *testing.T, safetyLevel string, filterSets ...map[str
 	optInRepoScope(t)
 	t.Cleanup(func() { restorePristineTree(context.Background()) })
 	return s
+}
+
+// ruleAt is a breakpoint at filename:line as GetWorkspaceRules returns it,
+// disabled for disableReason when that is set.
+func ruleAt(filename string, line int, disableReason string) map[string]interface{} {
+	return map[string]interface{}{
+		"id": "dtctl-rule-0001", "immutableId": "abc12345", "is_disabled": disableReason != "", "disable_reason": disableReason,
+		"aug_json": map[string]interface{}{"location": map[string]interface{}{"filename": filename, "lineno": line}},
+	}
 }
 
 // workspaceFilterSetsJSON is sets as getOrCreateUserWorkspaceV2 returns them.
@@ -179,6 +194,20 @@ func (s *liveDebuggerStub) sentFilterSets(t *testing.T) string {
 	}
 	t.Fatal("no workspace update was sent")
 	return ""
+}
+
+// projectPaths lists the workspaces the stub was asked for, in order.
+func (s *liveDebuggerStub) projectPaths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var paths []string
+	for _, c := range s.calls {
+		if input, ok := c.variables["workspaceInput"].(map[string]interface{}); ok && c.op == "GetOrCreateWorkspaceV2" {
+			path, _ := input["projectPath"].(string)
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func (s *liveDebuggerStub) reset() {
@@ -406,8 +435,8 @@ func TestBreakpoint_NamedRepoScope(t *testing.T) {
 		{"with --filters on update", []string{"update", "breakpoint", "--repo-scope", "ledger", "--filters", "k:v"}, "", "[filters repo-scope] were all set"},
 		{"with --condition on update", []string{"update", "breakpoint", "--repo-scope", "ledger", "--condition", "a==1"}, "",
 			"--repo-scope sets the workspace's filters, shared by every breakpoint in it; change --condition, --log-message, or --enabled in a separate call"},
-		{"with an identifier on update", []string{"update", "breakpoint", "A.java:1", "--repo-scope", "ledger"}, "",
-			"--repo-scope sets the workspace's filters, shared by every breakpoint in it; run it without the breakpoint identifier"},
+		{"with an identifier and --filters on update", []string{"update", "breakpoint", "A.java:1", "--filters", "k:v"}, "",
+			"--filters sets the workspace's filters, shared by every breakpoint in it; run it without the breakpoint identifier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv.reset()
@@ -479,22 +508,25 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newLiveDebuggerStub(t, "readonly", tc.filters...)
-			chdirTestRepo(t, breakpointScope)
+			repo := filepath.Base(chdirTestRepo(t, breakpointScope))
+			entry := "checkout"
 			if tc.dir != "" {
 				chdirSubdir(t, tc.dir)
+				entry = filepath.Base(tc.dir)
 			}
 			code, stdout, stderr := runRepoScoped(append([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, tc.args...), RunOptions{})
 			require.Zero(t, code, stderr)
-			require.Equal(t, fmt.Sprintf(tc.want, currentProjectPath(context.Background())), breakpointMessage(t, stdout))
+			require.Equal(t, fmt.Sprintf(tc.want, repo+"/"+entry), breakpointMessage(t, stdout))
 			require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops(), "the preview reads the workspace and writes nothing")
 		})
 	}
 
 	srv := newLiveDebuggerStub(t, "readonly")
-	chdirTestRepo(t, breakpointScope)
+	repo := filepath.Base(chdirTestRepo(t, breakpointScope))
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run", "--repo-scope", "ledger"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, fmt.Sprintf("Dry run: would set workspace %s's filters from repo scope ledger (service.name:ledger) and create breakpoint at A.java:1", currentProjectPath(context.Background())))
+	require.Contains(t, stdout, "Dry run: would set workspace "+repo+"/ledger's filters from repo scope ledger (service.name:ledger) and create breakpoint at A.java:1",
+		"a named entry names the workspace, whichever entry covers the working directory")
 	require.Empty(t, srv.ops())
 
 	code, stdout, _ = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
@@ -532,6 +564,69 @@ func breakpointMessage(t *testing.T, stdout string) string {
 	return out.Message
 }
 
+// Naming is not scoping: opted out of the repo scope or not, every breakpoint
+// command uses the workspace named after the repository and the entry
+// covering the working directory, and says which.
+func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
+	srv := newLiveDebuggerStub(t, "readwrite-all", ledgerFilterSet)
+	root := chdirTestRepo(t, breakpointScope)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"),
+		[]byte("[remote \"origin\"]\n\turl = git@example.invalid:shop/storefront.git\n"), 0o644))
+	chdirSubdir(t, filepath.Join("services", "ledger", "src"))
+
+	for _, tc := range []struct {
+		name   string
+		argv   []string
+		stdout string
+		stderr string
+	}{
+		{"create", []string{"create", "breakpoint", "A.java:1", "--plain"}, "(workspace storefront/ledger)", ""},
+		{"create --no-repo-scope", []string{"create", "breakpoint", "A.java:1", "--plain", "--no-repo-scope"}, "(workspace storefront/ledger)", ""},
+		{"update", []string{"update", "breakpoint", "--plain", "--filters", "service.name:ledger", "--yes"}, "(workspace storefront/ledger)", ""},
+		{"get", []string{"get", "breakpoints", "--no-agent"}, "", "workspace: storefront/ledger\n"},
+		{"get --plain", []string{"get", "breakpoints", "--no-agent", "--plain"}, "", "workspace: storefront/ledger\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv.reset()
+			code, stdout, stderr := runRepoScoped(tc.argv, RunOptions{})
+			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+			require.Equal(t, []string{"storefront/ledger"}, srv.projectPaths())
+			require.Contains(t, stdout, tc.stdout)
+			require.Equal(t, tc.stderr, stderr)
+		})
+	}
+}
+
+// --repo-scope names the workspace wherever the command runs, so a read
+// command, or an update of one breakpoint, finds what a create with the same
+// name put there; a name that does not resolve fails before any request.
+func TestBreakpoint_WorkspaceNamedByRepoScope(t *testing.T) {
+	srv := newLiveDebuggerStub(t, "readwrite-all")
+	srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+	root := chdirTestRepo(t, breakpointScope)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"),
+		[]byte("[remote \"origin\"]\n\turl = git@example.invalid:shop/storefront.git\n"), 0o644))
+	chdirSubdir(t, filepath.Join("services", "ledger", "src"))
+
+	for _, argv := range [][]string{
+		{"create", "breakpoint", "A.java:1", "--plain", "--yes", "--repo-scope", "regions"},
+		{"get", "breakpoints", "--plain", "--repo-scope", "regions"},
+		{"update", "breakpoint", "A.java:1", "--enabled=false", "--plain", "--repo-scope", "regions"},
+	} {
+		srv.reset()
+		code, stdout, stderr := runRepoScoped(argv, RunOptions{})
+		require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+		require.Equal(t, []string{"storefront/regions"}, srv.projectPaths(), argv)
+	}
+	require.NotContains(t, srv.ops(), "UpdateWorkspaceV2", "with an identifier, update leaves the workspace's filters alone")
+
+	srv.reset()
+	code, stdout, _ := runRepoScoped([]string{"get", "breakpoints", "--repo-scope", "nope", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, "not_found", agentError(t, stdout).Code)
+	require.Empty(t, srv.ops())
+}
+
 // update applies a scope only when one is named, so it has no opt-out.
 func TestUpdateBreakpoint_HasNoRepoScopeOptOut(t *testing.T) {
 	newLiveDebuggerStub(t, "readwrite-all")
@@ -547,14 +642,14 @@ func TestBreakpointRepoScopeFlagsAreExperimental(t *testing.T) {
 		cmd  string
 		flag string
 	}{
-		{"create", repoScopeFlag},
-		{"create", noRepoScopeFlag},
-		{"update", repoScopeFlag},
+		{"create breakpoint", repoScopeFlag},
+		{"create breakpoint", noRepoScopeFlag},
+		{"update breakpoint", repoScopeFlag},
 	} {
-		c, _, err := rootCmd.Find([]string{tc.cmd, "breakpoint"})
+		c, _, err := rootCmd.Find(strings.Fields(tc.cmd))
 		require.NoError(t, err)
-		require.NotNil(t, c.Flags().Lookup(tc.flag), "%s breakpoint --%s", tc.cmd, tc.flag)
-		require.Equal(t, stability.Experimental, stability.OfFlag(c, tc.flag), "%s breakpoint --%s", tc.cmd, tc.flag)
+		require.NotNil(t, c.Flags().Lookup(tc.flag), "%s --%s", tc.cmd, tc.flag)
+		require.Equal(t, stability.Experimental, stability.OfFlag(c, tc.flag), "%s --%s", tc.cmd, tc.flag)
 	}
 }
 

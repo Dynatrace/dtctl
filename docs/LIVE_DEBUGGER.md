@@ -21,7 +21,7 @@ The current Live Debugger flow in `dtctl` supports:
 - deleting breakpoints with `dtctl delete breakpoint ...`
 - fetching snapshots for a breakpoint with `dtctl get snapshots <breakpoint> --decode-snapshots`
 
-`dtctl` resolves or creates a Live Debugger workspace for the current project path, so commands operate on the workspace associated with the directory you run them from.
+`dtctl` resolves or creates a Live Debugger workspace for the current project path, so commands operate on the workspace associated with the directory you run them from, and say which (in a linked repository it is `<repo>/<entry>` or `<repo>`; see [Filters from the repo scope](#filters-from-the-repo-scope)).
 
 ## Prerequisites
 
@@ -119,15 +119,27 @@ honour `dt.entity.service`. Only a one-set entry can be pasted into
 - **A named entry.** `--repo-scope <name>` on `create breakpoint` and
   `update breakpoint` sets the workspace filters from that entry, every set,
   like `--filters` does (and with the same confirmation). It cannot be combined
-  with `--filters`.
+  with `--filters`. To return a workspace to its repo scope's filters:
+  `dtctl update breakpoint --repo-scope <name>`.
 - **Opting out.** `--no-repo-scope` on `create breakpoint`, or
   `DTCTL_NO_REPO_SCOPE=1`, turns the default off; it can be combined with
   `--filters`. `update breakpoint` applies a scope only when one is named, so
   it has no `--no-repo-scope`.
 
-The workspace is named after the working directory's base name, while the
-entry is the one whose path covers the working directory, so from
-`services/checkout/src` the workspace is `src` and the entry `checkout`'s.
+In a checkout with a scope file the workspace is named after the origin
+remote's repository name (the checkout directory's when `.git/config` cannot
+be read, so each such worktree gets its own): `<repo>/<entry>` where an entry
+covers the working directory, and `<repo>` in every other directory of the
+checkout, including one two entries tie on. Without a scope file, and outside
+a checkout, it is named after the working directory's base name.
+`--repo-scope <name>` uses `<repo>/<name>` wherever it runs, on every
+breakpoint command: `get breakpoints`, `describe breakpoint`,
+`delete breakpoint`, `get snapshots` and `update breakpoint <id>` take it only
+to name the workspace.
+Neither `--no-repo-scope` nor `DTCTL_NO_REPO_SCOPE` changes the name. Saving an
+entry moves the directories it covers from `<repo>` to `<repo>/<entry>`: to
+clean up the old workspace, run `dtctl delete breakpoint --all` there before
+saving, or afterwards from a directory of the checkout no entry covers.
 
 ```bash
 dtctl create breakpoint OrderController.java:306                        # default from the covering entry
@@ -222,6 +234,7 @@ dtctl describe breakpoint OrderController.java:306
 The command uses `GetRuleStatusBreakdown` and summarizes:
 
 - enabled/disabled state
+- the workspace it was read from (`workspace` in structured output)
 - log message (see [Log messages](#log-messages))
 - overall status
 - active and pending rooks

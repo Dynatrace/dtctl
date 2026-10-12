@@ -11,8 +11,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
+
 	"github.com/dynatrace-oss/dtctl/pkg/client"
 	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 )
 
@@ -528,21 +532,82 @@ func TestPrintGraphQLResponse_NilPayload(t *testing.T) {
 	}
 }
 
-func TestCurrentProjectPath(t *testing.T) {
-	originalCwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get cwd: %v", err)
+func TestWorkspaceName(t *testing.T) {
+	writeIsolatedConfig(t, safetyLevelConfig("http://127.0.0.1:1", "readonly"))
+	optInRepoScope(t)
+	cfg, err := loadConfig(context.Background())
+	require.NoError(t, err)
+	name := func(t *testing.T) (string, string) {
+		t.Helper()
+		var stderr bytes.Buffer
+		c := &cobra.Command{}
+		c.SetContext(withInvocation(context.Background(), &invocation{caps: Capabilities{HostWorkingDirectory: true}, stderr: &stderr}))
+		got, err := workspaceName(c, cfg)
+		require.NoError(t, err)
+		return got, stderr.String()
 	}
-	defer func() { _ = os.Chdir(originalCwd) }()
+	const origin = "[remote \"origin\"]\n\turl = https://example.invalid/shop/storefront.git\n"
 
-	tmp := t.TempDir()
-	if err := os.Chdir(tmp); err != nil {
-		t.Fatalf("failed to chdir: %v", err)
-	}
-
-	if got := currentProjectPath(context.Background()); got == "" || got == "no-project" {
-		t.Fatalf("expected project name from cwd, got %q", got)
-	}
+	t.Run("outside a checkout", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		got, _ := name(t)
+		require.Equal(t, filepath.Base(cwd), got)
+	})
+	t.Run("no scope file", func(t *testing.T) {
+		chdirTestRepo(t, "")
+		chdirSubdir(t, "src")
+		got, _ := name(t)
+		require.Equal(t, "src", got, "an unlinked checkout keeps the base name")
+	})
+	t.Run("a covering entry", func(t *testing.T) {
+		root := chdirTestRepo(t, breakpointScope)
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, filepath.Join("services", "ledger", "src"))
+		got, stderr := name(t)
+		require.Equal(t, "storefront/ledger", got)
+		require.Empty(t, stderr)
+	})
+	t.Run("a directory no entry covers", func(t *testing.T) {
+		root := chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: ledger\n      path: services/ledger\n      service-names: [ledger]\n")
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, filepath.Join("docs", "src"))
+		got, _ := name(t)
+		require.Equal(t, "storefront", got)
+	})
+	t.Run("a directory two entries tie on", func(t *testing.T) {
+		gradle := gradleMultiRepo(t)
+		root := chdirTestRepo(t, `environments:
+  127.0.0.1:
+    - name: webproxy
+      path: webproxy
+      service-names: [webproxy]
+    - name: admin
+      path: admin
+      service-names: [admin]
+`)
+		require.NoError(t, os.CopyFS(root, os.DirFS(gradle)))
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, filepath.Join("webproxy-core", "src"))
+		got, _ := name(t)
+		require.Equal(t, "storefront", got, "a tie names no entry, and no directory's base name either")
+	})
+	t.Run("a worktree", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: ../storefront/.git/worktrees/wt\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, reposcope.FileName), []byte(breakpointScope), 0o644))
+		t.Chdir(root)
+		got, _ := name(t)
+		require.Equal(t, filepath.Base(root)+"/checkout", got, "without a readable .git/config the checkout directory names the repository")
+	})
+	t.Run("an invalid scope file", func(t *testing.T) {
+		root := chdirTestRepo(t, "environments: [\n")
+		chdirSubdir(t, "src")
+		got, stderr := name(t)
+		require.Equal(t, filepath.Base(root), got)
+		require.Contains(t, stderr, "the Live Debugger workspace is named after the repository")
+	})
 
 	// An embedded invocation has no working directory of its own, so it never
 	// names its workspace after the server's.
@@ -550,9 +615,11 @@ func TestCurrentProjectPath(t *testing.T) {
 		"without HostWorkingDirectory": {concurrent: true},
 		"serving a session":            {concurrent: true, caps: Capabilities{HostWorkingDirectory: true}, session: &Session{}},
 	} {
-		if got := currentProjectPath(withInvocation(context.Background(), inv)); got != "no-project" {
-			t.Errorf("%s: currentProjectPath = %q, want no-project", name, got)
-		}
+		c := &cobra.Command{}
+		c.SetContext(withInvocation(context.Background(), inv))
+		got, err := workspaceName(c, cfg)
+		require.NoError(t, err)
+		require.Equal(t, "no-project", got, name)
 	}
 }
 
@@ -648,7 +715,7 @@ func TestRunGetBreakpoints_TableView(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
 
-	if err := runGetBreakpointsWithDeps(nil, nil, deps); err != nil {
+	if err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps); err != nil {
 		t.Fatalf("runGetBreakpoints returned error: %v", err)
 	}
 
@@ -712,7 +779,7 @@ func TestRunGetBreakpoints_StructuredView(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
 
-	if err := runGetBreakpointsWithDeps(nil, nil, deps); err != nil {
+	if err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps); err != nil {
 		t.Fatalf("runGetBreakpoints returned error: %v", err)
 	}
 
@@ -780,7 +847,7 @@ func TestRunGetBreakpoints_AgentEnvelope(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
 
-	if err := runGetBreakpointsWithDeps(nil, nil, deps); err != nil {
+	if err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps); err != nil {
 		t.Fatalf("runGetBreakpoints returned error: %v", err)
 	}
 
@@ -808,7 +875,7 @@ func TestRunGetBreakpoints_GetWorkspaceRulesError(t *testing.T) {
 		return nil, os.ErrPermission
 	}
 
-	err := runGetBreakpointsWithDeps(nil, nil, deps)
+	err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps)
 	if err == nil {
 		t.Fatalf("expected get workspace rules error")
 	}

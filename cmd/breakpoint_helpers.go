@@ -16,6 +16,7 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
 	"github.com/dynatrace-oss/dtctl/pkg/prompt"
+	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
@@ -108,7 +109,11 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath(cmdContext(cmd)))
+	workspace, err := workspaceName(cmd, cfg)
+	if err != nil {
+		return err
+	}
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -137,6 +142,7 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 	if err != nil {
 		return err
 	}
+	printWorkspaceName(cmdContext(cmd), workspace)
 
 	// This printer writes to rootCmd's writer rather than going through
 	// NewPrinter, so it opts into the get-wide --limit/--fields itself.
@@ -218,19 +224,63 @@ func breakpointRowFromRule(rule livedebugger.BreakpointRule) (breakpointRow, boo
 	return breakpointRow{ID: id, Filename: filename, Line: line, Active: !isDisabled, LogMessage: logMessage}, true
 }
 
-// currentProjectPath names the Live Debugger workspace of this invocation: the
-// base name of its working directory, or "no-project" when it has none (an
-// embedded invocation, see currentWorkDir) or that directory is the root.
-func currentProjectPath(ctx context.Context) string {
-	cwd, err := currentWorkDir(ctx)
-	if err != nil {
-		return "no-project"
+// workspaceName names the Live Debugger workspace of this invocation. In a
+// checkout with a scope file it is named after the repository: the origin
+// remote's repository name, or the checkout directory's base name when
+// .git/config cannot be read (a worktree). With --repo-scope <name> it is
+// <repo>/<name> wherever the command runs. Otherwise, where an entry covers
+// the working directory it is <repo>/<entry>, so every directory an entry
+// covers shares one workspace, under the same name on every machine, and two
+// entries never share one; any other directory of that checkout, including
+// one two entries tie on, is <repo>. Without a scope file, and outside a
+// checkout, it is the base name of the working directory, the name breakpoint
+// commands have always used, or "no-project" when there is none (an embedded
+// invocation, see currentWorkDir) or that directory is the root.
+//
+// Naming is not scoping: --no-repo-scope, DTCTL_NO_REPO_SCOPE and the
+// stability floor leave the name alone, so every breakpoint command finds the
+// same workspace, and the read commands take --repo-scope only to name it. A
+// name that does not resolve is an error, as on create. A scope file that
+// does not load otherwise names no entry, and is warned about here.
+func workspaceName(cmd *cobra.Command, cfg *config.Config) (string, error) {
+	ctx := cmdContext(cmd)
+	name, _ := cmd.Flags().GetString(repoScopeFlag)
+	scope, err := openRepoScope(ctx, cfg)
+	var status *reposcope.Status
+	if name != "" {
+		if err != nil {
+			return "", err
+		}
+		if status, err = scope.resolve(name); err != nil {
+			return "", err
+		}
+	}
+	cwd, cwdErr := currentWorkDir(ctx)
+	if cwdErr != nil {
+		return "no-project", nil
+	}
+	if scope != nil && (err != nil || scope.loc.Exists) {
+		repo := reposcope.RepositoryName(reposcope.RepoFS(scope.loc))
+		if repo == "" {
+			repo = filepath.Base(scope.loc.Root)
+		}
+		if err != nil {
+			output.FprintWarning(currentStderr(ctx), "%v; the Live Debugger workspace is named after the repository", err)
+			return repo, nil
+		}
+		if status == nil {
+			status, err = scope.resolve("")
+		}
+		if err == nil && status.Entry != nil {
+			return repo + "/" + status.Entry.Name, nil
+		}
+		return repo, nil
 	}
 	project := filepath.Base(cwd)
 	if project == "" || project == "." || project == string(filepath.Separator) {
-		return "no-project"
+		return "no-project", nil
 	}
-	return project
+	return project, nil
 }
 
 func parseFilters(input string) (map[string][]string, error) {

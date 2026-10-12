@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 24 experimental, 14 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 963
+- entries below (commands + flags): 967
 
 ## Surface
 
@@ -502,6 +502,7 @@ delete azure monitoring              stable
 delete breakpoint                    experimental  since 0.39.0
   --all                              experimental
   --dry-run                          experimental
+  --repo-scope                       experimental  since 0.43.0  (declared)
   --yes                              experimental
 delete bucket                        stable
   --confirm                          stable
@@ -569,6 +570,7 @@ describe azure                       stable
 describe azure connection            stable
 describe azure monitoring            stable
 describe breakpoint                  experimental  since 0.39.0
+  --repo-scope                       experimental  since 0.43.0  (declared)
 describe bucket                      stable
 describe dashboard                   stable
 describe document                    stable
@@ -756,6 +758,7 @@ get azure monitoring                 stable
 get azure monitoring-feature-sets    stable
 get azure monitoring-locations       stable
 get breakpoints                      experimental  since 0.39.0
+  --repo-scope                       experimental  since 0.43.0  (declared)
 get buckets                          stable
 get copilot-skills                   stable
 get dashboards                       stable
@@ -840,6 +843,7 @@ get snapshots                        experimental  since 0.39.0
   --max-result-records               experimental
   --metadata                         experimental
   --no-progress                      experimental
+  --repo-scope                       experimental  since 0.43.0  (declared)
 get trash                            stable
   --deleted-after                    stable
   --deleted-before                   stable
