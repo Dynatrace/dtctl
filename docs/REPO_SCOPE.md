@@ -1,7 +1,7 @@
 # Repo Scope Guide
 
-> **Experimental:** the `repo-scope` commands and `--repo-scope`/`--no-repo-scope` on `query`, `wait query` and
-> `verify query` may change in any release.
+> **Experimental:** the `repo-scope` commands, `--repo-scope`/`--no-repo-scope` on `query`, `wait query` and
+> `verify query`, and the breakpoint commands that read a scope may change in any release.
 > A context with `min-stability: stable` withholds them and runs every query as typed; exceptions for both flags
 > (`'query --repo-scope'`, `'query --no-repo-scope'`) bring default scoping back. See [STABILITY.md](STABILITY.md#choosing-what-this-environment-accepts).
 
@@ -197,6 +197,10 @@ A scope can be valid and still miss the records you care about, so check it once
 dtctl query 'fetch logs | summarize count(), by:{k8s.workload.name}'
 dtctl query 'fetch logs | summarize count(), by:{k8s.workload.name}' --no-repo-scope
 ```
+
+## 4. Live Debugger
+
+An entry's bindings are also the labels a Live Debugger workspace is filtered by: `dtctl create breakpoint` gives a workspace without filters the covering entry's namespace-and-workload set, and `--repo-scope <name>` on `create breakpoint` and `update breakpoint` sets every set of a named entry, in workspace `<repo>/<entry>`. [Filters from the repo scope](LIVE_DEBUGGER.md#filters-from-the-repo-scope) says what is sent, what is verified, and how to turn the default off.
 
 ## Monorepos
 

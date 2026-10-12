@@ -31,6 +31,8 @@ A repo scope is that connection, written down once and committed: per environmen
 | `pkg/dql` | `scan.go`, `insert.go` | The offset-preserving DQL scanner, and the lexical insertion of the filter |
 | `cmd/repo_scope.go` | `dtctl repo-scope discover\|set\|current\|describe\|delete\|list` | Manage the file |
 | `cmd/query_repo_scope.go` | `query`, `wait query`, `verify query` | Apply the scope, print the notice, decorate the envelope |
+| `pkg/reposcope/livedebugger.go` | `LiveDebuggerFilters`, `WorkloadFilterSet` | Render an entry as Live Debugger workspace filter sets; pick the one set create applies by default |
+| `cmd/breakpoint_repo_scope.go` | `create breakpoint`, `update breakpoint` | Set workspace filters from a named entry, or by default on create |
 
 `pkg/reposcope` has no view of the invocation. Where the working directory comes from, whether the host grants access to it, and how anything is printed stay in `cmd`; so do flag names, which is why the `set` line discovery proposes is built in `cmd` from a candidate's fields. `store.go` is the only file in the package that touches the host disk; everything else works on values and an `fs.FS`. `pkg/dql` imports nothing from dtctl, so the executor, the hint rules and the scope file share one scanner without depending on one another.
 
@@ -103,6 +105,18 @@ A scoped query that returns nothing is diagnosed on the text the user typed, not
 
 **Scope and scan cost.** The inserted filter narrows the rows and, as an equality filter right after `fetch`, helps the scan, but it cannot by itself keep a wide timeframe under the scan limit. `sdk/inventory/sampling.go` records the measurement: a scoped, unsampled 15-minute count of logs still scanned 341 GB on a large environment, against 500 GB for the capped unscoped read. Nothing honest can be inserted to change that: a timeframe changes the question, `samplingRatio` makes every scoped result approximate, and a scan cap is not scoping. So the rewrite sends what it always sent, and says so before sending: when neither the fetch stage (a `scanLimitGBytes` other than `-1`, `samplingRatio`; `Rewrite.ScanBounded`) nor the resolved scan limit or sampling ratio bounds the scan, the scope line ends with a clause that only the environment's default cap applies, and `decorate` repeats the same string as the one scan suggestion. A bounded scoped query the cap still stopped gets one line after the run instead, worded to agree with the executor's "filter early with ==" hint, which lists the other levers. `wait query` says either once; `verify query` sends no query and has no clause.
 
+## Live Debugger
+
+A Live Debugger workspace is filtered by labels its processes carry, under the same names as the record fields an entry binds, so an entry can set workspace filters as well as narrow queries. `reposcope.LiveDebuggerFilters` renders it into the type `--filters` parses to and `livedebugger.BuildFilterSets` takes, `map[string][]string`. `Resolve` renders once into `Status.LiveDebuggerFilters`, the one rendering `repo-scope describe`, `-o json` and both breakpoint paths read (through `Status.LiveDebuggerFilterSets`, which carries the reason when there is none).
+
+`--repo-scope <name>` is a filter source like `--filters`, resolved before any network call through `resolveRepoScope`, so its failures are the same errors as on `query`; both sources go through `applyWorkspaceFilters`, the one place the breakpoint commands change workspace filters.
+
+The default on `create` is narrow because a workspace's filters re-scope every breakpoint in it. It applies only to a workspace with no filters, and sends only the entry's one namespace-and-workload set (`reposcope.WorkloadFilterSet`): entity ids are deprecated fields that change with redeploys, so a process-group default would re-scope the workspace on every redeploy, and `service.name` is unverified. Nobody typed it, so it is never applied unconfirmed over active breakpoints, and it says what it did on stderr, in the result and in `context.suggestions`, with no new envelope key. The dry run reads the workspace, since `getOrCreateWorkspaceV2` is a read the other breakpoint commands already send, but never newly requires config.
+
+Two notions of "where am I" meet here. The workspace is keyed by the base name of the working directory (`currentProjectPath`), while the entry is the one whose path covers it, so from `services/checkout/src` the workspace is `src` and the entry `checkout`'s.
+
+**Verified against an environment.** Namespace with workload, and process group, are honoured as labels; the labels of a set are ANDed and several sets ORed. `dt.entity.service` selects nothing, so service ids are left out of the rendering, and an entry that binds only those renders none, with a reason. `service.name` is unverified.
+
 ## Discovery
 
 ### Record aggregates first
@@ -153,10 +167,11 @@ Candidates are keyed by namespace, workload and service name, so the result does
 1. Metrics: `timeseries` scoping on `dt.service.*` and `dt.process.*` through the `filter:` parameter. Until then metric queries run unscoped with a warning.
 2. `fetch events` and `fetch bizevents`; `inventory arrivals --scope` defaulting to the repo scope.
 3. Rendering an entry onto a filter segment, so the platform applies it.
-4. Discovery narrowing by cluster, host or deploy time, and a configurable window; a `--cluster` binding, which touches six layers.
+4. Discovery narrowing by cluster, host or deploy time, and a configurable window; a `--cluster` binding (six layers; `--filters k8s.cluster.name:<name>` works meanwhile) and a breakpoint's reached-process count (asynchronous per rule).
 5. A per-user overlay, export/import, staleness checks, and mapping profiling frames back to source.
 6. Rebuilding `stripDQLLiterals` (`pkg/exec`) and `dqlCode` (`cmd/query_window.go`) on `dql.Scan`, so one scanner remains.
-7. Promotion criteria for `repo-scope` and the query flags.
+7. Promotion criteria for `repo-scope` and the query flags; for the breakpoint flags, first verify on an environment that `service.name` is honoured as a workspace label.
 8. One entry for every environment a service runs in (`set --all-contexts`, or a shared section), and token readiness in `repo-scope current`.
-9. `catalog-info.yaml` and `skaffold.yaml` as name sources (a Gradle build's chart already supplies the deployed name, and `--term` covers the rest); stripping naming prefixes, which is organisation-specific.
-10. A Maven multi-module build as one unit, like a Gradle settings build: the asymmetry is deliberate until field data asks for it.
+9. Clearing a workspace's filters, and `update breakpoint` changing `--filters` and `--enabled` in one call, with an error that says filters belong to the workspace.
+10. `catalog-info.yaml` and `skaffold.yaml` as name sources (a Gradle build's chart already supplies the deployed name, and `--term` covers the rest); stripping naming prefixes, which is organisation-specific.
+11. A Maven multi-module build as one unit, like a Gradle settings build: the asymmetry is deliberate until field data asks for it.
