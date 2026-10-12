@@ -3,6 +3,7 @@ package reposcope
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,12 +54,30 @@ func tokenLines(tokens []token) []string {
 }
 
 func TestExtract_Fixtures(t *testing.T) {
+	dockerfile := &fstest.MapFile{Data: []byte("FROM scratch\n")}
+	webproxy := []string{
+		"dir webproxy webproxy/",
+		"workload webproxy deploy/webproxy/deployment.yaml:4",
+		"namespace edge deploy/webproxy/deployment.yaml:5",
+		"image webproxy deploy/webproxy/deployment.yaml:11",
+		"artifact webproxy-app webproxy/build.gradle.kts:6",
+	}
+	shared := append([]string{
+		"dir admin admin/",
+		"workload admin deploy/admin/deployment.yaml:4",
+		"namespace edge deploy/admin/deployment.yaml:5",
+		"image admin deploy/admin/deployment.yaml:11",
+	}, webproxy...)
+	widget := []string{"chart widget-detect server/helm/Chart.yaml:2", "project platform-widget settings.gradle.kts:1"}
 	tests := []struct {
-		name    string
-		dir     string
-		unit    string
-		tokens  []string
-		dropped []string
+		name string
+		// extra are files added to the fixture.
+		extra    fstest.MapFS
+		dir      string
+		unit     string
+		tokens   []string
+		dropped  []string
+		sharedBy []string
 	}{
 		{
 			name: "single-go",
@@ -135,6 +154,79 @@ func TestExtract_Fixtures(t *testing.T) {
 			tokens: []string{},
 		},
 		{
+			// One deployable (server holds the chart): the build is the
+			// one unit wherever discovery runs in it, and no module's
+			// directory name is sent. The settings file's include( spans
+			// several lines.
+			name:   "gradle-one-chart",
+			dir:    "server",
+			unit:   ".",
+			tokens: widget,
+		},
+		{
+			// A Dockerfile in the deployable does not split the build.
+			name:   "gradle-one-chart",
+			extra:  fstest.MapFS{"server/Dockerfile": dockerfile},
+			dir:    "logic-widget/src/main/java",
+			unit:   ".",
+			tokens: widget,
+		},
+		{
+			// Two deployables, each claimed by a manifest: each is a unit
+			// covering the modules it depends on.
+			name:   "gradle-multi",
+			dir:    "webproxy",
+			unit:   "webproxy",
+			tokens: webproxy,
+		},
+		{
+			// Only webproxy depends on the api module.
+			name:   "gradle-multi",
+			dir:    "webproxy-api",
+			unit:   "webproxy",
+			tokens: webproxy,
+		},
+		{
+			// Both depend on the core module: discovery sends both
+			// deployables' names, for the build.
+			name:     "gradle-multi",
+			dir:      "webproxy-core/src/main/kotlin",
+			unit:     ".",
+			tokens:   shared,
+			sharedBy: []string{"admin", "webproxy"},
+		},
+		{
+			// The settings directory is the whole build, which no entry
+			// of one deployable covers.
+			name:     "gradle-multi",
+			dir:      ".",
+			unit:     ".",
+			tokens:   shared,
+			sharedBy: []string{"admin", "webproxy"},
+		},
+		{
+			// buildSrc is never entered: its settings file names the
+			// build logic, not the build, so it is the build's directory.
+			name:     "gradle-multi",
+			dir:      "buildSrc",
+			unit:     ".",
+			tokens:   shared,
+			sharedBy: []string{"admin", "webproxy"},
+		},
+		{
+			// No module is deployed by name or by what it holds, so the
+			// build is the one unit, and app is not sent.
+			name: "gradle-app",
+			dir:  "app/src/main/java",
+			unit: ".",
+			tokens: []string{
+				"workload orders-mobile deploy/deployment.yaml:4",
+				"namespace orders deploy/deployment.yaml:5",
+				"image orders-mobile deploy/deployment.yaml:11",
+				"project orders-mobile settings.gradle.kts:1",
+			},
+		},
+		{
 			// A .git file points outside the repository: no remote.
 			name:   "worktree-gitfile",
 			dir:    ".",
@@ -177,11 +269,14 @@ func TestExtract_Fixtures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+"@"+tt.dir, func(t *testing.T) {
-			s, err := extract(fixture(t, tt.name), tt.dir)
+			fsys := fixture(t, tt.name)
+			maps.Copy(fsys, tt.extra)
+			s, err := extract(fsys, tt.dir)
 			require.NoError(t, err)
 			assert.Equal(t, tt.unit, s.unit)
 			assert.Equal(t, tt.tokens, tokenLines(s.tokens))
 			assert.Equal(t, tt.dropped, s.dropped)
+			assert.Equal(t, tt.sharedBy, s.sharedBy)
 		})
 	}
 }
@@ -312,6 +407,210 @@ func TestExtract_Dockerfile(t *testing.T) {
 			assert.Equal(t, tt.want, got.value)
 		})
 	}
+}
+
+func TestExtract_Gradle(t *testing.T) {
+	dockerfile := &fstest.MapFile{Data: []byte("FROM scratch\n")}
+	tests := []struct {
+		name     string
+		fsys     fstest.MapFS
+		dir      string
+		unit     string
+		tokens   []string
+		dropped  []string
+		sharedBy []string
+	}{
+		{
+			// Inside a settings build a module's build file names the
+			// build's one unit.
+			name: "Groovy DSL",
+			fsys: fstest.MapFS{
+				"settings.gradle":        {Data: []byte("rootProject.name = 'billing'\n")},
+				"invoicing/build.gradle": {Data: []byte("plugins { id 'java' }\n\narchivesBaseName = 'invoicing-service'\n")},
+			},
+			dir:    "invoicing",
+			unit:   ".",
+			tokens: []string{"artifact invoicing-service invoicing/build.gradle:3", "project billing settings.gradle:1"},
+		},
+		{
+			// Groovy's include and project(), a nested project path, and a
+			// module the settings file includes without a build file.
+			name: "Groovy references",
+			fsys: fstest.MapFS{
+				"settings.gradle":               {Data: []byte("include ':services:billing', ':services:orders'\ninclude ':libs:ledger-core', ':libs:audit'\n")},
+				"services/billing/build.gradle": {Data: []byte("dependencies {\n    implementation project(':libs:ledger-core')\n    // implementation project(':libs:audit')\n}\n")},
+				"services/billing/Dockerfile":   {Data: []byte("FROM scratch\n")},
+				"services/orders/Dockerfile":    {Data: []byte("FROM scratch\n")},
+			},
+			dir:    "libs/ledger-core/src",
+			unit:   "services/billing",
+			tokens: []string{"dir billing services/billing/"},
+		},
+		{
+			// Groovy's named path argument is a reference like the
+			// positional one.
+			name: "Groovy project(path:)",
+			fsys: fstest.MapFS{
+				"settings.gradle":       {Data: []byte("include ':checkout', ':ledger', ':core'\n")},
+				"checkout/build.gradle": {Data: []byte("dependencies {\n    implementation project(path: ':core')\n}\n")},
+				"checkout/Dockerfile":   dockerfile,
+				"ledger/build.gradle":   {Data: []byte("dependencies {\n    implementation project(':core')\n}\n")},
+				"ledger/Dockerfile":     dockerfile,
+				"core/build.gradle":     {Data: []byte("plugins { id 'java-library' }\n")},
+			},
+			dir:      "core",
+			unit:     ".",
+			tokens:   []string{"dir checkout checkout/", "dir ledger ledger/"},
+			sharedBy: []string{"checkout", "ledger"},
+		},
+		{
+			name: "Kotlin project(path =)",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":       {Data: []byte("include(\":checkout\", \":ledger\", \":core\")\n")},
+				"checkout/build.gradle.kts": {Data: []byte("dependencies {\n    implementation(project(path = \":core\"))\n}\n")},
+				"checkout/Dockerfile":       dockerfile,
+				"ledger/build.gradle.kts":   {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"ledger/Dockerfile":         dockerfile,
+			},
+			dir:      "core",
+			unit:     ".",
+			tokens:   []string{"dir checkout checkout/", "dir ledger ledger/"},
+			sharedBy: []string{"checkout", "ledger"},
+		},
+		{
+			// What only ledger's tests use is checkout's alone.
+			name: "a test configuration's reference",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":       {Data: []byte("include(\":checkout\", \":ledger\", \":core\")\n")},
+				"checkout/build.gradle.kts": {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"checkout/Dockerfile":       dockerfile,
+				"ledger/build.gradle.kts":   {Data: []byte("dependencies {\n    testImplementation(project(\":core\"))\n}\n")},
+				"ledger/Dockerfile":         dockerfile,
+			},
+			dir:    "core",
+			unit:   "checkout",
+			tokens: []string{"dir checkout checkout/"},
+		},
+		{
+			// The image a test module builds runs the tests: smoke-tests
+			// is no deployable, so checkout is the build's one.
+			name: "a test module with a Dockerfile",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":          {Data: []byte("include(\":checkout\", \":core\", \":smoke-tests\")\n")},
+				"checkout/build.gradle.kts":    {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"checkout/Dockerfile":          dockerfile,
+				"smoke-tests/build.gradle.kts": {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"smoke-tests/Dockerfile":       dockerfile,
+			},
+			dir:    "core",
+			unit:   ".",
+			tokens: []string{},
+		},
+		{
+			// Without a settings file every build file is a build.
+			name: "no settings file",
+			fsys: fstest.MapFS{
+				"services/billing/build.gradle": {Data: []byte("plugins { id 'java' }\n")},
+				"services/orders/build.gradle":  {Data: []byte("plugins { id 'java' }\n")},
+			},
+			dir:    "services/orders/src",
+			unit:   "services/orders",
+			tokens: []string{"dir orders services/orders/"},
+		},
+		{
+			name: "Kotlin DSL assignment",
+			fsys: fstest.MapFS{
+				"invoicing/build.gradle.kts": {Data: []byte("base {\n    archivesName = \"invoicing-service\"\n}\n")},
+			},
+			dir:    "invoicing",
+			unit:   "invoicing",
+			tokens: []string{"dir invoicing invoicing/", "artifact invoicing-service invoicing/build.gradle.kts:2"},
+		},
+		{
+			// The build root is the nearest settings file, not the
+			// repository root.
+			name: "build root below the repository root",
+			fsys: fstest.MapFS{
+				"go.mod":                  {Data: []byte("module example.invalid/tooling\n")},
+				"mobile/settings.gradle":  {Data: []byte("rootProject.name = 'orders-mobile'\n")},
+				"mobile/app/build.gradle": {Data: []byte("plugins { id 'com.android.application' }\n")},
+			},
+			dir:    "mobile/app/src/main",
+			unit:   "mobile",
+			tokens: []string{"dir mobile mobile/", "project orders-mobile mobile/settings.gradle:1"},
+		},
+		{
+			name: "a module's archives name is its build's",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":  {Data: []byte("rootProject.name = \"orders\"\n")},
+				"app/build.gradle.kts": {Data: []byte("base {\n    archivesName.set(\"orders-api\")\n}\n")},
+			},
+			dir:    "app",
+			unit:   ".",
+			tokens: []string{"artifact orders-api app/build.gradle.kts:2", "project orders settings.gradle.kts:1"},
+		},
+		{
+			name: "a one-line block",
+			fsys: fstest.MapFS{
+				"invoicing/build.gradle.kts": {Data: []byte("base { archivesName.set(\"invoicing-service\") }\n")},
+			},
+			dir:    "invoicing",
+			unit:   "invoicing",
+			tokens: []string{"dir invoicing invoicing/", "artifact invoicing-service invoicing/build.gradle.kts:1"},
+		},
+		{
+			// A test module is part of its build, and its directory name is
+			// not sent.
+			name: "a test module",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":           {Data: []byte("rootProject.name = \"checkout\"\n")},
+				"test-harness/build.gradle.kts": {Data: []byte("plugins { java }\n")},
+			},
+			dir:    "test-harness",
+			unit:   ".",
+			tokens: []string{"project checkout settings.gradle.kts:1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := extract(tt.fsys, tt.dir)
+			require.NoError(t, err)
+			assert.Equal(t, tt.unit, s.unit)
+			assert.Equal(t, tt.tokens, tokenLines(s.tokens))
+			assert.Equal(t, tt.dropped, s.dropped)
+			assert.Equal(t, tt.sharedBy, s.sharedBy)
+		})
+	}
+}
+
+// noWalkFS fails the test when a directory is listed.
+type noWalkFS struct {
+	fstest.MapFS
+	t *testing.T
+}
+
+func (f noWalkFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	f.t.Errorf("listed %s", name)
+	return f.MapFS.ReadDir(name)
+}
+
+func TestGradleBuildAt(t *testing.T) {
+	t.Run("no settings file, no walk", func(t *testing.T) {
+		fsys := noWalkFS{fstest.MapFS{"web/package.json": {Data: []byte(`{"name": "storefront"}`)}}, t}
+		assert.Nil(t, gradleBuildAt(fsys, "web"))
+	})
+	t.Run("other sources do not count toward maxFiles", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"settings.gradle":        {Data: []byte("include ':invoicing'\n")},
+			"invoicing/build.gradle": {Data: []byte("plugins { id 'java' }\n")},
+		}
+		for i := range maxFiles {
+			fsys[fmt.Sprintf("conf/f%04d.yaml", i)] = &fstest.MapFile{Data: []byte("a: b\n")}
+		}
+		b := gradleBuildAt(fsys, "invoicing")
+		require.NotNil(t, b)
+		assert.Contains(t, b.modules, "invoicing")
+	})
 }
 
 // A namespace is never sent, so the test-name rule has nothing to hold back:

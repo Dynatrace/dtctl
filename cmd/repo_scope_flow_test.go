@@ -389,6 +389,50 @@ func TestRepoScopeDiscoverDryRunNamesHeldBackNames(t *testing.T) {
 	require.Contains(t, details["sent"], "test-runner")
 }
 
+// A Gradle build with two deployables: discovery from a library one of them
+// depends on proposes that deployable's entry, which covers the library
+// through the build, and from a library both depend on proposes no entry but
+// discovering each.
+func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
+	fixture := gradleMultiRepo(t)
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": `{"k8s.namespace.name":"edge","k8s.workload.name":"webproxy","service.name":"webproxy","records":"100"}`,
+	}))
+	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+
+	t.Chdir(filepath.Join(repo, "webproxy-api"))
+	report, _ := discoverReport(t)
+	const line = "dtctl repo-scope set webproxy --namespace edge --workload webproxy --service-name webproxy --path webproxy"
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	runSetCommand(t, line)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "webproxy  (webproxy · 127.0.0.1; covered through the Gradle build: webproxy depends on webproxy-api)\n", stdout)
+
+	t.Chdir(filepath.Join(repo, "webproxy-core"))
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, []string{"admin", "webproxy"}, report.SharedBy)
+	require.Empty(t, report.Candidates[0].SetCommand)
+	require.Equal(t, "no entry is proposed for webproxy-core, shared by admin and webproxy; discover each to save its entry: "+
+		"dtctl repo-scope discover --path admin; dtctl repo-scope discover --path webproxy", suggestions[0])
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "entry:\n  dtctl repo-scope discover --path admin\n  dtctl repo-scope discover --path webproxy\n")
+
+	// The settings directory is the whole build: an entry for it would
+	// cover admin with webproxy's bindings.
+	t.Chdir(repo)
+	report, suggestions = discoverReport(t)
+	require.Equal(t, []string{"admin", "webproxy"}, report.SharedBy)
+	for _, c := range report.Candidates {
+		require.Empty(t, c.SetCommand, c.Name)
+	}
+	require.Equal(t, "no entry is proposed for ., shared by admin and webproxy; discover each to save its entry: "+
+		"dtctl repo-scope discover --path admin; dtctl repo-scope discover --path webproxy", suggestions[0])
+}
+
 // A token that provably cannot read spans is refused before the first query
 // leaves. One that cannot read the entity tables still gets the record
 // queries' answer; the fallbacks are reported as unreadable, not sent.

@@ -2,7 +2,9 @@ package reposcope
 
 import (
 	"fmt"
+	"io/fs"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -25,8 +27,8 @@ type Status struct {
 	Entry       *Entry `json:"entry,omitempty" yaml:"entry,omitempty"`
 	// Filters maps each data object to the expression the entry inserts.
 	Filters map[string]string `json:"filters,omitempty" yaml:"filters,omitempty"`
-	// Reason explains a nil Entry, or an entry chosen by name that does not
-	// cover Dir.
+	// Reason explains a nil Entry, an entry chosen by name that does not
+	// cover Dir, or one that covers it through a Gradle build.
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 	// Warning is File.Warning: keys the entries apply without.
 	Warning string   `json:"warning,omitempty" yaml:"warning,omitempty"`
@@ -37,35 +39,49 @@ type Status struct {
 // Resolve picks the entry for (host, relDir) from f, or the one named by
 // name when it is not empty. A named entry applies wherever it is asked
 // for; an unknown name is a *NotFoundError. Otherwise the entry whose Path
-// covers relDir wins, the longest when several do, then the entry without a
-// Path. A Path covers the directories under it by whole segment:
-// "services/checkout" does not cover "services/checkout-v2". With no entry,
-// Entry is nil and Reason names the paths the entries do cover.
+// covers relDir wins, the longest when several do, then the entry without
+// one. A path covers the directories under it by whole segment:
+// "services/checkout" does not cover "services/checkout-v2". Inside a Gradle
+// build, read from repo, an entry whose Path is a module also covers the
+// modules it depends on, as closely as relDir's own module. With no entry,
+// Entry is nil and Reason names the paths the entries do cover, or the two
+// entries that cover relDir as closely.
 //
 // Path comparison folds case on darwin and windows and is exact elsewhere.
-func Resolve(f *File, host, relDir, name string) (*Status, error) {
+func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 	s := &Status{File: FileName, Environment: host, Dir: relDir, Warning: f.Warning(), Hosts: f.Hosts()}
 	entries := f.Entries(host)
+	build := newGradleCoverage(repo, entries, relDir)
 	switch {
 	case name != "":
 		s.Entry = entryNamed(entries, name)
 		if s.Entry == nil {
 			return nil, &NotFoundError{Name: name, Host: host, Known: f.Names(host)}
 		}
-		if s.Entry.Path != "" && !covers(s.Entry.Path, relDir) {
-			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", s.Entry.Path, relDir)
-		}
 	case len(entries) == 0:
 		s.Reason = fmt.Sprintf("no entry for %s; the file defines: %s", host, strings.Join(f.Hosts(), ", "))
 		return s, nil
 	default:
-		s.Entry = closestEntry(entries, relDir)
+		var tied *Entry
+		if s.Entry, tied = closestEntry(entries, relDir, build); tied != nil {
+			s.Reason = fmt.Sprintf("covered by entries %s and %s; pick one with --repo-scope <name>", s.Entry.Name, tied.Name)
+			s.Entry = nil
+		}
 	}
 	if s.Entry == nil {
-		s.Reason = fmt.Sprintf("no entry covers %q; entries here cover %s; pick one with --repo-scope <name>",
-			relDir, strings.Join(entryPaths(entries), ", "))
+		if s.Reason == "" {
+			s.Reason = fmt.Sprintf("no entry covers %q; entries here cover %s; pick one with --repo-scope <name>",
+				relDir, strings.Join(entryPaths(entries), ", "))
+		}
 		s.Others = othersThan(entries, "")
 		return s, nil
+	}
+	if e := s.Entry; e.Path != "" && !covers(e.Path, relDir) {
+		if build.owns(e) {
+			s.Reason = fmt.Sprintf("covered through the Gradle build: %s depends on %s", e.Path, build.module)
+		} else {
+			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", e.Path, relDir)
+		}
 	}
 	s.Linked = true
 	s.Others = othersThan(entries, s.Entry.Name)
@@ -78,21 +94,83 @@ func Resolve(f *File, host, relDir, name string) (*Status, error) {
 	return s, nil
 }
 
-func closestEntry(entries []Entry, relDir string) *Entry {
-	var best, wide *Entry
+// closestEntry is the entry with the longest path covering relDir, else the
+// one with no path. An entry the build covers relDir through is as close as
+// relDir's module. tied is another entry as close: a second deployable whose
+// closure holds that module.
+func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best, tied *Entry) {
+	var wide *Entry
+	longest := 0
 	for i := range entries {
 		e := &entries[i]
+		n := 0
 		switch {
 		case e.Path == "":
 			wide = e
-		case covers(e.Path, relDir) && (best == nil || len(e.Path) > len(best.Path)):
-			best = e
+		case covers(e.Path, relDir):
+			n = len(e.Path)
+		case build.owns(e):
+			n = len(build.module)
+		}
+		switch {
+		case n == 0 || n < longest:
+			continue
+		case n > longest:
+			best, tied, longest = e, nil, n
+		default:
+			tied = e
 		}
 	}
-	if best != nil {
-		return best
+	if best == nil {
+		return wide, nil
 	}
-	return wide
+	return best, tied
+}
+
+// gradleCoverage is how the Gradle build holding a directory covers it: the
+// module holding the directory, and the deployables whose closure holds that
+// module. The deployables are the build's modules an entry's Path names:
+// discovery infers them from Dockerfiles and manifests, but once an entry
+// exists the scope file says which they are.
+type gradleCoverage struct {
+	module string
+	owners []string
+}
+
+func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverage {
+	var c gradleCoverage
+	if !slices.ContainsFunc(entries, func(e Entry) bool { return e.Path != "" }) {
+		return c
+	}
+	b := gradleBuildAt(repo, relDir)
+	if b == nil {
+		return c
+	}
+	for m := range b.modules {
+		// b.module(relDir), folding case as covers does.
+		if covers(m, relDir) && len(m) > len(c.module) {
+			c.module = m
+		}
+		if slices.ContainsFunc(entries, func(e Entry) bool { return samePath(e.Path, m) }) {
+			b.deployable[m] = true
+		}
+	}
+	if c.module != "" {
+		c.owners = b.owners(c.module)
+	}
+	return c
+}
+
+// owns reports whether e's path is a deployable whose closure holds the
+// module.
+func (c gradleCoverage) owns(e *Entry) bool {
+	return slices.ContainsFunc(c.owners, func(o string) bool { return samePath(e.Path, o) })
+}
+
+// samePath reports whether two paths name one directory, folding case as
+// covers does.
+func samePath(a, b string) bool {
+	return a == b || foldPathCase && strings.EqualFold(a, b)
 }
 
 // covers reports whether the entry path p is relDir or one of its ancestors,

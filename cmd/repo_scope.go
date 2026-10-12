@@ -79,7 +79,7 @@ func newRepoScopeSetCmd() *cobra.Command {
 		serviceNames  []string
 		namespace     string
 		workloads     []string
-		entryPath     string
+		entryPaths    []string
 	)
 	c := &cobra.Command{
 		Use:   "set <name>",
@@ -107,8 +107,14 @@ Examples:
 		ValidArgsFunction: completeRepoScopeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entry := reposcope.Entry{Name: args[0], Services: services, ProcessGroups: processGroups, ServiceNames: serviceNames}
-			if entryPath != "" {
-				entry.Path = path.Clean(filepath.ToSlash(entryPath))
+			if len(entryPaths) > 1 {
+				return &reposcope.InvalidError{
+					Source: "repo-scope set",
+					Msg:    "--path takes one directory; a Gradle deployable's modules are read from its build",
+				}
+			}
+			if len(entryPaths) == 1 {
+				entry.Path = path.Clean(filepath.ToSlash(entryPaths[0]))
 			}
 			for _, w := range workloads {
 				entry.Workloads = append(entry.Workloads, reposcope.Workload{Namespace: namespace, Name: w})
@@ -121,7 +127,7 @@ Examples:
 	c.Flags().StringArrayVar(&serviceNames, "service-name", nil, "OpenTelemetry service.name (repeatable)")
 	c.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
-	c.Flags().StringVar(&entryPath, "path", "", "directory the entry covers, relative to the repository root (default: the whole repository)")
+	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
 	for _, name := range []string{"service", "process-group", "service-name", "namespace", "workload", "path"} {
 		rejectEmptyFlag(c, name)
 	}
@@ -261,7 +267,7 @@ func (s *repoScopeFile) resolve(name string) (*reposcope.Status, error) {
 	if !s.loc.Exists && name == "" {
 		return &reposcope.Status{Environment: s.host, Dir: s.loc.RelDir, Reason: repoScopeNoFileReason}, nil
 	}
-	return reposcope.Resolve(s.file, s.host, s.loc.RelDir, name)
+	return reposcope.Resolve(reposcope.RepoFS(s.loc), s.file, s.host, s.loc.RelDir, name)
 }
 
 // openRepoScopeForEdit is openRepoScope for the commands that need the file
@@ -364,7 +370,7 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 	}
 
 	if agentMode(ctx) {
-		status, err := reposcope.Resolve(scope.file, scope.host, scope.loc.RelDir, entry.Name)
+		status, err := scope.resolve(entry.Name)
 		if err != nil {
 			return err
 		}

@@ -38,7 +38,7 @@ func repoScopeStatusLinked() reposcope.Status {
 		repoScopeHost:    repoScopeEntries(),
 		repoScopeStgHost: {{Name: "checkout", ServiceNames: []string{"checkout"}}},
 	}}
-	s, err := reposcope.Resolve(f, repoScopeHost, "services/checkout/internal", "")
+	s, err := reposcope.Resolve(fstest.MapFS{}, f, repoScopeHost, "services/checkout/internal", "")
 	if err != nil {
 		panic(err)
 	}

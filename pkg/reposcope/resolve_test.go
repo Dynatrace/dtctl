@@ -1,7 +1,9 @@
 package reposcope
 
 import (
+	"io/fs"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,14 +19,30 @@ func monorepoFile() *File {
 	}}}
 }
 
+// gradleFile is an entry for each of the gradle-multi fixture's two
+// deployables, which share the webproxy-core module.
+func gradleFile() *File {
+	return &File{Environments: map[string][]Entry{prodHost: {
+		{Name: "webproxy", Path: "webproxy", ServiceNames: []string{"webproxy"}},
+		{Name: "admin", Path: "admin", ServiceNames: []string{"admin"}},
+	}}}
+}
+
 func withRepositoryWide(f *File) *File {
 	f.Upsert(prodHost, Entry{Name: "shop", ServiceNames: []string{"shop"}})
 	return f
 }
 
 func TestResolve(t *testing.T) {
+	gradle := fixture(t, "gradle-multi")
+	onlyWebproxy := gradleFile()
+	onlyWebproxy.Remove(prodHost, "admin")
+	// A build file that is a symlink is not read: webproxy references nothing.
+	symlinked := fixture(t, "gradle-multi")
+	symlinked["webproxy/build.gradle.kts"] = &fstest.MapFile{Data: []byte("../admin/build.gradle.kts"), Mode: fs.ModeSymlink}
 	tests := []struct {
 		name   string
+		repo   fs.FS
 		file   *File
 		host   string
 		dir    string
@@ -55,10 +73,30 @@ func TestResolve(t *testing.T) {
 			others: []string{"checkout", "checkout-v2", "ledger-close"}},
 		{name: "selected by name where it applies anyway", file: monorepoFile(), host: prodHost, dir: "services/ledger", pick: "ledger",
 			entry: "ledger", others: []string{"checkout", "checkout-v2", "ledger-close"}},
+		{name: "a Gradle deployable", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy/src",
+			entry: "webproxy", others: []string{"admin"}},
+		{name: "a library one deployable depends on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-api/src",
+			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-api", others: []string{"admin"}},
+		{name: "a library two deployables depend on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core/src/main/kotlin",
+			reason: "covered by entries webproxy and admin; pick one with --repo-scope <name>", others: []string{"admin", "webproxy"}},
+		{name: "a library two deployables depend on, selected by name", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core",
+			pick: "admin", entry: "admin", reason: "covered through the Gradle build: admin depends on webproxy-core", others: []string{"webproxy"}},
+		{name: "a library only an entry's deployable is known to depend on", repo: gradle, file: onlyWebproxy, host: prodHost, dir: "webproxy-core",
+			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-core"},
+		{name: "the settings directory", repo: gradle, file: gradleFile(), host: prodHost, dir: ".",
+			reason: `no entry covers "."; entries here cover admin, webproxy; pick one with --repo-scope <name>`, others: []string{"admin", "webproxy"}},
+		{name: "selected by name outside its build closure", repo: gradle, file: gradleFile(), host: prodHost, dir: "admin", pick: "webproxy",
+			entry: "webproxy", reason: `selected by name; its path "webproxy" does not cover "admin"`, others: []string{"admin"}},
+		{name: "a build file that does not read", repo: symlinked, file: gradleFile(), host: prodHost, dir: "webproxy-api",
+			reason: `no entry covers "webproxy-api"; entries here cover admin, webproxy; pick one with --repo-scope <name>`, others: []string{"admin", "webproxy"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, err := Resolve(tt.file, tt.host, tt.dir, tt.pick)
+			repo := tt.repo
+			if repo == nil {
+				repo = fstest.MapFS{}
+			}
+			r, err := Resolve(repo, tt.file, tt.host, tt.dir, tt.pick)
 			require.NoError(t, err)
 			assert.Equal(t, tt.entry != "", r.Linked)
 			assert.Equal(t, FileName, r.File)
@@ -77,13 +115,13 @@ func TestResolve(t *testing.T) {
 }
 
 func TestResolve_UnknownName(t *testing.T) {
-	_, err := Resolve(monorepoFile(), prodHost, ".", "ledgr")
+	_, err := Resolve(fstest.MapFS{}, monorepoFile(), prodHost, ".", "ledgr")
 	var notFound *NotFoundError
 	require.ErrorAs(t, err, &notFound)
 	assert.Equal(t, &NotFoundError{Name: "ledgr", Host: prodHost, Known: []string{"checkout", "checkout-v2", "ledger", "ledger-close"}}, notFound)
 	assert.Equal(t, `repo scope "ledgr" not found for abc12345.apps.dynatrace.com (entries: checkout, checkout-v2, ledger, ledger-close)`, err.Error())
 
-	_, err = Resolve(monorepoFile(), stgHost, ".", "checkout")
+	_, err = Resolve(fstest.MapFS{}, monorepoFile(), stgHost, ".", "checkout")
 	require.ErrorAs(t, err, &notFound)
 	assert.Empty(t, notFound.Known)
 	assert.Equal(t, `repo scope "checkout" not found: .dtctl-repo-scope.yaml defines no entry for stg98765.apps.dynatrace.com`, err.Error())
@@ -94,13 +132,19 @@ func TestResolve_PathCase(t *testing.T) {
 	t.Cleanup(func() { foldPathCase = prev })
 
 	foldPathCase = true
-	r, err := Resolve(monorepoFile(), prodHost, "Services/Checkout/api", "")
+	r, err := Resolve(fstest.MapFS{}, monorepoFile(), prodHost, "Services/Checkout/api", "")
 	require.NoError(t, err)
 	require.NotNil(t, r.Entry, "a case-insensitive filesystem folds case")
 	assert.Equal(t, "checkout", r.Entry.Name)
+	f := gradleFile()
+	f.Environments[prodHost][0].Path = "WebProxy"
+	r, err = Resolve(fixture(t, "gradle-multi"), f, prodHost, "WebProxy-API/src", "")
+	require.NoError(t, err)
+	require.NotNil(t, r.Entry, "and so does the module a Gradle build covers a directory through")
+	assert.Equal(t, "webproxy", r.Entry.Name)
 
 	foldPathCase = false
-	r, err = Resolve(monorepoFile(), prodHost, "Services/Checkout/api", "")
+	r, err = Resolve(fstest.MapFS{}, monorepoFile(), prodHost, "Services/Checkout/api", "")
 	require.NoError(t, err)
 	assert.Nil(t, r.Entry, "a case-sensitive one does not")
 }
@@ -108,7 +152,7 @@ func TestResolve_PathCase(t *testing.T) {
 func TestResolve_Status(t *testing.T) {
 	f := exampleFile()
 	f.unknown = []string{`"discovered" on line 8`}
-	r, err := Resolve(f, prodHost, "services/checkout/internal", "")
+	r, err := Resolve(fstest.MapFS{}, f, prodHost, "services/checkout/internal", "")
 	require.NoError(t, err)
 	assert.Equal(t, &Status{
 		Linked:      true,

@@ -15,6 +15,8 @@ func TestExtractBuildFilesWithoutNames(t *testing.T) {
 		{"package.json", `{ "private": true }`},
 		{"pom.xml", "<project><parent><artifactId>parent-only</artifactId></parent></project>"},
 		{"pyproject.toml", "[tool.unrelated]\nname = 'not-a-project'\n"},
+		{"settings.gradle.kts", "include(\":app\")\n"},
+		{"build.gradle", "// archivesBaseName = 'commented-out'\n"},
 		{"Chart.yaml", "name: [invalid"},
 		{"Chart.yaml", "apiVersion: v2\n"},
 	} {

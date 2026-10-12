@@ -244,6 +244,7 @@ func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 		{"namespace", []string{"--namespace", "Payments", "--workload", "checkout"}, reposcope.FileName},
 		{"path outside", []string{"--service-name", "checkout", "--path", "../elsewhere"}, reposcope.FileName},
 		{"path taken", []string{"--service-name", "checkout", "--path", "services/ledger"}, reposcope.FileName},
+		{"two paths", []string{"--service-name", "checkout", "--path", "services/checkout", "--path", "libs/cart"}, "repo-scope set"},
 		{"entry name", nil, reposcope.FileName},
 		{"no binding", nil, "repo-scope set"},
 	} {
@@ -331,6 +332,15 @@ func TestRepoScopeDelete(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+// gradleMultiRepo is reposcope's gradle-multi fixture, an absolute path so it
+// survives a test's chdir.
+func gradleMultiRepo(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs(filepath.Join("..", "pkg", "reposcope", "testdata", "repos", "gradle-multi"))
+	require.NoError(t, err)
+	return dir
+}
+
 // The terminal output of current, describe and list, one golden per command:
 // current answers wherever it is run and exits 0 whenever it can answer,
 // because it is how a user finds out why a query was or was not scoped.
@@ -340,9 +350,17 @@ func TestRepoScopeHumanOutput(t *testing.T) {
       path: services/billing
       services: [SERVICE-0123456789ABCDEF]
 `
+	gradle := gradleMultiRepo(t)
+	webproxy := `environments:
+  abc12345.apps.dynatrace.com:
+    - name: webproxy
+      path: webproxy
+      service-names: [webproxy]
+`
 	for _, tc := range []struct {
 		golden    string
 		repo      bool
+		fixture   string
 		scopeFile string
 		dir       string
 		args      []string
@@ -357,12 +375,16 @@ func TestRepoScopeHumanOutput(t *testing.T) {
 		{golden: "describe-by-name", repo: true, scopeFile: monorepoScope, args: []string{"describe", "ledger"}},
 		{golden: "describe-one-object", repo: true, scopeFile: billing, dir: "services/billing", args: []string{"describe"}},
 		{golden: "describe-uncovered", repo: true, scopeFile: monorepoScope, dir: "docs", args: []string{"describe"}},
+		{golden: "describe-gradle-library", repo: true, fixture: gradle, scopeFile: webproxy, dir: "webproxy-api", args: []string{"describe"}},
 		{golden: "list", repo: true, scopeFile: billing, args: []string{"list"}},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {
 			localRepoScopeConfig(t)
 			if tc.repo {
-				chdirTestRepo(t, tc.scopeFile)
+				repo := chdirTestRepo(t, tc.scopeFile)
+				if tc.fixture != "" {
+					require.NoError(t, os.CopyFS(repo, os.DirFS(tc.fixture)))
+				}
 			} else {
 				t.Chdir(t.TempDir())
 			}

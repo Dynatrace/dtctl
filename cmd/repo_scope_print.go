@@ -27,13 +27,17 @@ const repoScopeShownCandidates = 5
 const repoScopeShownIDs = 2
 
 // printRepoScopeCurrent is `repo-scope current`: one line, the way
-// `ctx current` answers.
+// `ctx current` answers, with the reason when there is one.
 func printRepoScopeCurrent(w io.Writer, s *reposcope.Status) {
 	if s.Entry == nil {
 		fmt.Fprintf(w, "none  (%s)\n", s.Reason)
 		return
 	}
-	fmt.Fprintf(w, "%s  (%s · %s)\n", s.Entry.Name, repoScopeCoverage(s.Entry), s.Environment)
+	how := repoScopeCoverage(s.Entry) + " · " + s.Environment
+	if s.Reason != "" {
+		how += "; " + s.Reason
+	}
+	fmt.Fprintf(w, "%s  (%s)\n", s.Entry.Name, how)
 }
 
 // printRepoScopeDescribe is `repo-scope describe`.
@@ -125,6 +129,14 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 	took := fmt.Sprintf("%d of %d queries ran in %.1fs. Nothing was written.", ran, len(r.Queries), elapsed.Seconds())
 
 	switch {
+	case p.shared != "":
+		if len(r.Candidates) > 0 {
+			writeRepoScopeCandidates(w, r)
+		}
+		fmt.Fprintf(w, "%s %s:\n", took, capitalize(p.shared))
+		for _, l := range p.discoverEach {
+			fmt.Fprintf(w, "  %s\n", l)
+		}
 	case len(r.Candidates) == 0:
 		printRepoScopeNoMatch(w, r, p, took)
 	case r.Verdict == reposcope.VerdictMatch:

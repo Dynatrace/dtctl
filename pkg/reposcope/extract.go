@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -16,10 +17,12 @@ const (
 	maxFileBytes = 1 << 20 // per file
 )
 
-// skippedDirs are never entered: dependency trees, build output and tool
-// state hold other projects' names, not this repository's.
+// skippedDirs are never entered: dependency trees, build output, build
+// tooling and tool state hold other projects' names, not this repository's.
+// Gradle's buildSrc is a build of its own that compiles the main build's
+// logic, so like target and build it names nothing that runs.
 var skippedDirs = keySet(".git", "node_modules", "vendor", "target", "build", "dist",
-	".venv", "__pycache__", ".idea", ".terraform")
+	".venv", "__pycache__", ".idea", ".terraform", ".gradle", "buildSrc")
 
 // excludedDirs hold test content, compared case-insensitively so .NET's
 // Tests/ counts too: Go's testdata, Jest's __tests__, end-to-end suites, and
@@ -36,8 +39,9 @@ var excludedDirs = union(testWords, "testdata", "__tests__", "e2e", "examples")
 var testFileWords = union(testWords, "e2e")
 
 // source is one kind of file names are read from. A build file or Dockerfile
-// makes its directory a unit; a Kubernetes manifest or Helm chart does not,
-// and is attributed to a unit instead (see attribute).
+// makes its directory a unit, except inside a Gradle build (see
+// gradleBuilds.absorbs); a Kubernetes manifest or Helm chart does not, and is
+// attributed to a unit instead (see attribute).
 type source struct {
 	match     func(name string) bool
 	makesUnit bool
@@ -49,6 +53,8 @@ var sources = []source{
 	{named("go.mod"), true, buildFile(goModule)},
 	{named("package.json"), true, buildFile(packageName)},
 	{named("pom.xml"), true, buildFile(pomArtifact)},
+	{named(gradleSettingsFiles...), true, buildFile(gradleRootProject)},
+	{named(gradleBuildFiles...), true, buildFile(gradleArchivesName)},
 	{named("pyproject.toml"), true, buildFile(pyprojectName)},
 	{func(n string) bool { return strings.HasSuffix(n, ".csproj") }, true, buildFile(assemblyName)},
 	{isDockerfile, true, buildFile(dockerEntrypoint)},
@@ -56,8 +62,8 @@ var sources = []source{
 	{func(n string) bool { return strings.HasSuffix(n, ".yaml") || strings.HasSuffix(n, ".yml") }, false, manifestWorkloads},
 }
 
-func named(want string) func(string) bool {
-	return func(name string) bool { return name == want }
+func named(names ...string) func(string) bool {
+	return func(name string) bool { return slices.Contains(names, name) }
 }
 
 func isDockerfile(name string) bool {
@@ -89,6 +95,9 @@ type signals struct {
 	// dropped are the unit's names held back as test names (see
 	// token.testName), sorted, so that holding them back is never silent.
 	dropped []string
+	// sharedBy are the Gradle deployables that share the library module
+	// discovery ran for; tokens are then all of theirs.
+	sharedBy []string
 }
 
 // extract reads the names the repository at fsys gives the unit holding dir,
@@ -98,43 +107,71 @@ type signals struct {
 // machine here.
 //
 // The unit is the nearest directory at or above dir that holds a build file
-// or a Dockerfile, or the repository root when none does. Its directory name
-// is a token, and so is dir's own name when the unit is the root: in a
-// monorepo with one build file at the top, the directory a developer stands
-// in is often what the service is called.
+// or a Dockerfile, or the repository root when none does; inside a Gradle
+// build it is a deployable or the build (see gradleBuild). Its directory name
+// is a token, and so is dir's own name when the unit is a root no Gradle
+// build holds: in a monorepo with one build file at the top, the directory a
+// developer stands in is often what the service is called, while a Gradle
+// module is part of what its build deploys.
 func extract(fsys fs.FS, dir string) (*signals, error) {
 	dir = path.Clean(dir)
-	files, err := listSources(fsys, dir)
+	files, err := listSources(fsys, dir, func(f string) bool { return sourceFor(f) != nil })
 	if err != nil {
 		return nil, err
 	}
-	units := map[string]bool{".": true}
-	for _, f := range files {
-		if sourceFor(f).makesUnit {
-			units[path.Dir(f)] = true
-		}
-	}
 	var found []sourceNames
+	gradle := map[string]string{}
 	for _, f := range files {
-		if data, err := readRegular(fsys, f); err == nil {
-			found = append(found, sourceFor(f).read(data, f)...)
+		data, err := readRegular(fsys, f)
+		if err != nil {
+			continue
+		}
+		found = append(found, sourceFor(f).read(data, f)...)
+		if isGradleFile(path.Base(f)) {
+			gradle[f] = string(data)
 		}
 	}
 	found = append(found, readRemote(fsys)...)
 
-	unit := nearestUnit(units, dir)
-	nameDir := unit
-	if nameDir == "." {
-		nameDir = dir
+	builds := readGradleBuilds(files, gradle, found)
+	units := map[string]bool{".": true}
+	for _, f := range files {
+		if sourceFor(f).makesUnit && !builds.absorbs(f) {
+			units[path.Dir(f)] = true
+		}
 	}
-	return unitSignals(units, found, unit, nameDir), nil
+	for _, b := range builds {
+		if deployables := b.deployables(); len(deployables) > 1 {
+			for _, d := range deployables {
+				units[d] = true
+			}
+		}
+	}
+
+	unit, build := nearestUnit(units, dir), builds.of(dir)
+	if build == nil {
+		nameDir := unit
+		if nameDir == "." {
+			nameDir = dir
+		}
+		return newSignals(unit, unitTokens(units, found, unit, nameDir)), nil
+	}
+	unit, sharedBy := build.unitOf(dir, unit)
+	if len(sharedBy) > 0 {
+		var tokens []token
+		for _, d := range sharedBy {
+			tokens = append(tokens, unitTokens(units, found, d, d)...)
+		}
+		s := newSignals(unit, tokens)
+		s.sharedBy = sharedBy
+		return s, nil
+	}
+	return newSignals(unit, unitTokens(units, found, unit, unit)), nil
 }
 
-// unitSignals collects the names of unit: nameDir's own name unless it is the
+// unitTokens collects the names of unit: nameDir's own name unless it is the
 // repository root, then the names of every source attributed to the unit.
-// A test name is held back here rather than where it is read, so that what
-// is reported as held back is this unit's, not every unit's.
-func unitSignals(units map[string]bool, found []sourceNames, unit, nameDir string) *signals {
+func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string) []token {
 	var tokens []token
 	if nameDir != "." {
 		if t, ok := newToken(kindDir, path.Base(nameDir), dirSource(nameDir), 0); ok {
@@ -146,6 +183,13 @@ func unitSignals(units map[string]bool, found []sourceNames, unit, nameDir strin
 			tokens = append(tokens, f.tokens...)
 		}
 	}
+	return tokens
+}
+
+// newSignals holds the unit's test names back from its tokens. They are held
+// back here rather than where they are read, so that what is reported as held
+// back is this unit's, not every unit's.
+func newSignals(unit string, tokens []token) *signals {
 	s := &signals{unit: unit}
 	dropped := map[string]bool{}
 	for _, t := range tokens {
@@ -169,8 +213,9 @@ func dirSource(dir string) string {
 	return dir + "/"
 }
 
-// listSources lists the files a source reads, for discovery from dir.
-func listSources(fsys fs.FS, dir string) ([]string, error) {
+// listSources lists the files keep accepts, for discovery from dir. Only
+// those count toward maxFiles.
+func listSources(fsys fs.FS, dir string, keep func(string) bool) ([]string, error) {
 	var files []string
 	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		switch {
@@ -185,7 +230,7 @@ func listSources(fsys fs.FS, dir string) ([]string, error) {
 				return fs.SkipDir
 			}
 			return nil
-		case !d.Type().IsRegular() || sourceFor(p) == nil || testFile(d.Name()):
+		case !d.Type().IsRegular() || !keep(p) || testFile(d.Name()):
 			return nil
 		case len(files) == maxFiles:
 			return fs.SkipAll

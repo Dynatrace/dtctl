@@ -19,6 +19,14 @@ var (
 	tomlSectionRe  = regexp.MustCompile(`^\s*\[([^\]]+)\]\s*$`)
 	tomlNameRe     = regexp.MustCompile(`^\s*name\s*=\s*["']([^"']+)["']`)
 	dockerRunRe    = regexp.MustCompile(`(?im)^[ \t]*(ENTRYPOINT|CMD)[ \t]+(.+)$`)
+
+	// The Gradle expressions read one assignment in either DSL: `name = "x"`
+	// and `name = 'x'`, and Kotlin's `name.set("x")` for a property. The
+	// archives name is matched anywhere on a line not commented out before
+	// it, so a one-line block such as `base { archivesName.set("x") }` is
+	// read too.
+	gradleRootProjectRe  = regexp.MustCompile(`(?m)^[ \t]*rootProject\.name[ \t]*=[ \t]*["']([^"']+)["']`)
+	gradleArchivesNameRe = regexp.MustCompile(`(?m)^[^/\n]*?\b(?:archivesBaseName|archivesName)[ \t]*(?:=|\.set\()[ \t]*["']([^"']+)["']`)
 )
 
 // goModule reads the last segment of go.mod's module path, without a /vN
@@ -56,6 +64,23 @@ func pomArtifact(text, file string) (token, bool) {
 		return token{}, false
 	}
 	return tokenAt(kindArtifact, m[1], file, own, m[0])
+}
+
+// gradleRootProject reads the build's name from a Gradle settings file.
+func gradleRootProject(text, file string) (token, bool) {
+	if m := gradleRootProjectRe.FindStringSubmatch(text); m != nil {
+		return tokenAt(kindProject, m[1], file, text, m[0])
+	}
+	return token{}, false
+}
+
+// gradleArchivesName reads the name a Gradle module's archives are given in
+// place of the module's directory name; most modules set none.
+func gradleArchivesName(text, file string) (token, bool) {
+	if m := gradleArchivesNameRe.FindStringSubmatch(text); m != nil {
+		return tokenAt(kindArtifact, m[1], file, text, m[0])
+	}
+	return token{}, false
 }
 
 // pyprojectName reads `name = "…"` from [project] or [tool.poetry]; no TOML

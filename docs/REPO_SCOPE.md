@@ -74,7 +74,7 @@ The `set` line saves exactly the candidate shown:
 
 ### Units
 
-Discovery works per unit: the nearest directory at or above the working directory (or `--path`) that holds a build file (`go.mod`, `package.json`, `pom.xml`, `pyproject.toml`, `*.csproj`) or a Dockerfile; the repository root otherwise. Kubernetes manifests and Helm charts do not make units: their names are attributed to the unit named like them, or the nearest one above them. When the unit is the root, the working directory's own name is sent too, because in a repository with one build at the top the directory you stand in is often what the service is called. The `set` line covers the unit when it is not the root. When it is the root, the line carries `--path` for the directory discovery ran for only if that directory's name is what matched the candidate: from `services/ledger` of a repository whose only `go.mod` is at the top, a workload named `ledger` gets `--path services/ledger`, so `services/checkout` beside it can be linked to its own service; from `internal/handlers` of a single-module repository, the service its `go.mod` names gets an entry for the whole repository. The lines for linking by hand, printed when nothing matched, carry no such `--path` and say how to add it.
+Discovery works per unit: the nearest directory at or above the working directory (or `--path`) that holds a build file (`go.mod`, `package.json`, `pom.xml`, `build.gradle(.kts)`, `settings.gradle(.kts)`, `pyproject.toml`, `*.csproj`) or a Dockerfile; the repository root otherwise. Kubernetes manifests and Helm charts do not make units: their names are attributed to the unit named like them, or the nearest one above them. Each Maven module is a unit of its own. A Gradle build is one unit, at its settings file, unless several of its modules are deployed (see [Monorepos](#monorepos)); its settings file contributes `rootProject.name`, a module's build file its `archivesName`, and `buildSrc` and `.gradle` are never read. When the unit is a root no Gradle build holds, the working directory's own name is sent too, because in a repository with one build at the top the directory you stand in is often what the service is called. The `set` line covers the unit when it is not the root. When it is the root, the line carries `--path` for the directory discovery ran for only if that directory's name is what matched the candidate: from `services/ledger` of a repository whose only `go.mod` is at the top, a workload named `ledger` gets `--path services/ledger`, so `services/checkout` beside it can be linked to its own service; from `internal/handlers` of a single-module repository, the service its `go.mod` names gets an entry for the whole repository. The lines for linking by hand, printed when nothing matched, carry no such `--path` and say how to add it.
 
 ### What discovery sends
 
@@ -212,6 +212,14 @@ A query uses the entry whose path covers the working directory: the longest one 
 ```bash
 dtctl query 'fetch spans | limit 5' --repo-scope ledger
 ```
+
+A Gradle build is discovered by what it deploys: a module that holds a Dockerfile, or that a Helm chart or workload manifest is in or named after, unless the module is named like a test (`smoke-tests/`). With one such module, or none, the build is one unit, and discovery from any module proposes one entry for the build (with `--path <settings directory>` when the build sits below the repository root). With several, each deployable is a unit, and its entry's `path` is the deployable's module:
+
+```bash
+dtctl repo-scope set webproxy --namespace edge --workload webproxy --path webproxy
+```
+
+A library module resolves to the deployable whose closure of `project(":x")`, `project(path: ":x")` or `projects.x` references (outside test configurations such as `testImplementation`) holds it, read from the build files when the command runs, so the entry follows the build as it changes; `repo-scope current` says so. Discovery from a library module proposes the entry of the one deployable that depends on it. A module the deployables of several entries depend on resolves to none of them, so a query from there runs unscoped until you pick one with `--repo-scope <name>`, and discovery from it, or from the settings directory, proposes no entry but a `discover --path` line per deployable. A `projectDir` remap is not read, so run from such a module with `--repo-scope <name>`. Maven modules stay units of their own until field data shows a Maven build should be read the same way.
 
 ## Several environments
 

@@ -116,9 +116,13 @@ type Plan struct {
 	// repository root; Unit is the build unit holding it. They differ in a
 	// monorepo with one build file at the top, where Dir's own name is
 	// among what was sent but Unit is the whole repository.
-	Dir  string   `json:"dir" yaml:"dir"`
-	Unit string   `json:"unit" yaml:"unit"`
-	Sent []string `json:"sent" yaml:"sent"`
+	Dir  string `json:"dir" yaml:"dir"`
+	Unit string `json:"unit" yaml:"unit"`
+	// SharedBy are the Gradle deployables that share the library module
+	// Dir is in; Sent then holds all of their names, and no entry is the
+	// unit's alone.
+	SharedBy []string `json:"sharedBy,omitempty" yaml:"sharedBy,omitempty"`
+	Sent     []string `json:"sent" yaml:"sent"`
 	// Dropped are the unit's names held back because they look like test
 	// fixtures; a --term sends one anyway.
 	Dropped []string `json:"dropped,omitempty" yaml:"dropped,omitempty"`
@@ -143,7 +147,8 @@ func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Dir: path.Clean(dir), Unit: s.unit, Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens}
+	p := &Plan{Dir: path.Clean(dir), Unit: s.unit, SharedBy: s.sharedBy,
+		Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens}
 	p.Dropped = heldBack(s.dropped, p.Sent)
 	if len(p.Sent) == 0 {
 		return p, nil
@@ -274,10 +279,11 @@ const (
 // result as is.
 type DiscoveryReport struct {
 	Environment string `json:"environment" yaml:"environment"`
-	// Dir and Unit are the plan's.
-	Dir     string  `json:"dir" yaml:"dir"`
-	Unit    string  `json:"unit" yaml:"unit"`
-	Verdict Verdict `json:"verdict" yaml:"verdict"`
+	// Dir, Unit and SharedBy are the plan's.
+	Dir      string   `json:"dir" yaml:"dir"`
+	Unit     string   `json:"unit" yaml:"unit"`
+	SharedBy []string `json:"sharedBy,omitempty" yaml:"sharedBy,omitempty"`
+	Verdict  Verdict  `json:"verdict" yaml:"verdict"`
 	// Verdicts is keyed by service, processGroup, workload and serviceName.
 	Verdicts   map[string]Verdict `json:"verdicts" yaml:"verdicts"`
 	Candidates []Candidate        `json:"candidates" yaml:"candidates"`
@@ -297,7 +303,8 @@ type DiscoveryReport struct {
 // reads. A cancelled run returns the report so far together with ctx.Err(),
 // so a Ctrl-C after the first query still shows what it found.
 func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string) (*DiscoveryReport, error) {
-	r := &DiscoveryReport{Environment: host, Dir: p.Dir, Unit: p.Unit, Queries: append([]Query{}, p.Queries...), Sent: []string{}}
+	r := &DiscoveryReport{Environment: host, Dir: p.Dir, Unit: p.Unit, SharedBy: p.SharedBy,
+		Queries: append([]Query{}, p.Queries...), Sent: []string{}}
 	d := newDiscovery(p)
 	if len(p.Queries) == 0 {
 		r.note(fmt.Sprintf("no usable name found for unit %q", p.Unit))

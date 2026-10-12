@@ -33,8 +33,9 @@ type File struct {
 
 // Entry is one named binding set. A query run from Path (or any directory
 // under it) is scoped to these bindings; an Entry without Path covers the
-// whole repository. The file spells its keys in kebab-case, results in
-// camelCase.
+// whole repository. A Path that is a Gradle deployable's module also covers
+// the modules it depends on (see Resolve). The file spells its keys in
+// kebab-case, results in camelCase.
 type Entry struct {
 	Name          string     `yaml:"name" json:"name" table:"NAME"`
 	Path          string     `yaml:"path,omitempty" json:"path,omitempty" table:"PATH"`

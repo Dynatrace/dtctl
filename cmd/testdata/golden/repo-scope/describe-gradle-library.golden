@@ -1,0 +1,9 @@
+Name:           webproxy
+Path:           webproxy
+Environment:    abc12345.apps.dynatrace.com
+File:           .dtctl-repo-scope.yaml
+Note:           covered through the Gradle build: webproxy depends on webproxy-api
+Service names:  webproxy
+Filters:
+  fetch logs   | filter (service.name == "webproxy")
+  fetch spans  | filter (service.name == "webproxy")

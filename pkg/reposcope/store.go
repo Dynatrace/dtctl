@@ -187,7 +187,8 @@ func readRegular(fsys fs.FS, name string) ([]byte, error) {
 	return data, nil
 }
 
-// RepoFS is the repository root as a read-only fs.FS for PlanDiscovery.
+// RepoFS is the repository root as a read-only fs.FS. It reads the host's
+// disk, which only a CLI invocation has a Location on (see currentWorkDir).
 func RepoFS(loc Location) fs.FS {
 	return os.DirFS(loc.Root)
 }
