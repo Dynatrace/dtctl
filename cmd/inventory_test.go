@@ -3,12 +3,16 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	cmdtestutil "github.com/dynatrace-oss/dtctl/cmd/testutil"
+	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/dynatrace-oss/dtctl/pkg/exec"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
 	"github.com/dynatrace-oss/dtctl/sdk/inventory"
 )
@@ -149,4 +153,29 @@ func TestInventoryOutputGoldenAgent(t *testing.T) {
 		t.Fatalf("print failed: %v", err)
 	}
 	cmdtestutil.AssertGolden(t, "inventory/agent", buf.String())
+}
+
+// TestInventoryRunnerReadsTheScanFromTheResponse: whether a result was sampled
+// and how much it scanned come from Grail's metadata, never from the query
+// that asked for them.
+func TestInventoryRunnerReadsTheScanFromTheResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":{"records":[{"matched":"3"}],` +
+			`"metadata":{"grail":{"scannedBytes":180000000,"sampled":true}}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := client.NewForTesting(srv.URL, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &inventoryRunner{executor: exec.NewDQLExecutor(c), scanLimitGB: 5}
+	res, err := runner.RunQuery(context.Background(), "fetch logs, samplingRatio:100000 | summarize matched = count()")
+	if err != nil {
+		t.Fatalf("RunQuery: %v", err)
+	}
+	if !res.Sampled || res.ScannedBytes != 180000000 {
+		t.Errorf("Sampled/ScannedBytes = %t/%d, want true/180000000", res.Sampled, res.ScannedBytes)
+	}
 }

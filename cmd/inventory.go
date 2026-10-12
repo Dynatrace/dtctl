@@ -173,8 +173,10 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 	// down to a power of ten, reporting both as a warning on a 200. This flag
 	// is what keeps the SDK from extrapolating a count that was never sampled.
 	sampled := false
+	var scanned int64
 	if meta := resp.GetMetadata(); meta != nil {
 		sampled = meta.Sampled
+		scanned = meta.ScannedBytes
 	}
 	return &inventory.RunResult{
 		Records:         resp.GetRecords(),
@@ -183,6 +185,7 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 		TruncationCause: cause,
 		ColumnTypes:     inventory.ColumnTypesOf(resp.GetTypes()),
 		Sampled:         sampled,
+		ScannedBytes:    scanned,
 	}, nil
 }
 
