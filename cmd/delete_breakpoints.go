@@ -82,7 +82,7 @@ Examples:
 				return err
 			}
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath(cmdContext(cmd)))
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -104,7 +103,7 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath(cmdContext(cmd)))
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -214,8 +213,11 @@ func breakpointRowFromRule(rule livedebugger.BreakpointRule) (breakpointRow, boo
 	return breakpointRow{ID: id, Filename: filename, Line: line, Active: !isDisabled, LogMessage: logMessage}, true
 }
 
-func currentProjectPath() string {
-	cwd, err := os.Getwd()
+// currentProjectPath names the Live Debugger workspace of this invocation: the
+// base name of its working directory, or "no-project" when it has none (an
+// embedded invocation, see currentWorkDir) or that directory is the root.
+func currentProjectPath(ctx context.Context) string {
+	cwd, err := currentWorkDir(ctx)
 	if err != nil {
 		return "no-project"
 	}
