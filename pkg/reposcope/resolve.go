@@ -27,6 +27,13 @@ type Status struct {
 	Entry       *Entry `json:"entry,omitempty" yaml:"entry,omitempty"`
 	// Filters maps each data object to the expression the entry inserts.
 	Filters map[string]string `json:"filters,omitempty" yaml:"filters,omitempty"`
+	// LiveDebuggerFilters are the Live Debugger workspace filter sets the
+	// entry renders to; see LiveDebuggerFilters. It is the one rendering:
+	// describe and the breakpoint commands read it through
+	// LiveDebuggerFilterSets.
+	LiveDebuggerFilters []map[string][]string `json:"liveDebuggerFilters,omitempty" yaml:"liveDebuggerFilters,omitempty"`
+	// liveDebuggerReason says why an entry renders no filter sets.
+	liveDebuggerReason string
 	// Reason explains a nil Entry, an entry chosen by name that does not
 	// cover Dir, or one that covers it through a Gradle build.
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
@@ -91,7 +98,21 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 			s.Filters[object] = filter.Expr
 		}
 	}
+	s.LiveDebuggerFilters, _, s.liveDebuggerReason = LiveDebuggerFilters(s.Entry)
 	return s, nil
+}
+
+// LiveDebuggerFilterSets is the entry's LiveDebuggerFilters, or, when it
+// renders none, ok false and the reason. A Status without an entry renders
+// none either.
+func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, reason string) {
+	switch {
+	case len(s.LiveDebuggerFilters) > 0:
+		return s.LiveDebuggerFilters, true, ""
+	case s.Entry == nil:
+		return nil, false, s.Reason
+	}
+	return nil, false, s.liveDebuggerReason
 }
 
 // closestEntry is the entry with the longest path covering relDir, else the
