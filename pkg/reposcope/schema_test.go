@@ -138,6 +138,18 @@ func TestCheck(t *testing.T) {
 			msg: `path "/srv/repo" must be relative to the repository root`},
 		{name: "backslash path", doc: entry("name: checkout", `path: 'services\checkout'`, "service-names: [checkout]"),
 			msg: `must use forward slashes`},
+		{name: "paths", doc: entry("name: proxy", "path: proxy", "paths: [proxy, proxy-api]", "service-names: [proxy]")},
+		{name: "paths without path", doc: entry("name: proxy", "paths: [proxy, proxy-api]", "service-names: [proxy]"),
+			msg: `entry "proxy": paths is set without path`},
+		{name: "a module in two entries' paths",
+			doc: entry("name: proxy", "path: proxy", "paths: [proxy, core]", "service-names: [proxy]") +
+				"    - name: admin\n      path: admin\n      paths: [admin, core]\n      service-names: [admin]\n"},
+		{name: "path not in paths", doc: entry("name: proxy", "path: proxy", "paths: [proxy-api]", "service-names: [proxy]"),
+			msg: `path "proxy" is not one of paths`},
+		{name: "a path listed twice", doc: entry("name: proxy", "path: proxy", "paths: [proxy, Proxy]", "service-names: [proxy]"),
+			msg: `paths[1] "Proxy" is listed twice`},
+		{name: "a path in paths leaving the repository", doc: entry("name: proxy", "path: proxy", "paths: [proxy, ../core]", "service-names: [proxy]"),
+			msg: `paths[1]: path "../core" leaves the repository`},
 		{name: "dot path", doc: entry("name: checkout", "path: .", "service-names: [checkout]"),
 			msg: `path "." is the repository root`},
 		{name: "unclean path", doc: entry("name: checkout", "path: services/./checkout/", "service-names: [checkout]"),
@@ -205,6 +217,13 @@ func TestCheck_NoBindingSuggestsWhatToAdd(t *testing.T) {
 	invalidErr := f.check()
 	require.NotNil(t, invalidErr)
 	assert.Equal(t, []string{"add at least one of services, process-groups, service-names or workloads"}, invalidErr.Suggestions)
+}
+
+func TestCheck_PathsWithoutPathSuggestsIt(t *testing.T) {
+	f := &File{Environments: map[string][]Entry{prodHost: {{Name: "proxy", Paths: []string{"proxy", "proxy-core"}, ServiceNames: []string{"proxy"}}}}}
+	invalidErr := f.check()
+	require.NotNil(t, invalidErr)
+	assert.Equal(t, []string{"add path: proxy: path is the entry's primary directory, and paths lists it with the rest"}, invalidErr.Suggestions)
 }
 
 func TestUpsertRemove(t *testing.T) {

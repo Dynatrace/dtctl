@@ -243,6 +243,27 @@ func TestPlan_TermsBypassTestNames(t *testing.T) {
 	assert.NotContains(t, p.Dropped, "test-platform-service-smoke", "a name a term sends is not reported as held back")
 }
 
+// From a Gradle library two deployables share, discovery sends both
+// deployables' names for the build; from a library one of them depends on,
+// it plans for that deployable, covering the modules it is built from.
+func TestPlan_GradleDeployables(t *testing.T) {
+	p, err := PlanDiscovery(fixture(t, "gradle-multi"), "webproxy-core", nil)
+	require.NoError(t, err)
+	assert.Equal(t, ".", p.Unit)
+	assert.Equal(t, []string{"admin", "webproxy"}, p.SharedBy)
+	assert.Empty(t, p.Paths)
+	assert.Equal(t, []string{"admin", "webproxy", "webproxy-app", "webproxy.app", "webproxy_app", "webproxyapp"}, p.Sent)
+
+	p, err = PlanDiscovery(fixture(t, "gradle-multi"), "webproxy-api", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "webproxy", p.Unit)
+	assert.Equal(t, []string{"webproxy", "webproxy-api", "webproxy-core"}, p.Paths)
+	assert.Empty(t, p.SharedBy)
+	r, err := Discover(context.Background(), &fakeRunner{}, p, prodHost)
+	require.NoError(t, err)
+	assert.Equal(t, p.Paths, r.Paths)
+}
+
 // The names held back are named, so the drop is never silent.
 func TestDiscover_NotesDroppedNames(t *testing.T) {
 	p := singleGo(t)

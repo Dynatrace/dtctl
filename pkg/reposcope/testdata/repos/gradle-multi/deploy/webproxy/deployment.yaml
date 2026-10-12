@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webproxy
+  namespace: edge
+spec:
+  template:
+    spec:
+      containers:
+        - name: webproxy
+          image: registry.example.invalid/acme/webproxy:1.2

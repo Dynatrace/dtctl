@@ -57,6 +57,7 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	e := s.Entry
 	kv("Name:", e.Name)
 	kv("Path:", repoScopeCoverage(e))
+	kv("Paths:", e.Paths...)
 	kv("Environment:", s.Environment)
 	kv("File:", s.File)
 	kv("Note:", s.Reason)
@@ -76,7 +77,8 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	kv("Other entries:", s.Others...)
 }
 
-// repoScopeCoverage names the directory an entry covers.
+// repoScopeCoverage names the directory an entry covers: its path, which an
+// entry with paths lists first.
 func repoScopeCoverage(e *reposcope.Entry) string {
 	return cmp.Or(e.Path, "whole repository")
 }
@@ -104,7 +106,7 @@ func repoScopeRows(entries []reposcope.Entry) []repoScopeRow {
 	for _, e := range entries {
 		rows = append(rows, repoScopeRow{
 			Name:          e.Name,
-			Path:          repoScopeCoverage(&e),
+			Path:          cmp.Or(strings.Join(e.Paths, ", "), repoScopeCoverage(&e)),
 			Services:      strings.Join(e.Services, ", "),
 			ProcessGroups: strings.Join(e.ProcessGroups, ", "),
 			ServiceNames:  strings.Join(e.ServiceNames, ", "),
@@ -125,6 +127,14 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 	took := fmt.Sprintf("%d of %d queries ran in %.1fs. Nothing was written.", ran, len(r.Queries), elapsed.Seconds())
 
 	switch {
+	case p.shared != "":
+		if len(r.Candidates) > 0 {
+			writeRepoScopeCandidates(w, r)
+		}
+		fmt.Fprintf(w, "%s %s:\n", took, capitalize(p.shared))
+		for _, l := range p.discoverEach {
+			fmt.Fprintf(w, "  %s\n", l)
+		}
 	case len(r.Candidates) == 0:
 		printRepoScopeNoMatch(w, r, p, took)
 	case r.Verdict == reposcope.VerdictMatch:

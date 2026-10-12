@@ -46,6 +46,15 @@ func TestRepoScopeDiscoveryAmbiguousWithoutBindings(t *testing.T) {
 	require.Contains(t, strings.Join(suggestions, "\n"), "link by hand:")
 }
 
+// A module three deployables share names them as prose and proposes
+// discovering each.
+func TestRepoScopeDiscoverySharedByThree(t *testing.T) {
+	report := &reposcope.DiscoveryReport{Unit: ".", Dir: "core", SharedBy: []string{"billing", "checkout", "ledger"}}
+	proposal := newRepoScopeProposal(report, nil)
+	require.Equal(t, "no entry is proposed for core, shared by billing, checkout and ledger; discover each to save its entry", proposal.shared)
+	require.Len(t, proposal.discoverEach, 3)
+}
+
 func TestRepoScopeDiscoveryExplainsIncompleteNoMatch(t *testing.T) {
 	report := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Verdict: reposcope.VerdictNone, Partial: true,
 		Queries: []reposcope.Query{

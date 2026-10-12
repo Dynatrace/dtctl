@@ -225,6 +225,12 @@ func TestRepoScopeSet(t *testing.T) {
 		},
 		{Name: "ledger", Path: "services/ledger", Workloads: []reposcope.Workload{{Namespace: "payments", Name: "ledger"}}},
 	}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost), "set replaces the named entry whole and keeps the others")
+
+	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "proxy", "--service-name", "proxy",
+		"--path", "proxy", "--path", "proxy-core/"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, reposcope.Entry{Name: "proxy", Path: "proxy", Paths: []string{"proxy", "proxy-core"}, ServiceNames: []string{"proxy"}},
+		loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[2], "several --path are the entry's paths, the first its path too")
 }
 
 // A refused set must leave a committed file exactly as it was.
@@ -340,6 +346,11 @@ func TestRepoScopeHumanOutput(t *testing.T) {
       path: services/billing
       services: [SERVICE-0123456789ABCDEF]
 `
+	withPaths := billing + `    - name: proxy
+      path: proxy
+      paths: [proxy, proxy-core]
+      service-names: [proxy]
+`
 	for _, tc := range []struct {
 		golden    string
 		repo      bool
@@ -357,7 +368,8 @@ func TestRepoScopeHumanOutput(t *testing.T) {
 		{golden: "describe-by-name", repo: true, scopeFile: monorepoScope, args: []string{"describe", "ledger"}},
 		{golden: "describe-one-object", repo: true, scopeFile: billing, dir: "services/billing", args: []string{"describe"}},
 		{golden: "describe-uncovered", repo: true, scopeFile: monorepoScope, dir: "docs", args: []string{"describe"}},
-		{golden: "list", repo: true, scopeFile: billing, args: []string{"list"}},
+		{golden: "describe-paths", repo: true, scopeFile: withPaths, dir: "proxy-core", args: []string{"describe"}},
+		{golden: "list", repo: true, scopeFile: withPaths, args: []string{"list"}},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {
 			localRepoScopeConfig(t)

@@ -2,3 +2,4 @@ NAME       PATH                SERVICES                   PROCESS GROUPS   SERVI
 checkout   services/checkout                                               checkout                          
 ledger     services/ledger                                                                 payments/ledger   
 billing    services/billing    SERVICE-0123456789ABCDEF                                                      
+proxy      proxy, proxy-core                                               proxy                             

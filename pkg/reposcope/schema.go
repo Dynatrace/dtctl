@@ -31,13 +31,15 @@ type File struct {
 	unknown []string
 }
 
-// Entry is one named binding set. A query run from Path (or any directory
-// under it) is scoped to these bindings; an Entry without Path covers the
-// whole repository. The file spells its keys in kebab-case, results in
-// camelCase.
+// Entry is one named binding set. A query run from Path or one of Paths (or
+// any directory under them) is scoped to these bindings; an Entry without
+// either covers the whole repository. Paths lists more directories, such as
+// the modules a Gradle deployable is built from; Path must then be one of them.
+// The file spells its keys in kebab-case, results in camelCase.
 type Entry struct {
 	Name          string     `yaml:"name" json:"name" table:"NAME"`
 	Path          string     `yaml:"path,omitempty" json:"path,omitempty" table:"PATH"`
+	Paths         []string   `yaml:"paths,omitempty" json:"paths,omitempty" table:"PATHS"`
 	Services      []string   `yaml:"services,omitempty" json:"services,omitempty" table:"SERVICES"`
 	ProcessGroups []string   `yaml:"process-groups,omitempty" json:"processGroups,omitempty" table:"PROCESS-GROUPS"`
 	ServiceNames  []string   `yaml:"service-names,omitempty" json:"serviceNames,omitempty" table:"SERVICE-NAMES"`
@@ -80,9 +82,10 @@ const maxServiceNameRunes = 255
 // fails its pattern is an error naming the host, the entry and the field,
 // never something to escape and hope. Beyond the patterns above: host keys
 // must already be canonical, names and paths are unique per host (so at most
-// one entry omits Path), and every entry binds something.
+// one entry covers the whole repository), and every entry binds something.
 //
-// Paths are unique regardless of case, on every OS. Resolve folds case on
+// A Path is unique regardless of case, on every OS (one of Paths may be
+// shared, and Resolve then picks neither entry there). Resolve folds case on
 // macOS and Windows, where two paths differing only in case are one
 // directory; a committed file has to mean the same thing on all of them, so
 // it is valid everywhere or nowhere.
@@ -152,6 +155,26 @@ func (e *Entry) validate() *InvalidError {
 	}
 	if err := validatePath(e.Path); err != nil {
 		return err
+	}
+	if e.Path == "" && len(e.Paths) > 0 {
+		return invalid("paths is set without path",
+			fmt.Sprintf("add path: %s: path is the entry's primary directory, and paths lists it with the rest", e.Paths[0]))
+	}
+	seen := map[string]bool{}
+	for i, p := range e.Paths {
+		switch err := validatePath(p); {
+		case err != nil:
+			err.Msg = fmt.Sprintf("paths[%d]: %s", i, err.Msg)
+			return err
+		case p == "":
+			return invalid(fmt.Sprintf("paths[%d] is empty", i))
+		case seen[strings.ToLower(p)]:
+			return invalid(fmt.Sprintf("paths[%d] %q is listed twice", i, p))
+		}
+		seen[strings.ToLower(p)] = true
+	}
+	if len(e.Paths) > 0 && !seen[strings.ToLower(e.Path)] {
+		return invalid(fmt.Sprintf("path %q is not one of paths", e.Path), "list path in paths too, or omit it")
 	}
 	for i, id := range e.Services {
 		if !serviceIDRe.MatchString(id) {

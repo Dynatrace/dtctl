@@ -79,7 +79,7 @@ func newRepoScopeSetCmd() *cobra.Command {
 		serviceNames  []string
 		namespace     string
 		workloads     []string
-		entryPath     string
+		entryPaths    []string
 	)
 	c := &cobra.Command{
 		Use:   "set <name>",
@@ -107,8 +107,16 @@ Examples:
 		ValidArgsFunction: completeRepoScopeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entry := reposcope.Entry{Name: args[0], Services: services, ProcessGroups: processGroups, ServiceNames: serviceNames}
-			if entryPath != "" {
-				entry.Path = path.Clean(filepath.ToSlash(entryPath))
+			for _, p := range entryPaths {
+				entry.Paths = append(entry.Paths, path.Clean(filepath.ToSlash(p)))
+			}
+			// One --path is the entry's path; several are its paths, the
+			// first being its path too.
+			if len(entry.Paths) > 0 {
+				entry.Path = entry.Paths[0]
+			}
+			if len(entry.Paths) == 1 {
+				entry.Paths = nil
 			}
 			for _, w := range workloads {
 				entry.Workloads = append(entry.Workloads, reposcope.Workload{Namespace: namespace, Name: w})
@@ -121,7 +129,7 @@ Examples:
 	c.Flags().StringArrayVar(&serviceNames, "service-name", nil, "OpenTelemetry service.name (repeatable)")
 	c.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
-	c.Flags().StringVar(&entryPath, "path", "", "directory the entry covers, relative to the repository root (default: the whole repository)")
+	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (repeatable; default: the whole repository)")
 	for _, name := range []string{"service", "process-group", "service-name", "namespace", "workload", "path"} {
 		rejectEmptyFlag(c, name)
 	}

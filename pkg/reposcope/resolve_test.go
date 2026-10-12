@@ -17,6 +17,15 @@ func monorepoFile() *File {
 	}}}
 }
 
+// gradleFile is two Gradle deployables, as discovery proposes them, sharing
+// one module.
+func gradleFile() *File {
+	return &File{Environments: map[string][]Entry{prodHost: {
+		{Name: "proxy", Path: "proxy", Paths: []string{"proxy", "proxy-api", "proxy-core"}, ServiceNames: []string{"proxy"}},
+		{Name: "admin", Path: "admin", Paths: []string{"admin", "proxy-core"}, ServiceNames: []string{"admin"}},
+	}}}
+}
+
 func withRepositoryWide(f *File) *File {
 	f.Upsert(prodHost, Entry{Name: "shop", ServiceNames: []string{"shop"}})
 	return f
@@ -51,10 +60,18 @@ func TestResolve(t *testing.T) {
 		{name: "no entries for this host", file: monorepoFile(), host: stgHost, dir: "services/checkout",
 			reason: "no entry for stg98765.apps.dynatrace.com; the file defines: abc12345.apps.dynatrace.com"},
 		{name: "selected by name from anywhere", file: monorepoFile(), host: prodHost, dir: ".", pick: "ledger",
-			entry: "ledger", reason: `selected by name; its path "services/ledger" does not cover "."`,
+			entry: "ledger", reason: `selected by name; it covers services/ledger, not "."`,
 			others: []string{"checkout", "checkout-v2", "ledger-close"}},
 		{name: "selected by name where it applies anyway", file: monorepoFile(), host: prodHost, dir: "services/ledger", pick: "ledger",
 			entry: "ledger", others: []string{"checkout", "checkout-v2", "ledger-close"}},
+		{name: "one of paths", file: gradleFile(), host: prodHost, dir: "proxy-api/src",
+			entry: "proxy", others: []string{"admin"}},
+		{name: "a path two entries list", file: gradleFile(), host: prodHost, dir: "proxy-core",
+			reason: "covered by entries proxy and admin; pick one with --repo-scope <name>", others: []string{"admin", "proxy"}},
+		{name: "a path two entries list, selected by name", file: gradleFile(), host: prodHost, dir: "proxy-core", pick: "admin",
+			entry: "admin", others: []string{"proxy"}},
+		{name: "selected by name, covering none of its paths", file: gradleFile(), host: prodHost, dir: "admin", pick: "proxy",
+			entry: "proxy", reason: `selected by name; it covers proxy, proxy-api, proxy-core, not "admin"`, others: []string{"admin"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

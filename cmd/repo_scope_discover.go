@@ -49,10 +49,15 @@ starts with test, mock or fixture is not sent unless given with --term.
 
 Discovery is per unit: the nearest directory at or above the working directory
 (or --path) that holds a build file (go.mod, package.json, pom.xml,
-pyproject.toml, *.csproj) or a Dockerfile; the repository root otherwise.
-Each proposed set line covers that unit; when the unit is the repository root,
-it covers the directory discovery ran for instead if that directory's name is
-what matched. It names the --context discovery ran in.
+build.gradle(.kts), settings.gradle(.kts), pyproject.toml, *.csproj) or a
+Dockerfile; the repository root otherwise. A Gradle build is one unit unless
+several of its modules are deployed (hold a Dockerfile, or are held or named
+by a Helm chart or workload manifest): each of those is then a unit with the
+modules it depends on, and a module several of them depend on, like the
+settings directory, is discovered for all of them. Each proposed set line covers that unit; when the unit is
+the repository root, it covers the directory discovery ran for instead if
+that directory's name is what matched. It names the --context discovery ran
+in.
 
 Examples:
   # Discover for the unit holding the working directory
@@ -245,8 +250,12 @@ func printRepoScopeDiscoveryPlan(cmd *cobra.Command, plan *reposcope.Plan) error
 // candidate sharing its service name could sit below the sample's floor, so
 // ServiceNameShared cannot be trusted. No id binding is proposed for a
 // sampled or capped candidate either: it would bind only the ids discovery
-// happened to list.
+// happened to list. A Gradle module several deployables share gets no line:
+// an entry for it would be no deployable's.
 func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
+	if len(r.SharedBy) > 0 {
+		return ""
+	}
 	var bindings []string
 	flag := func(name string, values ...string) {
 		for _, v := range values {
@@ -270,19 +279,30 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 			return ""
 		}
 	}
-	return repoScopeSetLine(exec.ShellQuote(c.Name), bindings, repoScopeDir(r, c), selectors)
+	return repoScopeSetLine(exec.ShellQuote(c.Name), bindings, repoScopePaths(r, c), selectors)
 }
 
-// repoScopeSetLine assembles a `repo-scope set` line from its parts, each
-// already quoted for a shell.
-func repoScopeSetLine(name string, bindings []string, dir string, selectors []string) string {
+// repoScopeSetLine assembles a `repo-scope set` line. name, bindings and
+// selectors arrive shell-quoted; dirs do not, and are quoted here.
+func repoScopeSetLine(name string, bindings, dirs, selectors []string) string {
 	args := append([]string{"dtctl"}, selectors...)
 	args = append(args, "repo-scope", "set", name)
 	args = append(args, bindings...)
-	if dir != "." {
-		args = append(args, "--path", exec.ShellQuote(dir))
+	for _, dir := range dirs {
+		if dir != "." {
+			args = append(args, "--path", exec.ShellQuote(dir))
+		}
 	}
 	return strings.Join(args, " ")
+}
+
+// repoScopePaths are the directories an entry for c covers: a Gradle
+// deployable's paths, else the one repoScopeDir picks.
+func repoScopePaths(r *reposcope.DiscoveryReport, c reposcope.Candidate) []string {
+	if len(r.Paths) > 0 {
+		return r.Paths
+	}
+	return []string{repoScopeDir(r, c)}
 }
 
 // repoScopeDir is the directory an entry for c covers. A unit below the root
@@ -341,6 +361,10 @@ type repoScopeProposal struct {
 	// lineNotes explain each candidate that has no line because it was
 	// sampled or lists only some of its ids.
 	lineNotes []string
+	// shared says, for a Gradle module several deployables share, that it
+	// gets no line, and discoverEach are the lines discovering each of them.
+	shared       string
+	discoverEach []string
 }
 
 type repoScopeSelectAll struct {
@@ -352,6 +376,15 @@ type repoScopeSelectAll struct {
 // newRepoScopeProposal works out what r proposes beyond its candidates'
 // lines, which must already be set.
 func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repoScopeProposal {
+	if len(r.SharedBy) > 0 {
+		p := repoScopeProposal{shared: fmt.Sprintf("no entry is proposed for %s, shared by %s; discover each to save its entry",
+			r.Dir, joinAnd(r.SharedBy))}
+		for _, d := range r.SharedBy {
+			args := append(append([]string{"dtctl"}, selectors...), "repo-scope", "discover", "--path", exec.ShellQuote(d))
+			p.discoverEach = append(p.discoverEach, strings.Join(args, " "))
+		}
+		return p
+	}
 	p := repoScopeProposal{lineNotes: repoScopeNoLineNotes(r)}
 	lines := 0
 	for _, c := range r.Candidates {
@@ -373,9 +406,17 @@ func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repo
 	return p
 }
 
+// joinAnd lists words as prose: "a", "a and b", "a, b and c".
+func joinAnd(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
 // repoScopeHandLinks are the templates for linking the unit by hand.
 func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]string, string) {
-	dir := repoScopeDir(r, reposcope.Candidate{})
+	dir := repoScopePaths(r, reposcope.Candidate{})
 	links := []string{
 		repoScopeSetLine("<name>", []string{"--namespace", "<namespace>", "--workload", "<workload>"}, dir, selectors),
 		repoScopeSetLine("<name>", []string{"--service-name", "<service.name>"}, dir, selectors),
@@ -460,6 +501,8 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, selectors []str
 	p := newRepoScopeProposal(r, selectors)
 	var s []string
 	switch {
+	case p.shared != "":
+		s = append(s, p.shared+": "+strings.Join(p.discoverEach, "; "))
 	case len(p.handLinks) > 0:
 		s = append(s, repoScopeNarrowHint, "link by hand: "+strings.Join(p.handLinks[:2], ", or "))
 		if p.dirHint != "" {

@@ -2,7 +2,7 @@ Name:           ledger
 Path:           services/ledger
 Environment:    abc12345.apps.dynatrace.com
 File:           .dtctl-repo-scope.yaml
-Note:           selected by name; its path "services/ledger" does not cover "."
+Note:           selected by name; it covers services/ledger, not "."
 Workloads:      payments/ledger
 Filters:
   fetch logs   | filter ((k8s.namespace.name == "payments" and k8s.workload.name == "ledger"))
