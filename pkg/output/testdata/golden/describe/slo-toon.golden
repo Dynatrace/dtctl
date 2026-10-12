@@ -1,4 +1,4 @@
-criteria[#2]:
+criteria[2]:
   - target: 99.9
     timeframeFrom: "-7d"
     warning: 99.5
@@ -7,5 +7,5 @@ criteria[#2]:
 description: 99.9% availability for public API endpoints
 id: a1b2c3d4-0001-4000-8000-000000000001
 name: API Availability
-tags[#2]: "service:api","tier:1"
+tags[2]: "service:api","tier:1"
 version: "3"

@@ -1,4 +1,4 @@
-[#3]{expirationDate,name,scope,status,tokenId}:
+[3]{expirationDate,name,scope,status,tokenId}:
   "2026-10-01T00:00:00.000Z",ci-pipeline,"storage:events:read account-idm-read",ACTIVE,a1b2c3d4-e5f6-4a7b-8c9d-000000000001
   "2026-12-31T00:00:00.000Z",dev-automation,account-idm-write,ACTIVE,b2c3d4e5-f6a7-4b8c-9d0e-000000000002
   "2025-01-01T00:00:00.000Z",legacy-token,"storage:logs:read",REVOKED,c3d4e5f6-a7b8-4c9d-0e1f-000000000003

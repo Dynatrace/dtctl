@@ -1,4 +1,4 @@
-[#5]:
+[5]:
   - operation: GET /widgets
     scope: "widget:widgets:read"
     summary: List all widgets.

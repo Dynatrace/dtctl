@@ -1,4 +1,4 @@
-[#4]{key,value}:
+[4]{key,value}:
   AUTOMATION,"true"
   AI_FUNCTIONS,"true"
   LIVE_DEBUGGING,"true"

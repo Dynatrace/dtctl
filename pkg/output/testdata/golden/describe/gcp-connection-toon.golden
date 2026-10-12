@@ -4,6 +4,6 @@ type: SERVICE_ACCOUNT_IMPERSONATION
 value:
   name: production-gcp
   serviceAccountImpersonation:
-    consumers[#2]: ME,DA
+    consumers[2]: ME,DA
     serviceAccountId: sa-monitor@project-id.iam.gserviceaccount.com
   type: SERVICE_ACCOUNT_IMPERSONATION

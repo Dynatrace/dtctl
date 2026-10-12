@@ -4,12 +4,12 @@ metadata:
     start: "2025-03-15T08:30:00.000000000Z"
   canonicalQuery: "fetch logs\n| limit 3\n| fields timestamp, host.name, status, content"
   contributions:
-    buckets[#1]{matchedRecordsRatio,name,scannedBytes,table}:
+    buckets[1]{matchedRecordsRatio,name,scannedBytes,table}:
       1,default_logs,2982690,logs
   dqlVersion: V1_0
   executionTimeMilliseconds: 47
   locale: und
-  metrics[#2]{aggregation,displayName,fieldName,metric.key,unit}:
+  metrics[2]{aggregation,displayName,fieldName,metric.key,unit}:
     avg,Process CPU Utilization,avg(process.cpu.utilization),process.cpu.utilization,Percent
     sum,Process Memory Usage,sum(process.memory.usage),process.memory.usage,Byte
   query: "fetch logs | limit 3 | fields timestamp, host.name, status, content"
@@ -17,7 +17,7 @@ metadata:
   scannedBytes: 2982690
   scannedRecords: 42351
   timezone: Z
-records[#3]{content,host.name,status,timestamp}:
+records[3]{content,host.name,status,timestamp}:
   Connection timeout to database,web-server-01,ERROR,"2025-03-15T10:30:00Z"
   High memory usage detected,web-server-02,WARN,"2025-03-15T10:29:55Z"
   Request processed successfully,api-gateway,INFO,"2025-03-15T10:29:50Z"

@@ -1,11 +1,11 @@
-[#3]:
+[3]:
   - objectId: vu9U3hXa3q0AAAABACdidWlsdGluOmRhdmlzLmFub21hbHktZGV0ZWN0b3JzAA
     schemaId: "builtin:davis.anomaly-detectors"
     schemaVersion: 1.0.15
     scope: environment
     value:
       analyzer:
-        input[#6]{key,value}:
+        input[6]{key,value}:
           alertCondition,ABOVE
           threshold,"90"
           slidingWindow,"5"
@@ -16,7 +16,7 @@
       description: Monitors Aurora cluster CPU utilization to detect performance bottlenecks
       enabled: true
       eventTemplate:
-        properties[#3]{key,value}:
+        properties[3]{key,value}:
           event.type,PERFORMANCE_EVENT
           event.name,Aurora cluster high CPU
           event.description,CPU utilization is high
@@ -28,11 +28,11 @@
     scope: environment
     value:
       analyzer:
-        input[#0]:
+        input: []
         name: dt.statistics.ui.anomaly_detection.AutoAdaptiveAnomalyDetectionAnalyzer
       enabled: true
       eventTemplate:
-        properties[#2]{key,value}:
+        properties[2]{key,value}:
           event.type,AVAILABILITY_EVENT
           event.name,VPC packet drops detected
       source: Clouds
@@ -43,14 +43,14 @@
     scope: environment
     value:
       analyzer:
-        input[#2]{key,value}:
+        input[2]{key,value}:
           alertCondition,ABOVE
           threshold,"85"
         name: dt.statistics.ui.anomaly_detection.StaticThresholdAnomalyDetectionAnalyzer
       description: Disabled detector for EC2 CPU monitoring
       enabled: false
       eventTemplate:
-        properties[#2]{key,value}:
+        properties[2]{key,value}:
           event.type,PERFORMANCE_EVENT
           event.name,EC2 high CPU utilization
       source: dtctl

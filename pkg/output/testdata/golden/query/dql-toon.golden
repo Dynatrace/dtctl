@@ -1,4 +1,4 @@
-[#3]{content,host.name,status,timestamp}:
+[3]{content,host.name,status,timestamp}:
   Connection timeout to database,web-server-01,ERROR,"2025-03-15T10:30:00Z"
   High memory usage detected,web-server-02,WARN,"2025-03-15T10:29:55Z"
   Request processed successfully,api-gateway,INFO,"2025-03-15T10:29:50Z"
