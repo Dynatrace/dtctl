@@ -1115,7 +1115,7 @@ func WriteValue(w io.Writer, v any, format string) error {
 		if err := json.Unmarshal(b, &generic); err != nil {
 			return err
 		}
-		data, err := toon.Marshal(generic, toon.WithLengthMarkers(true))
+		data, err := toon.Marshal(generic)
 		if err != nil {
 			return err
 		}

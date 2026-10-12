@@ -1,3 +1,3 @@
-[#2]{createdAt,description,email,groupUuid,name,surname,uid}:
-  "2026-03-01T12:00:00Z",Synthetic integration identity,automation-alpha@example.invalid,"00000000-0000-4000-8000-000000000201",automation-alpha,ServiceUser,"00000000-0000-4000-8000-000000000101"
-  "2026-03-02T13:30:00Z",Synthetic reporting identity,automation-beta@example.invalid,"00000000-0000-4000-8000-000000000202",automation-beta,ServiceUser,"00000000-0000-4000-8000-000000000102"
+[2]{createdAt,description,email,groupUuid,name,surname,uid}:
+  "2026-03-01T12:00:00Z",Synthetic integration identity,automation-alpha@example.invalid,00000000-0000-4000-8000-000000000201,automation-alpha,ServiceUser,00000000-0000-4000-8000-000000000101
+  "2026-03-02T13:30:00Z",Synthetic reporting identity,automation-beta@example.invalid,00000000-0000-4000-8000-000000000202,automation-beta,ServiceUser,00000000-0000-4000-8000-000000000102

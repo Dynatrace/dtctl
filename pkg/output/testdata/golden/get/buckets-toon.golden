@@ -1,4 +1,4 @@
-[#3]:
+[3]:
   - bucketName: default_logs
     displayName: Default Logs
     records: 1250000
