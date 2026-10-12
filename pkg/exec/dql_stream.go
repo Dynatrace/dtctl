@@ -415,7 +415,7 @@ func (c *streamCollector) abort() {
 // started streaming has already emitted the rows and only has to close out.
 func (c *streamCollector) finish(query string, result *DQLQueryResponse, opts DQLExecuteOptions) error {
 	if !c.streaming {
-		opts.reportRows(len(c.buf))
+		opts.report(len(c.buf), result)
 		return c.e.printRecords(query, result, orEmptyRows(c.buf), opts)
 	}
 	opts.seriesAdvice = defaultSeriesAdvice(c.effect, opts)
@@ -423,11 +423,11 @@ func (c *streamCollector) finish(query string, result *DQLQueryResponse, opts DQ
 		if err := c.flushStdout(); err != nil {
 			return err
 		}
-		opts.reportRows(c.rows)
+		opts.report(c.rows, result)
 		// The rows are already on stdout; the notifications follow on stderr.
 		return c.e.finishStreamedJSONL(query, result)
 	}
-	opts.reportRows(c.rows)
+	opts.report(c.rows, result)
 	return c.e.finishStreamedSpill(query, result, c, opts)
 }
 

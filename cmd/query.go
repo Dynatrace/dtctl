@@ -521,7 +521,7 @@ Examples:
 					ctx.Window = queryWindowContext(result, named)
 					scoped.decorate(ctx)
 				},
-				OnRows:     scoped.onRows,
+				OnResult:   scoped.onResult,
 				TypedQuery: scoped.typed,
 				// The progress bar is a user-facing affordance of the `query`
 				// command only; opt in here (subject to --no-progress) so internal

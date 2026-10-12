@@ -277,11 +277,13 @@ type DQLExecuteOptions struct {
 	// Decorate amends the agent envelope context; records is nil when rows streamed to disk.
 	Decorate func(ctx *output.ResponseContext, result *DQLQueryResponse, records []map[string]interface{})
 
-	// OnRows, when set, is called once with the number of records, on every
-	// path that prints them, and always before Decorate: before the rows on
-	// the buffered path, after them on the streaming path. Unlike Decorate it
-	// runs for every output format.
-	OnRows func(n int)
+	// OnResult, when set, is called once with the number of records and the
+	// response they came from, on every path that prints them, and always
+	// before Decorate: before the rows on the buffered path, after them on the
+	// streaming path. On the streaming path the response's records were
+	// streamed, not kept, so n is the count to read. Unlike Decorate it runs
+	// for every output format.
+	OnResult func(n int, result *DQLQueryResponse)
 
 	// TypedQuery is the query as the user wrote it, when the caller sends a
 	// rewritten one. Empty-result diagnosis reads the fields it checks from
@@ -289,9 +291,9 @@ type DQLExecuteOptions struct {
 	TypedQuery string
 }
 
-func (opts DQLExecuteOptions) reportRows(n int) {
-	if opts.OnRows != nil {
-		opts.OnRows(n)
+func (opts DQLExecuteOptions) report(n int, result *DQLQueryResponse) {
+	if opts.OnResult != nil {
+		opts.OnResult(n, result)
 	}
 }
 
@@ -399,7 +401,7 @@ func (e *DQLExecutor) ExecuteWithContext(ctx context.Context, query string, opts
 	if result == nil {
 		return nil // context was cancelled; message already printed to stderr
 	}
-	opts.reportRows(len(result.GetRecords()))
+	opts.report(len(result.GetRecords()), result)
 	return e.printResults(query, result, opts)
 }
 

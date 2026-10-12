@@ -10,6 +10,7 @@ import (
 
 	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/dql"
+	"github.com/dynatrace-oss/dtctl/pkg/exec"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
 	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
@@ -176,8 +177,8 @@ type repoScopedQuery struct {
 	// warning names keys the file holds that this dtctl does not know.
 	warning string
 	stderr  io.Writer
-	// zeroRows is set by onRows and read by decorate; the executor calls
-	// OnRows first.
+	// zeroRows is set by onResult and read by decorate; the executor calls
+	// OnResult first.
 	zeroRows bool
 }
 
@@ -261,10 +262,10 @@ func (q *repoScopedQuery) announce() {
 		label, s.Reason, noRepoScopeFlag)
 }
 
-// onRows is the executor's OnRows hook. A scoped query that returns nothing
-// reads exactly like a quiet service, and the likelier cause is a binding the
-// records do not carry, so it says how to tell the two apart.
-func (q *repoScopedQuery) onRows(n int) {
+// onResult is the executor's OnResult hook. A scoped query that returns
+// nothing reads exactly like a quiet service, and the likelier cause is a
+// binding the records do not carry, so it says how to tell the two apart.
+func (q *repoScopedQuery) onResult(n int, _ *exec.DQLQueryResponse) {
 	if q.scope == nil || !q.scope.Applied || n > 0 {
 		return
 	}
