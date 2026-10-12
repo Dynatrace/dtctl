@@ -369,6 +369,11 @@ candidate's `setCommand` is the line that saves it; a candidate without one has
 no binding that selects it alone, and `suggestions` then says what to do
 instead.
 
+When `dtctl create breakpoint` sets workspace filters from the repo scope, a
+suggestion names `--filters` and `--no-repo-scope`, and a workspace that holds
+active breakpoints is refused with an error naming `--yes` (see
+[Filters from the repo scope](LIVE_DEBUGGER.md#filters-from-the-repo-scope)).
+
 ### Result notes: samples and durations
 
 Two suggestions describe what a non-empty result is *not*:
