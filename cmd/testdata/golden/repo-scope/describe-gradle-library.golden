@@ -7,3 +7,5 @@ Service names:  webproxy
 Filters:
   fetch logs   | filter (service.name == "webproxy")
   fetch spans  | filter (service.name == "webproxy")
+Live Debugger filters:
+  service.name:webproxy

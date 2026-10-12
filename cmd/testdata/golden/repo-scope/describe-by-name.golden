@@ -7,4 +7,6 @@ Workloads:      payments/ledger
 Filters:
   fetch logs   | filter ((k8s.namespace.name == "payments" and k8s.workload.name == "ledger"))
   fetch spans  | filter ((k8s.namespace.name == "payments" and k8s.workload.name == "ledger"))
+Live Debugger filters:
+  k8s.namespace.name:payments,k8s.workload.name:ledger
 Other entries:  checkout
