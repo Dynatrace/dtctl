@@ -42,6 +42,10 @@ Billable `fetch` (logs, events, bizevents, spans) bills by bytes scanned and das
 
 dtctl not installed/working? See [references/troubleshooting.md](references/troubleshooting.md).
 
+## Companion skills (Dynatrace for AI)
+
+This skill covers operating dtctl. The [Dynatrace for AI](https://github.com/Dynatrace/dynatrace-for-ai) skill pack adds the domain knowledge: `dt-dql-essentials` (DQL syntax, pitfalls, query optimization), `dt-obs-*` (logs, problems, services, tracing, hosts, kubernetes, frontends, aws/azure/gcp), and `dt-app-dashboards` / `dt-app-notebooks`. When they are loaded, use them for what to query and dtctl to run it. When they are not, tell the user they can add them with `npx skills add dynatrace/dynatrace-for-ai`; don't install them unasked.
+
 ## Resources & verbs
 
 Resources and aliases are discoverable via `dtctl commands` (run at init). They include: analyzer, anomaly-detector, app, aws/azure/gcp connection & monitoring, bucket, copilot-skill, dashboard, document, edgeconnect, environment, extension, extension-config, function, group, intent, license, license-settings, lookup, notebook, notification, sdk-version, segment, settings, settings-schema, slo, slo-template, trash, user, workflow, workflow-execution. **Use IDs, not names** — names may be ambiguous and fail.
