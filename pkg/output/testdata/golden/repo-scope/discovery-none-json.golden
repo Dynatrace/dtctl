@@ -19,21 +19,21 @@
     {
       "purpose": "spans by workload or service name (sampled 1-in-100000 over 1h)",
       "dataObject": "spans",
-      "dql": "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
+      "dql": "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
       "window": "1h",
       "samplingRatio": 100000
     },
     {
       "purpose": "spans by workload or service name (sampled 1-in-100000 over 24h)",
       "dataObject": "spans",
-      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
+      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
       "window": "24h",
       "samplingRatio": 100000
     },
     {
       "purpose": "spans by workload or service name (sampled 1-in-1000 over 24h)",
       "dataObject": "spans",
-      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
+      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
       "window": "24h",
       "samplingRatio": 1000
     },
@@ -45,21 +45,21 @@
     {
       "purpose": "logs by workload or service name (sampled 1-in-100000 over 1h)",
       "dataObject": "logs",
-      "dql": "fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
+      "dql": "fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
       "window": "1h",
       "samplingRatio": 100000
     },
     {
       "purpose": "logs by workload or service name (sampled 1-in-100000 over 24h)",
       "dataObject": "logs",
-      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
+      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
       "window": "24h",
       "samplingRatio": 100000
     },
     {
       "purpose": "logs by workload or service name (sampled 1-in-1000 over 24h)",
       "dataObject": "logs",
-      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
+      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize records = count(),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200",
       "window": "24h",
       "samplingRatio": 1000
     },

@@ -107,11 +107,16 @@ func repoScopeDiscoveryMatch() reposcope.DiscoveryReport {
 // repoScopeDiscoverySampled is a match on an environment where a day of
 // spans scans past the cap: the first sampled retry answered, the rest were
 // not needed, and the logs were read whole.
+// repoScopeDiscoverySampled also carries the Gradle fields, paths and
+// sharedBy, so that every result field reaches a golden; discovery sets the
+// two on different reports.
 func repoScopeDiscoverySampled() reposcope.DiscoveryReport {
 	return reposcope.DiscoveryReport{
 		Environment: repoScopeHost,
 		Dir:         ".",
 		Unit:        ".",
+		Paths:       []string{"checkout", "checkout-core"},
+		SharedBy:    []string{"checkout", "checkout-admin"},
 		Verdict:     reposcope.VerdictMatch,
 		Verdicts:    repoScopeVerdicts(reposcope.VerdictMatch),
 		Candidates: []reposcope.Candidate{{
@@ -126,20 +131,21 @@ func repoScopeDiscoverySampled() reposcope.DiscoveryReport {
 			Namespace:         "payments",
 			Workload:          "checkout",
 			Tier:              "exact",
-			Spans:             1200000,
-			Logs:              88000,
+			SpansSampled:      17,
+			LogsSampled:       4,
 			Sampled:           true,
 			Evidence: []string{
 				`k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
-				"~1200000 spans in 1h (sampled 1-in-100000), 88000 logs in 24h",
+				"17 sampled span hits in 1h (1 in 100000 requested), 4 sampled log hits in 1h (1 in 100000 requested)",
 			},
 			SetCommand: "dtctl repo-scope set checkout --namespace payments --workload checkout",
 		}},
 		Queries: repoScopeQueries(repoScopeCapped, repoScopeRows(1), repoScopeSkipped, repoScopeSkipped,
-			repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped),
+			repoScopeCapped, repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped),
 		Sent: []string{"checkout"},
 		Notes: []string{
 			"spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing",
+			"logs scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 logs over 1h may be missing",
 		},
 	}
 }

@@ -42,12 +42,11 @@ var checkoutRows = map[string]string{
 }
 
 // sampledCheckoutRows are what the sampled retries of the record queries
-// return for the checkout workload: sampled counts what the sample matched,
-// records extrapolates it.
+// return for the checkout workload: records counts what the sample matched.
 var sampledCheckoutRows = map[string]string{
-	"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","sampled":"12","records":"1200000",` +
+	"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"12",` +
 		`"serviceCount":"1","services":["` + flowService + `"],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`,
-	"logs": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","sampled":"30","records":"3000000",` +
+	"logs": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"30",` +
 		`"serviceCount":"0","services":[],"processGroupCount":"1","processGroups":[["` + flowProcessGroup + `"]]}`,
 }
 
@@ -276,7 +275,7 @@ func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) 
 	require.Len(t, sampling, 2, "the floor is in the notes on a match too")
 
 	newDQLRecorder(t, "readonly", cappedThenSampled(map[string]string{
-		"spans": `{"service.name":"checkout","sampled":"12","records":"1200000","serviceCount":"1","services":["` + flowService + `"]}`,
+		"spans": `{"service.name":"checkout","records":"12","serviceCount":"1","services":["` + flowService + `"]}`,
 	}))
 	report, suggestions = discoverReport(t)
 	require.Len(t, report.Candidates, 1)
