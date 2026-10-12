@@ -27,6 +27,26 @@ const (
 	// expression such as stringLength(entity.name).
 	fieldNameLength = "nameLength"
 
+	// fieldSamplingRatio is the ratio a sampled record was read at, so its
+	// sum over a sample is the population the sample stands for.
+	fieldSamplingRatio = "dt.system.sampling_ratio"
+
+	// The columns the record queries compute. records is the population (a
+	// count, or an extrapolation from a sample); sampled is how many records
+	// a sample actually matched. Each id field is counted and collected: the
+	// count says how many there are, the collection lists up to
+	// discoveryIDLimit of them.
+	fieldRecords           = "records"
+	fieldSampled           = "sampled"
+	fieldServiceCount      = "serviceCount"
+	fieldServices          = "services"
+	fieldProcessGroupCount = "processGroupCount"
+	fieldProcessGroups     = "processGroups"
+
+	// discoveryIDLimit is how many ids a record query collects per candidate
+	// per field; the count says how many there are.
+	discoveryIDLimit = 50
+
 	objectLogs          = "logs"
 	objectSpans         = "spans"
 	objectServices      = "dt.entity.service"

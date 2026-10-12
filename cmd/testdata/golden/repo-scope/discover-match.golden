@@ -8,5 +8,5 @@ Unit: .
    12400 spans, 88000 logs in 24h
 
 Verdict: match: process group, service, service name, workload
-2 of 4 queries ran in 0.6s. Nothing was written. Save it with:
+2 of 10 queries ran in 0.6s. Nothing was written. Save it with:
   dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout

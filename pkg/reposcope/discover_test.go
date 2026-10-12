@@ -22,17 +22,22 @@ import (
 )
 
 // fakeRunner answers discovery queries from fixtures, keyed by the data
-// object the query fetches, and records every DQL text it was sent.
+// object the query fetches, and records every DQL text it was sent. Each
+// object's answers are consumed in order, so a record query's first answer
+// is its own and the next ones its sampled retries'; once they run out, a
+// query gets an empty answer Grail did not sample.
 type fakeRunner struct {
-	answers map[string]answer
+	answers map[string][]answer
 	sent    []string
 	onRun   func(ctx context.Context, object string) // runs before answering
 }
 
 type answer struct {
-	records    []map[string]interface{}
-	truncation inventory.TruncationCause
-	err        error
+	records      []map[string]interface{}
+	truncation   inventory.TruncationCause
+	sampled      bool
+	scannedBytes int64
+	err          error
 }
 
 func (r *fakeRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunResult, error) {
@@ -41,11 +46,43 @@ func (r *fakeRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunRe
 	if r.onRun != nil {
 		r.onRun(ctx, object)
 	}
-	a := r.answers[object]
+	var a answer
+	if queue := r.answers[object]; len(queue) > 0 {
+		a, r.answers[object] = queue[0], queue[1:]
+	}
 	if a.err != nil {
 		return nil, a.err
 	}
-	return &inventory.RunResult{Records: a.records, Truncated: a.truncation != "", TruncationCause: a.truncation}, nil
+	return &inventory.RunResult{Records: a.records, Truncated: a.truncation != "", TruncationCause: a.truncation,
+		Sampled: a.sampled, ScannedBytes: a.scannedBytes}, nil
+}
+
+// capped is a record query's answer when the scan cap stopped it.
+func capped(records []map[string]interface{}) answer {
+	return answer{records: records, truncation: inventory.TruncationScanLimit}
+}
+
+// sampledAnswer is a rung's answer: Grail sampled it and read scanned bytes.
+func sampledAnswer(records []map[string]interface{}, scanned int64) answer {
+	return answer{records: records, sampled: true, scannedBytes: scanned}
+}
+
+// collected is an id column as a record query collects it.
+func collected(ids ...string) []interface{} {
+	out := make([]interface{}, len(ids))
+	for i, id := range ids {
+		out[i] = id
+	}
+	return out
+}
+
+// serviceNames is one row per name, as many distinct identities return.
+func serviceNames(n int) []map[string]interface{} {
+	out := make([]map[string]interface{}, n)
+	for i := range out {
+		out[i] = map[string]interface{}{fieldServiceName: fmt.Sprintf("checkout-%03d", i), fieldRecords: float64(1)}
+	}
+	return out
 }
 
 // rows reads testdata/discovery/<name>.json.
@@ -68,22 +105,38 @@ func singleGo(t *testing.T) *Plan {
 
 func TestPlan(t *testing.T) {
 	p := singleGo(t)
-	require.Len(t, p.Queries, 4)
+	require.Len(t, p.Queries, 10)
 	assert.Equal(t, ".", p.Unit)
 	assert.Equal(t, []string{"checkout", "checkout-service", "checkout.service", "checkout_service", "checkoutservice"}, p.Sent)
 
 	list := `"checkout", "checkout-service", "checkout.service", "checkout_service", "checkoutservice"`
+	ids := "    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
+		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n" +
+		"    by:{k8s.namespace.name, k8s.workload.name, service.name}\n"
 	assert.Equal(t, Query{
 		Purpose:    "spans by workload or service name",
 		DataObject: "spans",
 		DQL: "fetch spans, from:now()-24h, scanLimitGBytes:5\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize records = count(), by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity.service, dt.entity.process_group}\n" +
+			"| summarize records = count(),\n" + ids +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[0])
-	assert.Equal(t, "logs", p.Queries[1].DataObject)
-	assert.Equal(t, strings.Replace(p.Queries[0].DQL, "fetch spans", "fetch logs", 1), p.Queries[1].DQL)
+	assert.Equal(t, Query{
+		Purpose:       "spans by workload or service name (sampled 1-in-100000 over 1h)",
+		DataObject:    "spans",
+		Window:        "1h",
+		SamplingRatio: 100000,
+		DQL: "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n" +
+			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
+			"| summarize sampled = count(), records = sum(dt.system.sampling_ratio),\n" + ids +
+			"| sort records desc\n" +
+			"| limit 200",
+	}, p.Queries[1])
+	assert.NotContains(t, p.Queries[0].DQL, "by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity",
+		"an id in by: would make one row per id")
+	assert.Equal(t, "logs", p.Queries[4].DataObject)
+	assert.Equal(t, strings.Replace(p.Queries[0].DQL, "fetch spans", "fetch logs", 1), p.Queries[4].DQL)
 	assert.Equal(t, Query{
 		Purpose:    "services by entity name",
 		DataObject: "dt.entity.service",
@@ -93,8 +146,49 @@ func TestPlan(t *testing.T) {
 			"| fieldsAdd nameLength = stringLength(entity.name)\n" +
 			"| sort nameLength asc\n" +
 			"| limit 200",
-	}, p.Queries[2])
-	assert.Equal(t, "dt.entity.process_group", p.Queries[3].DataObject)
+	}, p.Queries[8])
+	assert.Equal(t, "dt.entity.process_group", p.Queries[9].DataObject)
+}
+
+// Each record query is followed by its sampled retries, coarsest first. They
+// are in the plan, so a dry run shows them, but a run sends them only when
+// the scan cap stops the record query.
+func TestPlan_IncludesSamplingRungs(t *testing.T) {
+	p := singleGo(t)
+	var got []string
+	for _, q := range p.Queries {
+		got = append(got, fmt.Sprintf("%s %s %d", q.DataObject, q.Window, q.SamplingRatio))
+	}
+	assert.Equal(t, []string{
+		"spans  0", "spans 1h 100000", "spans 24h 100000", "spans 24h 1000",
+		"logs  0", "logs 1h 100000", "logs 24h 100000", "logs 24h 1000",
+		"dt.entity.service  0", "dt.entity.process_group  0",
+	}, got)
+	for i, first := range []string{
+		"fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000",
+		"fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000",
+		"fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000",
+	} {
+		q := p.Queries[i+1]
+		assert.True(t, strings.HasPrefix(q.DQL, first+"\n"), q.DQL)
+		_, rest, _ := strings.Cut(q.DQL, "\n")
+		_, unsampled, _ := strings.Cut(p.Queries[0].DQL, "\n")
+		assert.Equal(t, strings.Replace(unsampled, "records = count()", "sampled = count(), records = sum(dt.system.sampling_ratio)", 1), rest,
+			"a rung differs from its record query only in what it reads and how it counts")
+	}
+
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "spans-checkout")}},
+		"logs":  {{records: rows(t, "logs-checkout")}},
+	}}
+	r, err := Discover(context.Background(), runner, p, prodHost)
+	require.NoError(t, err)
+	assert.Len(t, runner.sent, 2, "neither record query was capped")
+	for _, i := range []int{1, 2, 3, 5, 6, 7} {
+		assert.True(t, r.Queries[i].Skipped, r.Queries[i].Purpose)
+		assert.Empty(t, r.Queries[i].Cause, "a retry nothing needed is no gap")
+	}
+	assert.False(t, r.Partial)
 }
 
 // Every dotted name a planned query uses is one of the names in grail.go, so
@@ -103,6 +197,7 @@ func TestPlan_NamesOnlyGrailTableFields(t *testing.T) {
 	known := map[string]bool{
 		fieldService: true, fieldProcessGroup: true, fieldServiceName: true, fieldNamespace: true,
 		fieldWorkload: true, fieldEntityName: true, // the entity-table objects share the id fields' names
+		fieldSamplingRatio: true,
 	}
 	dotted := regexp.MustCompile(`[a-z][a-z0-9_]*(\.[a-z0-9_]+)+`)
 	for _, q := range singleGo(t).Queries {
@@ -129,7 +224,7 @@ func TestPlan_Terms(t *testing.T) {
 
 	p, err = PlanDiscovery(fixture(t, "no-signals"), ".", []string{" BillingEngine ", ""})
 	require.NoError(t, err)
-	require.Len(t, p.Queries, 4)
+	require.Len(t, p.Queries, 10)
 	assert.Equal(t, []string{"BillingEngine", "billing-engine", "billing.engine", "billing_engine", "billingengine"}, p.Sent,
 		"a term is sent as given, lowercased, and in its variants")
 }
@@ -146,12 +241,14 @@ func TestPlan_SendsTheNameAsWritten(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"BillingEngine", "billing-engine", "billing.engine", "billing_engine", "billingengine"}, p.Sent,
 		"a spelling with a space is not sent; its variants are")
-	for _, q := range p.Queries[:2] {
-		assert.Contains(t, q.DQL, `"BillingEngine"`, q.Purpose)
+	for _, q := range p.Queries {
+		if !q.fallback() {
+			assert.Contains(t, q.DQL, `"BillingEngine"`, q.Purpose)
+		}
 	}
 
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {records: []map[string]interface{}{{fieldServiceName: "BillingEngine", "records": float64(3)}}},
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{{fieldServiceName: "BillingEngine", fieldRecords: float64(3)}}}},
 	}}, p, prodHost)
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 1)
@@ -160,16 +257,16 @@ func TestPlan_SendsTheNameAsWritten(t *testing.T) {
 
 func TestDiscover_Match(t *testing.T) {
 	p := singleGo(t)
-	runner := &fakeRunner{answers: map[string]answer{
-		"spans": {records: rows(t, "spans-checkout")},
-		"logs":  {records: rows(t, "logs-checkout")},
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "spans-checkout")}},
+		"logs":  {{records: rows(t, "logs-checkout")}},
 	}}
 	r, err := Discover(context.Background(), runner, p, prodHost)
 	require.NoError(t, err)
 
 	assert.Len(t, runner.sent, 2, "the entity-table fallbacks are not needed")
-	assert.True(t, r.Queries[2].Skipped)
-	assert.True(t, r.Queries[3].Skipped)
+	assert.True(t, r.Queries[8].Skipped)
+	assert.True(t, r.Queries[9].Skipped)
 	assert.Equal(t, VerdictMatch, r.Verdict)
 	assert.Equal(t, map[string]Verdict{
 		"service": VerdictMatch, "processGroup": VerdictMatch, "workload": VerdictMatch, "serviceName": VerdictMatch,
@@ -179,16 +276,18 @@ func TestDiscover_Match(t *testing.T) {
 
 	require.Len(t, r.Candidates, 1, "the logs row joins the spans row of the same workload")
 	assert.Equal(t, Candidate{
-		Rank:          1,
-		Name:          "checkout",
-		Services:      []string{svcID},
-		ProcessGroups: []string{pgID},
-		ServiceName:   "checkout",
-		Namespace:     "payments",
-		Workload:      "checkout",
-		Tier:          "exact",
-		Spans:         12400,
-		Logs:          88000,
+		Rank:              1,
+		Name:              "checkout",
+		Services:          []string{svcID},
+		ServiceCount:      1,
+		ProcessGroups:     []string{pgID},
+		ProcessGroupCount: 1,
+		ServiceName:       "checkout",
+		Namespace:         "payments",
+		Workload:          "checkout",
+		Tier:              "exact",
+		Spans:             12400,
+		Logs:              88000,
 		Evidence: []string{
 			`k8s.workload.name "checkout" from Dockerfile:4, deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:12, deploy/k8s/deployment.yaml:15, go.mod:1`,
 			`service.name "checkout" from Dockerfile:4, deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:12, deploy/k8s/deployment.yaml:15, go.mod:1`,
@@ -199,8 +298,8 @@ func TestDiscover_Match(t *testing.T) {
 }
 
 func TestDiscover_FallbackTiers(t *testing.T) {
-	runner := &fakeRunner{answers: map[string]answer{
-		"dt.entity.service": {records: rows(t, "services-by-name")},
+	runner := &fakeRunner{answers: map[string][]answer{
+		"dt.entity.service": {{records: rows(t, "services-by-name")}},
 	}}
 	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
 	require.NoError(t, err)
@@ -221,9 +320,9 @@ func TestDiscover_FallbackTiers(t *testing.T) {
 }
 
 func TestDiscover_FallbackFailures(t *testing.T) {
-	runner := &fakeRunner{answers: map[string]answer{
-		"dt.entity.service":       {err: &sdkquery.QueryError{StatusCode: 403, ErrorType: "NOT_AUTHORIZED_FOR_TABLE", Message: "not authorized"}},
-		"dt.entity.process_group": {err: fmt.Errorf("query: %w", &sdkquery.QueryError{StatusCode: 400, ErrorType: "UNKNOWN_DATA_OBJECT", Message: "unknown\nsecond line"})},
+	runner := &fakeRunner{answers: map[string][]answer{
+		"dt.entity.service":       {{err: &sdkquery.QueryError{StatusCode: 403, ErrorType: "NOT_AUTHORIZED_FOR_TABLE", Message: "not authorized"}}},
+		"dt.entity.process_group": {{err: fmt.Errorf("query: %w", &sdkquery.QueryError{StatusCode: 400, ErrorType: "UNKNOWN_DATA_OBJECT", Message: "unknown\nsecond line"})}},
 	}}
 	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
 	require.NoError(t, err)
@@ -231,78 +330,123 @@ func TestDiscover_FallbackFailures(t *testing.T) {
 	assert.Equal(t, VerdictNone, r.Verdict)
 	assert.Empty(t, r.Candidates)
 	assert.True(t, r.Partial, "an unreadable table leaves a gap")
-	assert.Equal(t, causeAuth, r.Queries[2].Cause)
-	assert.Equal(t, causeUnknownObject, r.Queries[3].Cause)
-	assert.Equal(t, "query: query failed (UNKNOWN_DATA_OBJECT): unknown", r.Queries[3].Error, "first line only")
+	assert.Equal(t, causeAuth, r.Queries[8].Cause)
+	assert.Equal(t, causeUnknownObject, r.Queries[9].Cause)
+	assert.Equal(t, "query: query failed (UNKNOWN_DATA_OBJECT): unknown", r.Queries[9].Error, "first line only")
 	assert.Len(t, r.Notes, 2, "one note for each query that failed")
 }
 
 func TestDiscover_UnknownObjectAloneIsNotPartial(t *testing.T) {
 	unknown := answer{err: &sdkquery.QueryError{ErrorType: "UNKNOWN_DATA_OBJECT"}}
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"dt.entity.service": unknown, "dt.entity.process_group": unknown,
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"dt.entity.service": {unknown}, "dt.entity.process_group": {unknown},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	assert.False(t, r.Partial)
 	assert.Equal(t, VerdictNone, r.Verdict)
 }
 
+// A cap other than the scan cap is not a volume problem sampling solves: the
+// capped answer stands, and no retry is sent.
 func TestDiscover_TruncatedCapsTheVerdict(t *testing.T) {
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {records: rows(t, "spans-checkout"), truncation: inventory.TruncationScanLimit},
-	}}, singleGo(t), prodHost)
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "spans-checkout"), truncation: inventory.TruncationTimeout}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
 	require.NoError(t, err)
+	assert.Len(t, runner.sent, 2)
 	require.Len(t, r.Candidates, 1)
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"])
 	assert.True(t, r.Partial)
 	assert.True(t, r.Queries[0].Truncated)
 	assert.Equal(t, causeTruncated, r.Queries[0].Cause)
-	assert.Equal(t, inventory.TruncationScanLimit, r.Queries[0].truncation, "the note names the limit Grail reported")
+	assert.Equal(t, inventory.TruncationTimeout, r.Queries[0].truncation, "the note names the limit Grail reported")
 	assert.Len(t, r.Notes, 1)
 }
 
 // Grail does not flag a page cut by the query's own limit stage, so a page
-// that long is read as capped. Each row carries its own service id, so the
-// one candidate they merge into is 200 services, not one.
+// that long is read as capped. Rows are identities, so a full page is 200 of
+// them.
 func TestDiscover_FullPageCapsTheVerdict(t *testing.T) {
-	page := func(n int) []map[string]interface{} {
-		out := make([]map[string]interface{}, n)
-		for i := range out {
-			out[i] = map[string]interface{}{
-				fieldServiceName: "checkout", fieldService: fmt.Sprintf("SERVICE-%016X", i), "records": float64(1),
-			}
-		}
-		return out
-	}
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {records: page(discoveryRowLimit)},
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: serviceNames(discoveryRowLimit)}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
-	require.Len(t, r.Candidates, 1)
-	assert.Len(t, r.Candidates[0].Services, discoveryRowLimit)
+	assert.Len(t, r.Candidates, discoveryRowLimit)
 	assert.True(t, r.Partial)
 	assert.True(t, r.Queries[0].Truncated)
 	assert.Equal(t, causeRowLimit, r.Queries[0].Cause)
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
-	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"])
 	assert.Len(t, r.Notes, 1)
 
-	r, err = Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {records: page(2)},
+	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{
+			{fieldServiceName: "checkout", fieldServiceCount: "1", fieldServices: collected("SERVICE-0000000000000001"), fieldRecords: float64(1)},
+			{fieldServiceName: "checkout", fieldServiceCount: "1", fieldServices: collected("SERVICE-0000000000000002"), fieldRecords: float64(1)},
+		}}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	assert.False(t, r.Partial, "a short page is the whole answer")
+	require.Len(t, r.Candidates, 1)
+	assert.Equal(t, int64(2), r.Candidates[0].ServiceCount, "the rows of one identity merge their ids")
 	assert.Equal(t, VerdictMatch, r.Verdicts["serviceName"])
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"], "two service ids on one candidate are two services")
+}
+
+// One workload can run as hundreds of service ids. It is one row, so one
+// candidate, and the count says how many ids the collected list leaves out.
+func TestDiscover_ManyIDsAreOneCandidate(t *testing.T) {
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "many-ids")}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	c := r.Candidates[0]
+	assert.False(t, r.Partial)
+	assert.Len(t, c.Services, discoveryIDLimit)
+	assert.Equal(t, int64(200), c.ServiceCount)
+	assert.True(t, c.ServicesCapped)
+	assert.False(t, c.ProcessGroupsCapped)
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"], "200 services, whatever the list shows")
+	assert.Equal(t, VerdictMatch, r.Verdicts["workload"])
+
+	// The count, not the list, is the tally: one id listed of two is two.
+	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{
+			{fieldServiceName: "checkout", fieldServiceCount: "2", fieldServices: collected(svcID), fieldRecords: float64(1)},
+		}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"])
+}
+
+// Grail may report a collected array cut at maxLength with a "limited to"
+// message, which the runner maps to result_limit. A page shorter than the
+// query's own limit lost no row, so that is not a cut page.
+func TestDiscover_CollectedArrayCapIsNotACutPage(t *testing.T) {
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: serviceNames(3), truncation: inventory.TruncationResultLimit}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.False(t, r.Partial)
+	assert.False(t, r.Queries[0].Truncated)
+	assert.Empty(t, r.Notes)
+
+	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: serviceNames(discoveryRowLimit), truncation: inventory.TruncationResultLimit}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.True(t, r.Partial)
+	assert.Equal(t, causeRowLimit, r.Queries[0].Cause, "a full page is still judged by its length")
 }
 
 // A record query that failed leaves its data object unseen, so what the other
 // one found cannot be a match.
 func TestDiscover_FailedRecordQueryCapsTheVerdict(t *testing.T) {
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {err: &sdkquery.QueryError{ErrorType: "INTERNAL"}},
-		"logs":  {records: rows(t, "logs-checkout")},
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{err: &sdkquery.QueryError{ErrorType: "INTERNAL"}}},
+		"logs":  {{records: rows(t, "logs-checkout")}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 1)
@@ -317,7 +461,7 @@ func TestDiscover_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	runner := &fakeRunner{
-		answers: map[string]answer{"spans": {err: context.Canceled}},
+		answers: map[string][]answer{"spans": {{err: context.Canceled}}},
 		onRun: func(ctx context.Context, object string) {
 			if object == "spans" {
 				<-ctx.Done()
@@ -338,7 +482,7 @@ func TestDiscover_CancellationKeepsWhatWasFound(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	runner := &fakeRunner{
-		answers: map[string]answer{"spans": {records: rows(t, "spans-checkout")}},
+		answers: map[string][]answer{"spans": {{records: rows(t, "spans-checkout")}}},
 		onRun: func(_ context.Context, object string) {
 			if object == "spans" {
 				cancel() // Ctrl-C while the first query runs; its answer still arrives
@@ -362,9 +506,39 @@ func TestDiscover_CancellationKeepsWhatWasFound(t *testing.T) {
 	assert.True(t, r.Partial)
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"])
-	assert.Equal(t, causeCancelled, r.Queries[1].Cause)
-	assert.Empty(t, r.Queries[2].Cause, "a fallback the records made unnecessary is no gap")
+	assert.Empty(t, r.Queries[1].Cause, "the spans query completed, so its retries were not needed")
+	for _, q := range r.Queries[4:8] {
+		assert.Equal(t, causeCancelled, q.Cause, q.Purpose)
+	}
+	assert.Empty(t, r.Queries[8].Cause, "a fallback the records made unnecessary is no gap")
 	assert.Len(t, r.Notes, 1)
+}
+
+// Ctrl-C while a sampled retry runs: its answer still arrives, and the rungs
+// it kept from running are a gap like any query the cancellation stopped.
+func TestDiscover_CancellationMidLadder(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	runner := &fakeRunner{
+		answers: map[string][]answer{"spans": {capped(nil), {sampled: true}}},
+		onRun: func(context.Context, string) {
+			if calls++; calls == 2 {
+				cancel() // while the first rung runs
+			}
+		},
+	}
+	r, err := Discover(ctx, runner, singleGo(t), prodHost)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Len(t, runner.sent, 2)
+	assert.Equal(t, 0, r.Queries[1].Rows)
+	assert.Empty(t, r.Queries[1].Cause, "the first rung completed")
+	for _, q := range r.Queries[2:8] {
+		assert.True(t, q.Skipped, q.Purpose)
+		assert.Equal(t, causeCancelled, q.Cause, q.Purpose)
+	}
+	assert.True(t, r.Partial)
+	assert.Equal(t, VerdictNone, r.Verdict)
 }
 
 // A deadline that lapses before the first query leaves nothing seen: the
@@ -386,9 +560,9 @@ func TestDiscover_DeadlineBeforeTheFirstQuery(t *testing.T) {
 }
 
 func TestDiscover_AmbiguousRows(t *testing.T) {
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {records: rows(t, "spans-two-services")},
-		"logs":  {records: rows(t, "logs-service-name-only")},
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "spans-two-services")}},
+		"logs":  {{records: rows(t, "logs-service-name-only")}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 
@@ -407,24 +581,23 @@ func TestDiscover_AmbiguousRows(t *testing.T) {
 // Rows arrive sorted by record count, which changes with traffic. The result
 // must not.
 func TestDiscover_IndependentOfRowOrder(t *testing.T) {
-	row := func(service, namespace string, records float64) map[string]interface{} {
+	row := func(namespace string, records float64, services ...string) map[string]interface{} {
 		return map[string]interface{}{
-			fieldService: service, fieldServiceName: "checkout", fieldNamespace: namespace,
-			fieldWorkload: "checkout", "records": records,
+			fieldServices: collected(services...), fieldServiceCount: float64(len(services)), fieldServiceName: "checkout",
+			fieldNamespace: namespace, fieldWorkload: "checkout", fieldRecords: records,
 		}
 	}
 	spans := []map[string]interface{}{
-		{fieldServiceName: "checkout", "records": float64(5)},
-		row("SERVICE-0000000000000001", "a", 5),
-		row("SERVICE-0000000000000002", "b", 5),
-		row("SERVICE-0000000000000003", "a", 1),
+		{fieldServiceName: "checkout", fieldRecords: float64(5)},
+		row("a", 5, "SERVICE-0000000000000003", "SERVICE-0000000000000001"),
+		row("b", 5, "SERVICE-0000000000000002"),
 	}
 	logs := []map[string]interface{}{
-		{fieldProcessGroup: pgID, fieldServiceName: "checkout", fieldNamespace: "a", fieldWorkload: "checkout", "records": float64(3)},
+		{fieldProcessGroups: collected(pgID), fieldProcessGroupCount: "1", fieldServiceName: "checkout", fieldNamespace: "a", fieldWorkload: "checkout", fieldRecords: float64(3)},
 	}
 	discover := func(spans []map[string]interface{}) *DiscoveryReport {
-		r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-			"spans": {records: spans}, "logs": {records: logs},
+		r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+			"spans": {{records: spans}}, "logs": {{records: logs}},
 		}}, singleGo(t), prodHost)
 		require.NoError(t, err)
 		return r
@@ -472,20 +645,24 @@ func TestEntryName(t *testing.T) {
 }
 
 // A log written by several processes carries its process groups as an
-// array. Every valid id in it reaches the candidate, and the entry saved from
-// it renders a filter that matches the array.
+// array, so collecting them yields arrays of arrays. Every valid id in them
+// reaches the candidate, and the entry saved from it renders a filter that
+// matches the array.
 func TestDiscover_ProcessGroupArrays(t *testing.T) {
 	const pg2 = "PROCESS_GROUP-0123456789ABCDEF"
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"logs": {records: []map[string]interface{}{
-			{fieldServiceName: "checkout", fieldProcessGroup: []interface{}{pgID, pg2, "PROCESS_GROUP-1", nil}, "records": "10"},
-			{fieldServiceName: "checkout", fieldProcessGroup: pgID, "records": "4"},
-		}},
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"logs": {{records: []map[string]interface{}{
+			{fieldServiceName: "checkout", fieldProcessGroupCount: "1",
+				fieldProcessGroups: []interface{}{[]interface{}{pgID, pg2, "PROCESS_GROUP-1", nil}}, fieldRecords: "10"},
+			{fieldServiceName: "checkout", fieldProcessGroupCount: "1", fieldProcessGroups: collected(pgID), fieldRecords: "4"},
+		}}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 1)
 	c := r.Candidates[0]
 	assert.Equal(t, []string{pg2, pgID}, c.ProcessGroups, "an id the scope file would refuse is dropped")
+	assert.Equal(t, int64(2), c.ProcessGroupCount, "never fewer than the ids listed")
+	assert.False(t, c.ProcessGroupsCapped, "one distinct array is not a cut list")
 	assert.Equal(t, int64(14), c.Logs)
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["processGroup"], "two process groups")
 
@@ -494,16 +671,44 @@ func TestDiscover_ProcessGroupArrays(t *testing.T) {
 	assert.Equal(t, `in(dt.entity.process_group, array("PROCESS_GROUP-0123456789ABCDEF", "PROCESS_GROUP-FEDCBA9876543210"))`, f.Expr)
 }
 
+// For an array field Grail counts and collects distinct arrays. 60 arrays
+// counted against 50 collected is a cut list, however many ids the 50
+// flatten to.
+func TestDiscover_ProcessGroupArraysCut(t *testing.T) {
+	arrays, next := make([]interface{}, 50), 0
+	for i := range arrays {
+		size := 2
+		if i < 20 {
+			size = 3
+		}
+		ids := make([]interface{}, size)
+		for j := range ids {
+			ids[j], next = fmt.Sprintf("PROCESS_GROUP-%016X", next), next+1
+		}
+		arrays[i] = ids
+	}
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"logs": {{records: []map[string]interface{}{
+			{fieldServiceName: "checkout", fieldProcessGroupCount: "60", fieldProcessGroups: arrays, fieldRecords: "10"},
+		}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	c := r.Candidates[0]
+	assert.Len(t, c.ProcessGroups, 120)
+	assert.True(t, c.ProcessGroupsCapped, "10 arrays were cut, and their ids with them")
+}
+
 // Selecting prod's checkout must carry neither staging's nor the canary
 // beside it: the candidate says its service name is shared, so the CLI can
 // leave that binding out.
 func TestDiscover_ServiceNameShared(t *testing.T) {
 	record := func(namespace, workload string, records float64) map[string]interface{} {
-		return map[string]interface{}{fieldServiceName: "checkout", fieldNamespace: namespace, fieldWorkload: workload, "records": records}
+		return map[string]interface{}{fieldServiceName: "checkout", fieldNamespace: namespace, fieldWorkload: workload, fieldRecords: records}
 	}
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {records: []map[string]interface{}{record("prod", "checkout", 50), record("staging", "checkout", 5), record("prod", "checkout-canary", 2)}},
-		"logs":  {records: []map[string]interface{}{{fieldServiceName: "ledger", fieldNamespace: "prod", fieldWorkload: "ledger", "records": float64(1)}}},
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{record("prod", "checkout", 50), record("staging", "checkout", 5), record("prod", "checkout-canary", 2)}}},
+		"logs":  {{records: []map[string]interface{}{{fieldServiceName: "ledger", fieldNamespace: "prod", fieldWorkload: "ledger", fieldRecords: float64(1)}}}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	shared := map[string]bool{}
@@ -523,11 +728,11 @@ func TestDiscover_MatchedDir(t *testing.T) {
 		"services/billing/go.mod":  {Data: []byte("module example.invalid/billing\n")},
 		"services/billing/main.go": {Data: []byte("package main\n")},
 	}
-	spans := answer{records: []map[string]interface{}{
-		{fieldNamespace: "prod", fieldWorkload: "ledger", "records": float64(10)},
-		{fieldNamespace: "prod", fieldWorkload: "platform", "records": float64(10)},
-		{fieldNamespace: "prod", fieldWorkload: "billing", "records": float64(10)},
-	}}
+	spans := []map[string]interface{}{
+		{fieldNamespace: "prod", fieldWorkload: "ledger", fieldRecords: float64(10)},
+		{fieldNamespace: "prod", fieldWorkload: "platform", fieldRecords: float64(10)},
+		{fieldNamespace: "prod", fieldWorkload: "billing", fieldRecords: float64(10)},
+	}
 	tests := []struct {
 		name, dir string
 		want      map[string]bool
@@ -540,7 +745,7 @@ func TestDiscover_MatchedDir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p, err := PlanDiscovery(fsys, tc.dir, nil)
 			require.NoError(t, err)
-			r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{"spans": spans}}, p, prodHost)
+			r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{"spans": {{records: spans}}}}, p, prodHost)
 			require.NoError(t, err)
 			got := map[string]bool{}
 			for _, c := range r.Candidates {
@@ -562,15 +767,187 @@ func TestDiscover_RanksFilesNotLines(t *testing.T) {
 	}
 	p, err := PlanDiscovery(fsys, ".", nil)
 	require.NoError(t, err)
-	r, err := Discover(context.Background(), &fakeRunner{answers: map[string]answer{
-		"spans": {records: []map[string]interface{}{
-			{fieldServiceName: "ledger", "records": float64(1)},
-			{fieldServiceName: "checkout", "records": float64(100)},
-		}},
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{
+			{fieldServiceName: "ledger", fieldRecords: float64(1)},
+			{fieldServiceName: "checkout", fieldRecords: float64(100)},
+		}}},
 	}}, p, prodHost)
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 2)
 	assert.Equal(t, "ledger", r.Candidates[0].ServiceName)
 	assert.Equal(t, `service.name "checkout" from deploy.yaml:4, deploy.yaml:10, deploy.yaml:13`, r.Candidates[1].Evidence[0],
 		"evidence still cites every line")
+}
+
+// On a busy environment a day of spans scans past the cap. The first rung
+// answers, so it is the only retry sent, and its candidate is a match at the
+// floor its note states.
+func TestDiscover_ScanCapFallsBackToSampling(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(rows(t, "spans-checkout")), sampledAnswer(rows(t, "spans-checkout-sampled"), 100_000_000)},
+		"logs":  {{records: rows(t, "logs-checkout")}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Len(t, runner.sent, 3, "the first rung that completes ends the walk")
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.False(t, r.Partial)
+	assert.True(t, r.Queries[0].Truncated)
+	assert.Equal(t, causeTruncated, r.Queries[0].Cause)
+	assert.Equal(t, int64(100000), r.Queries[1].SamplingRatio)
+	assert.Equal(t, "1h", r.Queries[1].Window)
+	assert.Equal(t, 1, r.Queries[1].Rows)
+	for _, q := range r.Queries[2:4] {
+		assert.True(t, q.Skipped, q.Purpose)
+		assert.Empty(t, q.Cause, q.Purpose)
+	}
+	assert.Equal(t, []string{
+		"spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing",
+	}, r.Notes, "the capped query's own note is not needed: the retry answered")
+
+	require.Len(t, r.Candidates, 1)
+	c := r.Candidates[0]
+	assert.True(t, c.Sampled)
+	assert.Equal(t, int64(1200000), c.Spans, "the sample's extrapolation, not the capped scan's count")
+	assert.Equal(t, "~1200000 spans in 1h (sampled 1-in-100000), 88000 logs in 24h", c.Evidence[len(c.Evidence)-1])
+	assert.Equal(t, r.Notes, r.SamplingNotes())
+}
+
+// Before each rung is sent, the last scan is scaled by how much more the rung
+// reads. An hour at 1-in-100000 that read 1 GB predicts 24 GB for the day,
+// and the day at 1-in-1000 more still, so neither is sent.
+func TestDiscover_SamplingSkipsAPredictedCap(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), sampledAnswer(nil, 1_000_000_000)},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, strings.Count(strings.Join(runner.sent, "\n"), "fetch spans"))
+	for _, q := range r.Queries[2:4] {
+		assert.True(t, q.Skipped, q.Purpose)
+		assert.Equal(t, causePredictedCap, q.Cause, q.Purpose)
+	}
+	assert.True(t, r.Partial, "a sampled miss is a bound, not an absence")
+	assert.Contains(t, r.Notes,
+		"spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h and matched nothing; a service with fewer than about 300000 spans over 1h may be missing, so the result is partial")
+}
+
+// Every rung that completes empty passes the walk on to the next. The bound
+// the report states is the finest rung's, and the result stays partial.
+func TestDiscover_EmptySampledAnswerIsPartial(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), sampledAnswer(nil, 1_000_000), sampledAnswer(nil, 10_000_000), sampledAnswer(nil, 0)},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Len(t, runner.sent, 7, "every rung ran, then the logs query, then both fallbacks")
+	assert.True(t, r.Partial)
+	assert.Equal(t, VerdictNone, r.Verdict)
+	assert.False(t, r.Queries[8].Skipped, "the records found nothing, so the fallbacks ran")
+	assert.Equal(t, []string{
+		"spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-1000 over 24h and matched nothing; a service with fewer than about 3000 spans over 24h may be missing, so the result is partial",
+	}, r.SamplingNotes())
+}
+
+// A rung's collected id array cut at maxLength is no more a cut page than the
+// record query's own: its rows are the answer.
+func TestDiscover_SampledRungCollectedArrayCapIsNotACutPage(t *testing.T) {
+	rung := sampledAnswer(rows(t, "spans-checkout-sampled"), 100_000_000)
+	rung.truncation = inventory.TruncationResultLimit
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(rows(t, "spans-checkout")), rung},
+		"logs":  {{records: rows(t, "logs-checkout")}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Len(t, runner.sent, 3, "the rung answered, so the walk ended there")
+	assert.False(t, r.Queries[1].Truncated)
+	assert.Empty(t, r.Queries[1].Cause)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.False(t, r.Partial)
+	require.Len(t, r.Candidates, 1)
+	assert.True(t, r.Candidates[0].Sampled)
+	assert.Equal(t, int64(1200000), r.Candidates[0].Spans, "the sample's rows, not the capped scan's")
+}
+
+// A rung that reports no scan size keeps the prediction scaled from the last
+// one that did: 40 MB an hour is 960 MB a day, and a hundred times that at
+// 1-in-1000 is over the cap whatever the second rung failed to report.
+func TestDiscover_UnknownScanKeepsThePrediction(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), sampledAnswer(nil, 40_000_000), sampledAnswer(nil, 0)},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, strings.Count(strings.Join(runner.sent, "\n"), "fetch spans"))
+	assert.True(t, r.Queries[3].Skipped)
+	assert.Equal(t, causePredictedCap, r.Queries[3].Cause)
+}
+
+// A rung that fills the page is as cut short as a record query that does.
+func TestDiscover_SampledRungFillsThePage(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), sampledAnswer(serviceNames(discoveryRowLimit), 0)},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Equal(t, causeRowLimit, r.Queries[1].Cause)
+	assert.True(t, r.Queries[2].Skipped)
+	assert.Empty(t, r.Queries[2].Cause)
+	assert.True(t, r.Partial)
+	assert.Len(t, r.Candidates, discoveryRowLimit)
+	assert.True(t, r.Candidates[0].Sampled)
+}
+
+// Grail answers a refusal to sample with a warning on a 200, so the rung read
+// what the capped query read. Every further rung would too: the walk stops,
+// and the capped answer stands.
+func TestDiscover_SamplingRefusedByGrail(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(rows(t, "spans-checkout")), {records: rows(t, "spans-checkout-sampled")}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Equal(t, causeSamplingRefused, r.Queries[1].Cause)
+	for _, q := range r.Queries[2:4] {
+		assert.True(t, q.Skipped, q.Purpose)
+		assert.Empty(t, q.Cause, q.Purpose)
+	}
+	require.Len(t, r.Candidates, 1)
+	assert.Equal(t, int64(12400), r.Candidates[0].Spans, "the capped scan's count")
+	assert.False(t, r.Candidates[0].Sampled)
+	assert.True(t, r.Partial)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Equal(t, []string{
+		"this environment did not sample spans, so there is no cheaper query than the capped one",
+		"spans stopped at the 5 GB scan cap, so the verdict is capped at ambiguous",
+	}, r.Notes)
+	assert.Empty(t, r.SamplingNotes())
+}
+
+// Spans sampled over an hour and logs read over a day are compared per hour:
+// 1.2M spans in an hour is busier than 20M logs in a day.
+func TestDiscover_RanksByRate(t *testing.T) {
+	p, err := PlanDiscovery(fstest.MapFS{}, ".", []string{"checkout", "ledger"})
+	require.NoError(t, err)
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), sampledAnswer([]map[string]interface{}{
+			{fieldServiceName: "checkout", fieldSampled: "12", fieldRecords: "1200000"},
+		}, 0)},
+		"logs": {{records: []map[string]interface{}{{fieldServiceName: "ledger", fieldRecords: "20000000"}}}},
+	}}
+	r, err := Discover(context.Background(), runner, p, prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 2)
+	assert.Equal(t, "checkout", r.Candidates[0].ServiceName)
+	assert.Equal(t, "ledger", r.Candidates[1].ServiceName)
+	assert.Equal(t, `20000000 logs in 24h`, r.Candidates[1].Evidence[len(r.Candidates[1].Evidence)-1])
 }

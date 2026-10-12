@@ -35,10 +35,10 @@ const (
 // checkoutRows are the aggregates an environment running the checkout
 // workload returns: spans carry the service id, logs only the process group.
 var checkoutRows = map[string]string{
-	"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout",` +
-		`"dt.entity.service":"` + flowService + `","dt.entity.process_group":"` + flowProcessGroup + `","records":"12400"}`,
-	"logs": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout",` +
-		`"dt.entity.process_group":"` + flowProcessGroup + `","records":"88000"}`,
+	"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"12400",` +
+		`"serviceCount":"1","services":["` + flowService + `"],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`,
+	"logs": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"88000",` +
+		`"serviceCount":"0","services":[],"processGroupCount":"1","processGroups":[["` + flowProcessGroup + `"]]}`,
 }
 
 // chdirCheckoutRepo is a single-service repository whose go.mod and
@@ -129,7 +129,10 @@ func TestListingSeesChangedFiles(t *testing.T) {
 func recordQuery(object string) string {
 	return "fetch " + object + ", from:now()-24h, scanLimitGBytes:5\n" +
 		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))` + "\n" +
-		"| summarize records = count(), by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity.service, dt.entity.process_group}\n" +
+		"| summarize records = count(),\n" +
+		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
+		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n" +
+		"    by:{k8s.namespace.name, k8s.workload.name, service.name}\n" +
 		"| sort records desc\n" +
 		"| limit 200"
 }
@@ -267,7 +270,7 @@ func TestRepoScopeDiscoverDryRunNeedsNoToken(t *testing.T) {
 	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
 	require.Equal(t, true, plan["dry_run"])
 	payload := plan["payload"].([]interface{})
-	require.Len(t, payload, 4)
+	require.Len(t, payload, 10)
 	require.Equal(t, recordQuery("spans"), payload[0].(map[string]interface{})["dql"])
 
 	t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
@@ -294,7 +297,7 @@ func TestRepoScopeDiscoverChecksScopes(t *testing.T) {
 	withGrantedScopes(t, []string{"storage:logs:read", "storage:spans:read"}, true)
 	report, _ := discoverReport(t)
 	require.Equal(t, []string{recordQuery("spans"), recordQuery("logs")}, srv.queries())
-	require.Equal(t, []string{"auth", "auth"}, []string{report.Queries[2].Cause, report.Queries[3].Cause})
+	require.Equal(t, []string{"auth", "auth"}, []string{report.Queries[8].Cause, report.Queries[9].Cause})
 	require.True(t, report.Partial)
 }
 
@@ -315,7 +318,7 @@ func TestRepoScopeDiscoverTimeout(t *testing.T) {
 
 	report, _ := discoverReport(t)
 	require.Equal(t, "timeout", report.Queries[0].Cause)
-	require.True(t, report.Queries[1].Skipped)
+	require.True(t, report.Queries[4].Skipped, "the logs query")
 	require.True(t, report.Partial)
 }
 
@@ -508,7 +511,7 @@ func TestRepoScopeDiscoverSharedServiceName(t *testing.T) {
 	const vmService = "SERVICE-00000000000000AA"
 	rows := map[string]string{"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"900"},` +
 		`{"k8s.namespace.name":"staging","k8s.workload.name":"checkout","service.name":"checkout","records":"500"},` +
-		`{"service.name":"checkout","dt.entity.service":"` + vmService + `","records":"100"},` +
+		`{"service.name":"checkout","serviceCount":"1","services":["` + vmService + `"],"records":"100"},` +
 		`{"k8s.namespace.name":"payments","k8s.workload.name":"checkout-canary","service.name":"checkout","records":"50"}`}
 	newDQLRecorder(t, "readonly", rowsByObject(rows))
 	chdirCheckoutRepo(t)

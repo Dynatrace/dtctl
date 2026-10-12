@@ -11,6 +11,6 @@ Unit: .
    40 spans in 24h
 
 Verdict: ambiguous (candidates: 2)
-2 of 4 queries ran in 0.6s. Nothing was written. Save the one that runs this code with its line:
+2 of 10 queries ran in 0.6s. Nothing was written. Save the one that runs this code with its line:
   1  dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout
   2  dtctl repo-scope set checkout-ledger --namespace payments --workload checkout-ledger --service-name checkout-ledger

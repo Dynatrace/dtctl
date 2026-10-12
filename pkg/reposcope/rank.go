@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Candidate is one identity found for the unit: what the spans and logs of
@@ -15,22 +16,40 @@ type Candidate struct {
 	Rank int `json:"rank" yaml:"rank"`
 	// Name is the entry to save it as: the workload, else the service name,
 	// else the name an entity matched, else the unit.
-	Name          string   `json:"name" yaml:"name"`
-	Services      []string `json:"services,omitempty" yaml:"services,omitempty"`
-	ProcessGroups []string `json:"processGroups,omitempty" yaml:"processGroups,omitempty"`
-	ServiceName   string   `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
+	Name string `json:"name" yaml:"name"`
+	// Services and ProcessGroups are the ids the records carried, up to
+	// discoveryIDLimit of each per row. ServiceCount and ProcessGroupCount
+	// are how many there are: the largest distinct count any one row
+	// reported, since the spans and logs rows of one candidate report
+	// overlapping sets and a sum would count an id twice. That makes it a
+	// lower bound on the union, never below the ids listed. A Capped flag
+	// says a row had more ids than it listed, so the list is not all of
+	// them.
+	Services            []string `json:"services,omitempty" yaml:"services,omitempty"`
+	ServiceCount        int64    `json:"serviceCount,omitempty" yaml:"serviceCount,omitempty"`
+	ServicesCapped      bool     `json:"servicesCapped,omitempty" yaml:"servicesCapped,omitempty"`
+	ProcessGroups       []string `json:"processGroups,omitempty" yaml:"processGroups,omitempty"`
+	ProcessGroupCount   int64    `json:"processGroupCount,omitempty" yaml:"processGroupCount,omitempty"`
+	ProcessGroupsCapped bool     `json:"processGroupsCapped,omitempty" yaml:"processGroupsCapped,omitempty"`
+	ServiceName         string   `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
 	// ServiceNameShared reports that another candidate carries this service
 	// name under a different namespace and workload, either of which may be
 	// absent: a canary beside its main workload, the same service in another
 	// namespace, or one whose records name no workload at all. A
 	// service-name binding would select that candidate's records too.
-	ServiceNameShared bool     `json:"serviceNameShared,omitempty" yaml:"serviceNameShared,omitempty"`
-	Namespace         string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Workload          string   `json:"workload,omitempty" yaml:"workload,omitempty"`
-	Tier              string   `json:"tier" yaml:"tier"`
-	Spans             int64    `json:"spans,omitempty" yaml:"spans,omitempty"`
-	Logs              int64    `json:"logs,omitempty" yaml:"logs,omitempty"`
-	Evidence          []string `json:"evidence" yaml:"evidence"`
+	ServiceNameShared bool   `json:"serviceNameShared,omitempty" yaml:"serviceNameShared,omitempty"`
+	Namespace         string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Workload          string `json:"workload,omitempty" yaml:"workload,omitempty"`
+	Tier              string `json:"tier" yaml:"tier"`
+	// Spans and Logs are record counts over the window each was read in,
+	// which the evidence names; a sampled count is an extrapolation.
+	Spans int64 `json:"spans,omitempty" yaml:"spans,omitempty"`
+	Logs  int64 `json:"logs,omitempty" yaml:"logs,omitempty"`
+	// Sampled reports that some of the candidate's records were read by a
+	// sampled retry, so a candidate quieter than the stated floor could
+	// have been missed beside it.
+	Sampled  bool     `json:"sampled,omitempty" yaml:"sampled,omitempty"`
+	Evidence []string `json:"evidence" yaml:"evidence"`
 	// MatchedDir reports that the name of the directory discovery ran for
 	// is among the names that matched the candidate. It is set only when
 	// the unit is the repository root and the directory is below it: that
@@ -47,7 +66,8 @@ type Candidate struct {
 	// that repeats a name on several lines is still one file: ranking
 	// weighs independent files, not repetition.
 	sources map[string]bool
-	matched string // the token an entity matched
+	matched string  // the token an entity matched
+	rate    float64 // records per hour, which ranks candidates read over different windows
 }
 
 // tier is how well a candidate's name matches, best first. Records found by
@@ -84,12 +104,15 @@ type discovery struct {
 	namespaces []token
 	records    map[recordKey]*Candidate
 	entities   []*Candidate
+	// samples is the sampled retry that answered for a data object, absent
+	// for one read whole.
+	samples map[string]*Query
 }
 
 // newDiscovery prepares the matchers: every variant of every token sent, then
 // every sent value no token explains, which came from a term.
 func newDiscovery(p *Plan) *discovery {
-	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}}
+	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}}
 	if p.Unit == "." && p.Dir != "." {
 		d.dirSource = dirSource(p.Dir)
 	}
@@ -112,8 +135,9 @@ func newDiscovery(p *Plan) *discovery {
 	return d
 }
 
-// addRecord folds one aggregate row of a record query into its candidate.
-func (d *discovery) addRecord(object string, rec map[string]interface{}) {
+// addRecord folds one aggregate row of a record query into its candidate;
+// sampled is a row a sampled retry read.
+func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled bool) {
 	key := recordKey{
 		namespace:   stringField(rec, fieldNamespace),
 		workload:    stringField(rec, fieldWorkload),
@@ -127,13 +151,37 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}) {
 		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName}
 		d.records[key] = c
 	}
-	for _, id := range idsField(rec, fieldService, serviceIDRe) {
-		c.Services = addSorted(c.Services, id)
+	for _, f := range []struct {
+		ids              *[]string
+		count            *int64
+		capped           *bool
+		idsKey, countKey string
+		valid            *regexp.Regexp
+	}{
+		{&c.Services, &c.ServiceCount, &c.ServicesCapped, fieldServices, fieldServiceCount, serviceIDRe},
+		{&c.ProcessGroups, &c.ProcessGroupCount, &c.ProcessGroupsCapped, fieldProcessGroups, fieldProcessGroupCount, processGroupRe},
+	} {
+		// For a field that is itself an array, Grail counts and collects
+		// distinct arrays, so the count is compared with the arrays
+		// collected, not with the ids they flatten to.
+		ids, collected := idsField(rec, f.idsKey, f.valid)
+		n := countField(rec, f.countKey)
+		for _, id := range ids {
+			*f.ids = addSorted(*f.ids, id)
+		}
+		*f.capped = *f.capped || n > int64(collected)
+		*f.count = max(*f.count, n, int64(len(*f.ids)))
 	}
-	for _, id := range idsField(rec, fieldProcessGroup, processGroupRe) {
-		c.ProcessGroups = addSorted(c.ProcessGroups, id)
+	n := countField(rec, fieldRecords)
+	if sampled {
+		// A count that does not divide into a ratio is reported as what the
+		// sample matched, as inventory does, rather than extrapolated.
+		if matched := countField(rec, fieldSampled); matched <= 0 || n < matched {
+			n = matched
+		}
+		c.Sampled = true
 	}
-	if n := countField(rec, "records"); object == objectSpans {
+	if object == objectSpans {
 		c.Spans += n
 	} else {
 		c.Logs += n
@@ -231,16 +279,77 @@ func (d *discovery) explain(c *Candidate) {
 		}
 	}
 	c.cite(fieldNamespace, c.Namespace, from)
-	var counts []string
-	if c.Spans > 0 {
-		counts = append(counts, fmt.Sprintf("%d spans", c.Spans))
+	if counts := d.counts(c); counts != "" {
+		c.Evidence = append(c.Evidence, counts)
 	}
-	if c.Logs > 0 {
-		counts = append(counts, fmt.Sprintf("%d logs", c.Logs))
+}
+
+// counts is a record candidate's evidence line for its record counts. Counts
+// read whole share one window: "12400 spans, 88000 logs in 24h". A sampled
+// count is an estimate over its own window and says so: "~1200000 spans in
+// 1h (sampled 1-in-100000), 88000 logs in 24h".
+func (d *discovery) counts(c *Candidate) string {
+	var whole, all []string
+	for _, n := range c.recordCounts() {
+		if q := d.samples[n.object]; q != nil {
+			all = append(all, fmt.Sprintf("~%d %s in %s (sampled 1-in-%d)", n.count, n.object, d.window(n.object), q.SamplingRatio))
+			continue
+		}
+		whole = append(whole, fmt.Sprintf("%d %s", n.count, n.object))
+		all = append(all, fmt.Sprintf("%d %s in %s", n.count, n.object, d.window(n.object)))
 	}
-	if len(counts) > 0 {
-		c.Evidence = append(c.Evidence, strings.Join(counts, ", ")+" in "+discoveryWindow)
+	switch {
+	case len(all) == 0:
+		return ""
+	case len(whole) == len(all):
+		return strings.Join(whole, ", ") + " in " + discoveryWindow
 	}
+	return strings.Join(all, ", ")
+}
+
+// rate is a candidate's records per hour, each data object's over the window
+// it was read in.
+func (d *discovery) rate(c *Candidate) float64 {
+	var rate float64
+	for _, n := range c.recordCounts() {
+		rate += float64(n.count) / windowHours(d.window(n.object))
+	}
+	return rate
+}
+
+// window is the lookback a data object's records were read over: the
+// sampled retry's that answered for it, else the discovery window.
+func (d *discovery) window(object string) string {
+	if q := d.samples[object]; q != nil {
+		return q.Window
+	}
+	return discoveryWindow
+}
+
+type recordCount struct {
+	object string
+	count  int64
+}
+
+// recordCounts is the candidate's record count per data object, leaving out
+// the objects that had none.
+func (c *Candidate) recordCounts() []recordCount {
+	var out []recordCount
+	for _, n := range []recordCount{{objectSpans, c.Spans}, {objectLogs, c.Logs}} {
+		if n.count > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// windowHours is the length of a record query's window in hours.
+func windowHours(window string) float64 {
+	d, err := time.ParseDuration(window)
+	if err != nil || d <= 0 {
+		return 1
+	}
+	return d.Hours()
 }
 
 // cite adds one evidence line for a field the tokens name, listing each place
@@ -283,6 +392,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 	all := append([]*Candidate{}, d.entities...)
 	for _, c := range d.records {
 		d.explain(c)
+		c.rate = d.rate(c)
 		all = append(all, c)
 	}
 	sort.Slice(all, func(i, j int) bool { return before(all[i], all[j]) })
@@ -293,7 +403,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.MatchedDir = d.dirSource != "" && c.sources[d.dirSource]
 		c.Rank, c.Tier = i+1, c.tier.String()
 		c.Name = entryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
-		c.tier, c.sources, c.matched = 0, nil, ""
+		c.tier, c.sources, c.matched, c.rate = 0, nil, "", 0
 		r.Candidates[i] = *c
 	}
 	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial)
@@ -317,16 +427,17 @@ func sharedServiceNames(cs []*Candidate) map[string]bool {
 }
 
 // before orders candidates: better tier, more repository files naming them,
-// more records, then by identity, so the order never depends on the order
-// rows arrived in.
+// more records per hour, then by identity, so the order never depends on the
+// order rows arrived in. Records are compared per hour because a sampled
+// object may have been read over a shorter window than the other.
 func before(c, o *Candidate) bool {
 	switch {
 	case c.tier != o.tier:
 		return c.tier < o.tier
 	case len(c.sources) != len(o.sources):
 		return len(c.sources) > len(o.sources)
-	case c.Spans+c.Logs != o.Spans+o.Logs:
-		return c.Spans+c.Logs > o.Spans+o.Logs
+	case c.rate != o.rate:
+		return c.rate > o.rate
 	}
 	return identity(c) < identity(o)
 }
@@ -362,20 +473,23 @@ func entryName(raw string) string {
 
 // verdictKinds maps each verdict kind to its name for a reader and a
 // candidate's values for it. A kind is decided on distinct values, so one
-// candidate carrying two service ids is two services, not one.
+// candidate carrying two service ids is two services, not one. An id kind
+// also has a count, the candidate's own distinct total, which may exceed the
+// ids it lists.
 var verdictKinds = map[string]struct {
 	label  string
 	values func(Candidate) []string
+	count  func(Candidate) int64
 }{
-	"service":      {"service", func(c Candidate) []string { return c.Services }},
-	"processGroup": {"process group", func(c Candidate) []string { return c.ProcessGroups }},
-	"serviceName":  {"service name", func(c Candidate) []string { return nonEmpty(c.ServiceName) }},
+	"service":      {"service", func(c Candidate) []string { return c.Services }, func(c Candidate) int64 { return c.ServiceCount }},
+	"processGroup": {"process group", func(c Candidate) []string { return c.ProcessGroups }, func(c Candidate) int64 { return c.ProcessGroupCount }},
+	"serviceName":  {"service name", func(c Candidate) []string { return nonEmpty(c.ServiceName) }, nil},
 	"workload": {"workload", func(c Candidate) []string {
 		if c.Workload == "" {
 			return nil
 		}
 		return []string{Workload{Namespace: c.Namespace, Name: c.Workload}.String()}
-	}},
+	}, nil},
 }
 
 func nonEmpty(v string) []string {
@@ -395,22 +509,30 @@ func VerdictLabel(kind string) string {
 }
 
 // verdicts decides each kind and the whole. A partial result is never a
-// match: what was not seen could be a second candidate.
+// match: what was not seen could be a second candidate. A kind is tallied by
+// its count where it has one, so a candidate listing one of its 200 service
+// ids is 200 services, not one.
 func verdicts(candidates []Candidate, partial bool) (Verdict, map[string]Verdict) {
 	per := make(map[string]Verdict, len(verdictKinds))
 	for kind, k := range verdictKinds {
 		distinct := map[string]bool{}
+		var most int64
 		exact := true
 		for _, c := range candidates {
 			values := k.values(c)
 			for _, v := range values {
 				distinct[v] = true
 			}
-			if len(values) > 0 {
+			var n int64
+			if k.count != nil {
+				n = k.count(c)
+				most = max(most, n)
+			}
+			if len(values) > 0 || n > 0 {
 				exact = exact && c.Tier == tierExact.String()
 			}
 		}
-		per[kind] = decide(len(distinct), exact, partial)
+		per[kind] = decide(max(len(distinct), int(most)), exact, partial)
 	}
 	overall := decide(len(candidates), len(candidates) == 1 && candidates[0].Tier == tierExact.String(), partial)
 	return overall, per
@@ -431,24 +553,40 @@ func stringField(rec map[string]interface{}, key string) string {
 	return s
 }
 
-// idsField reads an entity id field, which a record carries as one id or,
-// for a log written by several processes, as an array of them. An id the
-// scope file would refuse is dropped: it could never be saved.
-func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) []string {
-	var values []interface{}
-	switch v := rec[key].(type) {
-	case string:
-		values = []interface{}{v}
-	case []interface{}:
-		values = v
-	}
-	var ids []string
-	for _, v := range values {
-		if id, ok := v.(string); ok && valid.MatchString(id) {
-			ids = append(ids, id)
+// idsField reads a collected id column: an array of ids, nested once more
+// when the field is itself an array (a log written by several processes
+// carries its process groups as one), so it is flattened. An id the scope
+// file would refuse is dropped: it could never be saved. collected is how
+// many elements the column held at its top level, valid or not: the values
+// collectDistinct kept, distinct ids or distinct arrays of them, which is
+// what the row's countDistinct counts too, so comparing the two tells a cut
+// list from a whole one.
+func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids []string, collected int) {
+	seen := map[string]bool{}
+	var walk func(v interface{})
+	walk = func(v interface{}) {
+		switch v := v.(type) {
+		case string:
+			if !seen[v] {
+				seen[v] = true
+				if valid.MatchString(v) {
+					ids = append(ids, v)
+				}
+			}
+		case []interface{}:
+			for _, e := range v {
+				walk(e)
+			}
 		}
 	}
-	return ids
+	switch v := rec[key].(type) {
+	case []interface{}:
+		collected = len(v)
+	case string:
+		collected = 1
+	}
+	walk(rec[key])
+	return ids, collected
 }
 
 // countField reads a count, which Grail sends as a number or, for a long, as
