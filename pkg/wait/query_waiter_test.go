@@ -148,6 +148,42 @@ func TestWait_MaxAttemptsExceeded(t *testing.T) {
 	}
 }
 
+// The waiter prints no response of its own, so OnResult sees every attempt's,
+// with its record count.
+func TestWait_ReportsEachAttemptToOnResult(t *testing.T) {
+	executor, cleanup := newWaiterTestExecutor(t, func(w http.ResponseWriter, r *http.Request) {
+		response := exec.DQLQueryResponse{
+			State:  "SUCCEEDED",
+			Result: &exec.DQLResult{Records: []map[string]interface{}{{"a": 1}}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer cleanup()
+
+	var counts []int
+	config := WaitConfig{
+		Query:       "fetch logs",
+		Condition:   Condition{Type: ConditionTypeCount, Operator: OpGreaterEqual, Value: 10},
+		MaxAttempts: 2,
+		Quiet:       true,
+		ProgressOut: &bytes.Buffer{},
+		Backoff:     BackoffConfig{MinInterval: 0, MaxInterval: 0},
+		QueryOptions: exec.DQLExecuteOptions{OnResult: func(n int, result *exec.DQLQueryResponse) {
+			if result == nil {
+				t.Error("OnResult got no response")
+			}
+			counts = append(counts, n)
+		}},
+	}
+	if _, err := NewQueryWaiter(executor, config).Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if fmt.Sprint(counts) != "[1 1]" {
+		t.Errorf("OnResult counts = %v, want one per attempt: [1 1]", counts)
+	}
+}
+
 // --- Wait: permanent query error fails fast ---
 
 func TestWait_PermanentQueryError_FailsFast(t *testing.T) {

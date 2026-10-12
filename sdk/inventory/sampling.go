@@ -92,15 +92,30 @@ func readSampledProbe(res *RunResult) sampledProbe {
 	p.matched = asInt64(r["matched"])
 	p.records = asInt64(r["population"])
 	p.lastSeen, _ = r["last_seen"].(string)
-	// Derive the ratio from the two numbers rather than trusting the request.
-	// A population below the sample count is incoherent (nothing can extrapolate
-	// downward), so fall back to reporting the sample as the count.
-	if p.matched > 0 && p.records >= p.matched {
-		p.ratio = p.records / p.matched
-	} else {
+	// Derive the ratio from the two numbers rather than trusting the request;
+	// without a coherent one, report the sample as the count.
+	if p.ratio = effectiveRatio(p.records, p.matched); p.ratio == 0 {
 		p.records = p.matched
 	}
 	return p
+}
+
+// effectiveRatio is the sampling ratio a sampled count actually ran at: the
+// extrapolated population divided by the records the sample matched.
+//
+// It is divided out of the data rather than copied from the request, because
+// Grail rounds every requested ratio down to a power of ten and answers a
+// refusal to sample with a mere warning, so the request overstates what was
+// read by up to the whole ratio. population is the sum of
+// dt.system.sampling_ratio over the matched records. It returns 0 when the
+// two numbers do not yield a ratio: nothing was matched, or the population is
+// below the sample count, which is incoherent because nothing extrapolates
+// downward.
+func effectiveRatio(population, matched int64) int64 {
+	if matched <= 0 || population < matched {
+		return 0
+	}
+	return population / matched
 }
 
 // samplingBias is the amount by which a sampled takeMax under-reports
@@ -129,8 +144,8 @@ func windowDuration(since string) time.Duration {
 	return d
 }
 
-// sampledZeroBound is the largest population a sampled probe that matched
-// nothing can still have missed, at about 95% confidence.
+// SampledMissBound is the largest population a count sampled 1-in-ratio that
+// matched nothing can still have missed, at about 95% confidence.
 //
 // This is the one place sampling yields *better* evidence than the cap it
 // replaced. A truncated scan covers an unspecified portion of the window and
@@ -139,7 +154,7 @@ func windowDuration(since string) time.Duration {
 // quantifiable: with 1-in-R sampling, missing a population of R*3 has
 // probability e^-3, just under 5%. Reporting that number is honest in a way
 // "the scan stopped early" cannot be.
-func sampledZeroBound(ratio int64) int64 { return ratio * 3 }
+func SampledMissBound(ratio int64) int64 { return ratio * 3 }
 
 // sampledHitEvidence states what a sampled verdict rests on. Every sampled
 // signal carries evidence, including a plain live one: its volume is an
@@ -161,7 +176,7 @@ func sampledHitEvidence(object string, p sampledProbe, bias time.Duration, scanL
 func sampledZeroEvidence(object string, ratio int64, since string, scanLimitGB float64) string {
 	return fmt.Sprintf("not evaluated: %s scans more than %s over %s, so it was sampled instead — 1-in-%s matched nothing, which bounds this scope at under ~%s records in the window (95%%) but does not establish absence; raise --scan-limit-gbytes to count it exactly, or narrow --since",
 		object, scanCapLabel(scanLimitGB), windowLabel(since),
-		formatCount(ratio), formatCount(sampledZeroBound(ratio)))
+		formatCount(ratio), formatCount(SampledMissBound(ratio)))
 }
 
 // sampledAmbiguousEvidence phrases the one band a sampled probe cannot resolve:

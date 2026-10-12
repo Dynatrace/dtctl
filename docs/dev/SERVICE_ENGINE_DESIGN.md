@@ -314,6 +314,12 @@ own wire format — protocol servers hold no dtctl logic of their own.
 The service is not a perfect mirror, and the differences are intentional:
 
 - **Host-only commands are absent** (see the environment axis above).
+- **Queries are never repo-scoped.** A repo scope (`.dtctl-repo-scope.yaml`,
+  see [REPO_SCOPE_DESIGN.md](REPO_SCOPE_DESIGN.md)) is found by walking up from
+  the working directory, which is CLI-only host state: `repo-scope` is a blocked
+  command, and `query` resolves a scope only with the `HostWorkingDirectory`
+  capability and no session. `TestEngineOutputEqualsCLI` runs its CLI side in a
+  temporary directory so a scope file in the checkout cannot make the two differ.
 - **AI-agent auto-detection is skipped** for session-backed runs. The host's
   environment must not shape a tenant's output format; envelopes are opt-in per
   request via `--agent`.

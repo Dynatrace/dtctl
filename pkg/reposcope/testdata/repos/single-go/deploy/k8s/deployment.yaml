@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: payments
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: checkout
+          image: registry.example.invalid/acme/checkout:1.4.2
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: checkout
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-http

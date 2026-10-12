@@ -115,6 +115,33 @@ func TestEmptyResultAdvice_FieldTypo(t *testing.T) {
 	}
 }
 
+// A caller that rewrote the query (a repo scope inserts a filter) passes the
+// text as typed: the diagnosis must judge only the fields the user wrote, and
+// sample the user's own fetch stage.
+func TestEmptyResultAdvice_DiagnosesTheTypedQuery(t *testing.T) {
+	const typed = `fetch logs | filter servce.name == "x"`
+	const sent = "fetch logs | filter (k8s.workload.name == \"checkout\")\n| filter servce.name == \"x\""
+
+	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return logSample(), nil }}
+	e := &DQLExecutor{probe: p.run}
+	reason, sugg := e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{TypedQuery: typed})
+	if reason == nil || reason.Field != "servce.name" {
+		t.Fatalf("reason = %+v, want the typed field servce.name", reason)
+	}
+	if hasSuggestion(sugg, "k8s.workload.name") {
+		t.Errorf("the inserted filter's field must not be diagnosed: %v", sugg)
+	}
+	if len(p.calls) != 1 || p.calls[0] != "fetch logs | limit 100" {
+		t.Errorf("probe calls = %q", p.calls)
+	}
+
+	// Positive control: without the typed text the inserted field is judged.
+	_, sugg = e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{})
+	if !hasSuggestion(sugg, "k8s.workload.name") {
+		t.Errorf("control: the sent query's fields should be diagnosed: %v", sugg)
+	}
+}
+
 func TestEmptyResultAdvice_FieldProbeKeepsUserWindow(t *testing.T) {
 	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return logSample(), nil }}
 	e := &DQLExecutor{probe: p.run}

@@ -256,7 +256,7 @@ func TestBuildSpillResponse_BudgetWritesContinuationFile(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("continuation files = %v, want one", matches)
 	}
-	want := fmt.Sprintf("dtctl inspect %s --page --offset %d --limit %d", shellQuote(matches[0]), k, k)
+	want := fmt.Sprintf("dtctl inspect %s --page --offset %d --limit %d", ShellQuote(matches[0]), k, k)
 	if ctx.Next != want {
 		t.Errorf("next = %q, want %q", ctx.Next, want)
 	}
@@ -308,8 +308,8 @@ func TestShellQuote(t *testing.T) {
 		"/tmp/it's/q.jsonl":                              `'/tmp/it'\''s/q.jsonl'`,
 		"":                                               "''",
 	} {
-		if got := shellQuote(in); got != want {
-			t.Errorf("shellQuote(%q) = %s, want %s", in, got, want)
+		if got := ShellQuote(in); got != want {
+			t.Errorf("ShellQuote(%q) = %s, want %s", in, got, want)
 		}
 	}
 }

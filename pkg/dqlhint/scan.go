@@ -1,41 +1,31 @@
 package dqlhint
 
 import (
-	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
-)
 
-// masked replaces the contents of string literals and backtick identifiers in
-// the structural view of a query, so no rule mistakes `"a=b"` for code.
-const masked = '#'
+	"github.com/dynatrace-oss/dtctl/pkg/dql"
+)
 
 // queryContext is a query error prepared for the rules: the query, a masked
 // structural view of it with bracket depths, its pipeline segments, and the
 // error span as byte offsets.
 type queryContext struct {
 	q     string
-	code  string // q with literal contents masked; byte offsets match q
-	depth []int  // bracket nesting depth of each byte; a bracket belongs to its outer level
-	segs  []segment
+	code  string // dql.Masked.Code
+	depth []int  // dql.Masked.Depth
+	segs  []dql.Segment
 	start int // byte offset of the span start in q
 	end   int // byte offset of the span end in q, inclusive
 	args  []string
 }
 
-// segment is one command of the pipeline: q[start:end], without the pipe.
-type segment struct {
-	start, end int
-	cmd        string
-}
-
-var commandRe = regexp.MustCompile(`^\s*([A-Za-z_]\w*)`)
-
 // newContext prepares e for the rules. It returns nil — no rule runs — when
 // there is no query or position, the position does not point into the query,
-// or the query holds something the scanner does not model (comments,
-// unbalanced brackets or quotes).
+// or dql.Scan refuses the text (unbalanced brackets or quotes). Comments
+// are refused here as well: the rules build their fixes from the raw text,
+// and a fix spliced around a comment could land inside it.
 func newContext(e Error) *queryContext {
 	if e.Query == "" || e.Span == nil {
 		return nil
@@ -50,23 +40,11 @@ func newContext(e Error) *queryContext {
 			end = o
 		}
 	}
-	code, depth, ok := scan(e.Query)
-	if !ok {
+	m, ok := dql.Scan(e.Query)
+	if !ok || m.HasComments {
 		return nil
 	}
-	c := &queryContext{q: e.Query, code: code, depth: depth, start: start, end: end, args: e.Arguments}
-	from := 0
-	for i := 0; i <= len(code); i++ {
-		if i == len(code) || (code[i] == '|' && depth[i] == 0) {
-			seg := segment{start: from, end: i}
-			if m := commandRe.FindStringSubmatch(code[from:i]); m != nil {
-				seg.cmd = m[1]
-			}
-			c.segs = append(c.segs, seg)
-			from = i + 1
-		}
-	}
-	return c
+	return &queryContext{q: e.Query, code: m.Code, depth: m.Depth, segs: m.Segments, start: start, end: end, args: e.Arguments}
 }
 
 // byteOffset converts a 1-based line and character column into a byte offset,
@@ -96,64 +74,10 @@ func byteOffset(q string, line, col int) int {
 	return off
 }
 
-var matchingOpen = map[byte]byte{')': '(', ']': '[', '}': '{'}
-
-// scan builds the masked view and bracket depths of q. ok is false for input
-// the rules should not touch.
-func scan(q string) (code string, depth []int, ok bool) {
-	b := []byte(q)
-	depth = make([]int, len(q))
-	d := 0
-	var open []byte // unclosed brackets, innermost last
-	for i := 0; i < len(b); i++ {
-		depth[i] = d
-		switch b[i] {
-		case '"', '`':
-			quote := b[i]
-			j := i + 1
-			for ; j < len(b) && b[j] != quote; j++ {
-				if b[j] == '\\' && quote == '"' {
-					b[j] = masked
-					depth[j] = d
-					j++
-					if j >= len(b) {
-						break
-					}
-				}
-				b[j] = masked
-				depth[j] = d
-			}
-			if j >= len(b) {
-				return "", nil, false
-			}
-			depth[j] = d
-			i = j
-		case '(', '[', '{':
-			open = append(open, b[i])
-			d++
-		case ')', ']', '}':
-			if d == 0 || open[d-1] != matchingOpen[b[i]] {
-				return "", nil, false
-			}
-			open = open[:d-1]
-			d--
-			depth[i] = d
-		case '/':
-			if i+1 < len(b) && (b[i+1] == '/' || b[i+1] == '*') {
-				return "", nil, false
-			}
-		}
-	}
-	if d != 0 {
-		return "", nil, false
-	}
-	return string(b), depth, true
-}
-
 // segmentAt returns the pipeline segment holding byte offset off.
-func (c *queryContext) segmentAt(off int) *segment {
+func (c *queryContext) segmentAt(off int) *dql.Segment {
 	for i := range c.segs {
-		if off >= c.segs[i].start && off < c.segs[i].end {
+		if off >= c.segs[i].Start && off < c.segs[i].End {
 			return &c.segs[i]
 		}
 	}

@@ -18,16 +18,25 @@ func Confirm(message string) bool {
 // invocation's input and output instead of the process's. It buffers in
 // per call, so pass a *bufio.Reader when confirming more than once on one in.
 func ConfirmWith(in io.Reader, out io.Writer, message string) bool {
+	confirmed, _ := ConfirmAnswered(in, out, message)
+	return confirmed
+}
+
+// ConfirmAnswered is ConfirmWith that also reports whether an answer was
+// read: answered is false when in ended, or failed, before one, which is how
+// a caller tells a run nobody could ask (stdin is /dev/null or a closed
+// pipe) from a user who said no.
+func ConfirmAnswered(in io.Reader, out io.Writer, message string) (confirmed, answered bool) {
 	fmt.Fprintf(out, "%s [y/N]: ", message)
 
 	reader := bufio.NewReader(in)
 	response, err := reader.ReadString('\n')
 	if err != nil {
-		return false
+		return false, false
 	}
 
 	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes"
+	return response == "y" || response == "yes", true
 }
 
 // ConfirmDeletion prompts for confirmation of a destructive operation

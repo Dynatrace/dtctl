@@ -540,6 +540,16 @@ func maskDeprecated(cmd *cobra.Command, blocked *DeprecatedError) {
 	cmd.RunE = func(*cobra.Command, []string) error { return blocked }
 }
 
+// flagAdmitted reports whether p lets a caller pass f to cmd, at path, and
+// the level f has there: the weaker of its own and its command's. The flag is
+// passed rather than named because a global flag cannot be looked up by name
+// on a subcommand until cobra merges the persistent flags.
+func flagAdmitted(cmd *cobra.Command, path string, f *pflag.Flag, p stability.Policy) (stability.Level, bool) {
+	own := stability.OfFlagValue(f)
+	lvl := session.Weakest(stability.Effective(cmd), own)
+	return lvl, p.AllowsFlag(path, f.Name, lvl, own)
+}
+
 // maskBelowFloor hides a command and replaces its body with a guard returning
 // blocked. Non-runnable commands (pure groups) need only the hide: Cobra will
 // print their help, and their runnable children are masked in their own right.
@@ -566,25 +576,21 @@ func blockBelowFloorFlags(cmd, root *cobra.Command, path string, p stability.Pol
 		return // flags are the command's own business; nothing to check
 	}
 	blocked := make(map[string]stability.Level)
-	consider := func(f *pflag.Flag, own stability.Level) {
-		lvl := session.Weakest(stability.Effective(cmd), own)
-		if p.AllowsFlag(path, f.Name, lvl, own) {
+	consider := func(f *pflag.Flag) {
+		lvl, ok := flagAdmitted(cmd, path, f, p)
+		if ok {
 			return
 		}
 		blocked[f.Name] = lvl
 		f.Hidden = true
 	}
-	visitOwnFlags(cmd, func(f *pflag.Flag) {
-		consider(f, stability.OfFlag(cmd, f.Name))
-	})
+	visitOwnFlags(cmd, consider)
 	// Global flags are declared once on the root and usable on every command,
 	// so the command being invoked is the only place a floor can refuse one.
 	// Checking them on the declaring command instead would police nothing: the
 	// guard below hangs off this command's RunE, and rootCmd's RunE never runs
 	// for a subcommand.
-	visitInheritedFlags(cmd, func(f *pflag.Flag) {
-		consider(f, stability.OfFlagValue(f))
-	})
+	visitInheritedFlags(cmd, consider)
 	if len(blocked) == 0 {
 		return
 	}

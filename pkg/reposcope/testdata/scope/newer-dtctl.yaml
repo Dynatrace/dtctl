@@ -1,0 +1,12 @@
+# Written by a newer dtctl that knows keys this one does not.
+apiVersion: v1
+kind: RepoScope
+environments:
+  abc12345.apps.dynatrace.com:
+    - name: checkout
+      service-names: [checkout]
+      discovered: 2026-09-30
+      workloads:
+        - namespace: payments
+          name: checkout
+          container: app

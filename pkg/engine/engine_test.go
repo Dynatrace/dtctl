@@ -265,7 +265,7 @@ func TestExecute_BlockedHiddenFromCatalog(t *testing.T) {
 	require.Contains(t, out, "get", "the resource surface stays visible")
 	// "skills:" (with colon) is the catalog entry for the top-level command;
 	// the bare word also appears in the unrelated "copilot-skills" resource.
-	for _, blocked := range []string{"doctor", "skills:", "completion"} {
+	for _, blocked := range []string{"doctor", "skills:", "completion", "repo-scope"} {
 		require.NotContains(t, out, blocked)
 	}
 }

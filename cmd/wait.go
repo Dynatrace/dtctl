@@ -122,6 +122,11 @@ Examples:
 				return err
 			}
 
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+
 			// Parse timing flags
 			timeout, _ := cmd.Flags().GetDuration("timeout")
 			maxAttempts, _ := cmd.Flags().GetInt("max-attempts")
@@ -152,6 +157,7 @@ Examples:
 			if err != nil {
 				return err
 			}
+			scoped.announce(&queryLimits)
 			fetchTimeoutSeconds, _ := cmd.Flags().GetInt32("fetch-timeout-seconds")
 			defaultTimeframeStart, _ := cmd.Flags().GetString("default-timeframe-start")
 			defaultTimeframeEnd, _ := cmd.Flags().GetString("default-timeframe-end")
@@ -169,6 +175,9 @@ Examples:
 				DefaultTimeframeEnd:    defaultTimeframeEnd,
 				Locale:                 locale,
 				Timezone:               timezone,
+				// The waiter calls this on every attempt; zero rows are the
+				// condition not met yet, so only the scan-cap line applies.
+				OnResult: scoped.noticeScanCap,
 				// ShowProgress is left false: the waiter drives its own per-attempt
 				// progress output on stderr, and a per-query progress bar (plus a
 				// completion summary per attempt) would fight it.
@@ -176,7 +185,7 @@ Examples:
 
 			// Create wait config
 			waitConfig := wait.WaitConfig{
-				Query:        query,
+				Query:        scoped.Query,
 				Condition:    condition,
 				Timeout:      timeout,
 				MaxAttempts:  maxAttempts,
@@ -195,7 +204,7 @@ Examples:
 
 			result, err := waiter.Wait(cmdContext(cmd))
 			if err != nil && err != context.DeadlineExceeded {
-				return fmt.Errorf("wait failed: %w", err)
+				return fmt.Errorf("wait failed: %w", scoped.wrapError(err))
 			}
 
 			// Print results if output format specified and condition was met
@@ -245,6 +254,7 @@ Examples:
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
+	addRepoScopeFlags(c, queryRepoScopeUsage, queryNoRepoScopeUsage)
 	rejectEmptyFlag(c, "file")
 	return c
 }

@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+  namespace: edge
+spec:
+  template:
+    spec:
+      containers:
+        - name: admin
+          image: registry.example.invalid/acme/admin:1.2

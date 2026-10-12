@@ -1,0 +1,12 @@
+Name:           proxy
+Path:           proxy
+Paths:          proxy, proxy-core
+Environment:    abc12345.apps.dynatrace.com
+File:           .dtctl-repo-scope.yaml
+Service names:  proxy
+Filters:
+  fetch logs   | filter (service.name == "proxy")
+  fetch spans  | filter (service.name == "proxy")
+Live Debugger filters:
+  service.name:proxy
+Other entries:  billing, checkout, ledger

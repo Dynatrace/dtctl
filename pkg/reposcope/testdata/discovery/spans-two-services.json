@@ -1,0 +1,22 @@
+[
+  {
+    "k8s.namespace.name": "payments",
+    "k8s.workload.name": "checkout",
+    "service.name": "checkout",
+    "records": 900,
+    "serviceCount": "1",
+    "services": ["SERVICE-0123456789ABCDEF"],
+    "processGroupCount": "1",
+    "processGroups": ["PROCESS_GROUP-FEDCBA9876543210"]
+  },
+  {
+    "k8s.namespace.name": "payments-canary",
+    "k8s.workload.name": "checkout",
+    "service.name": "checkout",
+    "records": 40,
+    "serviceCount": "1",
+    "services": ["SERVICE-00000000000000AA"],
+    "processGroupCount": "1",
+    "processGroups": ["PROCESS_GROUP-00000000000000BB"]
+  }
+]

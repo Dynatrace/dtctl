@@ -293,3 +293,107 @@ func TestWorkspaceHasFilters(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkspaceFilterSets(t *testing.T) {
+	resp := func(filterSets interface{}) map[string]interface{} {
+		ws := map[string]interface{}{"id": "ws-1"}
+		if filterSets != nil {
+			ws["filterSets"] = filterSets
+		}
+		return map[string]interface{}{"data": map[string]interface{}{"org": map[string]interface{}{
+			"getOrCreateUserWorkspaceV2": ws,
+		}}}
+	}
+
+	t.Run("a workspace without filters has none", func(t *testing.T) {
+		sets, err := WorkspaceFilterSets(resp(nil))
+		if err != nil || len(sets) != 0 {
+			t.Fatalf("got %#v, %v; want no sets and no error", sets, err)
+		}
+	})
+
+	t.Run("labels and filters as the environment holds them", func(t *testing.T) {
+		sets, err := WorkspaceFilterSets(resp([]interface{}{
+			map[string]interface{}{
+				"labels":  []interface{}{map[string]interface{}{"field": "k8s.namespace.name", "values": []interface{}{"payments"}}},
+				"filters": []interface{}{},
+			},
+			map[string]interface{}{
+				"labels":  []interface{}{},
+				"filters": []interface{}{map[string]interface{}{"field": "dt.entity.host", "values": []interface{}{"HOST-0000000000000001"}}},
+			},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(sets) != 2 {
+			t.Fatalf("got %d sets, want 2", len(sets))
+		}
+		if got := sets[0].Labels; len(got) != 1 || got[0].Field != "k8s.namespace.name" || strings.Join(got[0].Values, ",") != "payments" {
+			t.Errorf("set 0 labels = %#v", got)
+		}
+		if got := sets[1].Filters; len(got) != 1 || got[0].Field != "dt.entity.host" {
+			t.Errorf("set 1 filters = %#v", got)
+		}
+	})
+}
+
+func TestBuildFilterSets(t *testing.T) {
+	labels := func(set map[string]interface{}) []map[string]interface{} {
+		t.Helper()
+		list, ok := set["labels"].([]map[string]interface{})
+		if !ok {
+			t.Fatalf("labels: got %T, want []map[string]interface{}", set["labels"])
+		}
+		return list
+	}
+
+	t.Run("fields are sorted", func(t *testing.T) {
+		sets := BuildFilterSets(map[string][]string{
+			"k8s.workload.name":  {"checkout"},
+			"dt.entity.service":  {"SERVICE-0000000000000001"},
+			"k8s.namespace.name": {"payments"},
+		})
+		if len(sets) != 1 {
+			t.Fatalf("got %d filter sets, want 1", len(sets))
+		}
+		var fields []string
+		for _, label := range labels(sets[0]) {
+			fields = append(fields, label["field"].(string))
+		}
+		want := []string{"dt.entity.service", "k8s.namespace.name", "k8s.workload.name"}
+		if strings.Join(fields, ",") != strings.Join(want, ",") {
+			t.Fatalf("fields = %v, want %v", fields, want)
+		}
+	})
+
+	t.Run("one filter set per map, in order", func(t *testing.T) {
+		sets := BuildFilterSets(
+			map[string][]string{"k8s.namespace.name": {"payments"}},
+			map[string][]string{},
+			map[string][]string{"service.name": {"checkout"}},
+		)
+		if len(sets) != 2 {
+			t.Fatalf("got %d filter sets, want 2 (the empty map adds none)", len(sets))
+		}
+		for i, want := range []string{"k8s.namespace.name", "service.name"} {
+			if got := labels(sets[i])[0]["field"]; got != want {
+				t.Errorf("set %d field = %v, want %s", i, got, want)
+			}
+			if filters, ok := sets[i]["filters"].([]interface{}); !ok || len(filters) != 0 {
+				t.Errorf("set %d filters = %#v, want an empty list", i, sets[i]["filters"])
+			}
+		}
+	})
+
+	t.Run("no labels gives an empty slice", func(t *testing.T) {
+		for name, sets := range map[string][]map[string]interface{}{
+			"empty map": BuildFilterSets(map[string][]string{}),
+			"no maps":   BuildFilterSets(),
+		} {
+			if sets == nil || len(sets) != 0 {
+				t.Errorf("%s: got %#v, want an empty non-nil slice", name, sets)
+			}
+		}
+	})
+}

@@ -443,6 +443,22 @@ Execute a DQL query
 _read-only | access: read_
 
 
+## repo-scope
+
+[Experimental] Link this git repository to the entities that run its code
+
+_read-only | access: read_
+
+| Resource | Required scopes |
+| --- | --- |
+| current | _(none declared)_ |
+| delete | _(none declared)_ |
+| describe | _(none declared)_ |
+| discover | `storage:spans:read`, `storage:logs:read` |
+| list | _(none declared)_ |
+| set | _(none declared)_ |
+
+
 ## restore
 
 Restore resources to a previous version

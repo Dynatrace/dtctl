@@ -159,6 +159,11 @@ type ResponseContext struct {
 	// Window is the window `dtctl query` searched, as the response's own
 	// metadata states it.
 	Window *TimeWindow `json:"window,omitempty"`
+
+	// RepoScope reports what the working directory's repo scope did to the
+	// query. Absent when no repo scope resolved for the invocation: the query
+	// ran exactly as typed.
+	RepoScope *RepoScope `json:"repo_scope,omitempty"`
 }
 
 // TimeWindow is a query window as absolute RFC3339 instants.
@@ -170,6 +175,26 @@ type TimeWindow struct {
 	Span string `json:"span,omitempty"`
 	// Note says the window is the default one: the query named none.
 	Note string `json:"note,omitempty"`
+}
+
+// RepoScope is the repo scope a query ran under (see docs/AGENT_MODE.md). The
+// opt-out flag is named in context.suggestions, not here, so this stays a
+// statement of fact rather than advice.
+type RepoScope struct {
+	// Name is the entry that resolved; empty when none did (code no_entry,
+	// invalid_file).
+	Name        string `json:"name,omitempty"`
+	File        string `json:"file"`
+	Environment string `json:"environment"`
+	// Applied says the query sent was narrowed; when false it ran as typed.
+	Applied    bool   `json:"applied"`
+	DataObject string `json:"data_object,omitempty"`
+	// Filter is the expression inserted after the fetch stage.
+	Filter string `json:"filter,omitempty"`
+	// Code is "applied", or why the scope was not applied; docs/AGENT_MODE.md
+	// lists every code.
+	Code   string `json:"code"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // MarkFieldsClipped records on the context that values in fields were clipped

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -419,25 +420,38 @@ func (h *Handler) DeleteAllBreakpoints(ctx context.Context, workspaceID string) 
 	return h.executeGraphQL(ctx, mutation, variables)
 }
 
-func BuildFilterSets(filters map[string][]string) []map[string]interface{} {
-	if len(filters) == 0 {
-		return []map[string]interface{}{}
-	}
+// BuildFilterSets turns label filters into the filterSets payload of a
+// workspace update: one filter set per non-empty map, in argument order, each
+// carrying its labels sorted by field name so the same input always sends the
+// same request. It returns an empty slice, never nil, when no map has a label.
+func BuildFilterSets(sets ...map[string][]string) []map[string]interface{} {
+	filterSets := []map[string]interface{}{}
+	for _, filters := range sets {
+		if len(filters) == 0 {
+			continue
+		}
 
-	labelList := make([]map[string]interface{}, 0, len(filters))
-	for field, values := range filters {
-		labelList = append(labelList, map[string]interface{}{
-			"field":  field,
-			"values": values,
+		fields := make([]string, 0, len(filters))
+		for field := range filters {
+			fields = append(fields, field)
+		}
+		sort.Strings(fields)
+
+		labelList := make([]map[string]interface{}, 0, len(fields))
+		for _, field := range fields {
+			labelList = append(labelList, map[string]interface{}{
+				"field":  field,
+				"values": filters[field],
+			})
+		}
+
+		filterSets = append(filterSets, map[string]interface{}{
+			"filters": []interface{}{},
+			"labels":  labelList,
 		})
 	}
 
-	return []map[string]interface{}{
-		{
-			"filters": []interface{}{},
-			"labels":  labelList,
-		},
-	}
+	return filterSets
 }
 
 func (h *Handler) executeGraphQL(ctx context.Context, query string, variables map[string]interface{}) (map[string]interface{}, error) {

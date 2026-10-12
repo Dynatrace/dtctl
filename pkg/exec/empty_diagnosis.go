@@ -69,10 +69,14 @@ func (e *DQLExecutor) probeRunner() probeFunc {
 // for the agent envelope. On a non-empty result it returns nothing and runs no
 // probe. When no near-match finding explains the emptiness, the suggestions
 // include today's windowAdvice unchanged. A result cut short by a limit is
-// not diagnosed: the limit may be why it is empty.
+// not diagnosed: the limit may be why it is empty. The diagnosis reads
+// opts.TypedQuery when it is set, not the query that was sent.
 func (e *DQLExecutor) emptyResultAdvice(query string, result *DQLQueryResponse, records []map[string]interface{}, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
 	if !isEmptyResult(records) {
 		return nil, nil
+	}
+	if opts.TypedQuery != "" {
+		query = opts.TypedQuery
 	}
 	var reason *output.EmptyReason
 	var suggestions []string

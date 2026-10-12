@@ -1,0 +1,14 @@
+Unit: .
+
+#  SERVICE                             PROCESS GROUP                             WORKLOAD           SERVICE NAME  TIER
+1  SERVICE-0123456789ABCDEF (sampled)  PROCESS_GROUP-FEDCBA9876543210 (sampled)  payments/checkout  checkout      exact
+   k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   12 sampled span hits in 1h (1 in 100000 requested), 30 sampled log hits in 1h (1 in 100000 requested)
+
+Verdict: match: process group, service, service name, workload
+4 of 10 queries ran in 0.6s. Nothing was written. Save it with:
+  dtctl repo-scope set checkout --namespace payments --workload checkout
+Note: spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing
+Note: logs scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 logs over 1h may be missing

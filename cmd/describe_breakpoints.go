@@ -42,6 +42,7 @@ Examples:
 type breakpointStatusResult struct {
 	ID                 string                  `json:"id" yaml:"id"`
 	Location           string                  `json:"location,omitempty" yaml:"location,omitempty"`
+	Workspace          string                  `json:"workspace,omitempty" yaml:"workspace,omitempty"`
 	Enabled            bool                    `json:"enabled" yaml:"enabled"`
 	DisableReason      string                  `json:"disableReason,omitempty" yaml:"disableReason,omitempty"`
 	LogMessage         string                  `json:"logMessage,omitempty" yaml:"logMessage,omitempty"`
@@ -103,7 +104,8 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
+	workspace := workspaceName(cmdContext(cmd), cfg)
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -162,6 +164,7 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		if err != nil {
 			return err
 		}
+		result.Workspace = workspace
 		results = append(results, result)
 	}
 
@@ -465,6 +468,9 @@ func printBreakpointStatusResult(ctx context.Context, result breakpointStatusRes
 	output.FprintDescribeKV(w, "ID:", kw, "%s", result.ID)
 	if result.Location != "" {
 		output.FprintDescribeKV(w, "Location:", kw, "%s", result.Location)
+	}
+	if result.Workspace != "" {
+		output.FprintDescribeKV(w, "Workspace:", kw, "%s", result.Workspace)
 	}
 	output.FprintDescribeKV(w, "Enabled:", kw, "%t", result.Enabled)
 	if result.DisableReason != "" {

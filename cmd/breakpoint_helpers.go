@@ -3,8 +3,8 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -15,6 +15,8 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/client"
 	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/dynatrace-oss/dtctl/pkg/prompt"
+	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
@@ -49,6 +51,7 @@ type liveDebuggerDeps struct {
 	getOrCreateWorkspace   func(*livedebugger.Handler, string) (map[string]interface{}, string, error)
 	getWorkspaceRules      func(*livedebugger.Handler, string) (map[string]interface{}, error)
 	getRuleStatusBreakdown func(*livedebugger.Handler, string) (map[string]interface{}, error)
+	updateWorkspaceFilters func(*livedebugger.Handler, string, []map[string]interface{}) (map[string]interface{}, error)
 }
 
 func defaultLiveDebuggerDeps() liveDebuggerDeps {
@@ -64,6 +67,9 @@ func defaultLiveDebuggerDeps() liveDebuggerDeps {
 		},
 		getRuleStatusBreakdown: func(handler *livedebugger.Handler, ruleID string) (map[string]interface{}, error) {
 			return handler.GetRuleStatusBreakdown(ruleID)
+		},
+		updateWorkspaceFilters: func(handler *livedebugger.Handler, workspaceID string, filterSets []map[string]interface{}) (map[string]interface{}, error) {
+			return handler.UpdateWorkspaceFilters(workspaceID, filterSets)
 		},
 	}
 }
@@ -103,7 +109,8 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
+	workspace := workspaceName(cmdContext(cmd), cfg)
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -132,6 +139,7 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 	if err != nil {
 		return err
 	}
+	printWorkspaceName(cmdContext(cmd), workspace)
 
 	// This printer writes to rootCmd's writer rather than going through
 	// NewPrinter, so it opts into the get-wide --limit/--fields itself.
@@ -213,10 +221,41 @@ func breakpointRowFromRule(rule livedebugger.BreakpointRule) (breakpointRow, boo
 	return breakpointRow{ID: id, Filename: filename, Line: line, Active: !isDisabled, LogMessage: logMessage}, true
 }
 
-func currentProjectPath() string {
-	cwd, err := os.Getwd()
+// workspaceName names the Live Debugger workspace of this invocation. In a
+// checkout with a scope file it is named after the repository: the origin
+// remote's repository name, or the checkout directory's base name when
+// .git/config cannot be read (a worktree). Where an entry covers the working
+// directory it is <repo>/<entry>, so every directory an entry covers shares
+// one workspace, under the same name on every machine, and two entries never
+// share one; any other directory of that checkout, one that two entries tie
+// on included, is <repo>. Without a scope file, and outside a checkout, it is
+// the base name of the working directory, the name breakpoint commands have
+// always used, or "no-project" when there is none (an embedded invocation,
+// see currentWorkDir) or that directory is the root.
+//
+// Naming is not scoping: --no-repo-scope, DTCTL_NO_REPO_SCOPE and the
+// stability floor leave the name alone, so every breakpoint command, whether
+// or not it has the repo scope flags, finds the same workspace. A scope file
+// that does not load names no entry, and is warned about here.
+func workspaceName(ctx context.Context, cfg *config.Config) string {
+	cwd, err := currentWorkDir(ctx)
 	if err != nil {
 		return "no-project"
+	}
+	scope, err := openRepoScope(ctx, cfg)
+	if scope != nil && (err != nil || scope.loc.Exists) {
+		repo := reposcope.RepositoryName(reposcope.RepoFS(scope.loc))
+		if repo == "" {
+			repo = filepath.Base(scope.loc.Root)
+		}
+		if err != nil {
+			output.FprintWarning(currentStderr(ctx), "%v; the Live Debugger workspace is named after the repository", err)
+			return repo
+		}
+		if status, err := scope.resolve(""); err == nil && status.Entry != nil {
+			return repo + "/" + status.Entry.Name
+		}
+		return repo
 	}
 	project := filepath.Base(cwd)
 	if project == "" || project == "." || project == string(filepath.Separator) {
@@ -262,19 +301,6 @@ func parseFilters(input string) (map[string][]string, error) {
 	return filters, nil
 }
 
-// buildWorkspaceFilterSets parses a raw "key:value,key:value" filter string and
-// converts it into the GraphQL filter-set payload expected by
-// UpdateWorkspaceFilters. It is pure: no network calls and no side effects, so
-// callers (create and update) reuse it and run the network update at their own
-// call site.
-func buildWorkspaceFilterSets(raw string) ([]map[string]interface{}, error) {
-	parsed, err := parseFilters(raw)
-	if err != nil {
-		return nil, err
-	}
-	return livedebugger.BuildFilterSets(parsed), nil
-}
-
 // formatFilters renders parsed filters as a canonical, deterministic
 // "key:value,key:value" string. Keys are sorted (values are already sorted by
 // parseFilters), so dry-run previews show exactly what will be sent rather than
@@ -315,21 +341,10 @@ func requireFiltersValue(filters string) error {
 	return nil
 }
 
-// countActiveWorkspaceBreakpoints returns how many enabled breakpoints currently
-// exist in the workspace. Disabled rules are excluded on purpose: a breakpoint
-// that reached its hit limit is auto-disabled by the runtime, so it should not
+// countActiveRules counts the enabled breakpoint rules in a GetWorkspaceRules
+// GraphQL response. Disabled rules are excluded on purpose: a breakpoint that
+// reached its hit limit is auto-disabled by the runtime, so it should not
 // inflate the confirmation count shown before workspace filters are changed.
-func countActiveWorkspaceBreakpoints(handler *livedebugger.Handler, workspaceID string) (int, error) {
-	resp, err := handler.GetWorkspaceRules(workspaceID)
-	if err != nil {
-		return 0, err
-	}
-	return countActiveRules(resp)
-}
-
-// countActiveRules counts the enabled (non-disabled) breakpoint rules in a
-// GetWorkspaceRules GraphQL response. Split out from the network call so the
-// active-only counting logic can be unit tested without a live handler.
 func countActiveRules(resp map[string]interface{}) (int, error) {
 	rules, err := livedebugger.ExtractWorkspaceRules(resp)
 	if err != nil {
@@ -342,6 +357,84 @@ func countActiveRules(resp map[string]interface{}) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// workspaceFilterChange is how applyWorkspaceFilters asks before it
+// changes a workspace's filters.
+type workspaceFilterChange struct {
+	// creating says the same operation also creates a breakpoint, for the
+	// prompt.
+	creating bool
+	// skipConfirm is --yes: nothing is counted and nobody is asked.
+	skipConfirm bool
+	// unasked is a change nobody typed (create's repo scope default): the
+	// active breakpoints are counted even in a non-interactive run, and a
+	// re-scope nobody can confirm, in --plain or agent mode or at a prompt
+	// whose input ended, fails with errFiltersDeclined.
+	unasked bool
+}
+
+// errFiltersDeclined is a re-scope of active breakpoints that nobody could be
+// asked to confirm. The workspace is unchanged.
+var errFiltersDeclined = errors.New("changing the workspace filters re-scopes its active breakpoints, and nobody could confirm it")
+
+// applyWorkspaceFilters replaces the workspace's filters with sets, one filter
+// set per map. It is the one place create and update breakpoint change
+// workspace filters.
+//
+// Changing them re-scopes every existing active breakpoint in the workspace,
+// not just one being created, so it confirms first. A non-interactive
+// (--plain/agent) run skips the confirmation, unless the change is unasked:
+// then a re-scope nobody can confirm is declined without a prompt, which in
+// agent mode would land in the envelope on stdout. The extra read that counts
+// the active breakpoints is only paid when the run might prompt or decline.
+//
+// cancelled reports a confirmation the user declined; the workspace is
+// unchanged then, and the caller says so.
+func applyWorkspaceFilters(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, change workspaceFilterChange) (cancelled bool, err error) {
+	return applyWorkspaceFiltersWithDeps(ctx, handler, workspaceID, sets, change, defaultLiveDebuggerDeps())
+}
+
+func applyWorkspaceFiltersWithDeps(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, change workspaceFilterChange, deps liveDebuggerDeps) (bool, error) {
+	verbose := isDebugVerbose(ctx)
+
+	interactive := !plainMode(ctx)
+	if !change.skipConfirm && (interactive || change.unasked) {
+		rulesResp, err := deps.getWorkspaceRules(handler, workspaceID)
+		if err != nil {
+			return false, err
+		}
+		count, err := countActiveRules(rulesResp)
+		if err != nil {
+			return false, err
+		}
+		if count > 0 {
+			if !interactive {
+				return false, errFiltersDeclined
+			}
+			confirmed, answered := prompt.ConfirmAnswered(currentStdin(ctx), currentStdout(ctx), filterChangeConfirmMessage(count, change.creating))
+			switch {
+			case !answered && change.unasked:
+				return false, errFiltersDeclined
+			case !confirmed:
+				return true, nil
+			}
+		}
+	}
+
+	updateResp, err := deps.updateWorkspaceFilters(handler, workspaceID, livedebugger.BuildFilterSets(sets...))
+	if err != nil {
+		if verbose {
+			_ = printGraphQLResponse(ctx, "updateWorkspaceV2", updateResp)
+		}
+		return false, err
+	}
+	if verbose {
+		if err := printGraphQLResponse(ctx, "updateWorkspaceV2", updateResp); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // filterChangeConfirmMessage builds the prompt shown before changing workspace

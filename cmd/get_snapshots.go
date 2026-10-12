@@ -70,7 +70,8 @@ Use -o json / -o yaml for structured output.`,
 				return err
 			}
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
+			workspace := workspaceName(cmdContext(cmd), cfg)
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if isDebugVerbose(cmdContext(cmd)) {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -107,6 +108,7 @@ Use -o json / -o yaml for structured output.`,
 				dqlQuery += fmt.Sprintf(" | limit %d", limit)
 			}
 
+			printWorkspaceName(cmdContext(cmd), workspace)
 			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: Snapshots from the latest version of the breakpoint will be shown")
 
 			decodeVal, _ := cmd.Flags().GetString("decode-snapshots")

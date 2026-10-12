@@ -21,6 +21,24 @@ func TestSetCapabilitiesRoundTrip(t *testing.T) {
 	require.Equal(t, AllCapabilities(), caps)
 }
 
+// The working directory is host state: without HostWorkingDirectory an
+// invocation gets a CapabilityError, never the process's directory.
+func TestCurrentWorkDirNeedsHostWorkingDirectory(t *testing.T) {
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	got, err := currentWorkDir(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, wd, got)
+
+	prev := SetCapabilities(Capabilities{})
+	t.Cleanup(func() { SetCapabilities(prev) })
+	got, err = currentWorkDir(context.Background())
+	var capErr *CapabilityError
+	require.ErrorAs(t, err, &capErr)
+	require.Empty(t, got)
+	require.Equal(t, "the working directory is not available in this environment", capErr.Error())
+}
+
 func TestLaunchEditorCapabilityDisabled(t *testing.T) {
 	prev := SetCapabilities(Capabilities{})
 	t.Cleanup(func() { SetCapabilities(prev) })

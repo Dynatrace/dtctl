@@ -36,6 +36,10 @@ type RunResult struct {
 	// assumed its requested ratio had been honoured would extrapolate a
 	// refused object's count by that whole factor.
 	Sampled bool
+	// ScannedBytes is how much the query read, as the environment reports
+	// it; 0 when it does not. A caller choosing its next query predicts that
+	// one's scan from it.
+	ScannedBytes int64
 }
 
 // TypeUndefined is the DQL type of a column the query referenced but the

@@ -21,7 +21,7 @@ The current Live Debugger flow in `dtctl` supports:
 - deleting breakpoints with `dtctl delete breakpoint ...`
 - fetching snapshots for a breakpoint with `dtctl get snapshots <breakpoint> --decode-snapshots`
 
-`dtctl` resolves or creates a Live Debugger workspace for the current project path, so commands operate on the workspace associated with the directory you run them from.
+`dtctl` resolves or creates a Live Debugger workspace for the current project path, so commands operate on the workspace associated with the directory you run them from, and say which (in a linked repository it is `<repo>/<entry>` or `<repo>`; see [Filters from the repo scope](#filters-from-the-repo-scope)).
 
 ## Prerequisites
 
@@ -65,7 +65,7 @@ dtctl update breakpoint --filters k8s.namespace.name:prod --yes
 
 ### Notes
 
-- `--filters` is required for `dtctl update breakpoint`
+- `--filters` (or `--repo-scope`, see below) is required for `dtctl update breakpoint`
 - filter values are mapped to the Live Debugger workspace filter set payload
 - repeated keys are supported
 - changing filters re-scopes all existing breakpoints, so you are prompted to
@@ -73,6 +73,86 @@ dtctl update breakpoint --filters k8s.namespace.name:prod --yes
   after reaching their hit limit) are not counted, and non-interactive contexts
   (`--plain` or agent mode) skip the prompt
 - in verbose/debug mode, raw GraphQL responses are printed for troubleshooting
+
+### Filters from the repo scope
+
+A repository linked with `dtctl repo-scope` (see [REPO_SCOPE.md](REPO_SCOPE.md))
+records which workloads, service names and entities run its code, and those
+bindings are the labels a workspace is filtered by. `dtctl repo-scope describe`
+lists the filter sets an entry renders to, one line per set in the spelling
+`--filters` takes:
+
+```text
+Live Debugger filters:
+  k8s.namespace.name:payments,k8s.workload.name:checkout
+  service.name:checkout
+```
+
+An entry renders one filter set per Kubernetes namespace (with that namespace's
+workloads), then one for its service names and one for its process group ids
+(`dt.entity.process_group`). Service ids are never sent: a workspace does not
+honour `dt.entity.service`. Only a one-set entry can be pasted into
+`--filters`. The default on create sends the workload set only; a named
+`--repo-scope` sends every set.
+
+- **Default on create.** `dtctl create breakpoint` without `--filters`, in a
+  workspace that has no filters yet, applies the namespace-and-workload set of
+  the entry covering the working directory, when it renders exactly one. The
+  entry's service-name and process-group sets are not sent by default: entity
+  ids are deprecated fields that change with redeploys, and `service.name` is
+  unverified as a label. It says so on stderr and in the result, and in agent
+  mode adds a suggestion naming `--filters` for setting them by hand and
+  `--no-repo-scope` for turning the default off:
+
+  ```text
+  set the workspace filters from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout (--filters sets them by hand, --no-repo-scope turns this default off)
+  repo scope checkout's other filter sets (service.name:checkout) are set only with --repo-scope checkout
+  ```
+
+  A workspace that already has filters keeps them; when the covering entry
+  would set different ones, a warning names `--repo-scope <entry>`. An entry
+  with no workload binding, or with workloads in several namespaces, has no
+  one set to apply, and the command says to pass `--repo-scope <entry>`. A
+  workspace without filters normally holds no breakpoints; if it holds active
+  ones, the default asks first, and is refused, naming `--yes`, where nobody
+  can be asked (`--plain`, agent mode, an ended stdin).
+- **A named entry.** `--repo-scope <name>` on `create breakpoint` and
+  `update breakpoint` sets the workspace filters from that entry, every set,
+  like `--filters` does (and with the same confirmation). It cannot be combined
+  with `--filters`.
+- **Opting out.** `--no-repo-scope` on `create breakpoint`, or
+  `DTCTL_NO_REPO_SCOPE=1`, turns the default off; it can be combined with
+  `--filters`. `update breakpoint` applies a scope only when one is named, so
+  it has no `--no-repo-scope`.
+
+In a checkout with a scope file the workspace is named after the origin
+remote's repository name (the checkout directory's when `.git/config` cannot
+be read, so each such worktree gets its own): `<repo>/<entry>` where an entry
+covers the working directory, and `<repo>` in every other directory of the
+checkout, one two entries tie on included. Without a scope file, and outside
+a checkout, it is named after the working directory's base name. Neither `--no-repo-scope` nor
+`DTCTL_NO_REPO_SCOPE` changes the name, and `--repo-scope ledger` run in
+`checkout`'s directory sets `ledger`'s filters on `<repo>/checkout`. Saving an
+entry moves the directories it covers from `<repo>` to `<repo>/<entry>`: to
+clean up the old workspace, run `dtctl delete breakpoint --all` there before
+saving, or afterwards from a directory of the checkout no entry covers.
+
+```bash
+dtctl create breakpoint OrderController.java:306                        # default from the covering entry
+dtctl create breakpoint OrderController.java:306 --repo-scope checkout  # a named entry
+dtctl update breakpoint --repo-scope checkout                           # replace the workspace filters
+dtctl create breakpoint OrderController.java:306 --dry-run              # preview what the default will do
+```
+
+The dry run reads the workspace and says whether the default would set its
+filters, keep them, warn, or fail; like `get breakpoints`, it may create an
+empty workspace.
+
+> **Verified labels.** `k8s.namespace.name` with `k8s.workload.name`, and
+> `dt.entity.process_group`, select processes; the labels of one set must all
+> match, and several sets are alternatives. `service.name` is not yet verified:
+> check with `dtctl describe breakpoint <id>` that a breakpoint set from it
+> reaches the processes you expect.
 
 ## 2. Create a breakpoint
 
@@ -102,7 +182,8 @@ breakpoints, so `dtctl` prompts for confirmation unless you pass `--yes` (`-y`).
 - `--filters` is optional and accepts comma-separated `key:value` (or `key=value`) pairs
 - when `--filters` is provided, the workspace filters are updated before the breakpoint is created
 - when `--filters` changes the workspace filters, existing breakpoints are re-scoped too, so you are prompted to confirm unless you pass `--yes` (`-y`)
-- when `--filters` is omitted, the workspace must already have filters configured
+- `--repo-scope <name>` sets the filters from a repo scope entry instead, and in a linked repository a workspace without filters gets them from the covering entry (see [Filters from the repo scope](#filters-from-the-repo-scope))
+- otherwise, when `--filters` is omitted, the workspace must already have filters configured
 - `--dry-run` is supported
 
 Example:
@@ -149,6 +230,7 @@ dtctl describe breakpoint OrderController.java:306
 The command uses `GetRuleStatusBreakdown` and summarizes:
 
 - enabled/disabled state
+- the workspace it was read from (`workspace` in structured output)
 - log message (see [Log messages](#log-messages))
 - overall status
 - active and pending rooks

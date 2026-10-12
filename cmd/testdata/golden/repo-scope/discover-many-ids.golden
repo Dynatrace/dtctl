@@ -1,0 +1,12 @@
+Unit: .
+
+#  SERVICE                                                      PROCESS GROUP                   WORKLOAD           SERVICE NAME  TIER
+1  SERVICE-000000000000C000,SERVICE-000000000000C001 +198 more  PROCESS_GROUP-FEDCBA9876543210  payments/checkout  checkout      exact
+   k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   5400000 spans in 24h
+
+Verdict: match: process group, service name, workload
+2 of 10 queries ran in 0.6s. Nothing was written. Save it with:
+  dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout

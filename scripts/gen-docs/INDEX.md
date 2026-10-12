@@ -44,6 +44,7 @@
 | delete-credentials |
 | describe |
 | describe-context |
+| discover |
 | environment-share |
 | export |
 | get-contexts |

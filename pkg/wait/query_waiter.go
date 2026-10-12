@@ -183,6 +183,11 @@ func (w *QueryWaiter) Wait(ctx context.Context) (*Result, error) {
 				records = result.Result.Records
 			}
 			recordCount := int64(len(records))
+			// The waiter prints no response itself, so it reports each one to
+			// OnResult here: once per attempt, not once per run.
+			if w.config.QueryOptions.OnResult != nil {
+				w.config.QueryOptions.OnResult(len(records), result)
+			}
 
 			queryDuration := time.Since(attemptStartTime)
 			if w.config.Verbose {

@@ -1,0 +1,6 @@
+[build-system]
+requires = ["poetry-core"]
+
+[tool.poetry]
+name = "fraud_scoring"
+version = "0.1.0"
