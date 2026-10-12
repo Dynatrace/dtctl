@@ -6,6 +6,8 @@ import sdkld "github.com/dynatrace-oss/dtctl/sdk/api/livedebugger"
 type (
 	GraphQLWorkspaceResponse = sdkld.GraphQLWorkspaceResponse
 	Workspace                = sdkld.Workspace
+	FilterSet                = sdkld.FilterSet
+	FilterField              = sdkld.FilterField
 	RuleStatusNode           = sdkld.RuleStatusNode
 	DeleteAllRulesResponse   = sdkld.DeleteAllRulesResponse
 )
@@ -38,6 +40,7 @@ var (
 	ExtractDeletedRuleIDs = sdkld.ExtractDeletedRuleIDs
 	ExtractRuleStatuses   = sdkld.ExtractRuleStatuses
 	WorkspaceHasFilters   = sdkld.WorkspaceHasFilters
+	WorkspaceFilterSets   = sdkld.WorkspaceFilterSets
 )
 
 // ExtractWorkspaceRules extracts breakpoint rules from a GraphQL response,

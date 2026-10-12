@@ -294,6 +294,50 @@ func TestWorkspaceHasFilters(t *testing.T) {
 	})
 }
 
+func TestWorkspaceFilterSets(t *testing.T) {
+	resp := func(filterSets interface{}) map[string]interface{} {
+		ws := map[string]interface{}{"id": "ws-1"}
+		if filterSets != nil {
+			ws["filterSets"] = filterSets
+		}
+		return map[string]interface{}{"data": map[string]interface{}{"org": map[string]interface{}{
+			"getOrCreateUserWorkspaceV2": ws,
+		}}}
+	}
+
+	t.Run("a workspace without filters has none", func(t *testing.T) {
+		sets, err := WorkspaceFilterSets(resp(nil))
+		if err != nil || len(sets) != 0 {
+			t.Fatalf("got %#v, %v; want no sets and no error", sets, err)
+		}
+	})
+
+	t.Run("labels and filters as the environment holds them", func(t *testing.T) {
+		sets, err := WorkspaceFilterSets(resp([]interface{}{
+			map[string]interface{}{
+				"labels":  []interface{}{map[string]interface{}{"field": "k8s.namespace.name", "values": []interface{}{"payments"}}},
+				"filters": []interface{}{},
+			},
+			map[string]interface{}{
+				"labels":  []interface{}{},
+				"filters": []interface{}{map[string]interface{}{"field": "dt.entity.host", "values": []interface{}{"HOST-0000000000000001"}}},
+			},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(sets) != 2 {
+			t.Fatalf("got %d sets, want 2", len(sets))
+		}
+		if got := sets[0].Labels; len(got) != 1 || got[0].Field != "k8s.namespace.name" || strings.Join(got[0].Values, ",") != "payments" {
+			t.Errorf("set 0 labels = %#v", got)
+		}
+		if got := sets[1].Filters; len(got) != 1 || got[0].Field != "dt.entity.host" {
+			t.Errorf("set 1 filters = %#v", got)
+		}
+	})
+}
+
 func TestBuildFilterSets(t *testing.T) {
 	labels := func(set map[string]interface{}) []map[string]interface{} {
 		t.Helper()
