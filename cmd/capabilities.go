@@ -27,6 +27,11 @@ type Capabilities struct {
 	// spilled file and the path returned to the caller are both host state, so
 	// an embedded invocation returns its rows inline instead.
 	HostDiskSpill bool
+	// HostUsageLedger allows a context that opted into usage tracking to tally
+	// its DQL scan volume in the local usage ledger under the host's XDG state
+	// directory (pkg/usage). The ledger is host state that outlives the
+	// request, so an embedded invocation records nothing.
+	HostUsageLedger bool
 	// LongRunningStreams allows commands that can run indefinitely: --watch on
 	// get subcommands and --follow on logs. The service engine leaves this
 	// false so a streaming request cannot hold the execution slot forever.
@@ -42,6 +47,7 @@ func AllCapabilities() Capabilities {
 		Editor:             true,
 		BrowserOpen:        true,
 		HostDiskSpill:      true,
+		HostUsageLedger:    true,
 		LongRunningStreams: true,
 	}
 }

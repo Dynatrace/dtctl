@@ -38,6 +38,8 @@ type CLIConfig struct {
 	// StabilityExceptions are the individual commands and flags admitted below
 	// the floor, written exactly as a caller would ("query --decode-snapshots").
 	StabilityExceptions []string
+	// UsageTracking opts the context in to the local usage ledger.
+	UsageTracking bool
 }
 
 // BuildDtctl compiles the real binary into the test's temp directory and
@@ -77,6 +79,9 @@ contexts:
 		for _, e := range c.StabilityExceptions {
 			fmt.Fprintf(&b, "        - %q\n", e)
 		}
+	}
+	if c.UsageTracking {
+		b.WriteString("      usage-tracking: true\n")
 	}
 	fmt.Fprintf(&b, "tokens:\n  - name: cli\n    token: %s\n", c.Token)
 

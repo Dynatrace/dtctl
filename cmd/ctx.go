@@ -343,6 +343,10 @@ func describeContext(ctx context.Context, name string) error {
 		output.FprintDescribeKV(currentStdout(ctx), "Description:", w, "%s", found.Context.Description)
 	}
 
+	if cfg.UsageTrackingOn(found.Name) {
+		output.FprintDescribeKV(currentStdout(ctx), "Usage:", w, "%s", "tracked locally (see 'dtctl usage')")
+	}
+
 	return nil
 }
 
@@ -363,6 +367,9 @@ type contextSettings struct {
 	// floor. nil leaves the existing list untouched (the flag was not passed);
 	// a non-nil empty slice clears it.
 	stabilityExceptions []string
+	// usageTracking switches the context's local usage ledger on or off. nil
+	// leaves it untouched (the flag was not passed).
+	usageTracking *bool
 	// global writes to the global config instead of a discovered .dtctl.yaml.
 	global bool
 }
@@ -379,6 +386,10 @@ func contextSettingsFromFlags(cmd *cobra.Command) contextSettings {
 	s.profile, _ = cmd.Flags().GetString("profile")
 	s.minStability, _ = cmd.Flags().GetString("min-stability")
 	s.global, _ = cmd.Flags().GetBool("global")
+	if cmd.Flags().Changed("usage-tracking") {
+		on, _ := cmd.Flags().GetBool("usage-tracking")
+		s.usageTracking = &on
+	}
 	if cmd.Flags().Changed("stability-exception") {
 		vals, _ := cmd.Flags().GetStringArray("stability-exception")
 		// Non-nil even when empty: `--stability-exception ""` is how a caller
@@ -407,6 +418,8 @@ func addContextFlags(cmd *cobra.Command) {
 	cmd.Flags().String("min-stability", "", "stability floor: weakest contract a command or flag may offer here (stable, experimental)")
 	cmd.Flags().StringArray("stability-exception", nil, "admit one below-floor command or flag (repeatable; e.g. 'inventory' or 'query --decode-snapshots')")
 	cmd.Flags().Bool("global", false, "write to the global config instead of a discovered .dtctl.yaml")
+	cmd.Flags().Bool("usage-tracking", false, "keep a local tally of the DQL queries dtctl runs in this context and the data they scan (see 'dtctl usage'; --usage-tracking=false turns it off)")
+	stability.MarkFlag(cmd, "usage-tracking", stability.Experimental, "0.43.0")
 	registerFlagCompletion(cmd, "profile", completeProfileNames)
 	registerFlagCompletion(cmd, "min-stability", completeStabilityLevels)
 }
@@ -477,12 +490,19 @@ func setContext(ctx context.Context, name string, s contextSettings) error {
 		return err
 	}
 
+	// The usage ledger writes to the user's disk, so only the global config can
+	// opt in (see Config.UsageTrackingOn); turning it off locally is harmless.
+	if s.usageTracking != nil && *s.usageTracking && cfg.IsLocal() {
+		return fmt.Errorf("usage tracking can only be turned on in the global config, not the local config %s; re-run with --global", cfg.LocalConfigPath())
+	}
+
 	opts := &config.ContextOptions{
 		SafetyLevel:         config.SafetyLevel(safetyLevel),
 		Description:         description,
 		Profile:             profile,
 		MinStability:        minStability,
 		StabilityExceptions: s.stabilityExceptions,
+		UsageTracking:       s.usageTracking,
 	}
 
 	cfg.SetContextWithOptions(name, environment, tokenRef, opts)
@@ -500,6 +520,13 @@ func setContext(ctx context.Context, name string, s contextSettings) error {
 		output.FprintSuccess(currentStderr(ctx), "Context %q updated and set as current", name)
 	} else {
 		output.FprintSuccess(currentStderr(ctx), "Context %q created and set as current", name)
+	}
+	if s.usageTracking != nil {
+		if *s.usageTracking {
+			output.FprintInfo(currentStderr(ctx), "Usage tracking is on for %q: dtctl keeps a local per-day tally of its queries and the data they scan. View it with 'dtctl usage'.", name)
+		} else {
+			output.FprintInfo(currentStderr(ctx), "Usage tracking is off for %q. Tallies already recorded are kept; clear them with 'dtctl usage reset'.", name)
+		}
 	}
 	if !global {
 		warnLocalWriteTarget(ctx, fmt.Sprintf("Context %q", name))

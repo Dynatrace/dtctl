@@ -60,12 +60,15 @@ type DQLExecutor struct {
 	stdout io.Writer
 	stderr io.Writer
 	vfsEnv vfs.Env
+	// usage receives each execution's scan totals for the opt-in local usage
+	// ledger; nil (the default) records nothing. See usage.go.
+	usage UsageRecorder
 }
 
 // NewDQLExecutor creates a new DQL executor
 func NewDQLExecutor(c *client.Client) *DQLExecutor {
 	sdk := sdkquery.NewHandler(httpclient.Wrap(c.HTTP()))
-	return &DQLExecutor{client: c, sdk: sdk}
+	return &DQLExecutor{client: c, sdk: sdk, usage: usageRecorderFor(c)}
 }
 
 // WithStreams directs the executor's results to stdout and its notices,
@@ -466,6 +469,9 @@ func (e *DQLExecutor) runQuery(ctx context.Context, query string, opts DQLExecut
 			reporter.Update(state)
 		},
 	}, onRecord)
+	// Every execution counts toward the local usage tally, a failed or
+	// cancelled one included: whatever it scanned before it ended was scanned.
+	e.recordUsage(result, err != nil, lastScannedBytes, lastScannedRecords)
 	if err != nil {
 		// Clear the bar before any further stderr output (cancellation notice,
 		// error hints). Stop is idempotent; the defer remains a safety net.
