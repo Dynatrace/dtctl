@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dynatrace-oss/dtctl/pkg/exec"
+	"github.com/dynatrace-oss/dtctl/pkg/output"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 )
 
@@ -26,6 +27,9 @@ BREAKPOINT can be specified as:
 
 The command looks up the breakpoint's internal DQL ID, then executes:
   fetch application.snapshots | filter breakpoint.id == toUid("<id>")
+
+Updating a breakpoint, or reaching its hit limit, gives it a new internal ID;
+snapshots captured before that stay under the old ID and are not shown.
 
 Use --decode-snapshots to decode snapshot payloads (same as dtctl query).
 Use -o json / -o yaml for structured output.`,
@@ -112,7 +116,7 @@ Use -o json / -o yaml for structured output.`,
 			}
 
 			printWorkspaceName(cmdContext(cmd), workspace)
-			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: Snapshots from the latest version of the breakpoint will be shown")
+			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: only snapshots since the breakpoint was last changed are shown")
 
 			decodeVal, _ := cmd.Flags().GetString("decode-snapshots")
 			var decodeMode exec.DecodeMode
@@ -139,6 +143,7 @@ Use -o json / -o yaml for structured output.`,
 
 			executor := newDQLExecutorFromConfig(cmdContext(cmd), cfg, c)
 
+			var hint string
 			cancelCtx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
@@ -153,6 +158,25 @@ Use -o json / -o yaml for structured output.`,
 				MetadataDefaulted:     metadataDefaulted,
 				Verbose:               verbosity(cmdContext(cmd)) > 0,
 				ShowProgress:          !noProgress,
+				OnResult: func(n int, _ *exec.DQLQueryResponse) {
+					if n > 0 || rule.DisableReason == "" {
+						return
+					}
+					const query = "fetch application.snapshots | summarize count(), by:{breakpoint.id}"
+					hint = fmt.Sprintf("0 snapshots under the breakpoint's current ID (%s); earlier ones are under its previous IDs: dtctl query %s", rule.DisableReason, exec.ShellQuote(query))
+					if defaultTimeframeStart != "" {
+						hint += " --default-timeframe-start " + exec.ShellQuote(defaultTimeframeStart)
+					}
+					if defaultTimeframeEnd != "" {
+						hint += " --default-timeframe-end " + exec.ShellQuote(defaultTimeframeEnd)
+					}
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
+				},
+				Decorate: func(c *output.ResponseContext, _ *exec.DQLQueryResponse, _ []map[string]interface{}) {
+					if hint != "" {
+						c.Suggestions = append([]string{hint}, c.Suggestions...)
+					}
+				},
 			}
 
 			return executor.ExecuteWithContext(cancelCtx, dqlQuery, opts)

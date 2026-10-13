@@ -95,6 +95,10 @@ func newLiveDebuggerStub(t *testing.T, safetyLevel string, filterSets ...map[str
 	t.Helper()
 	s := &liveDebuggerStub{filterSets: workspaceFilterSetsJSON(filterSets...)}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/platform/storage/query/v1/query:execute" {
+			_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":{"records":[]}}`))
+			return
+		}
 		if r.URL.Path != "/platform/dob/graphql" {
 			http.NotFound(w, r)
 			return
