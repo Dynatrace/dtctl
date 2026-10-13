@@ -25,6 +25,12 @@ const streamTestQuery = `data record(a = ` + streamTestArray + `)
 | expand b
 | fieldsAdd pad = concat("row-", toString(a), "-", toString(b), "-padding-to-grow-the-serialised-size")`
 
+// Grail returns at most 1000 records unless asked for more, and the tenant's
+// default would cap the 1600 generated rows below the ~1024-row point at which
+// an auto-format result (costed at one byte per row) can be known to exceed a
+// 1KB threshold. The result would then be buffered, never streamed.
+const streamTestMaxRecords = "10000"
+
 // Live-tenant guard for the CLI half of the streaming path: against a real Grail
 // response, `dtctl query -A` above the switch point must write every row to disk
 // without holding the result, say so in the envelope, and land the same file the
@@ -106,7 +112,8 @@ func runQuerySpill(t *testing.T, exe, cfg, format string) spillEnvelope {
 	t.Helper()
 	// --spill carries a NoOptDefVal, so the value has to be attached with "=".
 	code, stdout, stderr := RunDtctl(t, exe, cfg, map[string]string{"DTCTL_SPILL_DIR": t.TempDir()},
-		"query", streamTestQuery, "--agent", "--spill=auto", "--spill-format", format, "--spill-threshold", "1KB")
+		"query", streamTestQuery, "--agent", "--spill=auto", "--spill-format", format, "--spill-threshold", "1KB",
+		"--max-result-records", streamTestMaxRecords)
 	if code != 0 {
 		t.Fatalf("dtctl query (spill-format %s) exited %d\nstdout: %s\nstderr: %s", format, code, stdout, stderr)
 	}
