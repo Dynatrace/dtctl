@@ -390,11 +390,11 @@ func TestRepoScopeDiscoverDryRunNamesHeldBackNames(t *testing.T) {
 
 // A Gradle build with two deployables: discovery from a library one of them
 // depends on proposes that deployable's entry, which covers the library
-// through the build, and from a library both depend on proposes no entry but
-// discovering each.
+// through the build, and from a library both depend on, or the settings
+// directory, discovers each deployable.
 func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 	fixture := gradleMultiRepo(t)
-	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+	srv := newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
 		"spans": `{"k8s.namespace.name":"edge","k8s.workload.name":"webproxy","service.name":"webproxy","records":"100"}`,
 	}))
 	repo := chdirTestRepo(t, "")
@@ -409,27 +409,42 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 	require.Zero(t, code, stderr)
 	require.Equal(t, "webproxy  (webproxy · 127.0.0.1; covered through the Gradle build: webproxy depends on webproxy-api)\n", stdout)
 
-	t.Chdir(filepath.Join(repo, "webproxy-core"))
+	// Each deployable is a discovery of its own, with its own queries.
+	for _, dir := range []string{"webproxy-core", "."} {
+		t.Chdir(filepath.Join(repo, dir))
+		before := len(srv.queries())
+		code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--agent"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		var reports []reposcope.DiscoveryReport
+		resp := agentResult(t, stdout, &reports)
+		require.Equal(t, 2, *resp.Context.Total)
+		require.Len(t, reports, 2)
+		require.Equal(t, "dtctl repo-scope set webproxy --namespace edge --workload webproxy --service-name webproxy --path admin", reports[0].Candidates[0].SetCommand)
+		require.Equal(t, line, reports[1].Candidates[0].SetCommand)
+		require.Equal(t, "admin: confirm with the user, then: "+reports[0].Candidates[0].SetCommand, resp.Context.Suggestions[0])
+		require.Contains(t, resp.Context.Suggestions, "webproxy: confirm with the user, then: "+line)
+		require.Len(t, srv.queries()[before:], 4, "both record queries, once per deployable")
+	}
 
-	report, suggestions := discoverReport(t)
-	require.Equal(t, []string{"admin", "webproxy"}, report.SharedBy)
-	require.Empty(t, report.Candidates[0].SetCommand)
-	require.Equal(t, "no entry is proposed for webproxy-core, shared by admin and webproxy; discover each to save its entry: "+
-		"dtctl repo-scope discover --path admin; dtctl repo-scope discover --path webproxy", suggestions[0])
 	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, "entry:\n  dtctl repo-scope discover --path admin\n  dtctl repo-scope discover --path webproxy\n")
+	require.Contains(t, stdout, "Unit: admin\n")
+	require.Contains(t, stdout, "--path admin\n")
+	require.Contains(t, stdout, "\n  "+line+"\n")
 
-	// The settings directory is the whole build: an entry for it would
-	// cover admin with webproxy's bindings.
-	t.Chdir(repo)
-	report, suggestions = discoverReport(t)
-	require.Equal(t, []string{"admin", "webproxy"}, report.SharedBy)
-	for _, c := range report.Candidates {
-		require.Empty(t, c.SetCommand, c.Name)
-	}
-	require.Equal(t, "no entry is proposed for ., shared by admin and webproxy; discover each to save its entry: "+
-		"dtctl repo-scope discover --path admin; dtctl repo-scope discover --path webproxy", suggestions[0])
+	before := len(srv.queries())
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+	require.Equal(t, map[string]interface{}{"units": "admin, webproxy"}, plan["details"])
+	require.Len(t, plan["payload"], 2)
+	require.Len(t, srv.queries(), before, "a dry run sends nothing")
+
+	// A term would be found by every deployable's discovery, and proposed
+	// for each of them.
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", "--term", "billing-engine", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, agentError(t, stdout).Message, "--term: a term is looked up for one deployable")
 }
 
 // From a library two entries' deployables depend on, neither entry applies:

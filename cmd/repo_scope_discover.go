@@ -53,11 +53,11 @@ build.gradle(.kts), settings.gradle(.kts), pyproject.toml, *.csproj) or a
 Dockerfile; the repository root otherwise. A Gradle build is one unit unless
 several of its modules are deployed (hold a Dockerfile, or are held or named
 by a Helm chart or workload manifest): each of those is then a unit with the
-modules it depends on, and a module several of them depend on, like the
-settings directory, is discovered for all of them. Each proposed set line covers that unit; when the unit is
-the repository root, it covers the directory discovery ran for instead if
-that directory's name is what matched. It names the --context discovery ran
-in.
+modules it depends on, and a module several of them depend on, or the
+settings directory, is discovered for each of them. Each proposed set line
+covers that unit; when the unit is the repository root, it covers the
+directory discovery ran for instead if that directory's name is what
+matched. It names the --context discovery ran in.
 
 Examples:
   # Discover for the unit holding the working directory
@@ -74,14 +74,14 @@ Examples:
 `,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			plan, err := discoveryPlan(cmdContext(cmd), dir, terms)
+			plans, err := discoveryPlans(cmdContext(cmd), dir, terms)
 			if err != nil {
 				return err
 			}
 			if dryRun(cmdContext(cmd)) {
-				return printRepoScopeDiscoveryPlan(cmd, plan)
+				return printRepoScopeDiscoveryPlans(cmd, plans)
 			}
-			return runDiscovery(cmd, plan)
+			return runDiscovery(cmd, plans)
 		},
 	}
 	c.Flags().StringArrayVar(&terms, "term", nil, "a name to look for besides those the repository holds (repeatable)")
@@ -91,10 +91,12 @@ Examples:
 	return c
 }
 
-// discoveryPlan reads the repository and plans the queries for the unit
-// holding dir (relative to the repository root), or the working directory.
-// It sends nothing, so a dry run prints exactly what a real run would send.
-func discoveryPlan(ctx context.Context, dir string, terms []string) (*reposcope.Plan, error) {
+// discoveryPlans reads the repository and plans the queries for the unit
+// holding dir (relative to the repository root), or the working directory;
+// for a directory several Gradle deployables share, one plan per deployable,
+// since an entry for the directory would be none of theirs. It sends nothing,
+// so a dry run prints exactly what a real run would send.
+func discoveryPlans(ctx context.Context, dir string, terms []string) ([]*reposcope.Plan, error) {
 	for _, t := range terms {
 		if !reposcope.PlainName(t) {
 			return nil, &reposcope.InvalidError{Source: "--term", Msg: fmt.Sprintf("%q may hold only letters, digits, '-', '_' and '.'", t)}
@@ -114,12 +116,33 @@ func discoveryPlan(ctx context.Context, dir string, terms []string) (*reposcope.
 				Suggestions: []string{"name the directory relative to the repository root, e.g. services/checkout"}}
 		}
 	}
-	return reposcope.PlanDiscovery(repo, start, terms)
+	plan, err := reposcope.PlanDiscovery(repo, start, terms)
+	if err != nil {
+		return nil, err
+	}
+	if len(plan.SharedBy) == 0 {
+		return []*reposcope.Plan{plan}, nil
+	}
+	// Every deployable's run would find a term's entity and propose it, so
+	// one workload would end up bound to each of them.
+	if len(terms) > 0 {
+		return nil, &reposcope.InvalidError{Source: "--term",
+			Msg:         "a term is looked up for one deployable, and this directory is discovered for each of: " + strings.Join(plan.SharedBy, ", "),
+			Suggestions: []string{"pass --path <deployable> with --term"}}
+	}
+	plans := make([]*reposcope.Plan, len(plan.SharedBy))
+	for i, d := range plan.SharedBy {
+		if plans[i], err = reposcope.PlanDiscovery(repo, d, nil); err != nil {
+			return nil, err
+		}
+	}
+	return plans, nil
 }
 
-// runDiscovery sends the plan's queries and prints what they found. Discovery
-// only reads, like inventory, so it sets up a client without a safety check.
-func runDiscovery(cmd *cobra.Command, plan *reposcope.Plan) error {
+// runDiscovery sends each plan's queries and prints what they found, a
+// report per plan. Discovery only reads, like inventory, so it sets up a
+// client without a safety check.
+func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	ctx := cmdContext(cmd)
 	cfg, c, err := setupClient(ctx)
 	if err != nil {
@@ -132,47 +155,83 @@ func runDiscovery(cmd *cobra.Command, plan *reposcope.Plan) error {
 	// A token that cannot read the records is refused before anything is
 	// sent. The entity-table fallbacks are checked only when they are about
 	// to run: without them discovery still answers.
-	for _, q := range plan.Queries {
-		if slices.Contains(reposcope.DataObjects(), q.DataObject) {
-			if err := dqlScopePrecheck(ctx, q.DQL); err != nil {
-				return err
+	for _, plan := range plans {
+		for _, q := range plan.Queries {
+			if slices.Contains(reposcope.DataObjects(), q.DataObject) {
+				if err := dqlScopePrecheck(ctx, q.DQL); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	if !agentMode(ctx) && len(plan.Queries) > 0 {
-		output.FprintInfo(currentStderr(ctx), "Sending to %s: %s (compared to %s); nothing else leaves this machine",
-			host, quotedValues(plan.Sent), strings.Join(reposcope.MatchedFields(), ", "))
-	}
+	table := outputFormat(ctx) == "table" && !agentMode(ctx)
 
 	runCtx, cancel := inventoryCancelContext(cmd)
 	defer cancel()
-	runCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverTimeout)
-	defer cancelTimeout()
 	runner := scopeCheckedRunner{&inventoryRunner{executor: newDQLExecutorFromConfig(ctx, cfg, c), scanLimitGB: reposcope.ScanLimitGB}}
-
-	began := time.Now()
-	report, err := reposcope.Discover(runCtx, runner, plan, host)
 	selectors := repoScopeSelectors(ctx)
-	for i, c := range report.Candidates {
-		report.Candidates[i].SetCommand = repoScopeSetCommand(report, c, selectors)
+	// Each plan is a run of its own with its own time bound. After a Ctrl-C
+	// the rest still report, every query marked as never run, so in table
+	// output no deployable drops out of the answer unsaid. The only error is
+	// the shared context's cancellation, so the last plan's stands for all.
+	discover := func(plan *reposcope.Plan) (*reposcope.DiscoveryReport, time.Duration, error) {
+		if !agentMode(ctx) && len(plan.Queries) > 0 && runCtx.Err() == nil {
+			output.FprintInfo(currentStderr(ctx), "Sending to %s: %s (compared to %s); nothing else leaves this machine",
+				host, quotedValues(plan.Sent), strings.Join(reposcope.MatchedFields(), ", "))
+		}
+		runCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverTimeout)
+		defer cancelTimeout()
+		began := time.Now()
+		report, err := reposcope.Discover(runCtx, runner, plan, host)
+		for i, c := range report.Candidates {
+			report.Candidates[i].SetCommand = repoScopeSetCommand(report, c, selectors)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			// The report marks the query that ran out of time and says the
+			// answer is partial; the run itself did what it could.
+			err = nil
+		}
+		return report, time.Since(began), err
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		// The report marks the query that ran out of time and says the
-		// answer is partial; the run itself did what it could.
-		err = nil
+
+	reports := make([]*reposcope.DiscoveryReport, len(plans))
+	for i, plan := range plans {
+		var elapsed time.Duration
+		reports[i], elapsed, err = discover(plan)
+		if table {
+			if i > 0 {
+				fmt.Fprintln(currentStdout(ctx))
+			}
+			printRepoScopeDiscovery(currentStdout(ctx), reports[i], newRepoScopeProposal(reports[i], selectors), elapsed)
+		}
+	}
+	if table {
+		return err
 	}
 	if err != nil && agentMode(ctx) {
 		return err
 	}
-	if outputFormat(ctx) == "table" && !agentMode(ctx) {
-		printRepoScopeDiscovery(currentStdout(ctx), report, newRepoScopeProposal(report, selectors), time.Since(began))
-		return err
-	}
 	printer := newPrinterCtx(ctx)
 	if ap := enrichAgent(printer, "discover", "repo-scope"); ap != nil {
-		ap.SetSuggestions(repoScopeDiscoverySuggestions(report, selectors))
+		var suggestions []string
+		for _, r := range reports {
+			for _, s := range repoScopeDiscoverySuggestions(r, selectors) {
+				if len(reports) > 1 {
+					s = r.Unit + ": " + s
+				}
+				suggestions = append(suggestions, s)
+			}
+		}
+		ap.SetSuggestions(suggestions)
+		ap.SetTotal(len(reports))
 	}
-	if perr := printer.Print(report); perr != nil {
+	var perr error
+	if len(reports) == 1 {
+		perr = printer.Print(reports[0])
+	} else {
+		perr = printer.PrintList(reports)
+	}
+	if perr != nil {
 		return perr
 	}
 	return err
@@ -190,26 +249,52 @@ func (r scopeCheckedRunner) RunQuery(ctx context.Context, dql string) (*inventor
 	return r.Runner.RunQuery(ctx, dql)
 }
 
-// printRepoScopeDiscoveryPlan is `discover --dry-run`: every query exactly as
-// it would be sent and every value in it. The agent envelope carries the
-// queries as its payload.
-func printRepoScopeDiscoveryPlan(cmd *cobra.Command, plan *reposcope.Plan) error {
-	report := newDryRunReport(cmd).As("discover", "repo-scope").Detail("unit", "%s", plan.Unit)
+// printRepoScopeDiscoveryPlans is `discover --dry-run`: every query exactly
+// as it would be sent and every value in it. The agent envelope carries the
+// queries as its payload, or for several units the plans, each with its own
+// sent and dropped values: the details are one flat map.
+func printRepoScopeDiscoveryPlans(cmd *cobra.Command, plans []*reposcope.Plan) error {
+	report := newDryRunReport(cmd).As("discover", "repo-scope")
+	units := make([]string, len(plans))
+	for i, plan := range plans {
+		if i > 0 {
+			report.Linef("")
+		}
+		writeDiscoveryPlan(report, plan)
+		units[i] = plan.Unit
+	}
+	var payload []byte
+	if plan := plans[0]; len(plans) == 1 {
+		report.Detail("unit", "%s", plan.Unit)
+		if len(plan.Queries) > 0 {
+			report.Detail("sent", "%s", strings.Join(plan.Sent, ", "))
+			payload, _ = json.Marshal(plan.Queries)
+		}
+		if len(plan.Dropped) > 0 {
+			report.Detail("dropped", "%s", strings.Join(plan.Dropped, ", "))
+		}
+	} else {
+		report.Detail("units", "%s", strings.Join(units, ", "))
+		payload, _ = json.Marshal(plans)
+	}
+	return report.Payload(payload).Print()
+}
+
+// writeDiscoveryPlan writes one plan's preview: its values and its queries.
+func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 	noteDropped := func() {
 		if len(plan.Dropped) > 0 {
-			report.Linef("Names that look like test fixtures are not sent: %s; use --term to send one", quotedValues(plan.Dropped)).
-				Detail("dropped", "%s", strings.Join(plan.Dropped, ", "))
+			report.Linef("Names that look like test fixtures are not sent: %s; use --term to send one", quotedValues(plan.Dropped))
 		}
 	}
 	if len(plan.Queries) == 0 {
 		report.Linef("Dry run: no usable name found for unit %q; %s", plan.Unit, repoScopeNarrowHint)
 		noteDropped()
-		return report.Print()
+		return
 	}
 	report.
 		Linef("Dry run: discovery for unit %q would send %d queries to the current context's environment; nothing was sent", plan.Unit, len(plan.Queries)).
-		Linef("Values it would send: %s", quotedValues(plan.Sent)).
-		Detail("sent", "%s", strings.Join(plan.Sent, ", "))
+		Linef("Values it would send: %s", quotedValues(plan.Sent))
 	noteDropped()
 	record := 0 // the number of the record query a rung retries
 	for i, q := range plan.Queries {
@@ -227,10 +312,6 @@ func printRepoScopeDiscoveryPlan(cmd *cobra.Command, plan *reposcope.Plan) error
 			report.Linef("   %s", line)
 		}
 	}
-	if payload, err := json.Marshal(plan.Queries); err == nil {
-		report.Payload(payload)
-	}
-	return report.Print()
 }
 
 // repoScopeSetCommand is the `repo-scope set` line that saves a candidate
@@ -250,12 +331,8 @@ func printRepoScopeDiscoveryPlan(cmd *cobra.Command, plan *reposcope.Plan) error
 // candidate sharing its service name could sit below the sample's floor, so
 // ServiceNameShared cannot be trusted. No id binding is proposed for a
 // sampled or capped candidate either: it would bind only the ids discovery
-// happened to list. A Gradle module several deployables share gets no line:
-// an entry for it would be no deployable's.
+// happened to list.
 func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
-	if len(r.SharedBy) > 0 {
-		return ""
-	}
 	var bindings []string
 	flag := func(name string, values ...string) {
 		for _, v := range values {
@@ -350,10 +427,6 @@ type repoScopeProposal struct {
 	// lineNotes explain each candidate that has no line because it was
 	// sampled or lists only some of its ids.
 	lineNotes []string
-	// shared says, for a Gradle module several deployables share, that it
-	// gets no line, and discoverEach are the lines discovering each of them.
-	shared       string
-	discoverEach []string
 }
 
 type repoScopeSelectAll struct {
@@ -365,15 +438,6 @@ type repoScopeSelectAll struct {
 // newRepoScopeProposal works out what r proposes beyond its candidates'
 // lines, which must already be set.
 func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repoScopeProposal {
-	if len(r.SharedBy) > 0 {
-		p := repoScopeProposal{shared: fmt.Sprintf("no entry is proposed for %s, shared by %s; discover each to save its entry",
-			r.Dir, joinAnd(r.SharedBy))}
-		for _, d := range r.SharedBy {
-			args := append(append([]string{"dtctl"}, selectors...), "repo-scope", "discover", "--path", exec.ShellQuote(d))
-			p.discoverEach = append(p.discoverEach, strings.Join(args, " "))
-		}
-		return p
-	}
 	p := repoScopeProposal{lineNotes: repoScopeNoLineNotes(r)}
 	lines := 0
 	for _, c := range r.Candidates {
@@ -393,14 +457,6 @@ func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repo
 		p.sharedNotes = repoScopeSharedNameNotes(r)
 	}
 	return p
-}
-
-// joinAnd lists words as prose: "a", "a and b", "a, b and c".
-func joinAnd(words []string) string {
-	if len(words) < 2 {
-		return strings.Join(words, "")
-	}
-	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
 // repoScopeHandLinks are the templates for linking the unit by hand.
@@ -490,8 +546,6 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, selectors []str
 	p := newRepoScopeProposal(r, selectors)
 	var s []string
 	switch {
-	case p.shared != "":
-		s = append(s, p.shared+": "+strings.Join(p.discoverEach, "; "))
 	case len(p.handLinks) > 0:
 		s = append(s, repoScopeNarrowHint, "link by hand: "+strings.Join(p.handLinks[:2], ", or "))
 		if p.dirHint != "" {

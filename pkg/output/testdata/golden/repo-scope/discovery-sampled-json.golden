@@ -2,10 +2,6 @@
   "environment": "abc12345.apps.dynatrace.com",
   "dir": ".",
   "unit": ".",
-  "sharedBy": [
-    "checkout",
-    "checkout-admin"
-  ],
   "verdict": "match",
   "verdicts": {
     "processGroup": "match",

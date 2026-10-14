@@ -241,15 +241,15 @@ func TestPlan_TermsBypassTestNames(t *testing.T) {
 	assert.NotContains(t, p.Dropped, "test-platform-service-smoke", "a name a term sends is not reported as held back")
 }
 
-// From a Gradle library two deployables share, discovery sends both
-// deployables' names for the build; from a library one of them depends on,
-// it plans for that deployable.
+// From a Gradle library two deployables share, discovery names them and
+// sends nothing itself; from a library one of them depends on, it plans for
+// that deployable.
 func TestPlan_GradleDeployables(t *testing.T) {
 	p, err := PlanDiscovery(fixture(t, "gradle-multi"), "webproxy-core", nil)
 	require.NoError(t, err)
 	assert.Equal(t, ".", p.Unit)
 	assert.Equal(t, []string{"admin", "webproxy"}, p.SharedBy)
-	assert.Equal(t, []string{"admin", "webproxy", "webproxy-app", "webproxy.app", "webproxy_app", "webproxyapp"}, p.Sent)
+	assert.Empty(t, p.Sent)
 
 	p, err = PlanDiscovery(fixture(t, "gradle-multi"), "webproxy-api", nil)
 	require.NoError(t, err)

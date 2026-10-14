@@ -361,8 +361,10 @@ asked for. A scoped query that fails keeps the query's own error code and
 position, which points into the text that was sent; `suggestions` shows that
 text and the `--no-repo-scope` retry.
 
-`dtctl repo-scope discover` returns its report as `result`: `verdict` is the
-overall answer and `verdicts` has one per kind of binding (`service`,
+`dtctl repo-scope discover` returns its report as `result`, or, from a
+directory several Gradle deployables share, a list of reports, one per
+deployable; `context.total` counts the reports. A report's `verdict` is
+the overall answer and `verdicts` has one per kind of binding (`service`,
 `processGroup`, `workload`, `serviceName`). A per-kind verdict can be
 `ambiguous` while the overall one is `match`: a single candidate whose logs
 name two process groups is one candidate but two process groups. Each

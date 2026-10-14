@@ -138,14 +138,6 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 	took := fmt.Sprintf("%d of %d queries ran in %.1fs. Nothing was written.", ran, len(r.Queries), elapsed.Seconds())
 
 	switch {
-	case p.shared != "":
-		if len(r.Candidates) > 0 {
-			writeRepoScopeCandidates(w, r)
-		}
-		fmt.Fprintf(w, "%s %s:\n", took, capitalize(p.shared))
-		for _, l := range p.discoverEach {
-			fmt.Fprintf(w, "  %s\n", l)
-		}
 	case len(r.Candidates) == 0:
 		printRepoScopeNoMatch(w, r, p, took)
 	case r.Verdict == reposcope.VerdictMatch:

@@ -97,7 +97,7 @@ type signals struct {
 	// token.testName), sorted, so that holding them back is never silent.
 	dropped []string
 	// sharedBy are the Gradle deployables that share the library module
-	// discovery ran for; tokens are then all of theirs.
+	// discovery ran for; nothing is sent for the module itself.
 	sharedBy []string
 }
 
@@ -159,13 +159,7 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 	}
 	unit, sharedBy := build.unitOf(dir, unit)
 	if len(sharedBy) > 0 {
-		var tokens []token
-		for _, d := range sharedBy {
-			tokens = append(tokens, unitTokens(units, found, d, d)...)
-		}
-		s := newSignals(unit, tokens)
-		s.sharedBy = sharedBy
-		return s, nil
+		return &signals{unit: unit, sharedBy: sharedBy}, nil
 	}
 	return newSignals(unit, unitTokens(units, found, unit, unit)), nil
 }

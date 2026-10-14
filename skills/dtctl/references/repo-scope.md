@@ -35,7 +35,7 @@ dtctl repo-scope set <name> --service-name <service.name>
 
 To preview what discovery would send without sending it: `dtctl repo-scope discover --dry-run -A`.
 
-Discovery works per unit: the nearest directory at or above the working directory (or `--path`) that holds a build file (`go.mod`, `package.json`, `pom.xml`, `build.gradle(.kts)`, `settings.gradle(.kts)`, `pyproject.toml`, `*.csproj`) or a Dockerfile; the repository root otherwise. Each Maven module is its own unit. A Gradle build is one unit unless several of its modules are deployed; each deployable's entry then covers the modules it depends on, read from the build when a command runs, and from a module several deployables share, or the settings directory, discovery proposes no entry but `discover --path <deployable>` for each.
+Discovery works per unit: the nearest directory at or above the working directory (or `--path`) that holds a build file (`go.mod`, `package.json`, `pom.xml`, `build.gradle(.kts)`, `settings.gradle(.kts)`, `pyproject.toml`, `*.csproj`) or a Dockerfile; the repository root otherwise. Each Maven module is its own unit. A Gradle build is one unit unless several of its modules are deployed; each deployable's entry then covers the modules it depends on, read from the build when a command runs, and from a module several deployables share, or the settings directory, discovery runs for each deployable and proposes each one's entry; `result` is then a list, `context.total` its length, and each suggestion is prefixed with its unit.
 
 ## Query under a scope
 

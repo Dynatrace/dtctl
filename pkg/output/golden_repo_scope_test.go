@@ -107,14 +107,11 @@ func repoScopeDiscoveryMatch() reposcope.DiscoveryReport {
 // repoScopeDiscoverySampled is a match on an environment where a day of
 // spans scans past the cap: the first sampled retry answered, the rest were
 // not needed, and the logs were read whole.
-// repoScopeDiscoverySampled also carries the Gradle field sharedBy, so that
-// every result field reaches a golden.
 func repoScopeDiscoverySampled() reposcope.DiscoveryReport {
 	return reposcope.DiscoveryReport{
 		Environment: repoScopeHost,
 		Dir:         ".",
 		Unit:        ".",
-		SharedBy:    []string{"checkout", "checkout-admin"},
 		Verdict:     reposcope.VerdictMatch,
 		Verdicts:    repoScopeVerdicts(reposcope.VerdictMatch),
 		Candidates: []reposcope.Candidate{{

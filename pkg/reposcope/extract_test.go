@@ -62,12 +62,6 @@ func TestExtract_Fixtures(t *testing.T) {
 		"image webproxy deploy/webproxy/deployment.yaml:11",
 		"artifact webproxy-app webproxy/build.gradle.kts:6",
 	}
-	shared := append([]string{
-		"dir admin admin/",
-		"workload admin deploy/admin/deployment.yaml:4",
-		"namespace edge deploy/admin/deployment.yaml:5",
-		"image admin deploy/admin/deployment.yaml:11",
-	}, webproxy...)
 	widget := []string{"chart widget-detect server/helm/Chart.yaml:2", "project platform-widget settings.gradle.kts:1"}
 	tests := []struct {
 		name string
@@ -187,12 +181,12 @@ func TestExtract_Fixtures(t *testing.T) {
 			tokens: webproxy,
 		},
 		{
-			// Both depend on the core module: discovery sends both
-			// deployables' names, for the build.
+			// Both depend on the core module: discovery runs for each
+			// deployable, and sends nothing for the module itself.
 			name:     "gradle-multi",
 			dir:      "webproxy-core/src/main/kotlin",
 			unit:     ".",
-			tokens:   shared,
+			tokens:   []string{},
 			sharedBy: []string{"admin", "webproxy"},
 		},
 		{
@@ -201,7 +195,7 @@ func TestExtract_Fixtures(t *testing.T) {
 			name:     "gradle-multi",
 			dir:      ".",
 			unit:     ".",
-			tokens:   shared,
+			tokens:   []string{},
 			sharedBy: []string{"admin", "webproxy"},
 		},
 		{
@@ -210,7 +204,7 @@ func TestExtract_Fixtures(t *testing.T) {
 			name:     "gradle-multi",
 			dir:      "buildSrc",
 			unit:     ".",
-			tokens:   shared,
+			tokens:   []string{},
 			sharedBy: []string{"admin", "webproxy"},
 		},
 		{
@@ -460,7 +454,7 @@ func TestExtract_Gradle(t *testing.T) {
 			},
 			dir:      "core",
 			unit:     ".",
-			tokens:   []string{"dir checkout checkout/", "dir ledger ledger/"},
+			tokens:   []string{},
 			sharedBy: []string{"checkout", "ledger"},
 		},
 		{
@@ -474,7 +468,7 @@ func TestExtract_Gradle(t *testing.T) {
 			},
 			dir:      "core",
 			unit:     ".",
-			tokens:   []string{"dir checkout checkout/", "dir ledger ledger/"},
+			tokens:   []string{},
 			sharedBy: []string{"checkout", "ledger"},
 		},
 		{
