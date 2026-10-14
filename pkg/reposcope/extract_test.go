@@ -332,7 +332,7 @@ func TestExtract_Limits(t *testing.T) {
 func TestExtract_TestContentIsNotRead(t *testing.T) {
 	dirs := []string{"Tests", "src/test/resources"}
 	for dir := range excludedDirs {
-		dirs = append(dirs, dir)
+		dirs = append(dirs, dir, "."+dir)
 	}
 	for _, dir := range dirs {
 		fsys := fstest.MapFS{dir + "/sub/package.json": {Data: []byte(`{"name": "stubbed-thing"}`)}}

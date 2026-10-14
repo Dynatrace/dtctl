@@ -24,9 +24,10 @@ const (
 var skippedDirs = keySet(".git", "node_modules", "vendor", "target", "build", "dist",
 	".venv", "__pycache__", ".idea", ".terraform", ".gradle", "buildSrc")
 
-// excludedDirs hold test content, compared case-insensitively so .NET's
-// Tests/ counts too: Go's testdata, Jest's __tests__, end-to-end suites, and
-// examples, whose manifests deploy a demonstration rather than the service.
+// excludedDirs hold test content, compared case-insensitively and behind a
+// leading dot, so .NET's Tests/ and Helm's rendered .tests/ count too: Go's
+// testdata, Jest's __tests__, end-to-end suites, and examples, whose
+// manifests deploy a demonstration rather than the service.
 // Unlike skippedDirs they are entered when discovery was asked about a
 // directory inside one (see onPath). dev is deliberately absent: it names
 // an environment, and deploy/overlays/dev describes exactly what runs on the
@@ -226,7 +227,7 @@ func listSources(fsys fs.FS, dir string, keep func(string) bool) ([]string, erro
 			return nil
 		case d.IsDir():
 			if p != "." && (skippedDirs[d.Name()] || strings.Count(p, "/")+1 > maxDepth ||
-				(excludedDirs[strings.ToLower(d.Name())] && !onPath(p, dir))) {
+				(excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))] && !onPath(p, dir))) {
 				return fs.SkipDir
 			}
 			return nil
