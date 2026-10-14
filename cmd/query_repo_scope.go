@@ -29,16 +29,18 @@ const (
 // Codes for a scope that resolved but was not applied for a reason the
 // rewrite cannot know; the rewrite's own codes are dql.Outcome.
 const (
-	repoScopeNoEntry     = "no_entry"
-	repoScopeInvalidFile = "invalid_file"
-	repoScopeNoBinding   = "no_binding"
+	repoScopeNoEntry        = "no_entry"
+	repoScopeAmbiguousEntry = "ambiguous_entry"
+	repoScopeInvalidFile    = "invalid_file"
+	repoScopeNoBinding      = "no_binding"
 )
 
 // repoScopeCodes is every context.repo_scope.code; docs/AGENT_MODE.md lists
 // each one but applied.
 var repoScopeCodes = []string{
 	string(dql.Applied), string(dql.NotFetch), string(dql.UnsupportedObject), repoScopeNoBinding,
-	string(dql.UserFilter), string(dql.Subquery), string(dql.Unscannable), repoScopeNoEntry, repoScopeInvalidFile,
+	string(dql.UserFilter), string(dql.Subquery), string(dql.Unscannable), repoScopeNoEntry, repoScopeAmbiguousEntry,
+	repoScopeInvalidFile,
 }
 
 // repoScopeRefusals are the codes for an entry that resolved but cannot narrow
@@ -103,8 +105,8 @@ type repoScopeResolution struct {
 	// working directory. Status is nil when the file failed to load.
 	Status *reposcope.Status
 	// Scope is what the envelope reports for a scope that resolved without an
-	// entry to apply (invalid_file, no_entry). It is nil when an entry
-	// resolved: what applying it does is the consumer's to say.
+	// entry to apply (invalid_file, no_entry, ambiguous_entry). It is nil when
+	// an entry resolved: what applying it does is the consumer's to say.
 	Scope *output.RepoScope
 	// Warning names keys the file holds that this dtctl does not know.
 	Warning string
@@ -122,6 +124,7 @@ type repoScopeResolution struct {
 //	no scope file, or no entry for this host               → off (--repo-scope: NotFoundError)
 //	the file fails to load                                 → warning, invalid_file (--repo-scope: the error)
 //	no entry covers the directory                          → warning, no_entry
+//	several entries cover it as closely                    → warning, ambiguous_entry
 //	an entry                                               → the consumer applies it
 //
 // "Off" is a nil resolution and a nil error, and the consumer says nothing,
@@ -158,7 +161,11 @@ func resolveRepoScope(cmd *cobra.Command, cfg *config.Config, name string) (*rep
 	}
 	res := &repoScopeResolution{Status: status, Warning: status.Warning}
 	if status.Entry == nil {
-		res.Scope = &output.RepoScope{File: status.File, Environment: status.Environment, Code: repoScopeNoEntry, Reason: status.Reason}
+		code := repoScopeNoEntry
+		if status.Ambiguous() {
+			code = repoScopeAmbiguousEntry
+		}
+		res.Scope = &output.RepoScope{File: status.File, Environment: status.Environment, Code: code, Reason: status.Reason}
 	}
 	return res, nil
 }

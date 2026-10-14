@@ -34,6 +34,8 @@ type Status struct {
 	LiveDebuggerFilters []map[string][]string `json:"liveDebuggerFilters,omitempty" yaml:"liveDebuggerFilters,omitempty"`
 	// liveDebuggerReason says why an entry renders no filter sets.
 	liveDebuggerReason string
+	// tied says the entries Reason names cover Dir as closely.
+	tied bool
 	// Reason explains a nil Entry, an entry chosen by name that does not
 	// cover Dir, or one that covers it through a Gradle build.
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
@@ -51,8 +53,8 @@ type Status struct {
 // "services/checkout" does not cover "services/checkout-v2". Inside a Gradle
 // build, read from repo, an entry whose Path is a module also covers the
 // modules it depends on, as closely as relDir's own module. With no entry,
-// Entry is nil and Reason names the paths the entries do cover, or the two
-// entries that cover relDir as closely.
+// Entry is nil and Reason names the paths the entries do cover, or the
+// entries that cover relDir as closely (see Ambiguous).
 //
 // Path comparison folds case on darwin and windows and is exact elsewhere.
 func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
@@ -69,10 +71,14 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		s.Reason = fmt.Sprintf("no entry for %s; the file defines: %s", host, strings.Join(f.Hosts(), ", "))
 		return s, nil
 	default:
-		var tied *Entry
+		var tied []*Entry
 		if s.Entry, tied = closestEntry(entries, relDir, build); tied != nil {
-			s.Reason = fmt.Sprintf("covered by entries %s and %s; pick one with --repo-scope <name>", s.Entry.Name, tied.Name)
-			s.Entry = nil
+			names := []string{s.Entry.Name}
+			for _, e := range tied {
+				names = append(names, e.Name)
+			}
+			s.Reason = fmt.Sprintf("covered by entries %s; pick one with --repo-scope <name>", joinAnd(names))
+			s.tied, s.Entry = true, nil
 		}
 	}
 	if s.Entry == nil {
@@ -115,11 +121,15 @@ func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, 
 	return nil, false, s.liveDebuggerReason
 }
 
+// Ambiguous reports whether several entries cover Dir as closely, none
+// applying; Reason names them.
+func (s *Status) Ambiguous() bool { return s.tied }
+
 // closestEntry is the entry with the longest path covering relDir, else the
 // one with no path. An entry the build covers relDir through is as close as
-// relDir's module. tied is another entry as close: a second deployable whose
-// closure holds that module.
-func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best, tied *Entry) {
+// relDir's module. tied are the other entries as close, in file order: further
+// deployables whose closure holds that module.
+func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best *Entry, tied []*Entry) {
 	var wide *Entry
 	longest := 0
 	for i := range entries {
@@ -139,13 +149,21 @@ func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best, t
 		case n > longest:
 			best, tied, longest = e, nil, n
 		default:
-			tied = e
+			tied = append(tied, e)
 		}
 	}
 	if best == nil {
 		return wide, nil
 	}
 	return best, tied
+}
+
+// joinAnd lists words as prose: "a", "a and b", "a, b and c".
+func joinAnd(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
 // gradleCoverage is how the Gradle build holding a directory covers it: the

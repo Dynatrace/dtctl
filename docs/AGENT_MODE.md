@@ -333,6 +333,7 @@ still stopped, points at the executor's scan-limit advice.
 | `subquery` | the data object is fetched again inside `[...]`, which the scope cannot reach |
 | `unscannable` | dtctl cannot read the text safely (an unterminated string or comment, unbalanced brackets, a single quote) |
 | `no_entry` | no entry covers the working directory; pick one with `--repo-scope <name>` |
+| `ambiguous_entry` | several entries cover the working directory as closely; `reason` names them; pick one with `--repo-scope <name>` |
 | `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
 
 When the scope file holds keys this dtctl does not know (a typo, or a newer

@@ -340,6 +340,8 @@ func repoScopeStatusSuggestions(s *reposcope.Status) []string {
 		return []string{fmt.Sprintf("'dtctl query' narrows fetch logs and fetch spans to %q here; add --%s to run a query unscoped", s.Entry.Name, noRepoScopeFlag)}
 	case s.Environment == "":
 		return []string{repoScopeCheckoutHint}
+	case s.Ambiguous():
+		return []string{s.Reason}
 	case len(s.Others) > 0:
 		return []string{"no entry covers this directory; pass --repo-scope <name> to use one of: " + strings.Join(s.Others, ", ")}
 	}

@@ -182,7 +182,7 @@ type TimeWindow struct {
 // statement of fact rather than advice.
 type RepoScope struct {
 	// Name is the entry that resolved; empty when none did (code no_entry,
-	// invalid_file).
+	// ambiguous_entry, invalid_file).
 	Name        string `json:"name,omitempty"`
 	File        string `json:"file"`
 	Environment string `json:"environment"`

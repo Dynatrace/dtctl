@@ -432,6 +432,36 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 		"dtctl repo-scope discover --path admin; dtctl repo-scope discover --path webproxy", suggestions[0])
 }
 
+// From a library two entries' deployables depend on, neither entry applies:
+// the envelope says the entries tie rather than that none covers it, and
+// the suggestion names them.
+func TestRepoScopeGradleTie(t *testing.T) {
+	fixture := gradleMultiRepo(t)
+	newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+	repo := chdirTestRepo(t, `environments:
+  127.0.0.1:
+    - name: webproxy
+      path: webproxy
+      service-names: [webproxy]
+    - name: admin
+      path: admin
+      service-names: [admin]
+`)
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+	t.Chdir(filepath.Join(repo, "webproxy-core"))
+	const reason = "covered by entries webproxy and admin; pick one with --repo-scope <name>"
+
+	_, stdout, stderr := runRepoScoped([]string{"query", "fetch logs", "--agent"}, RunOptions{})
+	s := repoScopeContext(t, stdout)
+	require.Equal(t, "ambiguous_entry", s.Code)
+	require.Equal(t, reason, s.Reason)
+	require.Contains(t, stderr, "repo scope not applied: "+reason)
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []string{reason}, agentEnvelope(t, stdout).Context.Suggestions)
+}
+
 // A token that provably cannot read spans is refused before the first query
 // leaves. One that cannot read the entity tables still gets the record
 // queries' answer; the fallbacks are reported as unreadable, not sent.

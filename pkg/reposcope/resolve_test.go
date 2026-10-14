@@ -41,15 +41,16 @@ func TestResolve(t *testing.T) {
 	symlinked := fixture(t, "gradle-multi")
 	symlinked["webproxy/build.gradle.kts"] = &fstest.MapFile{Data: []byte("../admin/build.gradle.kts"), Mode: fs.ModeSymlink}
 	tests := []struct {
-		name   string
-		repo   fs.FS
-		file   *File
-		host   string
-		dir    string
-		pick   string
-		entry  string // "" for no entry
-		reason string
-		others []string
+		name      string
+		repo      fs.FS
+		file      *File
+		host      string
+		dir       string
+		pick      string
+		entry     string // "" for no entry
+		reason    string
+		others    []string
+		ambiguous bool
 	}{
 		{name: "exact path", file: monorepoFile(), host: prodHost, dir: "services/checkout",
 			entry: "checkout", others: []string{"checkout-v2", "ledger", "ledger-close"}},
@@ -78,7 +79,7 @@ func TestResolve(t *testing.T) {
 		{name: "a library one deployable depends on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-api/src",
 			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-api", others: []string{"admin"}},
 		{name: "a library two deployables depend on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core/src/main/kotlin",
-			reason: "covered by entries webproxy and admin; pick one with --repo-scope <name>", others: []string{"admin", "webproxy"}},
+			reason: "covered by entries webproxy and admin; pick one with --repo-scope <name>", others: []string{"admin", "webproxy"}, ambiguous: true},
 		{name: "a library two deployables depend on, selected by name", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core",
 			pick: "admin", entry: "admin", reason: "covered through the Gradle build: admin depends on webproxy-core", others: []string{"webproxy"}},
 		{name: "a library only an entry's deployable is known to depend on", repo: gradle, file: onlyWebproxy, host: prodHost, dir: "webproxy-core",
@@ -110,8 +111,23 @@ func TestResolve(t *testing.T) {
 			}
 			assert.Equal(t, tt.reason, r.Reason)
 			assert.Equal(t, tt.others, r.Others)
+			assert.Equal(t, tt.ambiguous, r.Ambiguous())
 		})
 	}
+}
+
+// A tie's reason names every entry in it, in file order.
+func TestResolve_Ambiguous(t *testing.T) {
+	three := fixture(t, "gradle-multi")
+	three["settings.gradle.kts"] = &fstest.MapFile{Data: []byte(`include(":webproxy", ":admin", ":edge", ":webproxy-api", ":webproxy-core")`)}
+	three["edge/build.gradle.kts"] = &fstest.MapFile{Data: []byte(`dependencies { implementation(project(":webproxy-core")) }`)}
+	f := gradleFile()
+	f.Upsert(prodHost, Entry{Name: "edge", Path: "edge", ServiceNames: []string{"edge"}})
+	r, err := Resolve(three, f, prodHost, "webproxy-core", "")
+	require.NoError(t, err)
+	assert.True(t, r.Ambiguous())
+	assert.Nil(t, r.Entry)
+	assert.Equal(t, "covered by entries webproxy, admin and edge; pick one with --repo-scope <name>", r.Reason)
 }
 
 func TestResolve_UnknownName(t *testing.T) {
