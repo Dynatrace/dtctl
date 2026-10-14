@@ -174,3 +174,4 @@ Candidates are keyed by namespace, workload and service name, so the result does
 9. Clearing a workspace's filters, and `update breakpoint` changing `--filters` and `--enabled` in one call.
 10. `catalog-info.yaml` and `skaffold.yaml` as name sources (a Gradle build's chart already supplies the deployed name, and `--term` covers the rest); stripping naming prefixes, which is organisation-specific.
 11. A Maven multi-module build as one unit, like a Gradle settings build: the asymmetry is deliberate until field data asks for it.
+12. `get snapshots` after a re-version (hit limit, update) reads only the current immutable id. Earlier ids cannot be recovered: snapshots carry only `breakpoint.id`, the rule API returns `revision_count` but no ids, and ids are a tenant-wide sequence. Unblocked by the rule API listing its revisions' ids, or by snapshots carrying the rule's mutable id, which create already sends.
