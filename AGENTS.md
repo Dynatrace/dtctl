@@ -602,8 +602,14 @@ to the process-level default when the context carries no invocation, which is
 what keeps the CLI unchanged. Code that runs while a command is being *built* has
 no context yet: it is handed its storage explicitly.
 
+A command that sets its own `PersistentPreRunE` must run its parent's first.
+Cobra runs only the nearest one, and the root's is what runs `initConfig` on a
+concurrent tree and rejects a `--dry-run` the command does not implement on
+both. `attachPreviewNotice` is the pattern.
+
 *Guards*: `go test ./cmd/ -run TestNewCommandTreeMatchesSingleton` — the fresh
-tree has the singleton's surface, command by command and flag by flag — and
+tree has the singleton's surface, command by command and flag by flag —
+`go test ./cmd/ -run TestEveryCommandReachesTheRootPreRunHook`, and
 `go test -race ./pkg/engine/ -run TestConcurrent`, which runs a corpus on
 overlapping invocations and requires every result to equal the serialized one.
 
