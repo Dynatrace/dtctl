@@ -12,7 +12,7 @@ import (
 // preserving: login must request exactly the same scopes as before. Update this
 // table only with an intentional, reviewed change to login behavior.
 var baselineScopes = map[config.SafetyLevel][]string{
-	config.SafetyLevelReadOnly: { // 41 scopes
+	config.SafetyLevelReadOnly: { // 42 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -42,6 +42,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"storage:user.replays:read",
 		"storage:fieldsets:read",
 		"storage:fieldset-definitions:read",
+		"storage:profiles:read",
 		"storage:buckets:read",
 		"storage:bucket-definitions:read",
 		"storage:files:read",
@@ -113,7 +114,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"email:emails:send",
 		"dev-obs:breakpoints:set",
 	},
-	config.SafetyLevelReadWriteAll: { // 76 scopes
+	config.SafetyLevelReadWriteAll: { // 77 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -143,6 +144,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"storage:user.replays:read",
 		"storage:fieldsets:read",
 		"storage:fieldset-definitions:read",
+		"storage:profiles:read",
 		"storage:buckets:read",
 		"storage:bucket-definitions:read",
 		"storage:files:read",
@@ -191,7 +193,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"app-engine:edge-connects:write",
 		"notification:notifications:write",
 	},
-	config.SafetyLevelDangerouslyUnrestricted: { // 84 scopes
+	config.SafetyLevelDangerouslyUnrestricted: { // 85 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -221,6 +223,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"storage:user.replays:read",
 		"storage:fieldsets:read",
 		"storage:fieldset-definitions:read",
+		"storage:profiles:read",
 		"storage:buckets:read",
 		"storage:bucket-definitions:read",
 		"storage:files:read",
