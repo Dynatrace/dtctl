@@ -346,6 +346,10 @@ var grailExtendedReadScopes = []string{
 	"storage:user.replays:read",
 	"storage:fieldsets:read",
 	"storage:fieldset-definitions:read",
+	// Code-level profiling samples (the code-level analysis API). No built-in
+	// command reads them yet; requesting the scope at login is what lets
+	// `exec api` and dtctl-* plugins that reuse the dtctl session reach them.
+	"storage:profiles:read",
 }
 
 // scopeSet collects scopes preserving first-seen order and de-duplicating.
