@@ -5,7 +5,7 @@ go 1.26.9
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/go-resty/resty/v2 v2.17.2
-	github.com/godbus/dbus/v5 v5.2.2
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/stretchr/testify v1.12.1
 	github.com/zalando/go-keyring v0.2.8
