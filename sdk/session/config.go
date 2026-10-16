@@ -985,26 +985,12 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 		}
 	}
 
-	// A token the config names as a ${VAR} reference wins over any stored
-	// credential: the file says where the secret comes from, and a stale
-	// keyring entry for the same name must not shadow it. A reference set by
-	// SetToken on this Config is still the literal; resolve it the way loading
-	// the saved file would. (Local configs never get here with an inline
-	// token: they are refused above.)
-	if c.tokenFromEnvRef(tokenRef) {
-		for _, nt := range c.Tokens {
-			if nt.Name != tokenRef {
-				continue
-			}
-			value := nt.Token
-			if IsEnvReference(value) {
-				value = expandEnvPreservingShellParams(value)
-			}
-			if value != "" {
-				return value, nil
-			}
-		}
-	}
+	// A token the config names as a ${VAR} reference is read from the
+	// environment, never from a plain keyring entry of the same name: such an
+	// entry can only be a stale value the reference replaced. OAuth tokens keep
+	// their precedence. (Local configs never get here with an inline token:
+	// they are refused above.)
+	envValue, envRaw, isEnvRef := c.envRefToken(tokenRef)
 
 	// Try keyring first (skipped when file storage is explicitly requested)
 	if IsKeyringAvailable() && !IsFileTokenStorage() {
@@ -1028,9 +1014,11 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 		}
 
 		// Fall back to regular token
-		token, err := ts.GetToken(tokenRef)
-		if err == nil && token != "" {
-			return token, nil
+		if !isEnvRef {
+			token, err := ts.GetToken(tokenRef)
+			if err == nil && token != "" {
+				return token, nil
+			}
 		}
 	}
 
@@ -1050,6 +1038,13 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 				return tokenData.AccessToken, nil
 			}
 		}
+	}
+
+	if isEnvRef {
+		if envValue == "" {
+			return "", fmt.Errorf("token %q is read from %s, which is not set in the environment", tokenRef, envRaw)
+		}
+		return envValue, nil
 	}
 
 	// Fall back to config file

@@ -333,6 +333,18 @@ func TestGetTokenResolvesReferenceSetInProcess(t *testing.T) {
 	}
 }
 
+// TestGetTokenUnsetReferenceErrors: a reference whose variable is unset is an
+// error naming the variable, not a silent fallback to a stale keyring value.
+func TestGetTokenUnsetReferenceErrors(t *testing.T) {
+	t.Setenv("DT_TEST_SECRET", "")
+	os.Unsetenv("DT_TEST_SECRET")
+	cfg, _ := loadEnvRefConfig(t)
+	_, err := cfg.GetToken("templated-token")
+	if err == nil || !strings.Contains(err.Error(), "${DT_TEST_SECRET}") {
+		t.Errorf("GetToken error = %v, want one naming ${DT_TEST_SECRET}", err)
+	}
+}
+
 // TestTokensAsStored: displaying a config shows the reference, not the secret,
 // and leaves the resolved value in place for requests.
 func TestTokensAsStored(t *testing.T) {

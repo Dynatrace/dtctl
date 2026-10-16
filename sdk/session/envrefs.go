@@ -261,19 +261,30 @@ func (c *Config) restoreEnvRefs(fresh []byte) []byte {
 
 // tokenFromEnvRef reports whether the named credential's inline value is an
 // environment-variable reference: either loaded from one and unchanged since,
-// or (in a config loaded without expansion) still the literal reference.
+// or still the literal reference (set by SetToken on this Config, or loaded
+// without expansion).
 func (c *Config) tokenFromEnvRef(name string) bool {
+	_, _, ok := c.envRefToken(name)
+	return ok
+}
+
+// envRefToken resolves the named credential when its inline value is an
+// environment-variable reference, returning the value (empty when the
+// variable is unset) and the reference as written.
+func (c *Config) envRefToken(name string) (value, raw string, ok bool) {
 	for _, nt := range c.Tokens {
 		if nt.Name != name {
 			continue
 		}
 		if IsEnvReference(nt.Token) {
-			return true
+			return expandEnvPreservingShellParams(nt.Token), nt.Token, true
 		}
-		ref, ok := c.envRefs[tokenValuePath(name)]
-		return ok && ref.present && nt.Token == ref.loaded
+		if ref, found := c.envRefs[tokenValuePath(name)]; found && ref.present && nt.Token == ref.loaded {
+			return nt.Token, ref.raw, true
+		}
+		return "", "", false
 	}
-	return false
+	return "", "", false
 }
 
 // TokensAsStored returns a copy of c whose inline token values show the
