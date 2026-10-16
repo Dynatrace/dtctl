@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"runtime"
@@ -80,14 +81,14 @@ func TestEditSettingsValidateOnly_Success(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(editSettingCmd)
 	_ = editSettingCmd.Flags().Set("validate-only", "true")
@@ -120,14 +121,14 @@ func TestEditSettingsValidateOnly_ValidationFailed(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(editSettingCmd)
 	_ = editSettingCmd.Flags().Set("validate-only", "true")

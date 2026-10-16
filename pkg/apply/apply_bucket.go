@@ -29,7 +29,7 @@ func (a *Applier) applyBucket(data []byte) (ApplyResult, error) {
 			return nil, fmt.Errorf("failed to create bucket: %w", err)
 		}
 		var warnings []string
-		stderrWarn(&warnings, "Bucket creation can take up to 1 minute to complete")
+		a.stderrWarn(&warnings, "Bucket creation can take up to 1 minute to complete")
 		return &BucketApplyResult{
 			ApplyResultBase: ApplyResultBase{
 				Action:       ActionCreated,

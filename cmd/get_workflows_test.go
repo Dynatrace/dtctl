@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -31,18 +32,18 @@ func TestGetWorkflowsCmd_ListWithFilters(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origChunk := chunkSize
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origChunk := chunkSize(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		chunkSize = origChunk
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.chunkSize = origChunk
 	}()
 
-	cfgFile = configPath
-	plainMode = true
-	chunkSize = 500
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.chunkSize = 500
 
 	testutil.ResetCommandFlags(getWorkflowsCmd)
 	_ = getWorkflowsCmd.Flags().Set("filter", "deploy")
@@ -55,22 +56,22 @@ func TestGetWorkflowsCmd_ListWithFilters(t *testing.T) {
 }
 
 func TestGetWorkflowsCmd_InvalidChunkSize(t *testing.T) {
-	origCfgFile := cfgFile
-	origChunk := chunkSize
+	origCfgFile := cfgFile(context.Background())
+	origChunk := chunkSize(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		chunkSize = origChunk
+		gFlags.cfgFile = origCfgFile
+		gFlags.chunkSize = origChunk
 	}()
 
-	cfgFile = "nonexistent-cfg"
-	chunkSize = 5 // below minimum of 20
+	gFlags.cfgFile = "nonexistent-cfg"
+	gFlags.chunkSize = 5 // below minimum of 20
 
 	// Need a valid config so Setup() doesn't fail before chunk validation.
 	ms := testutil.NewMockServer(t, map[string]http.HandlerFunc{})
 	defer ms.Close()
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	testutil.ResetCommandFlags(getWorkflowsCmd)
 	err := getWorkflowsCmd.RunE(getWorkflowsCmd, nil)
@@ -94,21 +95,21 @@ func TestGetWorkflowsCmd_HasMoreWithLimit(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origChunk := chunkSize
-	origAgent := agentMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origChunk := chunkSize(context.Background())
+	origAgent := agentMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		chunkSize = origChunk
-		agentMode = origAgent
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.chunkSize = origChunk
+		gFlags.agentMode = origAgent
 	}()
 
-	cfgFile = configPath
-	plainMode = true
-	chunkSize = 0 // single-page mode: stop after first page
-	agentMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.chunkSize = 0 // single-page mode: stop after first page
+	gFlags.agentMode = true
 
 	testutil.ResetCommandFlags(getWorkflowsCmd)
 	_ = getWorkflowsCmd.Flags().Set("limit", "10")
@@ -141,17 +142,15 @@ func TestGetWorkflowExecutionsCmd_ListWithFilters(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origFilter := workflowFilter
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		workflowFilter = origFilter
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
 
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(getWorkflowExecutionsCmd)
 	_ = getWorkflowExecutionsCmd.Flags().Set("workflow", "wf-abc")
@@ -169,15 +168,15 @@ func TestGetWorkflowExecutionsCmd_InvalidStartedSince(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
 
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(getWorkflowExecutionsCmd)
 	_ = getWorkflowExecutionsCmd.Flags().Set("started-since", "not-a-date")
@@ -195,15 +194,15 @@ func TestGetWorkflowExecutionsCmd_InvalidStartedUntil(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
 
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(getWorkflowExecutionsCmd)
 	_ = getWorkflowExecutionsCmd.Flags().Set("started-until", "bad-date")
@@ -231,21 +230,18 @@ func TestGetWorkflowExecutionsCmd_HasMore(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origAgent := agentMode
-	origFilter := workflowFilter
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origAgent := agentMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		agentMode = origAgent
-		workflowFilter = origFilter
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.agentMode = origAgent
 	}()
 
-	cfgFile = configPath
-	plainMode = true
-	agentMode = true
-	workflowFilter = ""
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.agentMode = true
 
 	testutil.ResetCommandFlags(getWorkflowExecutionsCmd)
 

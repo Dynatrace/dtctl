@@ -4,7 +4,7 @@ schemaVersion: 1.0.15
 scope: environment
 value:
   analyzer:
-    input[#6]{key,value}:
+    input[6]{key,value}:
       alertCondition,ABOVE
       threshold,"90"
       slidingWindow,"5"
@@ -15,7 +15,7 @@ value:
   description: Monitors Aurora cluster CPU utilization to detect performance bottlenecks
   enabled: true
   eventTemplate:
-    properties[#3]{key,value}:
+    properties[3]{key,value}:
       event.type,PERFORMANCE_EVENT
       event.name,Aurora cluster high CPU
       event.description,CPU utilization is high

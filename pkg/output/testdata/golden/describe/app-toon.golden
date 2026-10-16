@@ -8,5 +8,5 @@ modificationInfo:
 name: Custom App
 resourceStatus:
   status: OK
-  subResourceTypes[#2]: function,action
+  subResourceTypes[2]: function,action
 version: 1.4.2

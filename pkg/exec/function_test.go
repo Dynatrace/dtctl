@@ -1,12 +1,17 @@
 package exec
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 // TestFunctionExecutor_Execute_ErrorEnvelope verifies end-to-end that the
@@ -189,5 +194,93 @@ func TestFunctionExecutor_Execute_ValidationErrors(t *testing.T) {
 				t.Errorf("Execute() error = %q, want it to contain %q", err.Error(), tt.errContains)
 			}
 		})
+	}
+}
+
+// An executor given a vfs.Env reads its code and payload files through it: a
+// path that exists only in the invocation's own filesystem resolves, and one
+// that exists only on the host does not.
+func TestFunctionExecutor_WithVFSReadsCodeAndPayloadThroughItsEnv(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":"ok","id":"exec-1"}`))
+	}))
+	defer server.Close()
+
+	c, err := client.NewForTesting(server.URL, "test-token")
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	env := vfs.Env{FS: vfs.NewMapFS(map[string][]byte{
+		"code.js":      []byte("export default () => 42"),
+		"payload.json": []byte(`{"input":"from-the-env"}`),
+	})}
+	executor := NewFunctionExecutor(c).WithVFS(env)
+
+	t.Run("ad-hoc code", func(t *testing.T) {
+		if _, err := executor.Execute(FunctionExecuteOptions{SourceCodeFile: "code.js", PayloadFile: "payload.json"}); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		var sent struct {
+			SourceCode string `json:"sourceCode"`
+			Payload    string `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(gotBody), &sent); err != nil {
+			t.Fatalf("request body %q is not JSON: %v", gotBody, err)
+		}
+		if sent.SourceCode != "export default () => 42" {
+			t.Errorf("sourceCode = %q, want the code from the env's file", sent.SourceCode)
+		}
+		if sent.Payload != `{"input":"from-the-env"}` {
+			t.Errorf("payload = %q, want the payload from the env's file", sent.Payload)
+		}
+	})
+
+	t.Run("app function payload", func(t *testing.T) {
+		gotBody = ""
+		if _, err := executor.Execute(FunctionExecuteOptions{FunctionName: "my.app/my-function", Defer: true, PayloadFile: "payload.json"}); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		if !strings.Contains(gotBody, "from-the-env") {
+			t.Errorf("request body %q lacks the payload from the env's file", gotBody)
+		}
+	})
+
+	t.Run("a host-only path does not resolve", func(t *testing.T) {
+		hostFile := filepath.Join(t.TempDir(), "host.json")
+		if err := os.WriteFile(hostFile, []byte(`{"input":"host"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := executor.Execute(FunctionExecuteOptions{SourceCodeFile: "code.js", PayloadFile: hostFile})
+		if err == nil || !strings.Contains(err.Error(), "failed to read payload") {
+			t.Errorf("Execute() error = %v, want a payload read failure for a path outside the env", err)
+		}
+	})
+}
+
+func TestReadFileOrStdinWith_UsesTheGivenEnv(t *testing.T) {
+	env := vfs.Env{
+		FS:    vfs.NewMapFS(map[string][]byte{"f.txt": []byte("from the env")}),
+		Stdin: strings.NewReader("from stdin"),
+	}
+
+	if got, err := ReadFileOrStdinWith(env, "f.txt"); err != nil || got != "from the env" {
+		t.Errorf("ReadFileOrStdinWith(file) = %q, %v", got, err)
+	}
+	if got, err := ReadFileOrStdinWith(env, "-"); err != nil || got != "from stdin" {
+		t.Errorf("ReadFileOrStdinWith(-) = %q, %v", got, err)
+	}
+	if _, err := ReadFileOrStdinWith(env, "missing.txt"); err == nil || !strings.Contains(err.Error(), `failed to read file "missing.txt"`) {
+		t.Errorf("ReadFileOrStdinWith(missing) error = %v, want the path named", err)
+	}
+
+	// The entry point without an env resolves through the installed filesystem.
+	prev := vfs.SetActive(vfs.NewMapFS(map[string][]byte{"g.txt": []byte("installed")}))
+	t.Cleanup(func() { vfs.SetActive(prev) })
+	if got, err := ReadFileOrStdin("g.txt"); err != nil || got != "installed" {
+		t.Errorf("ReadFileOrStdin = %q, %v, want the installed filesystem's file", got, err)
 	}
 }

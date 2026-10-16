@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -109,7 +110,7 @@ func TestStreamSwitchRows_NeverSpillsARowSetThatFits(t *testing.T) {
 	for _, agent := range []bool{false, true} {
 		for _, format := range []string{"json", "jsonl", "yaml", "toon", "csv", "auto"} {
 			opts := DQLExecuteOptions{AgentMode: agent, Spill: SpillOptions{Mode: SpillAuto, Threshold: 50 << 10}}
-			switchAt := streamSwitchRows(opts, format)
+			switchAt := streamSwitchRows(io.Discard, opts, format)
 			for name, shape := range shapes {
 				t.Run(fmt.Sprintf("agent=%v/%s/%s", agent, format, name), func(t *testing.T) {
 					rows := make([]map[string]interface{}, switchAt+1)
@@ -134,7 +135,7 @@ func TestStreamSwitchRows_IsExactWhereTheEmptyRowIsCheapest(t *testing.T) {
 		for _, format := range []string{"json", "jsonl", "yaml"} {
 			t.Run(fmt.Sprintf("agent=%v/%s", agent, format), func(t *testing.T) {
 				opts := DQLExecuteOptions{AgentMode: agent, Spill: SpillOptions{Mode: SpillAuto, Threshold: 50 << 10}}
-				switchAt := streamSwitchRows(opts, format)
+				switchAt := streamSwitchRows(io.Discard, opts, format)
 				rows := make([]map[string]interface{}, switchAt)
 				for i := range rows {
 					rows[i] = map[string]interface{}{}
@@ -163,7 +164,7 @@ func printedLayout(agent bool, format string) output.JSONLayout {
 
 func TestStreamSwitchRows_SpillAlwaysStreamsFromTheFirstRow(t *testing.T) {
 	opts := DQLExecuteOptions{Spill: SpillOptions{Mode: SpillAlways, Threshold: 50 << 10}}
-	if got := streamSwitchRows(opts, "json"); got != 0 {
+	if got := streamSwitchRows(io.Discard, opts, "json"); got != 0 {
 		t.Errorf("streamSwitchRows() = %d, want 0 for --spill=always", got)
 	}
 }

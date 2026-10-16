@@ -13,10 +13,13 @@ const (
 )
 
 // createCmd represents the create command
-var createCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create resources from files",
-	Long: `Create a new resource on the Dynatrace platform from a YAML or JSON file.
+var createCmd = newCreateCmd()
+
+func newCreateCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "create",
+		Short: "Create resources from files",
+		Long: `Create a new resource on the Dynatrace platform from a YAML or JSON file.
 
 Reads a resource definition from a file and creates it. If the resource already
 exists, the command fails — use 'dtctl apply' for create-or-update semantics.
@@ -29,7 +32,7 @@ Supported resources:
   slos                    settings                  buckets (bkt)
   edgeconnect (ec)        lookup-tables (lu)        extensions (ext)
   scheduling-rules (sr)`,
-	Example: `  # Create a workflow from a YAML file
+		Example: `  # Create a workflow from a YAML file
   dtctl create workflow -f workflow.yaml
 
   # Create a dashboard from JSON
@@ -40,7 +43,10 @@ Supported resources:
 
   # Preview what would be created
   dtctl create workflow -f workflow.yaml --dry-run`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // centralEnrichmentIntent maps the --central-enrichment flag onto the value
@@ -88,5 +94,4 @@ func init() {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(createCmd)
 }

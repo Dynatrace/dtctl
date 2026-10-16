@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,7 @@ func setReadonlyContext(t *testing.T) {
 	require.NoError(t, err)
 	cfg.SetContextWithOptions(cfg.CurrentContext, ctx.Environment, "",
 		&config.ContextOptions{SafetyLevel: config.SafetyLevelReadOnly})
-	require.NoError(t, cfg.SaveTo(cfgFile))
+	require.NoError(t, cfg.SaveTo(cfgFile(context.Background())))
 
 	// Sanity: the level really is refusing deletes, so a passing dry-run
 	// assertion below cannot be a misconfigured context quietly permitting one.
@@ -62,9 +63,9 @@ func TestDryRunNeedsNoSafetyLevel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setupPlatformCmdTest(t, srv.Server, "json")
 			setReadonlyContext(t)
-			origDryRun := dryRun
-			t.Cleanup(func() { dryRun = origDryRun })
-			dryRun = true
+			origDryRun := dryRun(context.Background())
+			t.Cleanup(func() { gFlags.dryRun = origDryRun })
+			gFlags.dryRun = true
 			srv.reset()
 
 			var runErr error
@@ -85,9 +86,9 @@ func TestRealRunStillNeedsSafetyLevel(t *testing.T) {
 	srv := newCloudMockServer(t)
 	setupPlatformCmdTest(t, srv.Server, "json")
 	setReadonlyContext(t)
-	origDryRun := dryRun
-	t.Cleanup(func() { dryRun = origDryRun })
-	dryRun = false
+	origDryRun := dryRun(context.Background())
+	t.Cleanup(func() { gFlags.dryRun = origDryRun })
+	gFlags.dryRun = false
 	srv.reset()
 
 	err := deleteAWSConnectionCmd.RunE(deleteAWSConnectionCmd, []string{mockAWSConnectionName})

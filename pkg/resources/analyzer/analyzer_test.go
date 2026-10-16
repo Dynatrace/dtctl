@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 func TestHandler_List(t *testing.T) {
@@ -832,5 +833,21 @@ func TestParseInputFromFile_FileNotFound(t *testing.T) {
 	_, err := ParseInputFromFile("/nonexistent/file.json")
 	if err == nil {
 		t.Error("ParseInputFromFile() expected error for nonexistent file, got nil")
+	}
+}
+
+func TestParseInputFromFileWith_ReadsThroughTheGivenEnv(t *testing.T) {
+	env := vfs.Env{FS: vfs.NewMapFS(map[string][]byte{"in.json": []byte(`{"timeframe": "now-1h"}`)})}
+
+	input, err := ParseInputFromFileWith(env, "in.json")
+	if err != nil {
+		t.Fatalf("ParseInputFromFileWith: %v", err)
+	}
+	if input["timeframe"] != "now-1h" {
+		t.Errorf("input = %v, want the file from the Env's filesystem", input)
+	}
+
+	if _, err := ParseInputFromFileWith(env, "missing.json"); err == nil {
+		t.Error("a path outside the Env's filesystem must not resolve")
 	}
 }

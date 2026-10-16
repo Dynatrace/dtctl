@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -28,14 +29,14 @@ func TestCreateSettingsValidateOnly_Success(t *testing.T) {
 
 	settingsFile := testutil.CreateTempFile(t, `{"key": "value"}`, "settings-*.json")
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(createSettingsCmd)
 	_ = createSettingsCmd.Flags().Set("file", settingsFile)
@@ -62,14 +63,14 @@ func TestCreateSettingsValidateOnly_ValidationFailed(t *testing.T) {
 
 	settingsFile := testutil.CreateTempFile(t, `{"key": "value"}`, "settings-*.json")
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(createSettingsCmd)
 	_ = createSettingsCmd.Flags().Set("file", settingsFile)

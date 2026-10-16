@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -23,11 +23,14 @@ import (
 // unaffordable for an agent, so the default view is the operation index: every
 // operation, at a coarser grain. --operation drills into one operation in full,
 // and --raw streams the unprojected document for a caller that asks for it.
-var describeAPICmd = &cobra.Command{
-	Use:     "api <name|base-path>",
-	Aliases: []string{"apis"},
-	Short:   "Show an API's operations from its published specification",
-	Long: `Show what one API offers, from the specification the environment publishes.
+var describeAPICmd = newDescribeAPICmd()
+
+func newDescribeAPICmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "api <name|base-path>",
+		Aliases: []string{"apis"},
+		Short:   "Show an API's operations from its published specification",
+		Long: `Show what one API offers, from the specification the environment publishes.
 
 The default view is the operation index: every operation as 'METHOD /path' with
 its summary and the scope the specification declares for it. That is a complete
@@ -53,57 +56,63 @@ Examples:
   # The unprojected specification (large — spills to a file in agent mode)
   dtctl describe api document --raw
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := resapi.NewHandler(c)
-		entry, err := handler.Resolve(args[0])
-		if err != nil {
-			return err
-		}
-
-		if raw, _ := cmd.Flags().GetBool("raw"); raw {
-			doc, err := handler.RawSpec(*entry)
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return emitRawSpec(cmd, cfg, *entry, doc)
-		}
 
-		if operation, _ := cmd.Flags().GetString("operation"); operation != "" {
-			detail, err := handler.DescribeOperation(*entry, operation)
+			handler := resapi.NewHandler(c)
+			entry, err := handler.Resolve(args[0])
 			if err != nil {
 				return err
 			}
-			if useAPIDescribeTextView() {
-				printOperationDetail(detail)
-				return nil
+
+			if raw, _ := cmd.Flags().GetBool("raw"); raw {
+				doc, err := handler.RawSpec(*entry)
+				if err != nil {
+					return err
+				}
+				return emitRawSpec(cmd, cfg, *entry, doc)
+			}
+
+			if operation, _ := cmd.Flags().GetString("operation"); operation != "" {
+				detail, err := handler.DescribeOperation(*entry, operation)
+				if err != nil {
+					return err
+				}
+				if useAPIDescribeTextView(cmdContext(cmd)) {
+					printOperationDetail(cmdContext(cmd), detail)
+					return nil
+				}
+				if ap := enrichAgent(printer, "describe", "api"); ap != nil {
+					ap.Context().Suggestions = []string{
+						detail.Example + "  -- call this operation",
+						fmt.Sprintf("dtctl describe api %s  -- the API's other operations", quoteCommandArg(args[0])),
+					}
+				}
+				return printer.Print(detail)
+			}
+
+			desc, err := handler.Describe(*entry)
+			if err != nil {
+				return err
+			}
+			if useAPIDescribeTextView(cmdContext(cmd)) {
+				return printAPIDescribe(cmdContext(cmd), printer, desc)
 			}
 			if ap := enrichAgent(printer, "describe", "api"); ap != nil {
-				ap.Context().Suggestions = []string{
-					detail.Example + "  -- call this operation",
-					fmt.Sprintf("dtctl describe api %s  -- the API's other operations", quoteCommandArg(args[0])),
-				}
+				ap.Context().Suggestions = apiDescribeSuggestions(args[0], desc)
 			}
-			return printer.Print(detail)
-		}
-
-		desc, err := handler.Describe(*entry)
-		if err != nil {
-			return err
-		}
-		if useAPIDescribeTextView() {
-			return printAPIDescribe(printer, desc)
-		}
-		if ap := enrichAgent(printer, "describe", "api"); ap != nil {
-			ap.Context().Suggestions = apiDescribeSuggestions(args[0], desc)
-		}
-		return printer.Print(desc)
-	},
+			return printer.Print(desc)
+		},
+	}
+	c.Flags().String("operation", "", "show one operation in full, addressed as 'METHOD /path'")
+	c.Flags().Bool("raw", false, "emit the unprojected specification document")
+	stability.MarkStable(c)
+	addSpillFlags(c)
+	return c
 }
 
 // useAPIDescribeTextView reports whether to render the human-readable text view.
@@ -111,11 +120,11 @@ Examples:
 // "table" default, so a bare format check would emit human text into an agent
 // session. "wide" belongs here too: it selects extra columns of the operation
 // table, not a different view.
-func useAPIDescribeTextView() bool {
-	if agentMode {
+func useAPIDescribeTextView(ctx context.Context) bool {
+	if agentMode(ctx) {
 		return false
 	}
-	return outputFormat == "" || outputFormat == "table" || outputFormat == "wide"
+	return outputFormat(ctx) == "" || outputFormat(ctx) == "table" || outputFormat(ctx) == "wide"
 }
 
 // apiDescribeSuggestions points at the next step, which for an operation index is
@@ -136,30 +145,30 @@ func apiDescribeSuggestions(query string, d *resapi.APIDescription) []string {
 // printAPIDescribe renders the human-readable operation index: a header block
 // plus the operation list through the ordinary table printer, so the operation
 // index looks like every other dtctl listing (and honours -o wide).
-func printAPIDescribe(printer output.Printer, d *resapi.APIDescription) error {
+func printAPIDescribe(ctx context.Context, printer output.Printer, d *resapi.APIDescription) error {
 	const w = 12
-	output.DescribeKV("Name:", w, "%s", d.Name)
+	output.FprintDescribeKV(currentStdout(ctx), "Name:", w, "%s", d.Name)
 	if d.Title != "" && d.Title != d.Name {
-		output.DescribeKV("Title:", w, "%s", d.Title)
+		output.FprintDescribeKV(currentStdout(ctx), "Title:", w, "%s", d.Title)
 	}
 	if d.Version != "" {
-		output.DescribeKV("Version:", w, "%s", d.Version)
+		output.FprintDescribeKV(currentStdout(ctx), "Version:", w, "%s", d.Version)
 	}
 	if d.Category != "" {
-		output.DescribeKV("Category:", w, "%s", d.Category)
+		output.FprintDescribeKV(currentStdout(ctx), "Category:", w, "%s", d.Category)
 	}
-	output.DescribeKV("Base Path:", w, "%s", d.BasePath)
+	output.FprintDescribeKV(currentStdout(ctx), "Base Path:", w, "%s", d.BasePath)
 	if d.Summary != "" {
-		output.DescribeKV("Summary:", w, "%s", d.Summary)
+		output.FprintDescribeKV(currentStdout(ctx), "Summary:", w, "%s", d.Summary)
 	}
 	if d.Dtctl != "" {
-		output.DescribeKV("dtctl:", w, "%s (prefer the native command over 'exec api')", d.Dtctl)
+		output.FprintDescribeKV(currentStdout(ctx), "dtctl:", w, "%s (prefer the native command over 'exec api')", d.Dtctl)
 	}
 
-	fmt.Println()
-	output.DescribeSection(fmt.Sprintf("Operations (%d):", len(d.Operations)))
+	fmt.Fprintln(currentStdout(ctx))
+	output.FprintDescribeSection(currentStdout(ctx), fmt.Sprintf("Operations (%d):", len(d.Operations)))
 	if len(d.Operations) == 0 {
-		fmt.Println("  (the specification declares none)")
+		fmt.Fprintln(currentStdout(ctx), "  (the specification declares none)")
 		return nil
 	}
 
@@ -167,53 +176,53 @@ func printAPIDescribe(printer output.Printer, d *resapi.APIDescription) error {
 		return err
 	}
 
-	fmt.Println()
-	fmt.Printf("  Detail:  dtctl describe api %s --operation '%s'\n",
+	fmt.Fprintln(currentStdout(ctx))
+	fmt.Fprintf(currentStdout(ctx), "  Detail:  dtctl describe api %s --operation '%s'\n",
 		quoteCommandArg(d.Name), d.Operations[0].Operation)
 	return nil
 }
 
 // printOperationDetail renders one operation in full.
-func printOperationDetail(d *resapi.OperationDetail) {
+func printOperationDetail(ctx context.Context, d *resapi.OperationDetail) {
 	const w = 12
-	output.DescribeKV("API:", w, "%s", d.API)
-	output.DescribeKV("Operation:", w, "%s", d.Operation)
-	output.DescribeKV("URL:", w, "%s", d.URL)
+	output.FprintDescribeKV(currentStdout(ctx), "API:", w, "%s", d.API)
+	output.FprintDescribeKV(currentStdout(ctx), "Operation:", w, "%s", d.Operation)
+	output.FprintDescribeKV(currentStdout(ctx), "URL:", w, "%s", d.URL)
 	if d.OperationID != "" {
-		output.DescribeKV("ID:", w, "%s", d.OperationID)
+		output.FprintDescribeKV(currentStdout(ctx), "ID:", w, "%s", d.OperationID)
 	}
 	if d.Deprecated {
-		output.DescribeKV("Deprecated:", w, "%s", "yes")
+		output.FprintDescribeKV(currentStdout(ctx), "Deprecated:", w, "%s", "yes")
 	}
 	if d.Summary != "" {
-		output.DescribeKV("Summary:", w, "%s", d.Summary)
+		output.FprintDescribeKV(currentStdout(ctx), "Summary:", w, "%s", d.Summary)
 	}
 	if len(d.RequiredScopes) > 0 {
-		output.DescribeKV("Scopes:", w, "%s", strings.Join(d.RequiredScopes, ", "))
+		output.FprintDescribeKV(currentStdout(ctx), "Scopes:", w, "%s", strings.Join(d.RequiredScopes, ", "))
 	} else {
 		// Saying nothing here would read as "no scope needed", which is not what
 		// an absent declaration means.
-		output.DescribeKV("Scopes:", w, "%s", "(not declared in the specification)")
+		output.FprintDescribeKV(currentStdout(ctx), "Scopes:", w, "%s", "(not declared in the specification)")
 	}
 	if d.Description != "" {
-		fmt.Println()
-		fmt.Println(indentBlock(unwrapHTMLBreaks(d.Description), "  "))
+		fmt.Fprintln(currentStdout(ctx))
+		fmt.Fprintln(currentStdout(ctx), indentBlock(unwrapHTMLBreaks(d.Description), "  "))
 	}
 
-	printOperationParameters(d.Parameters)
-	printOperationBody(d.RequestBody)
-	printOperationResponses(d.Responses)
+	printOperationParameters(ctx, d.Parameters)
+	printOperationBody(ctx, d.RequestBody)
+	printOperationResponses(ctx, d.Responses)
 
-	fmt.Println()
-	fmt.Printf("  Call it:  %s\n", d.Example)
+	fmt.Fprintln(currentStdout(ctx))
+	fmt.Fprintf(currentStdout(ctx), "  Call it:  %s\n", d.Example)
 }
 
-func printOperationParameters(params []resapi.Parameter) {
+func printOperationParameters(ctx context.Context, params []resapi.Parameter) {
 	if len(params) == 0 {
 		return
 	}
-	fmt.Println()
-	output.DescribeSection("Parameters:")
+	fmt.Fprintln(currentStdout(ctx))
+	output.FprintDescribeSection(currentStdout(ctx), "Parameters:")
 
 	nameW := 0
 	for _, p := range params {
@@ -230,39 +239,39 @@ func printOperationParameters(params []resapi.Parameter) {
 		if typ == "" {
 			typ = "-"
 		}
-		fmt.Printf("  %-*s  %-6s  %-8s  %s%s\n", nameW, p.Name, p.In, typ,
+		fmt.Fprintf(currentStdout(ctx), "  %-*s  %-6s  %-8s  %s%s\n", nameW, p.Name, p.In, typ,
 			firstLineOf(p.Description), req)
 	}
 }
 
-func printOperationBody(body *resapi.RequestBody) {
+func printOperationBody(ctx context.Context, body *resapi.RequestBody) {
 	if body == nil || len(body.Contents) == 0 {
 		return
 	}
-	fmt.Println()
+	fmt.Fprintln(currentStdout(ctx))
 	title := "Request Body:"
 	if body.Required {
 		title = "Request Body (required):"
 	}
-	output.DescribeSection(title)
+	output.FprintDescribeSection(currentStdout(ctx), title)
 
 	for _, mt := range body.Contents {
-		fmt.Printf("  %s\n", mt.ContentType)
+		fmt.Fprintf(currentStdout(ctx), "  %s\n", mt.ContentType)
 		fields, ok := resapi.TopLevelFields(mt.Schema)
 		if !ok {
-			fmt.Println("    (schema not introspectable — use -o yaml for the full schema)")
+			fmt.Fprintln(currentStdout(ctx), "    (schema not introspectable — use -o yaml for the full schema)")
 			continue
 		}
-		printSchemaFieldLines(fields)
+		printSchemaFieldLines(ctx, fields)
 	}
 }
 
-func printOperationResponses(responses []resapi.Response) {
+func printOperationResponses(ctx context.Context, responses []resapi.Response) {
 	if len(responses) == 0 {
 		return
 	}
-	fmt.Println()
-	output.DescribeSection("Responses:")
+	fmt.Fprintln(currentStdout(ctx))
+	output.FprintDescribeSection(currentStdout(ctx), "Responses:")
 	for _, r := range responses {
 		types := make([]string, 0, len(r.Contents))
 		for _, mt := range r.Contents {
@@ -272,13 +281,13 @@ func printOperationResponses(responses []resapi.Response) {
 		if len(types) > 0 {
 			line += fmt.Sprintf("  [%s]", strings.Join(types, ", "))
 		}
-		fmt.Println(line)
+		fmt.Fprintln(currentStdout(ctx), line)
 	}
 }
 
-func printSchemaFieldLines(fields []resapi.SchemaField) {
+func printSchemaFieldLines(ctx context.Context, fields []resapi.SchemaField) {
 	if len(fields) == 0 {
-		fmt.Println("    (no properties declared)")
+		fmt.Fprintln(currentStdout(ctx), "    (no properties declared)")
 		return
 	}
 	nameW := 0
@@ -296,9 +305,9 @@ func printSchemaFieldLines(fields []resapi.SchemaField) {
 		if typ == "" {
 			typ = "-"
 		}
-		fmt.Printf("    %-*s  %-12s  %s%s\n", nameW, f.Name, typ, f.Description, req)
+		fmt.Fprintf(currentStdout(ctx), "    %-*s  %-12s  %s%s\n", nameW, f.Name, typ, f.Description, req)
 	}
-	fmt.Println("    (one level shown — use -o yaml for the full schema)")
+	fmt.Fprintln(currentStdout(ctx), "    (one level shown — use -o yaml for the full schema)")
 }
 
 // emitRawSpec writes the unprojected specification.
@@ -324,14 +333,14 @@ func emitRawSpec(cmd *cobra.Command, cfg *config.Config, entry resapi.Entry, doc
 	spill := opts.Mode == exec.SpillAlways ||
 		(opts.Mode == exec.SpillAuto && size > opts.Threshold)
 	if !spill {
-		if _, werr := os.Stdout.Write(doc); werr != nil {
+		if _, werr := currentStdout(cmdContext(cmd)).Write(doc); werr != nil {
 			return werr
 		}
 		// Only when a human is watching, and never under --agent: --raw is documented
 		// as going to stdout so the caller can redirect it, and a redirected document
 		// must be byte-exact.
-		if isTerminal(os.Stdout) && !agentMode && size > 0 && doc[size-1] != '\n' {
-			fmt.Println()
+		if writerIsTerminal(currentStdout(cmdContext(cmd))) && !agentMode(cmdContext(cmd)) && size > 0 && doc[size-1] != '\n' {
+			fmt.Fprintln(currentStdout(cmdContext(cmd)))
 		}
 		return nil
 	}
@@ -339,11 +348,11 @@ func emitRawSpec(cmd *cobra.Command, cfg *config.Config, entry resapi.Entry, doc
 	// A raw document is written in the encoding the environment served it in, so
 	// --spill-format has nothing to choose.
 	if cmd.Flags().Changed("spill-format") {
-		output.PrintWarning("--spill-format does not apply to --raw: a specification is written in its own encoding")
+		output.FprintWarning(currentStderr(cmdContext(cmd)), "--spill-format does not apply to --raw: a specification is written in its own encoding")
 	}
 
 	encoding := resapi.RawSpecEncoding(entry)
-	targetPath, baseDir, err := rawSpecTargetPath(cfg, entry, encoding, opts)
+	targetPath, baseDir, err := rawSpecTargetPath(cmdContext(cmd), cfg, entry, encoding, opts)
 	if err != nil {
 		return err
 	}
@@ -361,8 +370,8 @@ func emitRawSpec(cmd *cobra.Command, cfg *config.Config, entry resapi.Entry, doc
 		output.PruneOldSpills(baseDir, opts.TTL)
 	}
 
-	if agentMode {
-		printer := NewPrinter()
+	if agentMode(cmdContext(cmd)) {
+		printer := newPrinterCtx(cmdContext(cmd))
 		if ap := enrichAgent(printer, "describe", "api"); ap != nil {
 			ap.Context().Suggestions = []string{
 				"the file holds the specification exactly as served; read it locally",
@@ -380,7 +389,7 @@ func emitRawSpec(cmd *cobra.Command, cfg *config.Config, entry resapi.Entry, doc
 		})
 	}
 
-	fmt.Printf("Wrote %s (%d bytes) to %s\n", entry.Name, written, targetPath)
+	fmt.Fprintf(currentStdout(cmdContext(cmd)), "Wrote %s (%d bytes) to %s\n", entry.Name, written, targetPath)
 	return nil
 }
 
@@ -388,13 +397,13 @@ func emitRawSpec(cmd *cobra.Command, cfg *config.Config, entry resapi.Entry, doc
 // --spill-to destination, or the managed spill cache partitioned by context. The
 // returned baseDir is non-empty only for the managed cache, which is the only
 // location dtctl prunes on a TTL.
-func rawSpecTargetPath(cfg *config.Config, entry resapi.Entry, encoding string, opts exec.SpillOptions) (path, baseDir string, err error) {
+func rawSpecTargetPath(ctx context.Context, cfg *config.Config, entry resapi.Entry, encoding string, opts exec.SpillOptions) (path, baseDir string, err error) {
 	if opts.ToPath != "" {
 		dir := filepath.Dir(opts.ToPath)
 		if !output.ProbeWritable(dir) {
 			return "", "", fmt.Errorf("spill destination directory %q is not writable", dir)
 		}
-		output.PrintWarning("%s", userChosenSpillPathWarning)
+		output.FprintWarning(currentStderr(ctx), "%s", userChosenSpillPathWarning)
 		return opts.ToPath, "", nil
 	}
 
@@ -408,7 +417,7 @@ func rawSpecTargetPath(cfg *config.Config, entry resapi.Entry, encoding string, 
 		dir = filepath.Join(base, output.SanitizeContextName(contextName))
 	} else {
 		base = ""
-		output.PrintWarning("%s", userChosenSpillPathWarning)
+		output.FprintWarning(currentStderr(ctx), "%s", userChosenSpillPathWarning)
 	}
 
 	// The filename is derived from the document's request path, and the hash is
@@ -458,14 +467,5 @@ func indentBlock(s, indent string) string {
 	return strings.Join(lines, "\n")
 }
 
-func init() {
-	describeAPICmd.Flags().String("operation", "", "show one operation in full, addressed as 'METHOD /path'")
-	describeAPICmd.Flags().Bool("raw", false, "emit the unprojected specification document")
-	addSpillFlags(describeAPICmd)
-}
-
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(describeAPICmd)
-}

@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -14,52 +14,58 @@ import (
 )
 
 // describeSchedulingRuleCmd shows detailed info about a scheduling rule
-var describeSchedulingRuleCmd = &cobra.Command{
-	Use:     "scheduling-rule <id>",
-	Aliases: []string{"sr"},
-	Short:   "Show details of a scheduling rule",
-	Long: `Show detailed information about a scheduling rule.
+var describeSchedulingRuleCmd = newDescribeSchedulingRuleCmd()
+
+func newDescribeSchedulingRuleCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "scheduling-rule <id>",
+		Aliases: []string{"sr"},
+		Short:   "Show details of a scheduling rule",
+		Long: `Show detailed information about a scheduling rule.
 
 Examples:
   # Describe a scheduling rule
   dtctl describe scheduling-rule <scheduling-rule-id>
   dtctl describe sr <scheduling-rule-id>
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		handler := schedulingrule.NewHandler(c)
+			handler := schedulingrule.NewHandler(c)
 
-		rule, err := handler.Get(id)
-		if err != nil {
-			return err
-		}
+			rule, err := handler.Get(id)
+			if err != nil {
+				return err
+			}
 
-		if useSchedulingRuleDescribeTextView() {
-			printSchedulingRuleDescribeTable(os.Stdout, rule)
-			return nil
-		}
+			if useSchedulingRuleDescribeTextView(cmdContext(cmd)) {
+				printSchedulingRuleDescribeTable(currentStdout(cmdContext(cmd)), rule)
+				return nil
+			}
 
-		enrichAgent(printer, "describe", "scheduling-rule")
-		return printer.Print(rule)
-	},
+			enrichAgent(printer, "describe", "scheduling-rule")
+			return printer.Print(rule)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // useSchedulingRuleDescribeTextView reports whether to render the human-readable
 // text view. Agent mode always takes the structured envelope path — note that
 // agent mode leaves outputFormat at its "table" default, so a bare format check
 // would wrongly emit human text into an agent session.
-func useSchedulingRuleDescribeTextView() bool {
-	if agentMode {
+func useSchedulingRuleDescribeTextView(ctx context.Context) bool {
+	if agentMode(ctx) {
 		return false
 	}
-	return outputFormat == "" || outputFormat == "table"
+	return outputFormat(ctx) == "" || outputFormat(ctx) == "table"
 }
 
 // printSchedulingRuleDescribeTable renders a scheduling rule in human-readable describe format.
@@ -125,5 +131,4 @@ func schedulingRuleBodyKeys(m map[string]interface{}) []string {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(describeSchedulingRuleCmd)
 }

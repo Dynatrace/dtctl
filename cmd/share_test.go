@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -19,13 +20,13 @@ func setupShareCmdTest(t *testing.T, srv *httptest.Server) {
 	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 	t.Setenv(config.EnvTokenStorage, "file")
 	configPath := filepath.Join(t.TempDir(), "config")
-	originalCfgFile, originalDryRun := cfgFile, dryRun
-	restorePristineTree()
+	originalCfgFile, originalDryRun := cfgFile(context.Background()), dryRun(context.Background())
+	restorePristineTree(context.Background())
 	t.Cleanup(func() {
-		cfgFile, dryRun = originalCfgFile, originalDryRun
-		restorePristineTree()
+		gFlags.cfgFile, gFlags.dryRun = originalCfgFile, originalDryRun
+		restorePristineTree(context.Background())
 	})
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", srv.URL, "test-token")
@@ -96,15 +97,15 @@ func TestShareDocument_NoNotify(t *testing.T) {
 			t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 			t.Setenv(config.EnvTokenStorage, "file")
 			configPath := filepath.Join(t.TempDir(), "config")
-			originalCfgFile, originalDryRun := cfgFile, dryRun
+			originalCfgFile, originalDryRun := cfgFile(context.Background()), dryRun(context.Background())
 			// Another test may have left a stability floor wrapped around this
 			// command; start from, and leave behind, the as-registered tree.
-			restorePristineTree()
+			restorePristineTree(context.Background())
 			t.Cleanup(func() {
-				cfgFile, dryRun = originalCfgFile, originalDryRun
-				restorePristineTree()
+				gFlags.cfgFile, gFlags.dryRun = originalCfgFile, originalDryRun
+				restorePristineTree(context.Background())
 			})
-			cfgFile, dryRun = configPath, false
+			gFlags.cfgFile, gFlags.dryRun = configPath, false
 
 			cfg := config.NewConfig()
 			cfg.SetContext("test", srv.URL, "test-token")

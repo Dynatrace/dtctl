@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,10 +14,13 @@ import (
 	"github.com/dynatrace-oss/dtctl/sdk/inventory"
 )
 
-var inventoryArrivalsCmd = &cobra.Command{
-	Use:   "arrivals",
-	Short: "Is data arriving for this source right now? Per-signal ingest state over a window",
-	Long: `Report, per signal type, whether data matching one scope is arriving inside a
+var inventoryArrivalsCmd = newInventoryArrivalsCmd()
+
+func newInventoryArrivalsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "arrivals",
+		Short: "Is data arriving for this source right now? Per-signal ingest state over a window",
+		Long: `Report, per signal type, whether data matching one scope is arriving inside a
 window — the question you actually have after instrumenting a service, pointing a
 collector at the tenant, or running an ingest.
 
@@ -73,90 +76,102 @@ Examples:
   dtctl inventory arrivals --since 5m --scope 'log.source == "batch-import"' \
       --signals logs --require logs
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Usage is validated before the client is set up: a mistyped --since
-		// or signal name is the user's typo, and reporting it as an auth
-		// failure on a machine that happens to have no token sends them to
-		// fix the wrong thing.
-		scope, _ := cmd.Flags().GetString("scope")
-		since, _ := cmd.Flags().GetString("since")
-		signals, _ := cmd.Flags().GetStringSlice("signals")
-		require, _ := cmd.Flags().GetStringSlice("require")
-		staleAfterFlag, _ := cmd.Flags().GetDuration("stale-after")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Usage is validated before the client is set up: a mistyped --since
+			// or signal name is the user's typo, and reporting it as an auth
+			// failure on a machine that happens to have no token sends them to
+			// fix the wrong thing.
+			scope, _ := cmd.Flags().GetString("scope")
+			since, _ := cmd.Flags().GetString("since")
+			signals, _ := cmd.Flags().GetStringSlice("signals")
+			require, _ := cmd.Flags().GetStringSlice("require")
+			staleAfterFlag, _ := cmd.Flags().GetDuration("stale-after")
 
-		// Not MarkFlagRequired: cobra's "required flag(s) \"scope\" not set"
-		// would preempt this message, and the whole point of requiring a scope
-		// is the reason behind it — an unscoped windowed count is the most
-		// expensive query in the battery, and plain 'dtctl inventory' already
-		// answers the unscoped question for free.
-		if strings.TrimSpace(scope) == "" {
-			return fmt.Errorf("--scope is required: see 'dtctl inventory arrivals --help' for why an unscoped window is not offered")
-		}
-		sinceExpr, windowLen, err := inventory.NormalizeSince(since)
-		if err != nil {
-			return err
-		}
+			// Not MarkFlagRequired: cobra's "required flag(s) \"scope\" not set"
+			// would preempt this message, and the whole point of requiring a scope
+			// is the reason behind it — an unscoped windowed count is the most
+			// expensive query in the battery, and plain 'dtctl inventory' already
+			// answers the unscoped question for free.
+			if strings.TrimSpace(scope) == "" {
+				return fmt.Errorf("--scope is required: see 'dtctl inventory arrivals --help' for why an unscoped window is not offered")
+			}
+			sinceExpr, windowLen, err := inventory.NormalizeSince(since)
+			if err != nil {
+				return err
+			}
 
-		defs, err := inventoryDefinitions(cmd)
-		if err != nil {
-			return err
-		}
-		// Names are checked before a single query runs: a typo is a usage
-		// error, and discovering it after the battery has spent the budget
-		// would both waste the run and dress the mistake up as a telemetry
-		// verdict.
-		if err := inventory.ValidateSignalNames(defs, signals, require); err != nil {
-			return err
-		}
+			defs, err := inventoryDefinitions(cmd)
+			if err != nil {
+				return err
+			}
+			// Names are checked before a single query runs: a typo is a usage
+			// error, and discovering it after the battery has spent the budget
+			// would both waste the run and dress the mistake up as a telemetry
+			// verdict.
+			if err := inventory.ValidateSignalNames(defs, signals, require); err != nil {
+				return err
+			}
 
-		staleAfter := staleAfterFlag
-		if staleAfter == 0 {
-			staleAfter = inventory.DefaultStaleAfter(windowLen)
-		}
-		if windowLen > time.Hour {
-			fmt.Fprintf(os.Stderr, "warning: a %s window makes each probe scan proportionally more; probes cut short by the scan cap report as unknown, not absent — narrow --since if that happens\n", roundWindow(windowLen))
-		}
+			staleAfter := staleAfterFlag
+			if staleAfter == 0 {
+				staleAfter = inventory.DefaultStaleAfter(windowLen)
+			}
+			if windowLen > time.Hour {
+				fmt.Fprintf(currentStderr(cmdContext(cmd)), "warning: a %s window makes each probe scan proportionally more; probes cut short by the scan cap report as unknown, not absent — narrow --since if that happens\n", roundWindow(windowLen))
+			}
 
-		cfg, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
+			cfg, c, err := setupClient(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		scanLimitGB, _ := cmd.Flags().GetFloat64("scan-limit-gbytes")
-		noSample, _ := cmd.Flags().GetBool("no-sample")
-		runner := newInventoryRunner(cmd, cfg, c)
-		ctx, cancel := inventoryCancelContext(cmd)
-		defer cancel()
+			scanLimitGB, _ := cmd.Flags().GetFloat64("scan-limit-gbytes")
+			noSample, _ := cmd.Flags().GetBool("no-sample")
+			runner := newInventoryRunner(cmd, cfg, c)
+			ctx, cancel := inventoryCancelContext(cmd)
+			defer cancel()
 
-		budgetQueries, budgetSeconds := inventoryBudget(cmd)
-		inv, err := inventory.Discover(ctx, runner, defs, inventory.DiscoverOptions{
-			ContextName:     cfg.CurrentContext,
-			BudgetQueries:   budgetQueries,
-			BudgetSeconds:   budgetSeconds,
-			Since:           sinceExpr,
-			Scope:           scope,
-			StaleAfter:      staleAfter,
-			Signals:         signals,
-			ScanLimitGBytes: scanLimitGB,
-			DisableSampling: noSample,
-		})
-		if err != nil {
-			return err
-		}
+			budgetQueries, budgetSeconds := inventoryBudget(cmd)
+			inv, err := inventory.Discover(ctx, runner, defs, inventory.DiscoverOptions{
+				ContextName:     cfg.CurrentContext,
+				BudgetQueries:   budgetQueries,
+				BudgetSeconds:   budgetSeconds,
+				Since:           sinceExpr,
+				Scope:           scope,
+				StaleAfter:      staleAfter,
+				Signals:         signals,
+				ScanLimitGBytes: scanLimitGB,
+				DisableSampling: noSample,
+			})
+			if err != nil {
+				return err
+			}
 
-		if outputFormat == "table" && !agentMode {
-			printInventorySignalsHuman(inv)
-			return exitForRequiredSignals(inv, require)
-		}
-		printer := NewPrinter()
-		if ap := enrichAgent(printer, "inventory", "arrivals"); ap != nil {
-			ap.SetSuggestions(inventorySuggestions(inv))
-		}
-		if err := printer.Print(inv); err != nil {
-			return err
-		}
-		return exitForRequiredSignals(inv, require)
-	},
+			if outputFormat(cmdContext(cmd)) == "table" && !agentMode(cmdContext(cmd)) {
+				printInventorySignalsHuman(cmdContext(cmd), inv)
+				return exitForRequiredSignals(cmdContext(cmd), inv, require)
+			}
+			printer := newPrinterCtx(cmdContext(cmd))
+			if ap := enrichAgent(printer, "inventory", "arrivals"); ap != nil {
+				ap.SetSuggestions(inventorySuggestions(inv))
+			}
+			if err := printer.Print(inv); err != nil {
+				return err
+			}
+			return exitForRequiredSignals(cmdContext(cmd), inv, require)
+		},
+	}
+	c.Flags().String("scope", "", "DQL filter fragment scoping every probe, e.g. 'k8s.namespace.name == \"payments\"' (required)")
+	c.Flags().String("since", inventory.DefaultWindow, "Window to report arrivals over (e.g. 15m, 1h)")
+	c.Flags().StringSlice("signals", nil, "Restrict probing to these signals (default: all signal streams and metric families)")
+	c.Flags().StringSlice("require", nil, "Exit non-zero unless every named signal is live (10 = not live, 11 = no verdict)")
+	c.Flags().Duration("stale-after", 0, "Age past which a matched signal is stale rather than live (default max(2m, window/3))")
+	c.Flags().Bool("no-sample", false, "Do not fall back to sampled probing when a signal exceeds the scan cap; report it as unknown instead")
+	addInventoryDiscoveryFlags(c)
+	// Not marked required (see the RunE check for why); an explicitly empty
+	// value is still a usage error.
+	rejectEmptyFlag(c, "scope")
+	return c
 }
 
 func roundWindow(d time.Duration) string {
@@ -173,10 +188,10 @@ func roundWindow(d time.Duration) string {
 // part of the command's contract, not an error to re-print, and a command body
 // that terminates the process cannot be embedded (see the E2 guard in
 // silent_exit_test.go).
-func exitForRequiredSignals(inv *inventory.Inventory, require []string) error {
+func exitForRequiredSignals(ctx context.Context, inv *inventory.Inventory, require []string) error {
 	verdict := inventory.CheckRequired(inv, require)
 	for _, m := range verdict.Messages {
-		fmt.Fprintf(os.Stderr, "\n%s\n", m)
+		fmt.Fprintf(currentStderr(ctx), "\n%s\n", m)
 	}
 	if code := verdict.ExitCode(); code != 0 {
 		return &silentExitError{code: code, reason: "required signals not live"}
@@ -253,19 +268,19 @@ func inventorySuggestions(inv *inventory.Inventory) []string {
 // printInventorySignalsHuman renders windowed arrival mode for a terminal: the
 // per-signal state table first, then the evidence for everything that is not
 // simply live.
-func printInventorySignalsHuman(inv *inventory.Inventory) {
+func printInventorySignalsHuman(ctx context.Context, inv *inventory.Inventory) {
 	const w = 12
-	output.DescribeKV("Context:", w, "%s", inv.Context)
-	output.DescribeKV("Generated:", w, "%s", inv.GeneratedAt)
+	output.FprintDescribeKV(currentStdout(ctx), "Context:", w, "%s", inv.Context)
+	output.FprintDescribeKV(currentStdout(ctx), "Generated:", w, "%s", inv.GeneratedAt)
 	if inv.Window != nil {
-		output.DescribeKV("Window:", w, "%s → now()  (stale after %s)", inv.Window.Since, inv.Window.StaleAfter)
+		output.FprintDescribeKV(currentStdout(ctx), "Window:", w, "%s → now()  (stale after %s)", inv.Window.Since, inv.Window.StaleAfter)
 		if inv.Window.Filter != "" {
-			output.DescribeKV("Scope:", w, "%s", inv.Window.Filter)
+			output.FprintDescribeKV(currentStdout(ctx), "Scope:", w, "%s", inv.Window.Filter)
 		}
 	}
 
 	if len(inv.Signals) == 0 {
-		fmt.Println("\nNo signal types were probed — every capability was excluded by --signals.")
+		fmt.Fprintln(currentStdout(ctx), "\nNo signal types were probed — every capability was excluded by --signals.")
 		return
 	}
 
@@ -297,11 +312,11 @@ func printInventorySignalsHuman(inv *inventory.Inventory) {
 			}
 		}
 	}
-	fmt.Println()
-	fmt.Printf("%-*s  %-*s  %*s  %-*s  %*s\n",
+	fmt.Fprintln(currentStdout(ctx))
+	fmt.Fprintf(currentStdout(ctx), "%-*s  %-*s  %*s  %-*s  %*s\n",
 		width[0], headers[0], width[1], headers[1], width[2], headers[2], width[3], headers[3], width[4], headers[4])
 	for _, r := range rows {
-		fmt.Printf("%-*s  %-*s  %*s  %-*s  %*s\n",
+		fmt.Fprintf(currentStdout(ctx), "%-*s  %-*s  %*s  %-*s  %*s\n",
 			width[0], r[0], width[1], r[1], width[2], r[2], width[3], r[3], width[4], r[4])
 	}
 
@@ -316,7 +331,7 @@ func printInventorySignalsHuman(inv *inventory.Inventory) {
 			}
 		}
 		if len(parts) > 0 {
-			fmt.Printf("\n%s\n", strings.Join(parts, " · "))
+			fmt.Fprintf(currentStdout(ctx), "\n%s\n", strings.Join(parts, " · "))
 		}
 	}
 
@@ -331,20 +346,20 @@ func printInventorySignalsHuman(inv *inventory.Inventory) {
 		if len(capped) == 1 {
 			verb = "it scans"
 		}
-		fmt.Printf("\nScan cap: %s could not be counted — %s more than the %g GB cap over this window.\n",
+		fmt.Fprintf(currentStdout(ctx), "\nScan cap: %s could not be counted — %s more than the %g GB cap over this window.\n",
 			strings.Join(capped, ", "), verb, scanLimitOf(inv))
-		fmt.Println("  This is a dtctl limit, not a verdict about your data. Raise --scan-limit-gbytes or narrow --since.")
+		fmt.Fprintln(currentStdout(ctx), "  This is a dtctl limit, not a verdict about your data. Raise --scan-limit-gbytes or narrow --since.")
 	}
 
 	// Sampled signals resolved *because* of the cap, so this sits with the
 	// cap note rather than in the evidence block: a reader who takes the
 	// volume column at face value needs to know before they read it.
 	if sampled := sampledSignals(inv); len(sampled) > 0 {
-		fmt.Printf("\nSampling: %s exceeded the %g GB cap, so %s probed on a sample.\n",
+		fmt.Fprintf(currentStdout(ctx), "\nSampling: %s exceeded the %g GB cap, so %s probed on a sample.\n",
 			strings.Join(signalNames(sampled), ", "), scanLimitOf(inv),
 			map[bool]string{true: "it was", false: "they were"}[len(sampled) == 1])
 		for _, sig := range sampled {
-			fmt.Printf("  %s — 1-in-%d, %d sampled records; volume is an estimate and last seen is a lower bound.\n",
+			fmt.Fprintf(currentStdout(ctx), "  %s — 1-in-%d, %d sampled records; volume is an estimate and last seen is a lower bound.\n",
 				sig.Name, sig.SamplingRatio, sig.RecordsSampled)
 		}
 	}
@@ -356,19 +371,19 @@ func printInventorySignalsHuman(inv *inventory.Inventory) {
 		}
 	}
 	if len(evidence) > 0 {
-		fmt.Println()
-		output.DescribeSection("Evidence (what was checked)")
+		fmt.Fprintln(currentStdout(ctx))
+		output.FprintDescribeSection(currentStdout(ctx), "Evidence (what was checked)")
 		for _, sig := range evidence {
-			fmt.Printf("  %s — %s\n", sig.Name, sig.Evidence)
+			fmt.Fprintf(currentStdout(ctx), "  %s — %s\n", sig.Name, sig.Evidence)
 		}
 	}
 	for _, n := range inv.Notes {
-		output.DescribeKV("Note:", w, "%s", n)
+		output.FprintDescribeKV(currentStdout(ctx), "Note:", w, "%s", n)
 	}
 	if r := inv.Discovery; r != nil {
-		fmt.Fprintf(os.Stderr, "\nDiscovery: %d queries, %.1fs query time\n", r.Queries, r.Seconds)
+		fmt.Fprintf(currentStderr(ctx), "\nDiscovery: %d queries, %.1fs query time\n", r.Queries, r.Seconds)
 		for _, n := range r.Notes {
-			fmt.Fprintf(os.Stderr, "  note: %s\n", n)
+			fmt.Fprintf(currentStderr(ctx), "  note: %s\n", n)
 		}
 	}
 }
@@ -440,17 +455,4 @@ func signalAge(sig inventory.Signal) string {
 		return "—"
 	}
 	return (time.Duration(sig.AgeSeconds) * time.Second).String()
-}
-
-func init() {
-	addInventoryDiscoveryFlags(inventoryArrivalsCmd)
-	inventoryArrivalsCmd.Flags().String("scope", "", "DQL filter fragment scoping every probe, e.g. 'k8s.namespace.name == \"payments\"' (required)")
-	// Not marked required (see the RunE check for why); an explicitly empty
-	// value is still a usage error.
-	rejectEmptyFlag(inventoryArrivalsCmd, "scope")
-	inventoryArrivalsCmd.Flags().String("since", inventory.DefaultWindow, "Window to report arrivals over (e.g. 15m, 1h)")
-	inventoryArrivalsCmd.Flags().StringSlice("signals", nil, "Restrict probing to these signals (default: all signal streams and metric families)")
-	inventoryArrivalsCmd.Flags().StringSlice("require", nil, "Exit non-zero unless every named signal is live (10 = not live, 11 = no verdict)")
-	inventoryArrivalsCmd.Flags().Duration("stale-after", 0, "Age past which a matched signal is stale rather than live (default max(2m, window/3))")
-	inventoryArrivalsCmd.Flags().Bool("no-sample", false, "Do not fall back to sampled probing when a signal exceeds the scan cap; report it as unknown instead")
 }

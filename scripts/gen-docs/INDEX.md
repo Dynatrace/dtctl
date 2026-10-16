@@ -61,6 +61,7 @@
 | preview-processor |
 | query |
 | refresh |
+| reset |
 | sdk-version |
 | set |
 | set-context |

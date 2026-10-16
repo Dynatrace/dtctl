@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -13,11 +14,14 @@ import (
 
 // describeAnalyzerCmd shows details of a Davis analyzer, including its resolved
 // input and result JSON Schemas.
-var describeAnalyzerCmd = &cobra.Command{
-	Use:     "analyzer <name>",
-	Aliases: []string{"analyzers", "az"},
-	Short:   "Show details of a Davis AI analyzer",
-	Long: `Show detailed information about a Davis AI analyzer, including its input and
+var describeAnalyzerCmd = newDescribeAnalyzerCmd()
+
+func newDescribeAnalyzerCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "analyzer <name>",
+		Aliases: []string{"analyzers", "az"},
+		Short:   "Show details of a Davis AI analyzer",
+		Long: `Show detailed information about a Davis AI analyzer, including its input and
 result schemas so you know what to pass to 'dtctl exec analyzer'.
 
 Unlike 'get analyzer', which returns the raw analyzer definition, 'describe'
@@ -34,129 +38,133 @@ Examples:
   # Structured output (includes inputSchema and resultSchema)
   dtctl describe analyzer dt.statistics.GenericForecastAnalyzer -o json
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := analyzer.NewHandler(c)
-
-		// --doc short-circuits to raw markdown documentation.
-		if doc, _ := cmd.Flags().GetBool("doc"); doc {
-			md, err := handler.GetDocumentation(name)
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			fmt.Println(md)
-			return nil
-		}
 
-		def, err := handler.Get(name)
-		if err != nil {
-			return err
-		}
+			handler := analyzer.NewHandler(c)
 
-		// Schema calls are best-effort: an analyzer without a published schema
-		// should still describe successfully.
-		inputSchema, _ := handler.GetInputSchema(name)
-		resultSchema, _ := handler.GetResultSchema(name)
-
-		desc := &analyzer.AnalyzerDescription{
-			Name:         def.Name,
-			DisplayName:  def.DisplayName,
-			Description:  def.Description,
-			Type:         def.Type,
-			Labels:       def.Labels,
-			InputSchema:  inputSchema,
-			ResultSchema: resultSchema,
-		}
-		if def.Category != nil {
-			desc.Category = def.Category.DisplayName
-		}
-
-		if useAnalyzerDescribeTextView() {
-			printAnalyzerDescribe(desc)
-			return nil
-		}
-
-		ap := enrichAgent(printer, "describe", "analyzer")
-		if ap != nil {
-			ap.Context().Suggestions = []string{
-				fmt.Sprintf("dtctl exec analyzer %s --query <dql>  -- run this analyzer", name),
-				fmt.Sprintf("dtctl verify analyzer %s -f input.json  -- validate an input", name),
-				fmt.Sprintf("dtctl describe analyzer %s --doc  -- full markdown docs", name),
+			// --doc short-circuits to raw markdown documentation.
+			if doc, _ := cmd.Flags().GetBool("doc"); doc {
+				md, err := handler.GetDocumentation(name)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(currentStdout(cmdContext(cmd)), md)
+				return nil
 			}
-		}
-		return printer.Print(desc)
-	},
+
+			def, err := handler.Get(name)
+			if err != nil {
+				return err
+			}
+
+			// Schema calls are best-effort: an analyzer without a published schema
+			// should still describe successfully.
+			inputSchema, _ := handler.GetInputSchema(name)
+			resultSchema, _ := handler.GetResultSchema(name)
+
+			desc := &analyzer.AnalyzerDescription{
+				Name:         def.Name,
+				DisplayName:  def.DisplayName,
+				Description:  def.Description,
+				Type:         def.Type,
+				Labels:       def.Labels,
+				InputSchema:  inputSchema,
+				ResultSchema: resultSchema,
+			}
+			if def.Category != nil {
+				desc.Category = def.Category.DisplayName
+			}
+
+			if useAnalyzerDescribeTextView(cmdContext(cmd)) {
+				printAnalyzerDescribe(cmdContext(cmd), desc)
+				return nil
+			}
+
+			ap := enrichAgent(printer, "describe", "analyzer")
+			if ap != nil {
+				ap.Context().Suggestions = []string{
+					fmt.Sprintf("dtctl exec analyzer %s --query <dql>  -- run this analyzer", name),
+					fmt.Sprintf("dtctl verify analyzer %s -f input.json  -- validate an input", name),
+					fmt.Sprintf("dtctl describe analyzer %s --doc  -- full markdown docs", name),
+				}
+			}
+			return printer.Print(desc)
+		},
+	}
+	c.Flags().Bool("doc", false, "print the analyzer's markdown documentation")
+	stability.MarkStable(c)
+	return c
 }
 
 // useAnalyzerDescribeTextView reports whether to render the human-readable text
 // view. Agent mode always takes the structured envelope path — note that agent
 // mode leaves outputFormat at its "table" default, so a bare format check would
 // wrongly emit human text into an agent session.
-func useAnalyzerDescribeTextView() bool {
-	if agentMode {
+func useAnalyzerDescribeTextView(ctx context.Context) bool {
+	if agentMode(ctx) {
 		return false
 	}
-	return outputFormat == "" || outputFormat == "table"
+	return outputFormat(ctx) == "" || outputFormat(ctx) == "table"
 }
 
 // printAnalyzerDescribe renders the human-readable table view.
-func printAnalyzerDescribe(d *analyzer.AnalyzerDescription) {
+func printAnalyzerDescribe(ctx context.Context, d *analyzer.AnalyzerDescription) {
 	const w = 14
-	output.DescribeKV("Name:", w, "%s", d.Name)
-	output.DescribeKV("Display Name:", w, "%s", d.DisplayName)
+	output.FprintDescribeKV(currentStdout(ctx), "Name:", w, "%s", d.Name)
+	output.FprintDescribeKV(currentStdout(ctx), "Display Name:", w, "%s", d.DisplayName)
 	if d.Category != "" {
-		output.DescribeKV("Category:", w, "%s", d.Category)
+		output.FprintDescribeKV(currentStdout(ctx), "Category:", w, "%s", d.Category)
 	}
 	if d.Type != "" {
-		output.DescribeKV("Type:", w, "%s", d.Type)
+		output.FprintDescribeKV(currentStdout(ctx), "Type:", w, "%s", d.Type)
 	}
 	if d.Description != "" {
-		output.DescribeKV("Description:", w, "%s", d.Description)
+		output.FprintDescribeKV(currentStdout(ctx), "Description:", w, "%s", d.Description)
 	}
 	if len(d.Labels) > 0 {
-		output.DescribeKV("Labels:", w, "%s", strings.Join(d.Labels, ", "))
+		output.FprintDescribeKV(currentStdout(ctx), "Labels:", w, "%s", strings.Join(d.Labels, ", "))
 	}
 
-	printSchemaSection("Input", d.InputSchema)
-	printSchemaSection("Output", d.ResultSchema)
+	printSchemaSection(ctx, "Input", d.InputSchema)
+	printSchemaSection(ctx, "Output", d.ResultSchema)
 
-	fmt.Println()
-	fmt.Printf("  Run it:  dtctl exec analyzer %s --query <dql>\n", d.Name)
-	fmt.Printf("  Docs:    dtctl describe analyzer %s --doc\n", d.Name)
+	fmt.Fprintln(currentStdout(ctx))
+	fmt.Fprintf(currentStdout(ctx), "  Run it:  dtctl exec analyzer %s --query <dql>\n", d.Name)
+	fmt.Fprintf(currentStdout(ctx), "  Docs:    dtctl describe analyzer %s --doc\n", d.Name)
 }
 
 // printSchemaSection prints a flattened schema. "Input" splits into required and
 // optional groups; other sections list all fields together.
-func printSchemaSection(title string, schema map[string]interface{}) {
+func printSchemaSection(ctx context.Context, title string, schema map[string]interface{}) {
 	fields, ok := analyzer.FlattenSchema(schema)
 	if !ok {
-		fmt.Println()
-		output.DescribeSection(title + ":")
-		fmt.Println("  (schema not introspectable — use -o json or --doc)")
+		fmt.Fprintln(currentStdout(ctx))
+		output.FprintDescribeSection(currentStdout(ctx), title+":")
+		fmt.Fprintln(currentStdout(ctx), "  (schema not introspectable — use -o json or --doc)")
 		return
 	}
 
 	if title == "Input" {
-		printSchemaFields("Input (required)", filterFields(fields, true))
-		printSchemaFields("Input (optional)", filterFields(fields, false))
+		printSchemaFields(ctx, "Input (required)", filterFields(fields, true))
+		printSchemaFields(ctx, "Input (optional)", filterFields(fields, false))
 		return
 	}
-	printSchemaFields(title, fields)
+	printSchemaFields(ctx, title, fields)
 }
 
-func printSchemaFields(title string, fields []analyzer.SchemaField) {
+func printSchemaFields(ctx context.Context, title string, fields []analyzer.SchemaField) {
 	if len(fields) == 0 {
 		return
 	}
-	fmt.Println()
-	output.DescribeSection(title + ":")
+	fmt.Fprintln(currentStdout(ctx))
+	output.FprintDescribeSection(currentStdout(ctx), title+":")
 	// Column-align the name and type.
 	nameW := 0
 	for _, f := range fields {
@@ -169,7 +177,7 @@ func printSchemaFields(title string, fields []analyzer.SchemaField) {
 		if f.Composite {
 			desc = "(composite — see -o json or --doc)"
 		}
-		fmt.Printf("  %-*s  %-9s  %s\n", nameW, f.Name, f.Type, desc)
+		fmt.Fprintf(currentStdout(ctx), "  %-*s  %-9s  %s\n", nameW, f.Name, f.Type, desc)
 	}
 }
 
@@ -184,11 +192,9 @@ func filterFields(fields []analyzer.SchemaField, required bool) []analyzer.Schem
 }
 
 func init() {
-	describeAnalyzerCmd.Flags().Bool("doc", false, "print the analyzer's markdown documentation")
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(describeAnalyzerCmd)
 }

@@ -12,6 +12,7 @@ import (
 // FunctionExecutor handles function execution
 type FunctionExecutor struct {
 	handler *appengine.FunctionHandler
+	vfsEnv  vfs.Env
 }
 
 // NewFunctionExecutor creates a new function executor
@@ -19,6 +20,13 @@ func NewFunctionExecutor(c *client.Client) *FunctionExecutor {
 	return &FunctionExecutor{
 		handler: appengine.NewFunctionHandler(c),
 	}
+}
+
+// WithVFS sets the filesystem and stdin the executor reads code and payload
+// files from. The zero Env keeps the process's.
+func (e *FunctionExecutor) WithVFS(env vfs.Env) *FunctionExecutor {
+	e.vfsEnv = env
+	return e
 }
 
 // FunctionExecuteOptions contains options for function execution
@@ -56,7 +64,7 @@ func (e *FunctionExecutor) executeCode(opts FunctionExecuteOptions) (*appengine.
 
 	// Read from file if specified
 	if opts.SourceCodeFile != "" {
-		content, err := appengine.ReadFileOrStdin(opts.SourceCodeFile)
+		content, err := appengine.ReadFileOrStdinWith(e.vfsEnv, opts.SourceCodeFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read source code: %w", err)
 		}
@@ -70,7 +78,7 @@ func (e *FunctionExecutor) executeCode(opts FunctionExecuteOptions) (*appengine.
 	// Read payload if specified
 	payload := opts.Payload
 	if opts.PayloadFile != "" {
-		content, err := appengine.ReadFileOrStdin(opts.PayloadFile)
+		content, err := appengine.ReadFileOrStdinWith(e.vfsEnv, opts.PayloadFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read payload: %w", err)
 		}
@@ -100,7 +108,7 @@ func (e *FunctionExecutor) executeAppFunction(opts FunctionExecuteOptions) (inte
 	// Read payload if specified
 	payload := opts.Payload
 	if opts.PayloadFile != "" {
-		content, err := appengine.ReadFileOrStdin(opts.PayloadFile)
+		content, err := appengine.ReadFileOrStdinWith(e.vfsEnv, opts.PayloadFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read payload: %w", err)
 		}
@@ -141,7 +149,12 @@ func (e *FunctionExecutor) GetSDKVersions() (*appengine.SDKVersionsResponse, err
 // ReadFileOrStdin reads content from a file (through the vfs seam, so
 // embedded invocations resolve virtual request files) or stdin.
 func ReadFileOrStdin(filename string) (string, error) {
-	content, err := vfs.ReadFileOrStdin(filename)
+	return ReadFileOrStdinWith(vfs.Env{}, filename)
+}
+
+// ReadFileOrStdinWith is ReadFileOrStdin through the given invocation Env.
+func ReadFileOrStdinWith(env vfs.Env, filename string) (string, error) {
+	content, err := env.ReadFileOrStdin(filename)
 	if err != nil {
 		if filename == "-" {
 			return "", err

@@ -1,10 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 
@@ -19,11 +19,6 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/output"
 	resapi "github.com/dynatrace-oss/dtctl/pkg/resources/api"
 )
-
-// checkScopes is the --check-scopes persistent flag: resolve the command's
-// required token scopes, compare against the scopes granted in the active token,
-// print the verdict, and do NOT run the command.
-var checkScopes bool
 
 // scope-check verdict statuses.
 const (
@@ -124,13 +119,13 @@ func installScopePreflight(cmd *cobra.Command) {
 // command, so it can never turn a working command into a broken one.
 func scopePreflight(c *cobra.Command, args []string) (skip bool, err error) {
 	// Only do work when explicitly requested or when auto-preflighting in agent mode.
-	if !checkScopes && !agentMode {
+	if !checkScopes(cmdContext(c)) && !agentMode(cmdContext(c)) {
 		return false, nil
 	}
 
 	verb, resource := verbResource(c)
 
-	if checkScopes {
+	if checkScopes(cmdContext(c)) {
 		required, req := scopesForInvocation(c, verb, resource)
 		if req == scopeRequirementPerCall {
 			// --check-scopes is explicit and terminal: the command body does not run
@@ -146,13 +141,13 @@ func scopePreflight(c *cobra.Command, args []string) (skip bool, err error) {
 		if req == scopeRequirementKnown {
 			alternatives = alternativesForInvocation(c, verb, resource)
 		}
-		result := computeScopeVerdict(verb, resource, required, alternatives, req)
+		result := computeScopeVerdict(cmdContext(c), verb, resource, required, alternatives, req)
 		// In agent mode the verdict must use the same envelope contract as every
 		// other command: an insufficient verdict reuses the ScopeError path (so it
 		// renders as an `insufficient_scope` error envelope with exit 5, identical
 		// to the auto-preflight), and ok/unknown verdicts are wrapped in an OK
 		// envelope rather than printed as a bare object.
-		if agentMode {
+		if agentMode(cmdContext(c)) {
 			if result.Status == scopeStatusInsufficient {
 				return false, &ScopeError{
 					Verb:         verb,
@@ -164,10 +159,10 @@ func scopePreflight(c *cobra.Command, args []string) (skip bool, err error) {
 					Advice:       result.Suggestions,
 				}
 			}
-			printScopeVerdictAgent(result)
+			printScopeVerdictAgent(cmdContext(c), result)
 			return true, nil
 		}
-		printScopeVerdict(result)
+		printScopeVerdict(cmdContext(c), result)
 		if result.Status == scopeStatusInsufficient {
 			return true, &silentExitError{code: client.ExitPermissionError, reason: "insufficient scope"}
 		}
@@ -189,7 +184,7 @@ func scopePreflight(c *cobra.Command, args []string) (skip bool, err error) {
 	if req != scopeRequirementKnown {
 		return false, nil
 	}
-	granted, known := grantedScopesFunc()
+	granted, known := grantedScopesFunc(cmdContext(c))
 	if !known {
 		return false, nil
 	}
@@ -216,8 +211,12 @@ func scopePreflight(c *cobra.Command, args []string) (skip bool, err error) {
 // the ancestor whose parent is the root command; the resource is the leaf
 // command name (empty when the leaf is the verb itself, e.g. `query`).
 func verbResource(c *cobra.Command) (verb, resource string) {
+	// Stop below whichever root c's tree has: the singleton for the CLI, a
+	// per-invocation tree's own for a concurrent embedder. Comparing against
+	// rootCmd walked a fresh tree up to its root, so every command resolved to
+	// the verb "dtctl" and the agent-mode preflight never ran.
 	node := c
-	for node.Parent() != nil && node.Parent() != rootCmd {
+	for node.Parent() != nil && node.Parent().HasParent() {
 		node = node.Parent()
 	}
 	verb = node.Name()
@@ -286,13 +285,11 @@ var flagScopeRequirements = map[string]map[string][]string{
 
 	// --environment link (alone or in link,public) works on environment
 	// shares, a second API next to the documents one: share lists and creates
-	// them (replacing one at another access level also deletes, but only with
-	// an explicit --access, so :delete is not listed), unshare lists and
-	// deletes them. --environment public only sets the document's isPrivate
-	// flag, which the documents scopes cover.
-	"share document":    {"environment=link": {"document:environment-shares:read", "document:environment-shares:write"}},
-	"share dashboard":   {"environment=link": {"document:environment-shares:read", "document:environment-shares:write"}},
-	"share notebook":    {"environment=link": {"document:environment-shares:read", "document:environment-shares:write"}},
+	// them, unshare lists and deletes them. --environment public only calls the
+	// document's :makePublic/:makePrivate, which the documents scopes cover.
+	"share document":    {"environment=link": environmentShareWriteScopes},
+	"share dashboard":   {"environment=link": environmentShareWriteScopes},
+	"share notebook":    {"environment=link": environmentShareWriteScopes},
 	"unshare document":  {"environment=link": environmentShareDeleteScopes},
 	"unshare dashboard": {"environment=link": environmentShareDeleteScopes},
 	"unshare notebook":  {"environment=link": environmentShareDeleteScopes},
@@ -312,7 +309,7 @@ var flagScopeRequirements = map[string]map[string][]string{
 // this particular invocation contribute. It is what both callers want: the
 // requirement of the command line in front of us, not of the command in general.
 func scopesForInvocation(c *cobra.Command, verb, resource string) ([]string, scopeRequirement) {
-	required, req := requiredScopesFor(verb, resource)
+	required, req := requiredScopesIn(c.Root(), verb, resource)
 	extra := flagContributedScopes(c, verb, resource)
 	if len(extra) == 0 || req != scopeRequirementKnown {
 		// Augmenting anything but a known requirement would invent one: a per-call
@@ -452,10 +449,17 @@ func unionScopes(lists ...[]string) []string {
 // requiredScopesFor looks up a command's required scopes from the catalog (the
 // single source of truth), and reports what kind of answer that is.
 func requiredScopesFor(verb, resource string) ([]string, scopeRequirement) {
+	return requiredScopesIn(rootCmd, verb, resource)
+}
+
+// requiredScopesIn is requiredScopesFor against the catalog of the tree root
+// heads, so a concurrent invocation reads its own tree rather than the
+// singleton.
+func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, scopeRequirement) {
 	if perCallScopeCommands[verb+" "+resource] {
 		return nil, scopeRequirementPerCall
 	}
-	listing := commands.Build(rootCmd)
+	listing := commands.Build(root)
 	v, ok := listing.Verbs[verb]
 	if !ok {
 		return nil, scopeRequirementNone
@@ -490,7 +494,7 @@ func resolvePerCallScopes(c *cobra.Command, args []string) ([]string, bool) {
 		method = http.MethodGet
 	}
 
-	_, client, err := SetupClient()
+	_, client, err := setupClient(cmdContext(c))
 	if err != nil {
 		return nil, false
 	}
@@ -510,8 +514,8 @@ var grantedScopesFunc = grantedScopes
 // "unknown" rather than a false negative. The same goes for a scope list read
 // back from the access token's claim, which is a subset of the grant: a scope
 // absent from it is not proven missing.
-func grantedScopes() (scopes []string, known bool) {
-	cfg, err := LoadConfig()
+func grantedScopes(ictx context.Context) (scopes []string, known bool) {
+	cfg, err := loadConfig(ictx)
 	if err != nil {
 		return nil, false
 	}
@@ -529,7 +533,7 @@ func grantedScopes() (scopes []string, known bool) {
 // computeScopeVerdict builds the verdict for the explicit --check-scopes path.
 // alternatives are the scope sets accepted in place of required (see
 // alternativesForInvocation); a token holding any one of them is sufficient.
-func computeScopeVerdict(verb, resource string, required []string, alternatives [][]string, req scopeRequirement) ScopeCheckResult {
+func computeScopeVerdict(ctx context.Context, verb, resource string, required []string, alternatives [][]string, req scopeRequirement) ScopeCheckResult {
 	res := ScopeCheckResult{
 		Verb:           verb,
 		Resource:       resource,
@@ -559,7 +563,7 @@ func computeScopeVerdict(verb, resource string, required []string, alternatives 
 
 	res.AlternativeScopes = alternatives
 
-	granted, known := grantedScopesFunc()
+	granted, known := grantedScopesFunc(ctx)
 	if !known {
 		res.Status = scopeStatusUnknown
 		ensure := "token scopes are not introspectable (API/platform token); ensure it carries: " + strings.Join(required, ", ")
@@ -591,77 +595,77 @@ func computeScopeVerdict(verb, resource string, required []string, alternatives 
 // envelope, so `--check-scopes` in agent mode emits the same {ok,result,context}
 // shape as every other command. Insufficient verdicts go through the ScopeError
 // error-envelope path instead (see scopePreflight).
-func printScopeVerdictAgent(r ScopeCheckResult) {
+func printScopeVerdictAgent(ctx context.Context, r ScopeCheckResult) {
 	resp := output.Response{
 		OK:      true,
 		Result:  r,
 		Context: &output.ResponseContext{Verb: r.Verb, Resource: r.Resource},
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(currentStdout(ctx))
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(resp)
 }
 
 // printScopeVerdict writes the verdict in the active output format (non-agent).
-func printScopeVerdict(r ScopeCheckResult) {
-	switch outputFormat {
+func printScopeVerdict(ctx context.Context, r ScopeCheckResult) {
+	switch outputFormat(ctx) {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(currentStdout(ctx))
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(r)
 	case "yaml", "yml":
-		enc := yaml.NewEncoder(os.Stdout)
+		enc := yaml.NewEncoder(currentStdout(ctx))
 		enc.SetIndent(2)
 		_ = enc.Encode(r)
 		_ = enc.Close()
 	default:
-		printScopeVerdictHuman(r)
+		printScopeVerdictHuman(ctx, r)
 	}
 }
 
-func printScopeVerdictHuman(r ScopeCheckResult) {
+func printScopeVerdictHuman(ctx context.Context, r ScopeCheckResult) {
 	target := r.Verb
 	if r.Resource != "" {
 		target += " " + r.Resource
 	}
-	fmt.Printf("Scope check for %q:\n", target)
+	fmt.Fprintf(currentStdout(ctx), "Scope check for %q:\n", target)
 	if len(r.RequiredScopes) == 0 {
 		// An empty requirement means two different things, and the status is what
 		// separates them: nothing is needed, or nothing could be determined. Printing
 		// "no platform scopes required" for the latter would turn an abstention into
 		// a claim.
 		if r.Status == scopeStatusUnknown {
-			fmt.Println("  required: unknown")
-			fmt.Println("  status:   unknown — dtctl could not determine what this call needs")
+			fmt.Fprintln(currentStdout(ctx), "  required: unknown")
+			fmt.Fprintln(currentStdout(ctx), "  status:   unknown — dtctl could not determine what this call needs")
 			for _, s := range r.Suggestions {
-				fmt.Printf("    - %s\n", s)
+				fmt.Fprintf(currentStdout(ctx), "    - %s\n", s)
 			}
 			return
 		}
-		fmt.Println("  no platform scopes required")
+		fmt.Fprintln(currentStdout(ctx), "  no platform scopes required")
 		return
 	}
-	fmt.Printf("  required: %s\n", strings.Join(r.RequiredScopes, ", "))
+	fmt.Fprintf(currentStdout(ctx), "  required: %s\n", strings.Join(r.RequiredScopes, ", "))
 	if len(r.AlternativeScopes) > 0 {
-		fmt.Printf("  or any of: %s\n", formatAlternatives(r.AlternativeScopes))
+		fmt.Fprintf(currentStdout(ctx), "  or any of: %s\n", formatAlternatives(r.AlternativeScopes))
 	}
 	switch r.Status {
 	case scopeStatusUnknown:
-		fmt.Println("  granted:  unknown (token scopes are not introspectable)")
-		fmt.Println("  status:   unknown — cannot verify; ensure the token carries the required scopes")
+		fmt.Fprintln(currentStdout(ctx), "  granted:  unknown (token scopes are not introspectable)")
+		fmt.Fprintln(currentStdout(ctx), "  status:   unknown — cannot verify; ensure the token carries the required scopes")
 	case scopeStatusInsufficient:
-		fmt.Printf("  granted:  %s\n", strings.Join(r.GrantedScopes, ", "))
-		fmt.Printf("  missing:  %s\n", strings.Join(r.MissingScopes, ", "))
-		fmt.Printf("  status:   insufficient — missing %d scope(s)\n", len(r.MissingScopes))
+		fmt.Fprintf(currentStdout(ctx), "  granted:  %s\n", strings.Join(r.GrantedScopes, ", "))
+		fmt.Fprintf(currentStdout(ctx), "  missing:  %s\n", strings.Join(r.MissingScopes, ", "))
+		fmt.Fprintf(currentStdout(ctx), "  status:   insufficient — missing %d scope(s)\n", len(r.MissingScopes))
 		if len(r.AlternativeScopes) > 0 {
-			fmt.Println("            and no accepted alternative is granted")
+			fmt.Fprintln(currentStdout(ctx), "            and no accepted alternative is granted")
 		}
 	default:
 		if len(r.SatisfiedBy) > 0 {
-			fmt.Printf("  status:   ok — granted accepted alternative: %s\n", strings.Join(r.SatisfiedBy, " + "))
+			fmt.Fprintf(currentStdout(ctx), "  status:   ok — granted accepted alternative: %s\n", strings.Join(r.SatisfiedBy, " + "))
 			return
 		}
-		fmt.Println("  status:   ok — all required scopes granted")
+		fmt.Fprintln(currentStdout(ctx), "  status:   ok — all required scopes granted")
 	}
 }
 

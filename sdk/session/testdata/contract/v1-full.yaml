@@ -21,6 +21,7 @@ contexts:
         threshold: 50KB
       query-limits:
         scan-limit-gbytes: 50
+      usage-tracking: true
       future-context-field: keep-me-too
   - name: prod
     context:

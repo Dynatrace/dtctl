@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dynatrace-oss/dtctl/pkg/resources/awsconnection"
@@ -302,38 +304,28 @@ func writeJSONError(w http.ResponseWriter, body string) {
 	_, _ = fmt.Fprint(w, body)
 }
 
-// resetCloudFlagVars zeroes the package-level flag variables the hyperscaler
-// commands read, so one subtest cannot leak state into the next.
+// resetCloudFlagVars resets every hyperscaler command's cobra flags to their
+// default values so one subtest cannot leak state into the next.
 func resetCloudFlagVars() {
-	createAWSConnectionName, createAWSConnectionRoleArn = "", ""
-	createAWSMonitoringConfigName, createAWSMonitoringConfigCredentials = "", ""
-	createAWSMonitoringConfigRegions, createAWSMonitoringConfigFeatureSets = "", ""
-	createAWSMonitoringConfigCentral = false
+	resetCmdFlags(
+		createAWSConnectionCmd, createAWSMonitoringConfigCmd,
+		createAzureConnectionCmd, createAzureMonitoringConfigCmd,
+		createGCPConnectionCmd, createGCPMonitoringConfigCmd,
+		updateAWSConnectionCmd, updateAWSMonitoringConfigCmd,
+		updateAzureConnectionCmd, updateAzureMonitoringConfigCmd,
+		updateGCPConnectionCmd, updateGCPMonitoringConfigCmd,
+		enableAWSMonitoringCmd, enableAzureMonitoringCmd, enableGCPMonitoringCmd,
+		disableAWSMonitoringCmd, disableAzureMonitoringCmd, disableGCPMonitoringCmd,
+	)
+}
 
-	createAzureConnectionName, createAzureConnectionType = "", ""
-	createAzureConnectionDirectoryID, createAzureConnectionApplicationID = "", ""
-	createAzureConnectionClientSecret, createAzureConnectionIssuer = "", ""
-	createAzureMonitoringConfigName, createAzureMonitoringConfigCredentials = "", ""
-	createAzureMonitoringConfigLocationFiltering, createAzureMonitoringConfigFeatureSets = "", ""
-	createAzureMonitoringConfigCentral = false
-
-	createGCPConnectionName, createGCPConnectionServiceAccountID = "", ""
-	createGCPMonitoringConfigName, createGCPMonitoringConfigCredentials = "", ""
-	createGCPMonitoringConfigLocationFiltering, createGCPMonitoringConfigFeatureSets = "", ""
-	createGCPMonitoringConfigCentral = false
-
-	updateAWSConnectionName, updateAWSConnectionRoleArn = "", ""
-	updateAWSMonitoringConfigName = ""
-	updateAWSMonitoringConfigRegions, updateAWSMonitoringConfigFeatureSets = "", ""
-
-	updateAzureConnectionName, updateAzureConnectionDirectoryID = "", ""
-	updateAzureConnectionApplicationID, updateAzureConnectionClientSecret = "", ""
-	updateAzureMonitoringConfigName = ""
-	updateAzureMonitoringConfigLocationFiltering, updateAzureMonitoringConfigFeatureSets = "", ""
-
-	updateGCPConnectionName, updateGCPConnectionServiceAccountID = "", ""
-	updateGCPMonitoringConfigName = ""
-	updateGCPMonitoringConfigLocationFiltering, updateGCPMonitoringConfigFeatureSets = "", ""
+// resetCmdFlags resets every flag on each command to its declared default value.
+func resetCmdFlags(cmds ...*cobra.Command) {
+	for _, cmd := range cmds {
+		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			_ = f.Value.Set(f.DefValue)
+		})
+	}
 }
 
 // TestCloudCommandsDryRunSendsNoMutatingRequest is the behavioural half of
@@ -357,8 +349,8 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			name: "create aws connection",
 			cmd:  createAWSConnectionCmd,
 			setup: func() {
-				createAWSConnectionName = "new-aws-connection"
-				createAWSConnectionRoleArn = mockRoleArn
+				_ = createAWSConnectionCmd.Flags().Set("name", "new-aws-connection")
+				_ = createAWSConnectionCmd.Flags().Set("roleArn", mockRoleArn)
 			},
 		},
 		{
@@ -368,88 +360,88 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			name: "create aws monitoring",
 			cmd:  createAWSMonitoringConfigCmd,
 			setup: func() {
-				createAWSMonitoringConfigName = "new-aws-monitoring"
-				createAWSMonitoringConfigCredentials = mockAWSConnectionName
-				createAWSMonitoringConfigRegions = "us-east-1"
+				_ = createAWSMonitoringConfigCmd.Flags().Set("name", "new-aws-monitoring")
+				_ = createAWSMonitoringConfigCmd.Flags().Set("credentials", mockAWSConnectionName)
+				_ = createAWSMonitoringConfigCmd.Flags().Set("regions", "us-east-1")
 			},
 		},
 		{
 			name: "create azure connection",
 			cmd:  createAzureConnectionCmd,
 			setup: func() {
-				createAzureConnectionName = "new-azure-connection"
-				createAzureConnectionType = "federatedIdentityCredential"
+				_ = createAzureConnectionCmd.Flags().Set("name", "new-azure-connection")
+				_ = createAzureConnectionCmd.Flags().Set("type", "federatedIdentityCredential")
 			},
 		},
 		{
 			name: "create azure monitoring",
 			cmd:  createAzureMonitoringConfigCmd,
 			setup: func() {
-				createAzureMonitoringConfigName = "new-azure-monitoring"
-				createAzureMonitoringConfigCredentials = mockAzureConnectionName
+				_ = createAzureMonitoringConfigCmd.Flags().Set("name", "new-azure-monitoring")
+				_ = createAzureMonitoringConfigCmd.Flags().Set("credentials", mockAzureConnectionName)
 			},
 		},
 		{
 			name: "create gcp connection",
 			cmd:  createGCPConnectionCmd,
 			setup: func() {
-				createGCPConnectionName = "new-gcp-connection"
+				_ = createGCPConnectionCmd.Flags().Set("name", "new-gcp-connection")
 			},
 		},
 		{
 			name: "create gcp monitoring",
 			cmd:  createGCPMonitoringConfigCmd,
 			setup: func() {
-				createGCPMonitoringConfigName = "new-gcp-monitoring"
-				createGCPMonitoringConfigCredentials = mockGCPConnectionName
+				_ = createGCPMonitoringConfigCmd.Flags().Set("name", "new-gcp-monitoring")
+				_ = createGCPMonitoringConfigCmd.Flags().Set("credentials", mockGCPConnectionName)
 			},
 		},
 		{
 			name: "update aws connection",
 			cmd:  updateAWSConnectionCmd,
 			setup: func() {
-				updateAWSConnectionName = mockAWSConnectionName
-				updateAWSConnectionRoleArn = mockRoleArn
+				_ = updateAWSConnectionCmd.Flags().Set("name", mockAWSConnectionName)
+				_ = updateAWSConnectionCmd.Flags().Set("roleArn", mockRoleArn)
 			},
 		},
 		{
 			name: "update aws monitoring",
 			cmd:  updateAWSMonitoringConfigCmd,
 			setup: func() {
-				updateAWSMonitoringConfigName = mockAWSConfigName
-				updateAWSMonitoringConfigRegions = "us-east-1,eu-central-1"
+				_ = updateAWSMonitoringConfigCmd.Flags().Set("name", mockAWSConfigName)
+				_ = updateAWSMonitoringConfigCmd.Flags().Set("regions", "us-east-1,eu-central-1")
 			},
 		},
 		{
 			name: "update azure connection",
 			cmd:  updateAzureConnectionCmd,
 			setup: func() {
-				updateAzureConnectionName = mockAzureConnectionName
-				updateAzureConnectionApplicationID = "22222222-2222-2222-2222-222222222222"
+				_ = updateAzureConnectionCmd.Flags().Set("name", mockAzureConnectionName)
+				_ = updateAzureConnectionCmd.Flags().Set("applicationId", "22222222-2222-2222-2222-222222222222")
 			},
 		},
 		{
 			name: "update azure monitoring",
 			cmd:  updateAzureMonitoringConfigCmd,
 			setup: func() {
-				updateAzureMonitoringConfigName = mockAzureConfigName
-				updateAzureMonitoringConfigLocationFiltering = "eastus,westeurope"
+				_ = updateAzureMonitoringConfigCmd.Flags().Set("name", mockAzureConfigName)
+				_ = updateAzureMonitoringConfigCmd.Flags().Set("locationFiltering", "eastus,westeurope")
 			},
 		},
 		{
 			name: "update gcp connection",
 			cmd:  updateGCPConnectionCmd,
 			setup: func() {
-				updateGCPConnectionName = mockGCPConnectionName
-				updateGCPConnectionServiceAccountID = "reader@example-project.iam.gserviceaccount.invalid"
+				_ = updateGCPConnectionCmd.Flags().Set("name", mockGCPConnectionName)
+				_ = updateGCPConnectionCmd.Flags().Set("serviceAccountId", "reader@example-project.iam.gserviceaccount.invalid")
 			},
 		},
 		{
 			name: "update gcp monitoring",
 			cmd:  updateGCPMonitoringConfigCmd,
 			setup: func() {
-				updateGCPMonitoringConfigName = mockGCPConfigName
-				updateGCPMonitoringConfigLocationFiltering = "us-central1,europe-west1"
+				_ = updateGCPMonitoringConfigCmd.Flags().Set("name", mockGCPConfigName)
+				_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "us-central1,europe-west1")
 			},
 		},
 	}
@@ -464,13 +456,13 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setupPlatformCmdTest(t, srv.Server, "json")
 
-			origDryRun := dryRun
+			origDryRun := dryRun(context.Background())
 			t.Cleanup(func() {
-				dryRun = origDryRun
+				gFlags.dryRun = origDryRun
 				resetCloudFlagVars()
 			})
-			dryRun = true
 			resetCloudFlagVars()
+			gFlags.dryRun = true
 			tc.setup()
 			srv.reset()
 

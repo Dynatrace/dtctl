@@ -284,3 +284,17 @@ func TestTruncateVisible(t *testing.T) {
 		t.Errorf("truncateVisible colored visible width = %d, want 3 (got %q)", visibleWidth(got), got)
 	}
 }
+
+func TestNewProgressReporterTo_DrawsOnTheGivenWriter(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewProgressReporterTo(true, false, &buf)
+	if r.w != &buf {
+		t.Errorf("reporter writes to %v, want the writer it was given", r.w)
+	}
+	// Not a terminal, so nothing is drawn: the invocation's stderr stays clean.
+	r.Update(ProgressState{Progress: 50})
+	r.Stop()
+	if buf.Len() != 0 {
+		t.Errorf("a reporter on a non-terminal writer wrote %q, want nothing", buf.String())
+	}
+}

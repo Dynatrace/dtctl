@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -38,17 +39,14 @@ import (
 )
 
 var (
-	cfgFile      string
-	contextName  string
-	outputFormat string
-	jqFilter     string
-	verbosity    int
-	debugMode    bool // --debug flag (alias for -vv)
-	dryRun       bool
-	plainMode    bool
-	chunkSize    int64
-	agentMode    bool // --agent/-A flag: wrap output in machine-readable envelope
-	noAgent      bool // --no-agent flag: opt out of auto-detected agent mode
+	// contextName is the only root flag still shared across concurrent
+	// invocations. A Session replaces config and context resolution wholesale
+	// with a synthetic single-context config, so an embedded request never
+	// consults it; and eight locals in auth.go, config.go, describe_api.go,
+	// document_admin_access.go, inspect_list.go and spill.go already shadow
+	// the name, which a blanket rename would silently capture. Everything
+	// else moved to gFlags — see rootflags.go.
+	contextName string
 
 	// tracingRootCtx holds the context carrying the root OTel span for this
 	// invocation. Set by executeArgs() and read by NewClientFromConfig to inject
@@ -66,11 +64,25 @@ var (
 // cmdContext returns cmd.Context() if set, or context.Background() as a
 // fallback for test callers that invoke RunE without ExecuteContext.
 func cmdContext(cmd *cobra.Command) context.Context {
+	if cmd == nil {
+		return context.Background()
+	}
 	if ctx := cmd.Context(); ctx != nil {
 		return ctx
 	}
+	if hook := onMissingCommandContext; hook != nil && concurrentActive.Load() > 0 {
+		hook(cmd)
+	}
 	return context.Background()
 }
+
+// onMissingCommandContext is set by tests. A command asked for its context
+// while concurrent invocations run, and has none, would resolve the process's
+// state instead of its invocation's: code that prepares a command before cobra
+// has handed it the invocation's context (a constructor, say) must be given the
+// invocation, or the storage, explicitly. See
+// TestConcurrentRunNeverLacksACommandContext.
+var onMissingCommandContext func(cmd *cobra.Command)
 
 // rootCmd represents the base command
 var rootCmd = &cobra.Command{
@@ -82,7 +94,7 @@ var rootCmd = &cobra.Command{
 		if err := rejectUnimplementedDryRun(cmd); err != nil {
 			return err
 		}
-		return validateGlobalFlags()
+		return validateGlobalFlags(cmdContext(cmd))
 	},
 	Long: `dtctl is a kubectl-inspired CLI tool for managing Dynatrace platform resources.
 
@@ -91,12 +103,12 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 }
 
 // validateGlobalFlags enforces cross-command constraints for root persistent flags.
-func validateGlobalFlags() error {
-	if jqFilter == "" {
+func validateGlobalFlags(ctx context.Context) error {
+	if jqFilter(ctx) == "" {
 		return nil
 	}
 
-	outputFormat = output.NormalizeJQOutputFormat(outputFormat)
+	setOutputFormat(ctx, output.NormalizeJQOutputFormat(outputFormat(ctx)))
 	return nil
 }
 
@@ -118,32 +130,45 @@ func AddCommand(c *cobra.Command) {
 	rootCmd.AddCommand(c)
 }
 
-// executeArgs runs one invocation of the given command line (program name
-// excluded) and returns an exit code. Callers go through Run, which provides
-// serialization and the pristine-tree guarantee.
+// executeArgs runs one invocation using the singleton tree. It is the serial
+// path; the concurrent path calls executeTree with a fresh commandTree from
+// newCommandTree().
 func executeArgs(argv []string) int {
+	return executeTree(rootCmd, getCmd, argv)
+}
+
+// executeTree runs one invocation against the given root command tree.
+// root is the cobra root; get is root's "get" subcommand (needed for
+// installGetListPaging). The serial path passes the package-level singletons;
+// the concurrent path passes a fresh tree from newCommandTree().
+func executeTree(root, get *cobra.Command, argv []string) int {
 	// --- Stage 1: development-feature registration ---
 	// Attach the development-tier commands this invocation opted into and
 	// detach the rest, before anything else walks the tree. Registration
 	// (rather than hiding) is what makes an un-opted-in development feature
 	// unreachable by accident: `dtctl <it>` is an unknown command like any
 	// other, and it is absent from help, completion and the catalog.
-	devEnabled, devSignpost := resolveDevelopmentFeatures(argv)
-	applyDevelopmentRegistration(devEnabled)
+	devEnabled, devSignpost := resolveDevelopmentFeatures(cmdContext(root), argv)
+	// Development commands use singleton parent pointers; only apply them to
+	// the singleton tree. Fresh trees (concurrent path) skip this stage —
+	// development commands are blocked via RunOptions.BlockedCommands anyway.
+	if root == rootCmd {
+		applyDevelopmentRegistration(devEnabled)
+	}
 	// --- End development-feature registration ---
 
 	// Setup enhanced error handling after all subcommands are registered
-	setupErrorHandlers(rootCmd)
+	setupErrorHandlers(root)
 
 	// Wrap runnable commands with the token-scope preflight (--check-scopes and
 	// agent-mode auto-preflight). Must run after all subcommands are registered.
-	installScopePreflight(rootCmd)
+	installScopePreflight(root)
 	// Record which get subcommand runs, for the agent-mode default page.
-	installGetListPaging(getCmd)
+	installGetListPaging(get)
 
 	// Cobra falls back to os.Args when no args were set — always pin the
 	// requested argv so embedded invocations never see the host's arguments.
-	rootCmd.SetArgs(argv)
+	root.SetArgs(argv)
 
 	// --- Alias resolution (before Cobra parses args AND before tracing init) ---
 	// Resolving aliases first ensures the span name reflects the real command,
@@ -151,45 +176,45 @@ func executeArgs(argv []string) int {
 	// resolution (the real command will produce the proper error later).
 	// Session-backed invocations skip aliases entirely: they are a host-config
 	// convenience, and a tenant request must not expand through the host's
-	// alias table.
+	// alias table (see aliasConfig).
 	spanArgs := argv
-	if cfg, err := config.Load(); err == nil && runSession == nil {
+	if cfg, err := aliasConfig(cmdContext(root)); err == nil {
 		// Security: warn when an auto-discovered local .dtctl.yaml carries
 		// code-execution keys (aliases / apply hooks) that are ignored. This
 		// makes adoption of an untrusted per-project config visible instead of
 		// silent. See config.Load / markLocal.
 		if cfg.IgnoredExecKeys() {
-			fmt.Fprintf(os.Stderr,
+			fmt.Fprintf(currentStderr(cmdContext(root)),
 				"warning: ignoring aliases and hooks from local config %q "+
 					"(honored only from the global config, --config, or DTCTL_CONFIG)\n",
 				cfg.LocalConfigPath())
 		}
 		if cfg.IgnoredEnvRefs() {
-			fmt.Fprintf(os.Stderr,
+			fmt.Fprintf(currentStderr(cmdContext(root)),
 				"warning: local config %q contains env-var references ($...) that were not expanded "+
 					"(use --config or DTCTL_CONFIG to use a trusted config with env-var expansion)\n",
 				cfg.LocalConfigPath())
 		}
 
-		expanded, isShell, err := resolveAlias(argv, cfg)
+		expanded, isShell, err := resolveAlias(cmdContext(root), argv, cfg)
 		if err != nil {
-			output.PrintHumanError("%s", err)
+			output.FprintHumanError(currentStderr(cmdContext(root)), "%s", err)
 			return 1
 		}
 
 		if isShell {
-			if !caps.ShellAliases {
-				output.PrintHumanError("%s", &CapabilityError{Feature: "shell aliases"})
+			if !currentCaps(cmdContext(root)).ShellAliases {
+				output.FprintHumanError(currentStderr(cmdContext(root)), "%s", &CapabilityError{Feature: "shell aliases"})
 				return 1
 			}
-			if err := execShellAlias(expanded[0]); err != nil {
+			if err := execShellAlias(cmdContext(root), expanded[0]); err != nil {
 				return 1
 			}
 			return 0
 		}
 
 		if expanded != nil {
-			rootCmd.SetArgs(expanded)
+			root.SetArgs(expanded)
 			spanArgs = expanded
 		}
 	}
@@ -201,12 +226,12 @@ func executeArgs(argv []string) int {
 	// `commands` catalog, and completion all reflect the reduced surface. A
 	// nil profile is the full tree (backward compatible). An unknown profile
 	// name is a hard error rather than a silent surface expansion.
-	prof, profErr := resolveActiveProfile(spanArgs)
+	prof, profErr := resolveActiveProfile(cmdContext(root), spanArgs)
 	if profErr != nil {
-		output.PrintHumanError("%s", profErr)
+		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", profErr)
 		return exitCodeForError(profErr)
 	}
-	applyProfile(rootCmd, prof)
+	applyProfile(root, prof)
 	// --- End command profile filter ---
 
 	// --- Blocked-command filter (embedded callers) ---
@@ -214,7 +239,7 @@ func executeArgs(argv []string) int {
 	// environment (RunOptions.BlockedCommands) — e.g. the service engine
 	// removes host-oriented commands like config/ctx/auth. Applied after the
 	// profile filter so both masks compose; a nil set is the full surface.
-	applyBlockedCommands(rootCmd, runBlocked)
+	applyBlockedCommands(root, currentBlocked(cmdContext(root)))
 	// --- End blocked-command filter ---
 
 	// --- Stage 3: stability floor ---
@@ -224,15 +249,15 @@ func executeArgs(argv []string) int {
 	// earlier one narrowed. A misspelled exception is a hard error rather than
 	// a silent skip: it would otherwise tighten the surface and produce a
 	// confusing block much later.
-	policy, stabErr := resolveStabilityPolicy(spanArgs, devEnabled)
+	policy, stabErr := resolveStabilityPolicy(cmdContext(root), spanArgs, devEnabled)
 	if stabErr != nil {
-		output.PrintHumanError("%s", stabErr)
+		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", stabErr)
 		return client.ExitUsageError
 	}
-	applyStabilityFloor(rootCmd, policy)
+	applyStabilityFloor(root, policy)
 	// Badge what survived, so a caller reading help is told the guarantee
 	// rather than left to infer it from the tier's name.
-	applyStabilityBadges(rootCmd)
+	applyStabilityBadges(root)
 	// --- End stability floor ---
 
 	// --- Stage 5: deprecated surface ---
@@ -245,8 +270,8 @@ func executeArgs(argv []string) int {
 	// to *find* problems rather than to avoid them.
 	// surfaceConfig, not LoadConfig: this is a surface decision like the four
 	// stages above it, and must not depend on credentials resolving.
-	if surfaceConfig(spanArgs).NoDeprecated() {
-		applyNoDeprecated(rootCmd)
+	if surfaceConfig(cmdContext(root), spanArgs).NoDeprecated() {
+		applyNoDeprecated(root)
 	}
 	// --- End deprecated surface ---
 
@@ -258,9 +283,9 @@ func executeArgs(argv []string) int {
 	spanName := buildSpanName(spanArgs)
 	safeArgs := extractSafeArgs(spanArgs)
 	tracingCtx, shutdownTracing, tracingErr := tracing.Init(
-		context.Background(), spanName, safeArgs, verbosity,
+		context.Background(), spanName, safeArgs, verbosity(cmdContext(root)),
 	)
-	tracingRootCtx = tracingCtx
+	setCurrentTracingCtx(cmdContext(root), tracingCtx)
 	rootSpan := trace.SpanFromContext(tracingCtx)
 	defer func() {
 		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -269,10 +294,14 @@ func executeArgs(argv []string) int {
 	}()
 	if tracingErr != nil {
 		// Non-fatal: warn and continue. The CLI still works; spans may not export.
-		fmt.Fprintf(os.Stderr, "dtctl: tracing: %v (check OTEL_EXPORTER_OTLP_ENDPOINT or unset it to disable export)\n", tracingErr)
+		fmt.Fprintf(currentStderr(cmdContext(root)), "dtctl: tracing: %v (check OTEL_EXPORTER_OTLP_ENDPOINT or unset it to disable export)\n", tracingErr)
 	}
 
-	if err := rootCmd.ExecuteContext(runCtx); err != nil {
+	if err := root.ExecuteContext(cmdContext(root)); err != nil {
+		// cobra stops before the root's PersistentPreRunE when the arguments
+		// do not validate; the error is still reported under the invocation's
+		// settings, which that hook is what establishes for a concurrent tree.
+		initConcurrentOnError(cmdContext(root))
 		// silentExitError carries an exit code only (e.g. --check-scopes printed
 		// its verdict, diff found differences, wait timed out); set the status
 		// and return without re-printing.
@@ -297,7 +326,7 @@ func executeArgs(argv []string) int {
 		// present (kubectl semantics; built-ins always win because they never
 		// reach this error path). See docs/dev/PLUGIN_CONVENTIONS.md.
 		if strings.Contains(errStr, "unknown command") {
-			if code, handled := tryPluginDispatch(spanArgs); handled {
+			if code, handled := tryPluginDispatch(cmdContext(root), spanArgs); handled {
 				return code
 			}
 			// A disabled development feature explains itself only to a caller
@@ -307,7 +336,7 @@ func executeArgs(argv []string) int {
 			if devErr := developmentHint(errStr, devSignpost); devErr != nil {
 				err = devErr
 			} else {
-				err = enhanceCommandError(rootCmd, err)
+				err = enhanceCommandError(root, err)
 			}
 		}
 
@@ -319,11 +348,11 @@ func executeArgs(argv []string) int {
 		var typedFlagErr *suggest.FlagError
 		if !errors.As(err, &typedFlagErr) &&
 			(strings.Contains(errStr, "unknown flag") || strings.Contains(errStr, "unknown shorthand flag")) {
-			err = enhanceFlagError(rootCmd, err)
+			err = enhanceFlagError(root, err)
 		}
 
 		// Check for URL-related hints (e.g., wrong domain like live.dynatrace.com)
-		urlHints := getURLHintsForError(err)
+		urlHints := getURLHintsForError(cmdContext(root), err)
 
 		// Check for auth-related hints (e.g., expired OAuth session)
 		authHints := getAuthHintsForError(err)
@@ -348,7 +377,7 @@ func executeArgs(argv []string) int {
 		// envelope, wherever it put --agent. An unknown command stops cobra
 		// even earlier, and neither failure ever reaches initConfig, so the
 		// environment's auto-detection is asked here as well.
-		structuredError := agentMode || plainMode
+		structuredError := agentMode(cmdContext(root)) || plainMode(cmdContext(root))
 		if !structuredError {
 			var maskedProfile *ProfileError
 			var maskedUnsupported *UnsupportedCommandError
@@ -361,26 +390,26 @@ func executeArgs(argv []string) int {
 				structuredError = hasRawFlag(spanArgs, "--agent") ||
 					hasShortFlagLetter(spanArgs, 'A') ||
 					hasRawFlag(spanArgs, "--plain") ||
-					agentModeAutoDetectedFromArgs(spanArgs)
+					agentModeAutoDetectedFromArgs(cmdContext(root), spanArgs)
 			}
 		}
 
 		if structuredError {
-			detail := errorToDetail(err)
+			detail := errorToDetail(cmdContext(root), err)
 			detail.Suggestions = append(detail.Suggestions, allHints...)
 			// Agent/plain mode: error envelopes go to stdout (not stderr) because
 			// machine consumers read all structured output — success and failure — from
 			// stdout. Relying on stderr for structured error data is unreliable in these
 			// modes; consumers must parse stdout for the full response envelope.
-			_ = output.PrintError(os.Stdout, detail)
+			_ = output.PrintError(currentStdout(cmdContext(root)), detail)
 			return exitCodeForError(err)
 		}
 
-		output.PrintHumanError("%s", err)
+		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", err)
 		if len(allHints) > 0 {
-			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(currentStderr(cmdContext(root)))
 			for _, hint := range allHints {
-				output.PrintHint("%s", hint)
+				output.FprintHint(currentStderr(cmdContext(root)), "%s", hint)
 			}
 		}
 		return exitCodeForError(err)
@@ -503,6 +532,15 @@ func enhanceCommandError(cmd *cobra.Command, err error) error {
 					UsageHint:  syn.hint,
 				}
 			}
+			if !cmd.HasParent() {
+				if advice := nounAdvice(cmd.Root(), name); len(advice) > 0 {
+					return &suggest.CommandError{
+						Command:  name,
+						Message:  fmt.Sprintf("unknown command %q — dtctl commands are verbs (get, query, run, …); the data or resource is their argument", name),
+						Runnable: advice,
+					}
+				}
+			}
 		}
 		commands := collectSubcommands(cmd)
 		return suggest.ParseCommandError(errStr, commands)
@@ -557,6 +595,9 @@ var streamKeywords = []struct {
 // unknownObjectRe pulls the offending name out of the API's
 // "<name> isn't a valid data object." detail.
 var unknownObjectRe = regexp.MustCompile(`(\S+) isn't a valid data object`)
+
+// platformObjectRe matches a fetch of a platform object served by an API, not Grail.
+var platformObjectRe = regexp.MustCompile(`(?i)(workflow|automation|execution|\bslos?\b|dashboard|notebook)\S* isn't a valid data object`)
 
 // nearestStreams suggests real stream names for an unknown data-object guess:
 // keyword routing first, edit distance over coreStreams as fallback.
@@ -613,6 +654,8 @@ func dqlErrorAdvice(e *sdkquery.QueryError) []string {
 		s = append(s, `smartscape is queried via the COMMANDS smartscapeNodes/smartscapeEdges, not fetch — start the query with them: dtctl query 'smartscapeNodes "HOST" | limit 10'`)
 	case e.ErrorType == "UNKNOWN_DATA_OBJECT" && strings.Contains(text, "dt.entity."):
 		s = append(s, `for a current-state entity census use: dtctl query 'smartscapeNodes "<TYPE>" | summarize count()' — dt.entity.* tables are event-lookback views and exist only for some types`)
+	case e.ErrorType == "UNKNOWN_DATA_OBJECT" && platformObjectRe.MatchString(text):
+		s = append(s, "workflows, their executions, SLOs, dashboards and notebooks are not Grail data — list them with dtctl get (e.g. dtctl get workflow-executions, dtctl get slos); the catalog: dtctl commands")
 	case e.ErrorType == "UNKNOWN_DATA_OBJECT":
 		if m := unknownObjectRe.FindStringSubmatch(text); len(m) == 2 {
 			if near := nearestStreams(m[1]); len(near) > 0 {
@@ -657,7 +700,7 @@ func queryStateErrorDetail(err error, state string) *output.ErrorDetail {
 
 // errorToDetail converts any error into a structured ErrorDetail for agent/plain mode output.
 // It uses errors.As to extract rich context from typed errors when available.
-func errorToDetail(err error) *output.ErrorDetail {
+func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 	// diagnostic.Error — wraps API errors with operation context and suggestions
 	var diagErr *diagnostic.Error
 	if errors.As(err, &diagErr) {
@@ -986,14 +1029,28 @@ func errorToDetail(err error) *output.ErrorDetail {
 
 	// Fallback — generic error with no structured context
 	return &output.ErrorDetail{
-		Code:    classifyGenericError(err),
+		Code:    classifyGenericError(ctx, err),
 		Message: err.Error(),
 	}
 }
 
 // classifyGenericError attempts to classify an error by inspecting its message
 // when no typed error is available.
-func classifyGenericError(err error) string {
+//
+// A concurrent invocation recognises a deadline by type first. Its request
+// context and its HTTP client time out on one budget, and whichever fires
+// first decides the wording — "Client.Timeout exceeded" matches the message
+// rules below, "context deadline exceeded" does not — so a message-only rule
+// would report the same breach as "timeout" or as "error" depending on which
+// timer won. The CLI and serialized invocations keep the message rules alone,
+// exactly as before.
+func classifyGenericError(ctx context.Context, err error) string {
+	if concurrentInvocation(ctx) != nil {
+		var netErr net.Error
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+			return "timeout"
+		}
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "no active context") || strings.Contains(msg, "no context"):
@@ -1013,14 +1070,14 @@ func classifyGenericError(err error) string {
 // has known problems (e.g., live.dynatrace.com instead of apps.dynatrace.com)
 // and returns actionable hints. Only returns hints for errors that could
 // plausibly be caused by a wrong URL (403, 401, connectivity, auth failures).
-func getURLHintsForError(err error) []string {
+func getURLHintsForError(ictx context.Context, err error) []string {
 	// Only provide URL hints for errors that could be caused by wrong URL
 	if !isURLRelatedError(err) {
 		return nil
 	}
 
 	// Try to load config quietly — if we can't, there's nothing to check
-	cfg, cfgErr := LoadConfig()
+	cfg, cfgErr := loadConfig(ictx)
 	if cfgErr != nil {
 		return nil
 	}
@@ -1276,6 +1333,15 @@ func requireSubcommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// A data domain or resource under another verb: name the commands that read it.
+	if advice := nounAdvice(cmd.Root(), args[0]); len(advice) > 0 {
+		return &suggest.CommandError{
+			Command:  args[0],
+			Message:  fmt.Sprintf("unknown resource type %q — these commands read it", args[0]),
+			Runnable: advice,
+		}
+	}
+
 	// Check if the first arg looks like an unknown subcommand
 	subcommands := collectSubcommands(cmd)
 	suggestion := suggest.FindClosest(args[0], subcommands)
@@ -1307,38 +1373,73 @@ func quoteCommandArgs(args []string) []string {
 }
 
 // GetPlainMode returns the current plain mode setting
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// getPlainMode, which reads the state carried on its context.
 func GetPlainMode() bool {
-	return plainMode
+	return getPlainMode(context.Background())
+}
+
+// GetPlainMode returns the current plain mode setting
+func getPlainMode(ctx context.Context) bool {
+	return plainMode(ctx)
 }
 
 // GetChunkSize returns the current chunk size setting for pagination
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// getChunkSize, which reads the state carried on its context.
 func GetChunkSize() int64 {
-	return chunkSize
+	return getChunkSize(context.Background())
+}
+
+// GetChunkSize returns the current chunk size setting for pagination
+func getChunkSize(ctx context.Context) int64 {
+	return chunkSize(ctx)
 }
 
 // Setup creates a Config, Client, and Printer for read-only commands.
 // It consolidates the common LoadConfig → NewClientFromConfig → NewPrinter boilerplate.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// setup, which reads the state carried on its context.
 func Setup() (*config.Config, *client.Client, output.Printer, error) {
-	cfg, err := LoadConfig()
+	return setup(context.Background())
+}
+
+// Setup creates a Config, Client, and Printer for read-only commands.
+// It consolidates the common LoadConfig → NewClientFromConfig → NewPrinter boilerplate.
+func setup(ctx context.Context) (*config.Config, *client.Client, output.Printer, error) {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	c, err := NewClientFromConfig(cfg)
+	c, err := newClientFromConfig(ctx, cfg)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return cfg, c, NewPrinter(), nil
+	return cfg, c, newPrinterCtx(ctx), nil
 }
 
 // SetupClient creates a Config and Client without a Printer.
 // Use this for commands that need the client but handle output differently
 // (e.g., exec commands, log streaming, or commands with conditional printers).
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// setupClient, which reads the state carried on its context.
 func SetupClient() (*config.Config, *client.Client, error) {
-	cfg, err := LoadConfig()
+	return setupClient(context.Background())
+}
+
+// SetupClient creates a Config and Client without a Printer.
+// Use this for commands that need the client but handle output differently
+// (e.g., exec commands, log streaming, or commands with conditional printers).
+func setupClient(ctx context.Context) (*config.Config, *client.Client, error) {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	c, err := NewClientFromConfig(cfg)
+	c, err := newClientFromConfig(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1352,15 +1453,29 @@ func SetupClient() (*config.Config, *client.Client, error) {
 //
 // Under --dry-run the check is skipped: see CheckSafety for why, and for the
 // invariant that makes it sound.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// setupWithSafety, which reads the state carried on its context.
 func SetupWithSafety(op safety.Operation) (*config.Config, *client.Client, error) {
-	cfg, err := LoadConfig()
+	return setupWithSafety(context.Background(), op)
+}
+
+// SetupWithSafety creates a Config + Client for mutating commands, performing a safety
+// check before the client is created. Use this for commands where ownership is unknown
+// (i.e., the resource doesn't need to be fetched first to determine the owner).
+// A Printer is not included because many mutating commands don't use one.
+//
+// Under --dry-run the check is skipped: see CheckSafety for why, and for the
+// invariant that makes it sound.
+func setupWithSafety(ctx context.Context, op safety.Operation) (*config.Config, *client.Client, error) {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := CheckSafety(cfg, op, safety.OwnershipUnknown); err != nil {
+	if err := checkSafety(ctx, cfg, op, safety.OwnershipUnknown); err != nil {
 		return nil, nil, err
 	}
-	c, err := NewClientFromConfig(cfg)
+	c, err := newClientFromConfig(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1382,8 +1497,30 @@ func SetupWithSafety(op safety.Operation) (*config.Config, *client.Client, error
 // dry-run branch that returns before any write. TestDryRunNeedsNoSafetyLevel
 // holds that invariant by running every such command against a readonly
 // context and a mock environment whose writes fail.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// checkSafety, which reads the state carried on its context.
 func CheckSafety(cfg *config.Config, op safety.Operation, ownership safety.ResourceOwnership) error {
-	if dryRun {
+	return checkSafety(context.Background(), cfg, op, ownership)
+}
+
+// CheckSafety applies the context's safety level to a mutating operation --
+// and is the single place that exempts a dry run from it.
+//
+// A dry run reads to build its preview and writes nothing, so it is gated like
+// a read, not like the mutation it describes. Checking it would refuse the
+// preview in exactly the context that wants one most: `readonly` exists for
+// someone who wants to look without touching, and `dtctl get dashboard X`
+// already succeeds there, so refusing the same GET under `delete --dry-run`
+// would be inconsistent rather than safer.
+//
+// The exemption is sound only because --dry-run is opt-in per command
+// (dryRunCommands): a command that reaches this function with dryRun set has a
+// dry-run branch that returns before any write. TestDryRunNeedsNoSafetyLevel
+// holds that invariant by running every such command against a readonly
+// context and a mock environment whose writes fail.
+func checkSafety(ctx context.Context, cfg *config.Config, op safety.Operation, ownership safety.ResourceOwnership) error {
+	if dryRun(ctx) {
 		return nil
 	}
 	checker, err := NewSafetyChecker(cfg)
@@ -1395,12 +1532,21 @@ func CheckSafety(cfg *config.Config, op safety.Operation, ownership safety.Resou
 
 // SetupWithSafetyAndPrinter is SetupWithSafety plus a Printer, for mutating
 // commands that render their result through the normal output pipeline.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// setupWithSafetyAndPrinter, which reads the state carried on its context.
 func SetupWithSafetyAndPrinter(op safety.Operation) (*config.Config, *client.Client, output.Printer, error) {
-	cfg, c, err := SetupWithSafety(op)
+	return setupWithSafetyAndPrinter(context.Background(), op)
+}
+
+// SetupWithSafetyAndPrinter is SetupWithSafety plus a Printer, for mutating
+// commands that render their result through the normal output pipeline.
+func setupWithSafetyAndPrinter(ctx context.Context, op safety.Operation) (*config.Config, *client.Client, output.Printer, error) {
+	cfg, c, err := setupWithSafety(ctx, op)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return cfg, c, NewPrinter(), nil
+	return cfg, c, newPrinterCtx(ctx), nil
 }
 
 // NewSafetyChecker creates a new safety checker for the current context.
@@ -1415,32 +1561,39 @@ func NewSafetyChecker(cfg *config.Config) (*safety.Checker, error) {
 }
 
 // NewPrinter creates a new printer respecting agent and plain mode settings
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// newPrinterCtx, which reads the state carried on its context.
 func NewPrinter() output.Printer {
-	if agentMode {
+	return newPrinterCtx(context.Background())
+}
+
+// NewPrinter creates a new printer respecting agent and plain mode settings
+func newPrinterCtx(ictx context.Context) output.Printer {
+	if agentMode(ictx) {
 		ctx := &output.ResponseContext{}
-		ap := output.NewAgentPrinter(os.Stdout, ctx)
-		ap.SetJQFilter(jqFilter)
+		ap := output.NewAgentPrinter(currentStdout(ictx), ctx)
+		ap.SetJQFilter(jqFilter(ictx))
 		// If the user explicitly requested an output format via -o,
 		// use that format for the result field inside the agent envelope
 		// (e.g. -o toon for token-efficient encoding).
-		outputFlag := rootCmd.PersistentFlags().Lookup("output")
 		resultFormat := "json"
-		if outputFlag != nil && outputFlag.Changed {
-			ap.SetResultFormat(outputFormat)
-			if outputFormat == "toon" {
+		if outputFormatChanged(ictx) {
+			ap.SetResultFormat(outputFormat(ictx))
+			if outputFormat(ictx) == "toon" {
 				resultFormat = "toon"
 			}
 		}
-		return shapeListOutput(ap, resultFormat, resultFormat == "toon")
+		return shapeListOutput(ictx, ap, resultFormat, resultFormat == "toon")
 	}
 
-	p := output.NewPrinterWithOpts(output.PrinterOptions{
-		Format:    outputFormat,
-		Writer:    os.Stdout,
-		PlainMode: plainMode,
-		JQFilter:  jqFilter,
+	p := newPrinterOpts(ictx, output.PrinterOptions{
+		Format:    outputFormat(ictx),
+		Writer:    currentStdout(ictx),
+		PlainMode: plainMode(ictx),
+		JQFilter:  jqFilter(ictx),
 	})
-	return shapeListOutput(p, outputFormat, output.IsTabularFormat(outputFormat, plainMode))
+	return shapeListOutput(ictx, p, outputFormat(ictx), output.IsTabularFormat(outputFormat(ictx), plainMode(ictx)))
 }
 
 // enrichAgent configures agent-mode metadata on the printer if agent mode is active.
@@ -1457,8 +1610,16 @@ func enrichAgent(printer output.Printer, verb, resource string) *output.AgentPri
 }
 
 // GetAgentMode returns the current agent mode setting
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// getAgentMode, which reads the state carried on its context.
 func GetAgentMode() bool {
-	return agentMode
+	return getAgentMode(context.Background())
+}
+
+// GetAgentMode returns the current agent mode setting
+func getAgentMode(ctx context.Context) bool {
+	return agentMode(ctx)
 }
 
 // LoadConfig loads the config and applies the context override, if any.
@@ -1466,20 +1627,32 @@ func GetAgentMode() bool {
 // config file. Both overrides are session-local — the config file is never
 // written, so a scripted `DTCTL_CONTEXT=x dtctl ...` cannot repoint other
 // processes on the machine.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// loadConfig, which reads the state carried on its context.
 func LoadConfig() (*config.Config, error) {
+	return loadConfig(context.Background())
+}
+
+// LoadConfig loads the config and applies the context override, if any.
+// Precedence: --context flag > DTCTL_CONTEXT env var > current-context in the
+// config file. Both overrides are session-local — the config file is never
+// written, so a scripted `DTCTL_CONTEXT=x dtctl ...` cannot repoint other
+// processes on the machine.
+func loadConfig(ctx context.Context) (*config.Config, error) {
 	// A session-backed invocation (embedded callers, see Session) is pinned to
 	// its own environment + token: the config file and context overrides do
 	// not apply.
-	if runSession != nil {
-		return runSession.syntheticConfig(), nil
+	if s := currentSession(ctx); s != nil {
+		return withInvocationEnv(ctx, s.syntheticConfig()), nil
 	}
 
 	var cfg *config.Config
 	var err error
 
 	// Load from specified config file or default location
-	if cfgFile != "" {
-		cfg, err = config.LoadFrom(cfgFile)
+	if cfgFile(ctx) != "" {
+		cfg, err = config.LoadFrom(cfgFile(ctx))
 	} else {
 		cfg, err = config.Load()
 	}
@@ -1490,31 +1663,52 @@ func LoadConfig() (*config.Config, error) {
 
 	override := contextName
 	if override == "" {
-		override = os.Getenv("DTCTL_CONTEXT")
+		override = getenv(ctx, "DTCTL_CONTEXT")
 	}
 	if override != "" {
 		cfg.CurrentContext = override
 	}
 
-	return cfg, nil
+	return withInvocationEnv(ctx, cfg), nil
 }
 
 // NewClientFromConfig creates a new client from config with verbose mode configured
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// newClientFromConfig, which reads the state carried on its context.
 func NewClientFromConfig(cfg *config.Config) (*client.Client, error) {
+	return newClientFromConfig(context.Background(), cfg)
+}
+
+// NewClientFromConfig creates a new client from config with verbose mode configured
+func newClientFromConfig(ctx context.Context, cfg *config.Config) (*client.Client, error) {
 	c, err := client.NewFromConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
 	// If --debug flag is set, force verbosity to 2 (full debug mode)
-	if debugMode {
+	if debugMode(ctx) {
 		c.SetVerbosity(2)
 	} else {
-		c.SetVerbosity(verbosity)
+		c.SetVerbosity(verbosity(ctx))
 	}
+	// A concurrent invocation's context is its only deadline, so every request
+	// it sends must end with it: in-process code is not preemptible, and an
+	// upstream that never answers would otherwise hold the invocation's slot
+	// until the SDK's own 6-minute ceiling, whatever deadline the request
+	// asked for. Many handlers pass context.Background() to the SDK, so the
+	// binding is made here, where the invocation's client is built.
+	if concurrentInvocation(ctx) != nil {
+		bindClientContext(c, ctx)
+	}
+
 	// Propagate W3C trace context on every Dynatrace API request.
-	if tracingRootCtx != nil {
-		client.InjectTraceContext(c, tracingRootCtx)
+	if tc := currentTracingCtx(ctx); tc != nil {
+		client.InjectTraceContext(c, tc)
 	}
+	// Opt-in local usage tally: every DQL executor built on this client
+	// records its scan volume (see cmd/usage.go).
+	bindUsageTracking(ctx, cfg, c)
 	return c, nil
 }
 
@@ -1538,11 +1732,11 @@ func accountTokenKeyName(uuid string) string {
 
 // resolveUUIDNoDiscovery returns the account UUID from flagValue > DTCTL_ACCOUNT_UUID > ctx.AccountUUID.
 // It never calls the API, so it is safe to call before a token is available.
-func resolveUUIDNoDiscovery(ctx *config.Context, flagValue string) string {
+func resolveUUIDNoDiscovery(ictx context.Context, ctx *config.Context, flagValue string) string {
 	if flagValue != "" {
 		return flagValue
 	}
-	if v := os.Getenv("DTCTL_ACCOUNT_UUID"); v != "" {
+	if v := getenv(ictx, "DTCTL_ACCOUNT_UUID"); v != "" {
 		return v
 	}
 	return ctx.AccountUUID
@@ -1552,8 +1746,8 @@ func resolveUUIDNoDiscovery(ctx *config.Context, flagValue string) string {
 // 1. DTCTL_ACCOUNT_TOKEN env var
 // 2. Keyring (if accountUUID is known) — stored by `dtctl account login`
 // 3. Error with hint to run `dtctl account login`
-func resolveAccountToken(cfg *config.Config, accountUUID string) (string, error) {
-	if v := os.Getenv("DTCTL_ACCOUNT_TOKEN"); v != "" {
+func resolveAccountToken(ictx context.Context, cfg *config.Config, accountUUID string) (string, error) {
+	if v := getenv(ictx, "DTCTL_ACCOUNT_TOKEN"); v != "" {
 		return v, nil
 	}
 	if accountUUID != "" {
@@ -1572,12 +1766,12 @@ func resolveAccountToken(cfg *config.Config, accountUUID string) (string, error)
 
 // resolveCurrentAccountUserUUID extracts the current user's UUID from the account
 // token's JWT sub claim. Used to auto-populate --user-uuid on token creation.
-func resolveCurrentAccountUserUUID(accountUUID string) (string, error) {
-	cfg, err := LoadConfig()
+func resolveCurrentAccountUserUUID(ctx context.Context, accountUUID string) (string, error) {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return "", err
 	}
-	token, err := resolveAccountToken(cfg, accountUUID)
+	token, err := resolveAccountToken(ctx, cfg, accountUUID)
 	if err != nil {
 		return "", err
 	}
@@ -1586,39 +1780,57 @@ func resolveCurrentAccountUserUUID(accountUUID string) (string, error) {
 
 // SetupAccount resolves account credentials and builds an account-plane httpclient.
 // Use for read-only account commands (no safety check).
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// setupAccount, which reads the state carried on its context.
 func SetupAccount() (*httpclient.Client, string, error) {
-	cfg, err := LoadConfig()
+	return setupAccount(context.Background())
+}
+
+// SetupAccount resolves account credentials and builds an account-plane httpclient.
+// Use for read-only account commands (no safety check).
+func setupAccount(ctx context.Context) (*httpclient.Client, string, error) {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return nil, "", err
 	}
-	return setupAccountClient(cfg)
+	return setupAccountClient(ctx, cfg)
 }
 
 // SetupAccountWithSafety resolves account credentials, runs a safety check,
 // and builds an account-plane httpclient. Use for mutating account commands.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// setupAccountWithSafety, which reads the state carried on its context.
 func SetupAccountWithSafety(op safety.Operation) (*httpclient.Client, string, error) {
-	cfg, err := LoadConfig()
+	return setupAccountWithSafety(context.Background(), op)
+}
+
+// SetupAccountWithSafety resolves account credentials, runs a safety check,
+// and builds an account-plane httpclient. Use for mutating account commands.
+func setupAccountWithSafety(ctx context.Context, op safety.Operation) (*httpclient.Client, string, error) {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return nil, "", err
 	}
-	if err := CheckSafety(cfg, op, safety.OwnershipUnknown); err != nil {
+	if err := checkSafety(ctx, cfg, op, safety.OwnershipUnknown); err != nil {
 		return nil, "", err
 	}
-	return setupAccountClient(cfg)
+	return setupAccountClient(ctx, cfg)
 }
 
-func setupAccountClient(cfg *config.Config) (*httpclient.Client, string, error) {
+func setupAccountClient(ictx context.Context, cfg *config.Config) (*httpclient.Client, string, error) {
 	ctx, err := cfg.CurrentContextObj()
 	if err != nil {
 		return nil, "", err
 	}
 
-	accountUUID := resolveUUIDNoDiscovery(ctx, "")
+	accountUUID := resolveUUIDNoDiscovery(ictx, ctx, "")
 	if accountUUID == "" {
 		return nil, "", fmt.Errorf("account UUID required: set DTCTL_ACCOUNT_UUID, add account-uuid to the current context, or pass --account-uuid")
 	}
 
-	accountToken, err := resolveAccountToken(cfg, accountUUID)
+	accountToken, err := resolveAccountToken(ictx, cfg, accountUUID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1629,8 +1841,8 @@ func setupAccountClient(cfg *config.Config) (*httpclient.Client, string, error) 
 	if err != nil {
 		return nil, "", err
 	}
-	level := verbosity
-	if debugMode {
+	level := verbosity(ictx)
+	if debugMode(ictx) {
 		level = 2
 	}
 	// Cap at 1 — level 2 dumps response bodies, which would expose the
@@ -1638,7 +1850,7 @@ func setupAccountClient(cfg *config.Config) (*httpclient.Client, string, error) 
 	if level > 1 {
 		level = 1
 	}
-	c.EnableVerboseLogging(level, os.Stderr)
+	c.EnableVerboseLogging(level, currentStderr(ictx))
 	return c, accountUUID, nil
 }
 
@@ -1730,9 +1942,25 @@ func extractSafeArgs(args []string) []string {
 // token refresh support. When the OAuth token expires during a long-running query poll
 // (which can exceed the 5-minute token lifetime), the executor automatically fetches a
 // fresh token and retries without aborting the query.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// newDQLExecutorFromConfig, which reads the state carried on its context.
 func NewDQLExecutorFromConfig(cfg *config.Config, c *client.Client) *exec.DQLExecutor {
-	executor := exec.NewDQLExecutor(c)
-	if config.IsOAuthStorageAvailable() {
+	return newDQLExecutorFromConfig(context.Background(), cfg, c)
+}
+
+// NewDQLExecutorFromConfig creates a DQL executor from a config and client, with OAuth
+// token refresh support. When the OAuth token expires during a long-running query poll
+// (which can exceed the 5-minute token lifetime), the executor automatically fetches a
+// fresh token and retries without aborting the query.
+func newDQLExecutorFromConfig(ictx context.Context, cfg *config.Config, c *client.Client) *exec.DQLExecutor {
+	executor := newDQLExecutor(ictx, c)
+	// A sealed config (a Session's) carries its token inline and resolves it
+	// from nowhere else, so a refresher could never hand back a different one.
+	// Asking first also keeps IsOAuthStorageAvailable's keyring probe off the
+	// request path: a concurrent invocation scrubs DTCTL_DISABLE_KEYRING into
+	// its own environment overlay, which that probe does not read.
+	if !cfg.InlineCredentialsOnly() && config.IsOAuthStorageAvailable() {
 		ctx, err := cfg.CurrentContextObj()
 		if err == nil && ctx.TokenRef != "" {
 			tokenRef := ctx.TokenRef
@@ -1745,7 +1973,7 @@ func NewDQLExecutorFromConfig(cfg *config.Config, c *client.Client) *exec.DQLExe
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initConfigHook)
 
 	// Register template functions for help/usage formatting
 	cobra.AddTemplateFunc("bold", func(s string) string {
@@ -1753,73 +1981,16 @@ func init() {
 	})
 	cobra.AddTemplateFunc("flagUsages", helpFlagUsages)
 
-	// Custom usage template with bold section headers.
-	// NOTE: This is a copy of Cobra's default usage template with {{bold ...}} wrappers.
-	// If upgrading Cobra, compare against the upstream default template for changes:
-	//   https://github.com/spf13/cobra/blob/main/command.go (search "usageTemplate")
-	rootCmd.SetUsageTemplate(`{{bold "Usage:"}}{{if .Runnable}}
-  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
-
-{{bold "Aliases:"}}
-  {{.NameAndAliases}}{{end}}{{if .HasExample}}
-
-{{bold "Examples:"}}
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
-
-{{bold "Available Commands:"}}{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
-
-{{bold .Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
-
-{{bold "Additional Commands:"}}{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-{{bold "Flags:"}}
-{{flagUsages .LocalFlags | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
-
-{{bold "Global Flags:"}}
-{{flagUsages .InheritedFlags | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-{{bold "Additional help topics:"}}{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`)
-
-	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (searches .dtctl.yaml upward, then $XDG_CONFIG_HOME/dtctl/config)")
-	rootCmd.PersistentFlags().StringVar(&contextName, "context", "", "use a specific context for this invocation (env: DTCTL_CONTEXT; never persisted)")
-	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "output format: json|yaml|csv|toon|table|wide|auto")
-	rootCmd.PersistentFlags().StringVar(&jqFilter, "jq", "", "jq filter expression for structured output (json|yaml|toon); applied to the result payload, not the --agent envelope (on query: '.records', not '.result.records'); non-structured formats are auto-promoted to json")
-	rootCmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "verbose output (-v for details, -vv for full debug including auth headers)")
-	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "enable debug mode (full HTTP request/response logging, equivalent to -vv)")
-	rootCmd.PersistentFlags().BoolVar(&plainMode, "plain", false, "plain output for machine processing (no colors, no interactive prompts)")
-	rootCmd.PersistentFlags().BoolVarP(&agentMode, "agent", "A", false, "agent output mode: wrap output in a structured JSON envelope with metadata")
-	rootCmd.PersistentFlags().BoolVar(&noAgent, "no-agent", false, "disable auto-detected agent mode")
-	rootCmd.PersistentFlags().BoolVar(&checkScopes, "check-scopes", false, "check the active token has the scopes this command requires, then exit without running it")
-	rootCmd.PersistentFlags().Int64Var(&chunkSize, "chunk-size", 500, "Paginate through all results in chunks of this size. 0 returns only the first page.")
-
-	// Both flags read as "absent" when empty, so `--context "$CTX"` with an
-	// unset CTX would silently run against the default context — the worst
-	// form of the bug rejectEmptyFlag exists for, since the command still
-	// succeeds, against the wrong tenant.
-	rejectEmptyFlag(rootCmd, "context")
-	rejectEmptyFlag(rootCmd, "config")
-
-	// Bind flags to viper
-	_ = viper.BindPFlag("context", rootCmd.PersistentFlags().Lookup("context"))
-	_ = viper.BindPFlag("output", rootCmd.PersistentFlags().Lookup("output"))
-	_ = viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
+	// Delegate to the shared helper so newCommandTree uses the same setup.
+	registerRootPersistentFlags(rootCmd, &gFlags)
 }
 
 // agentModeAutoDetectedFromArgs answers initConfig's auto-detection question
 // from the raw command line, for failures cobra raises before initConfig runs
 // (unknown command, unknown flag). It applies the same rules: an explicit
 // --no-agent, a session-backed invocation, or an explicit non-JSON -o opts out.
-func agentModeAutoDetectedFromArgs(args []string) bool {
-	if noAgent || runSession != nil || rawNoAgent(args) || !aidetect.Detect().Detected {
+func agentModeAutoDetectedFromArgs(ctx context.Context, args []string) bool {
+	if noAgent(ctx) || currentSession(ctx) != nil || rawNoAgent(args) || !aidetect.Detect().Detected {
 		return false
 	}
 	format, given := rawOutputFormat(args)
@@ -1867,14 +2038,46 @@ func rawOutputFormat(args []string) (string, bool) {
 	return "", false
 }
 
+// initConfigHook is the initializer cobra runs for every command it executes.
+// cobra's hooks take no context and are registered process-wide, so this one
+// cannot tell which invocation it is running for. Serialized invocations
+// exclude concurrent ones (see runMu), which makes the count of active
+// concurrent invocations enough: when there are none, this is the CLI or a
+// serialized Run, and the process-level state initConfig reads is the right
+// state. A concurrent tree runs initConfig itself, with its own context, from
+// the PersistentPreRunE of its root.
+func initConfigHook() {
+	if concurrentActive.Load() > 0 {
+		return
+	}
+	initConfig(context.Background())
+}
+
+// initConcurrentOnError runs initConfig for a concurrent invocation whose tree
+// never reached its root's PersistentPreRunE, so an invalid command line is
+// reported under the same settings as a valid one.
+func initConcurrentOnError(ctx context.Context) {
+	if inv := concurrentInvocation(ctx); inv != nil && !inv.initDone {
+		initConfig(ctx)
+		inv.initDone = true
+	}
+}
+
 // initConfig reads in config file and ENV variables if set
-func initConfig() {
+func initConfig(ctx context.Context) {
+	// A concurrent invocation runs the request-scoped half below (it reads and
+	// writes the invocation's own flags) and skips the process-wide half: viper
+	// and the output package's plain-mode switch are single process globals
+	// that concurrent requests would race on, and a Session replaces
+	// config-file resolution entirely anyway.
+	concurrent := concurrentInvocation(ctx) != nil
+
 	// Auto-detect AI agent environment and enable agent mode. Session-backed
 	// invocations skip auto-detection entirely: whether the *host process*
 	// runs under an AI agent says nothing about the request, and host env
 	// must not shape a tenant's output. Service callers opt in per request,
 	// explicitly, with --agent on the command line.
-	if !agentMode && !noAgent && runSession == nil {
+	if !agentMode(ctx) && !noAgent(ctx) && currentSession(ctx) == nil {
 		if info := aidetect.Detect(); info.Detected {
 			// Only auto-enable if user hasn't explicitly chosen a non-JSON
 			// output format. An explicit `-o json` is compatible — the agent
@@ -1882,35 +2085,38 @@ func initConfig() {
 			// out of habit, and treating that as an opt-out silently disarmed
 			// every envelope affordance (suggestions, warnings, advice) for
 			// exactly the audience they were built for (matrix-11 forensics).
-			outputFlag := rootCmd.PersistentFlags().Lookup("output")
-			if outputFlag == nil || !outputFlag.Changed || outputFormat == "json" {
-				agentMode = true
+			if !outputFormatChanged(ctx) || outputFormat(ctx) == "json" {
+				setAgentMode(ctx, true)
 			}
 		}
 	}
 
 	// Agent mode implies plain mode (no colors, no interactive prompts)
-	if agentMode {
-		plainMode = true
+	if agentMode(ctx) {
+		setPlainMode(ctx, true)
 	}
 
 	// DTCTL_OUTPUT provides a default output format when -o/--output is not
 	// given explicitly. The flag always wins; agent-mode auto-detection above
 	// also treats the env value as a default, not an explicit choice.
-	if f := rootCmd.PersistentFlags().Lookup("output"); f != nil && !f.Changed {
-		if env := os.Getenv("DTCTL_OUTPUT"); env != "" {
-			outputFormat = env
+	if !outputFormatChanged(ctx) {
+		if env := getenv(ctx, "DTCTL_OUTPUT"); env != "" {
+			setOutputFormat(ctx, env)
 		}
 	}
 
+	if concurrent {
+		return
+	}
+
 	// Propagate plain mode to the output package so ColorEnabled() respects --plain
-	if plainMode {
+	if plainMode(ctx) {
 		output.SetPlainMode(true)
 	}
 
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	} else if envPath := os.Getenv(config.EnvConfig); envPath != "" {
+	if cfgFile(ctx) != "" {
+		viper.SetConfigFile(cfgFile(ctx))
+	} else if envPath := getenv(ctx, config.EnvConfig); envPath != "" {
 		// DTCTL_CONFIG is an explicit, trusted config that bypasses discovery —
 		// mirror config.Load's precedence so diagnostics name the right file.
 		viper.SetConfigFile(envPath)
@@ -1934,8 +2140,29 @@ func initConfig() {
 
 	// Read config file if it exists
 	if err := viper.ReadInConfig(); err == nil {
-		if verbosity > 0 {
-			fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+		if verbosity(ctx) > 0 {
+			fmt.Fprintln(currentStderr(ctx), "Using config file:", viper.ConfigFileUsed())
 		}
 	}
+}
+
+// errNoAliasesForSession is aliasConfig's answer for a session-backed
+// invocation, which has no alias table.
+var errNoAliasesForSession = errors.New("a session-backed invocation does not resolve aliases")
+
+// loadHostConfig loads the host's own config: DTCTL_CONFIG, a local
+// .dtctl.yaml, or the global one. A variable so tests can see whether it is
+// called.
+var loadHostConfig = config.Load
+
+// aliasConfig loads the config alias resolution reads. A session-backed
+// invocation gets none, without anything being read: it is detached from the
+// host's config, and reading the host's files only to discard them would still
+// open them on a tenant's behalf (DTCTL_CONFIG, a .dtctl.yaml above the host's
+// working directory, the global config).
+func aliasConfig(ctx context.Context) (*config.Config, error) {
+	if currentSession(ctx) != nil {
+		return nil, errNoAliasesForSession
+	}
+	return loadHostConfig()
 }

@@ -12,7 +12,17 @@ Browser-based SSO login with automatic token refresh:
 dtctl auth login --context my-env --environment "https://abc12345.apps.dynatrace.com"
 ```
 
-Tokens are stored securely in your OS keyring. To log out:
+Tokens are stored securely in your OS keyring.
+
+**No keyring (headless Linux, fresh VMs, containers):** run `auth login` in a
+terminal and dtctl asks once whether to keep tokens in files under
+`~/.local/share/dtctl/oauth-tokens/` (owner-only, not encrypted) instead. Your
+answer is remembered on that machine and applies only while there is no keyring. dtctl never switches silently, and scripts
+or CI never get the question: set `DTCTL_TOKEN_STORAGE=file` there. To undo a
+remembered choice, delete the marker file `dtctl doctor` names, or set
+`DTCTL_TOKEN_STORAGE=keyring`.
+
+To log out:
 
 ```bash
 dtctl auth logout
@@ -112,7 +122,7 @@ Use `dtctl auth whoami -o json` for machine-readable output, or `--id-only` to g
 
 ### Credential storage
 
-OAuth and platform tokens are stored in your OS keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service), never in plain text.
+OAuth and platform tokens are stored in your OS keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service). The only exception is file-based storage, which you opt into explicitly (`DTCTL_TOKEN_STORAGE=file`, or by answering the one-time prompt on a machine with no keyring): those OAuth tokens are kept in owner-only (`0600`) files, not encrypted. A remembered answer applies only while the machine has no keyring; a locked or broken keyring is reported as an error rather than falling back.
 
 On **Linux and WSL**, gnome-keyring can start with only a transient session collection and no persistent login collection. When `dtctl auth login` detects a missing collection (`failed to unlock correct collection`), it connects to the D-Bus Secret Service, creates a persistent collection with the `default` alias, and triggers an OS password prompt if required (polling for up to two minutes). If automatic creation fails, the error message suggests alternatives such as token-based auth. `dtctl doctor` includes a keyring check that reports backend status.
 
@@ -537,6 +547,26 @@ Two caveats worth knowing:
 
 Limits apply to `dtctl query` and `dtctl wait query`. `dtctl inventory` keeps its
 own discovery cap (`--scan-limit-gbytes`, default 25).
+
+## Usage Tracking
+
+A context can opt in to a local tally of the DQL queries dtctl runs and the
+data they scan, shown by `dtctl usage` (today, 7d, 30d). It is off by default,
+and with it off dtctl writes nothing. Only the global config can turn it on; a
+project-local `.dtctl.yaml` cannot.
+
+```bash
+dtctl config set-context prod --usage-tracking   # adds usage-tracking: true to the context
+dtctl usage
+dtctl usage reset                                # clear it
+```
+
+Only aggregate counters per UTC day and context are kept (query count, failed
+queries, scanned bytes, records and data points), never query text, results,
+identity or tokens. It counts only queries dtctl ran on this machine; billing
+events (`dt.system.events`, `BILLING_USAGE_EVENT`) are the authoritative
+source. See [USAGE_TRACKING.md](USAGE_TRACKING.md) for the file location and
+format.
 
 ## Command Aliases
 

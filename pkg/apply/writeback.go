@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
-
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 // writeIDToFile injects the given id into the top of a YAML or JSON source file
@@ -18,14 +15,14 @@ import (
 //
 // If the file already contains an id field the function is a no-op (returns nil).
 // Errors writing the file are returned but do NOT affect the already-completed apply.
-func writeIDToFile(filename, id string) error {
+func (a *Applier) writeIDToFile(filename, id string) error {
 	if filename == "" {
 		return fmt.Errorf("no source file to write ID back to")
 	}
 
 	// Through the vfs seam: for embedded invocations the writeback lands in
 	// the request's virtual filesystem, never on the host.
-	original, err := vfs.ReadFile(filename)
+	original, err := a.vfsEnv.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", filename, err)
 	}
@@ -39,7 +36,7 @@ func writeIDToFile(filename, id string) error {
 		return nil
 	}
 
-	return vfs.WriteFile(filename, updated, 0o644)
+	return a.vfsEnv.WriteFile(filename, updated, 0o644)
 }
 
 // injectIDIntoFileContent returns the file content with the id field injected,
@@ -156,7 +153,7 @@ func detectJSONIndent(afterBrace []byte) string {
 // field before the apply — in that case neither the write-back nor the hint is
 // needed, and the function is a no-op.
 // If resourceID is empty the function is always a no-op.
-func applyWriteBack(sourceFile, resourceID, resourceType string, writeID bool, fileAlreadyHasID bool, warnings *[]string) {
+func (a *Applier) applyWriteBack(sourceFile, resourceID, resourceType string, writeID bool, fileAlreadyHasID bool, warnings *[]string) {
 	if sourceFile == StdinSourceFile {
 		// Piped input: there is no file to write to or to name in a hint.
 		return
@@ -166,13 +163,13 @@ func applyWriteBack(sourceFile, resourceID, resourceType string, writeID bool, f
 		return
 	}
 	if writeID {
-		if err := writeIDToFile(sourceFile, resourceID); err != nil {
-			stderrWarn(warnings, "could not write ID back to file: %v", err)
+		if err := a.writeIDToFile(sourceFile, resourceID); err != nil {
+			a.stderrWarn(warnings, "could not write ID back to file: %v", err)
 		} else if sourceFile != "" {
-			fmt.Fprintf(os.Stderr, "Wrote id %s to %s\n", resourceID, sourceFile)
+			fmt.Fprintf(a.stderrW(), "Wrote id %s to %s\n", resourceID, sourceFile)
 		}
 	} else {
-		printWriteIDHint(sourceFile, resourceID, resourceType)
+		a.printWriteIDHint(sourceFile, resourceID, resourceType)
 	}
 }
 
@@ -183,11 +180,11 @@ const StdinSourceFile = "<stdin>"
 
 // printWriteIDHint prints a stderr hint when a resource was created without --write-id.
 // It suggests the exact command to recover without creating another duplicate.
-func printWriteIDHint(sourceFile, resourceID, resourceType string) {
+func (a *Applier) printWriteIDHint(sourceFile, resourceID, resourceType string) {
 	if sourceFile == "" {
 		return
 	}
-	fmt.Fprintf(os.Stderr,
+	fmt.Fprintf(a.stderrW(),
 		"Hint: to update this %s in future runs without creating duplicates:\n"+
 			"  dtctl apply -f %s --write-id --id %s\n",
 		resourceType, sourceFile, resourceID,

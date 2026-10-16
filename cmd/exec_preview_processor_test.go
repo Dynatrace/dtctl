@@ -74,7 +74,7 @@ func TestExecPreviewProcessorCmd_JSONOutput(t *testing.T) {
 
 	// An explicit -o json delegates to the printer's PrintList instead of the
 	// default indented-JSON path.
-	outputFormat = "json"
+	gFlags.outputFormat = "json"
 	rootCmd.PersistentFlags().Lookup("output").Changed = true
 
 	var runErr error

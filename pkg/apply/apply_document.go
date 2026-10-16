@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
@@ -47,7 +46,7 @@ func (a *Applier) applyDocument(data []byte, docType string, opts ApplyOptions) 
 	// Show validation warnings on stderr and collect for result
 	var resultWarnings []string
 	for _, w := range validationWarnings {
-		stderrWarn(&resultWarnings, "%s", w)
+		a.stderrWarn(&resultWarnings, "%s", w)
 	}
 
 	// Count tiles/sections for feedback
@@ -95,7 +94,7 @@ func (a *Applier) applyDocument(data []byte, docType string, opts ApplyOptions) 
 
 		// File had no id field before this apply — stamp it back or hint.
 		if resultID != "(ID not returned)" {
-			applyWriteBack(a.sourceFile, resultID, docType, opts.WriteID, false, &resultWarnings)
+			a.applyWriteBack(a.sourceFile, resultID, docType, opts.WriteID, false, &resultWarnings)
 		}
 
 		return a.buildDocumentResult(ActionCreated, docType, resultID, resultName, tileCount, resultWarnings, labels), nil
@@ -135,7 +134,7 @@ func (a *Applier) applyDocument(data []byte, docType string, opts ApplyOptions) 
 		createID := id
 		if isUUID(id) {
 			createID = ""
-			stderrWarn(&resultWarnings, "Creating new %s (UUID IDs cannot be reused across tenants)", docType)
+			a.stderrWarn(&resultWarnings, "Creating new %s (UUID IDs cannot be reused across tenants)", docType)
 		}
 
 		result, err := handler.Create(document.CreateRequest{
@@ -164,7 +163,7 @@ func (a *Applier) applyDocument(data []byte, docType string, opts ApplyOptions) 
 		// For the non-UUID case the file already carries the id field, so neither
 		// the write-back nor the hint is needed (applyWriteBack treats it as a no-op).
 		fileAlreadyHasID := !isUUID(id) // non-UUID id was in the file and is preserved
-		applyWriteBack(a.sourceFile, resultID, docType, opts.WriteID, fileAlreadyHasID, &resultWarnings)
+		a.applyWriteBack(a.sourceFile, resultID, docType, opts.WriteID, fileAlreadyHasID, &resultWarnings)
 
 		return a.buildDocumentResult(ActionCreated, docType, resultID, resultName, tileCount, resultWarnings, labels), nil
 	}
@@ -179,7 +178,7 @@ func (a *Applier) applyDocument(data []byte, docType string, opts ApplyOptions) 
 	if opts.ShowDiff {
 		existingDoc, err := handler.Get(id)
 		if err == nil && len(existingDoc.Content) > 0 {
-			showJSONDiff(existingDoc.Content, contentData, docType)
+			a.showJSONDiff(existingDoc.Content, contentData, docType)
 		}
 	}
 
@@ -371,7 +370,7 @@ func itemName(docType string) string {
 }
 
 // showJSONDiff displays a simple diff between two JSON documents
-func showJSONDiff(oldData, newData []byte, resourceType string) {
+func (a *Applier) showJSONDiff(oldData, newData []byte, resourceType string) {
 	// Pretty-print both for comparison
 	var oldPretty, newPretty bytes.Buffer
 	if err := json.Indent(&oldPretty, oldData, "", "  "); err != nil {
@@ -384,7 +383,7 @@ func showJSONDiff(oldData, newData []byte, resourceType string) {
 	oldLines := strings.Split(oldPretty.String(), "\n")
 	newLines := strings.Split(newPretty.String(), "\n")
 
-	fmt.Fprintf(os.Stderr, "\n--- existing %s\n+++ new %s\n", resourceType, resourceType)
+	fmt.Fprintf(a.stderrW(), "\n--- existing %s\n+++ new %s\n", resourceType, resourceType)
 
 	// Simple line-by-line diff
 	maxLines := len(oldLines)
@@ -404,19 +403,19 @@ func showJSONDiff(oldData, newData []byte, resourceType string) {
 
 		if oldLine != newLine {
 			if oldLine != "" {
-				fmt.Fprintf(os.Stderr, "- %s\n", oldLine)
+				fmt.Fprintf(a.stderrW(), "- %s\n", oldLine)
 			}
 			if newLine != "" {
-				fmt.Fprintf(os.Stderr, "+ %s\n", newLine)
+				fmt.Fprintf(a.stderrW(), "+ %s\n", newLine)
 			}
 			changes++
 		}
 	}
 
 	if changes == 0 {
-		fmt.Fprintln(os.Stderr, "(no changes)")
+		fmt.Fprintln(a.stderrW(), "(no changes)")
 	}
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(a.stderrW())
 }
 
 // documentURL returns the UI URL for a document

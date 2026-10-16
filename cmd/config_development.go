@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -76,11 +75,14 @@ func contains(list []string, v string) bool {
 // and from `dtctl commands`: the features do not exist until opted into, so
 // something has to be able to name them, and a command a caller must ask for
 // by name is a much narrower disclosure than a badge in `--help`.
-var configListDevelopmentCmd = &cobra.Command{
-	Use:     "list-development",
-	Aliases: []string{"list-dev"},
-	Short:   "List development-tier features and whether they are enabled",
-	Long: `List the development-tier features this dtctl build carries.
+var configListDevelopmentCmd = newConfigListDevelopmentCmd()
+
+func newConfigListDevelopmentCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "list-development",
+		Aliases: []string{"list-dev"},
+		Short:   "List development-tier features and whether they are enabled",
+		Long: `List the development-tier features this dtctl build carries.
 
 Development features are unfinished. They carry no stability guarantees, may
 change or be removed without notice, and are not registered on the command tree
@@ -93,48 +95,51 @@ Enable one for a single process:
   ` + config.DevelopmentEnvVar + `=<feature> dtctl <command>
   ` + config.DevelopmentEnvVar + `=` + config.DevelopmentAll + ` dtctl <command>   # every feature
 `,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		features := stability.DefaultRegistry().Features()
-		// Resolved from the config this invocation actually loaded (honoring
-		// --config / DTCTL_CONFIG), not from the ambient default: a listing
-		// that reported a different file's opt-ins than the one being edited
-		// would be worse than no listing.
-		enabled := map[string]bool{}
-		if cfg, err := LoadConfig(); err == nil {
-			enabled = legacyDevelopmentFeatures(cfg.EnabledDevelopmentFeatures())
-		}
-
-		switch outputFormat {
-		case "json":
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(developmentRows(features, enabled))
-		case "yaml", "yml":
-			enc := yaml.NewEncoder(os.Stdout)
-			enc.SetIndent(2)
-			if err := enc.Encode(developmentRows(features, enabled)); err != nil {
-				return err
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			features := stability.DefaultRegistry().Features()
+			// Resolved from the config this invocation actually loaded (honoring
+			// --config / DTCTL_CONFIG), not from the ambient default: a listing
+			// that reported a different file's opt-ins than the one being edited
+			// would be worse than no listing.
+			enabled := map[string]bool{}
+			if cfg, err := loadConfig(cmdContext(cmd)); err == nil {
+				enabled = legacyDevelopmentFeatures(cmdContext(cmd), cfg.EnabledDevelopmentFeatures())
 			}
-			return enc.Close()
-		}
 
-		if len(features) == 0 {
-			fmt.Println("This build carries no development-tier features.")
-			return nil
-		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
-		fmt.Fprintln(w, "FEATURE\tCOMMAND\tENABLED")
-		for _, f := range features {
-			path, _ := stability.DefaultRegistry().Path(f)
-			state := "no"
-			if stability.Enabled(f, enabled) {
-				state = "yes"
+			switch outputFormat(cmdContext(cmd)) {
+			case "json":
+				enc := json.NewEncoder(currentStdout(cmdContext(cmd)))
+				enc.SetIndent("", "  ")
+				return enc.Encode(developmentRows(features, enabled))
+			case "yaml", "yml":
+				enc := yaml.NewEncoder(currentStdout(cmdContext(cmd)))
+				enc.SetIndent(2)
+				if err := enc.Encode(developmentRows(features, enabled)); err != nil {
+					return err
+				}
+				return enc.Close()
 			}
-			fmt.Fprintf(w, "%s\tdtctl %s\t%s\n", f, path, state)
-		}
-		return w.Flush()
-	},
+
+			if len(features) == 0 {
+				fmt.Fprintln(currentStdout(cmdContext(cmd)), "This build carries no development-tier features.")
+				return nil
+			}
+			w := tabwriter.NewWriter(currentStdout(cmdContext(cmd)), 0, 8, 2, ' ', 0)
+			fmt.Fprintln(w, "FEATURE\tCOMMAND\tENABLED")
+			for _, f := range features {
+				path, _ := stability.DefaultRegistry().Path(f)
+				state := "no"
+				if stability.Enabled(f, enabled) {
+					state = "yes"
+				}
+				fmt.Fprintf(w, "%s\tdtctl %s\t%s\n", f, path, state)
+			}
+			return w.Flush()
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // developmentRow is one machine-readable development-feature entry.
@@ -162,5 +167,4 @@ func developmentRows(features []string, enabled map[string]bool) []developmentRo
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(configListDevelopmentCmd)
 }

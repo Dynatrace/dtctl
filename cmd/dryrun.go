@@ -3,9 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -153,12 +152,12 @@ func (r *dryRunReport) Payload(raw []byte) *dryRunReport {
 
 // Print renders the report. It is the return value of a dry-run branch.
 func (r *dryRunReport) Print() error {
-	if !agentMode {
-		// Resolved per call, not cached: the embedding seam swaps the streams per
-		// invocation.
-		w := io.Writer(os.Stdout)
+	ctx := cmdContext(r.cmd)
+	if !agentMode(ctx) {
+		// Resolved per call, not cached: the streams belong to the invocation.
+		w := currentStdout(ctx)
 		if r.stderr {
-			w = os.Stderr
+			w = currentStderr(ctx)
 		}
 		for _, line := range r.lines {
 			if line.label != "" {
@@ -189,7 +188,7 @@ func (r *dryRunReport) Print() error {
 	// at a terminal. A dry run piped to an agent must be compact like every other
 	// envelope dtctl emits — indenting it would spend a third more tokens on
 	// whitespace, for the one audience this rendering exists to serve.
-	return output.EncodeEnvelope(os.Stdout, output.Response{
+	return output.EncodeEnvelope(currentStdout(ctx), output.Response{
 		OK:      true,
 		Result:  plan,
 		Context: &output.ResponseContext{Verb: verb, Resource: resource},
@@ -329,9 +328,12 @@ var dryRunCommands = []*cobra.Command{
 	updateGCPMonitoringConfigCmd,
 }
 
+// dryRunUsage is the --dry-run help text, shared by every declaration.
+const dryRunUsage = "print what would be done without doing it"
+
 func init() {
 	for _, c := range dryRunCommands {
-		c.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be done without doing it")
+		c.Flags().BoolVar(&gFlags.dryRun, "dry-run", false, dryRunUsage)
 	}
 
 	// A hidden root declaration, so that Cobra still knows --dry-run is a
@@ -346,14 +348,39 @@ func init() {
 	// parsed for a command that has no dry run — which is what
 	// rejectUnimplementedDryRun turns into the usage error. Hidden keeps it out
 	// of --help and out of the `commands` catalog's global flags.
-	rootCmd.PersistentFlags().Bool("dry-run", false, "print what would be done without doing it")
+	rootCmd.PersistentFlags().Bool("dry-run", false, dryRunUsage)
 	_ = rootCmd.PersistentFlags().MarkHidden("dry-run")
 	rootDryRunFlag = rootCmd.PersistentFlags().Lookup("dry-run")
 }
 
-// rootDryRunFlag is the hidden root declaration registered above. Held as a
-// variable rather than looked up through rootCmd, because rootCmd's
-// PersistentPreRunE calls the function that reads it.
+// dryRunPaths is dryRunCommands as root-relative command paths ("delete
+// workflow"), so a per-invocation tree can find its own copies of them.
+// Computed on first use, after every init() has wired the singleton.
+var dryRunPaths = sync.OnceValue(func() map[string]bool {
+	paths := make(map[string]bool, len(dryRunCommands))
+	for _, c := range dryRunCommands {
+		paths[commandPathRelative(c, rootCmd)] = true
+	}
+	return paths
+})
+
+// bindDryRunFlags gives a per-invocation tree's dry-run commands their
+// --dry-run, bound to that invocation's flags. The init() above reaches only
+// the singleton's commands: without this, a fresh tree's `delete workflow x
+// --dry-run` parses the flag into the hidden root declaration, which no
+// command reads — and deletes the workflow.
+func bindDryRunFlags(root *cobra.Command, flags *rootFlags) {
+	paths := dryRunPaths()
+	walkCommands(root, func(c *cobra.Command) {
+		if paths[commandPathRelative(c, root)] {
+			c.Flags().BoolVar(&flags.dryRun, "dry-run", false, dryRunUsage)
+		}
+	})
+}
+
+// rootDryRunFlag is the singleton's hidden root declaration registered above.
+// rejectUnimplementedDryRun looks it up through the command's own root, so
+// that a per-invocation tree checks its own copy; tests reach it here.
 var rootDryRunFlag *pflag.Flag
 
 // dryRunUnavailableMessage is the one wording for "this command has no dry
@@ -379,7 +406,11 @@ func dryRunUnavailableMessage(cmd *cobra.Command) string {
 // subcommand for a workflow or a login, so "use 'dtctl verify'" dead-ended
 // every caller it was written for.
 func verifyAlternativeFor(cmd *cobra.Command) string {
-	for _, sub := range verifyCmd.Commands() {
+	verify, _, err := cmd.Root().Find([]string{"verify"})
+	if err != nil || verify.Name() != "verify" {
+		return ""
+	}
+	for _, sub := range verify.Commands() {
 		if sub == cmd || !sub.HasAlias(cmd.Name()) && sub.Name() != cmd.Name() {
 			continue
 		}
@@ -392,10 +423,13 @@ func verifyAlternativeFor(cmd *cobra.Command) string {
 // not implement one. The flag reaches the root declaration only when the
 // command has none of its own, so its presence there *is* the error.
 func rejectUnimplementedDryRun(cmd *cobra.Command) error {
-	if rootDryRunFlag == nil || !rootDryRunFlag.Changed {
+	// The hidden declaration on cmd's own tree: rootDryRunFlag for the
+	// singleton, a per-invocation tree's copy for a concurrent embedder.
+	rootFlag := cmd.Root().PersistentFlags().Lookup("dry-run")
+	if rootFlag == nil || !rootFlag.Changed {
 		return nil
 	}
-	if own := cmd.Flags().Lookup("dry-run"); own != nil && own != rootDryRunFlag {
+	if own := cmd.Flags().Lookup("dry-run"); own != nil && own != rootFlag {
 		return nil
 	}
 	return &suggest.FlagError{Flag: "dry-run", Message: dryRunUnavailableMessage(cmd)}

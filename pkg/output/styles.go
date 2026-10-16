@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/term"
 )
@@ -15,16 +16,33 @@ var (
 	colorEnabledOnce   sync.Once
 	colorEnabledResult bool
 	plainModeEnabled   bool
+	// colorPinnedOff overrides the cached decision with "no colour". Set by
+	// PinColorOff for a process whose output is never a terminal's, such as an
+	// embedder running invocations concurrently; cleared by ResetColorCache.
+	colorPinnedOff atomic.Bool
 )
 
 // ColorEnabled returns whether color output should be used.
 // Respects NO_COLOR env var (https://no-color.org/), FORCE_COLOR env var,
 // and auto-detects non-TTY output.
 func ColorEnabled() bool {
+	if colorPinnedOff.Load() {
+		return false
+	}
 	colorEnabledOnce.Do(func() {
 		colorEnabledResult = detectColor()
 	})
 	return colorEnabledResult
+}
+
+// PinColorOff turns colour off for the whole process, ahead of the cached
+// detection, until ResetColorCache. The detection reads the process: NO_COLOR
+// and FORCE_COLOR from its environment, and whether its stdout is a terminal.
+// An invocation that prints to a writer of its own, as a concurrent embedded
+// invocation does, is never a terminal and must not inherit the host's answer.
+// Safe to call from several goroutines.
+func PinColorOff() {
+	colorPinnedOff.Store(true)
 }
 
 // SetPlainMode disables color output when --plain is used.
@@ -71,6 +89,7 @@ func ResetColorCache() {
 	colorEnabledOnce = sync.Once{}
 	colorEnabledResult = false
 	plainModeEnabled = false
+	colorPinnedOff.Store(false)
 }
 
 // Colorize wraps text in ANSI color codes if color is enabled.

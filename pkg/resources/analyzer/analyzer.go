@@ -147,7 +147,12 @@ func fromSDKExecuteResult(s *sdkana.ExecuteResult) *ExecuteResult {
 // ParseInputFromFile reads and parses analyzer input from a file.
 // This is a CLI-layer helper and intentionally not part of the SDK.
 func ParseInputFromFile(filename string) (map[string]interface{}, error) {
-	content, err := vfs.ReadFile(filename)
+	return ParseInputFromFileWith(vfs.Env{}, filename)
+}
+
+// ParseInputFromFileWith is ParseInputFromFile through the given invocation Env.
+func ParseInputFromFileWith(env vfs.Env, filename string) (map[string]interface{}, error) {
+	content, err := env.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}

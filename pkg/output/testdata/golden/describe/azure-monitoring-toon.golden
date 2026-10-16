@@ -4,13 +4,13 @@ objectId: azmon-a1b2c3d4
 value:
   azure:
     configurationMode: STANDARD
-    credentials[#1]{connectionId,description,enabled,servicePrincipalId,type}:
+    credentials[1]{connectionId,description,enabled,servicePrincipalId,type}:
       azure-conn-a1b2c3d4,Main credential,true,"",CLIENT_SECRET
     deploymentMode: FULL
     deploymentScope: MANAGEMENT_GROUP
     subscriptionFilteringMode: ALL
   description: Production Azure monitoring
   enabled: true
-  featureSets[#2]: default,advanced
+  featureSets[2]: default,advanced
   version: "1.0"
 version: "1.0"

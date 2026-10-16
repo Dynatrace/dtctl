@@ -155,7 +155,7 @@ func TestClaimEnvironmentShare_DryRun(t *testing.T) {
 	srv := httptest.NewServer(claimMux(t, &called))
 	t.Cleanup(srv.Close)
 	setupShareCmdTest(t, srv)
-	dryRun = true
+	gFlags.dryRun = true
 
 	out := captureExtStdout(t, func() {
 		if err := claimEnvironmentShareCmd.RunE(claimEnvironmentShareCmd, []string{"share-1"}); err != nil {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -59,13 +60,13 @@ func TestDeleteServiceUserRequiresExactlyOneUUID(t *testing.T) {
 }
 
 func TestCreateServiceUserDryRunSkipsSetup(t *testing.T) {
-	oldDryRun := dryRun
+	oldDryRun := dryRun(context.Background())
 	oldSetup := setupServiceUserAccountWithSafety
 	nameFlag := accountCreateServiceUserCmd.Flags().Lookup("name")
 	descriptionFlag := accountCreateServiceUserCmd.Flags().Lookup("description")
 	oldDescription := descriptionFlag.Value.String()
 	t.Cleanup(func() {
-		dryRun = oldDryRun
+		gFlags.dryRun = oldDryRun
 		setupServiceUserAccountWithSafety = oldSetup
 		// Reset name via Reset() because nonEmptyStringValue rejects Set("").
 		if v, ok := nameFlag.Value.(*nonEmptyStringValue); ok {
@@ -74,7 +75,7 @@ func TestCreateServiceUserDryRunSkipsSetup(t *testing.T) {
 		_ = accountCreateServiceUserCmd.Flags().Set("description", oldDescription)
 	})
 
-	dryRun = true
+	gFlags.dryRun = true
 	_ = accountCreateServiceUserCmd.Flags().Set("name", "automation-alpha")
 	_ = accountCreateServiceUserCmd.Flags().Set("description", "Synthetic integration identity")
 	called := false
@@ -92,14 +93,14 @@ func TestCreateServiceUserDryRunSkipsSetup(t *testing.T) {
 }
 
 func TestDeleteServiceUserDryRunSkipsSetup(t *testing.T) {
-	oldDryRun := dryRun
+	oldDryRun := dryRun(context.Background())
 	oldSetup := setupServiceUserAccountWithSafety
 	t.Cleanup(func() {
-		dryRun = oldDryRun
+		gFlags.dryRun = oldDryRun
 		setupServiceUserAccountWithSafety = oldSetup
 	})
 
-	dryRun = true
+	gFlags.dryRun = true
 	called := false
 	setupServiceUserAccountWithSafety = func(safety.Operation) (*httpclient.Client, string, error) {
 		called = true
@@ -115,11 +116,11 @@ func TestDeleteServiceUserDryRunSkipsSetup(t *testing.T) {
 }
 
 func TestCreateServiceUserUsesCreateSafetyOperation(t *testing.T) {
-	oldDryRun := dryRun
+	oldDryRun := dryRun(context.Background())
 	oldSetup := setupServiceUserAccountWithSafety
 	nameFlag := accountCreateServiceUserCmd.Flags().Lookup("name")
 	t.Cleanup(func() {
-		dryRun = oldDryRun
+		gFlags.dryRun = oldDryRun
 		setupServiceUserAccountWithSafety = oldSetup
 		// Reset name via Reset() because nonEmptyStringValue rejects Set("").
 		if v, ok := nameFlag.Value.(*nonEmptyStringValue); ok {
@@ -127,7 +128,7 @@ func TestCreateServiceUserUsesCreateSafetyOperation(t *testing.T) {
 		}
 	})
 
-	dryRun = false
+	gFlags.dryRun = false
 	_ = accountCreateServiceUserCmd.Flags().Set("name", "automation-alpha")
 	stop := errors.New("stop after safety setup")
 	var got safety.Operation
@@ -145,14 +146,14 @@ func TestCreateServiceUserUsesCreateSafetyOperation(t *testing.T) {
 }
 
 func TestDeleteServiceUserUsesDeleteSafetyOperation(t *testing.T) {
-	oldDryRun := dryRun
+	oldDryRun := dryRun(context.Background())
 	oldSetup := setupServiceUserAccountWithSafety
 	t.Cleanup(func() {
-		dryRun = oldDryRun
+		gFlags.dryRun = oldDryRun
 		setupServiceUserAccountWithSafety = oldSetup
 	})
 
-	dryRun = false
+	gFlags.dryRun = false
 	stop := errors.New("stop after safety setup")
 	var got safety.Operation
 	setupServiceUserAccountWithSafety = func(op safety.Operation) (*httpclient.Client, string, error) {

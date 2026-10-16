@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,9 +38,9 @@ func TestCtxListContexts(t *testing.T) {
 	setupCtxTestConfig(t)
 
 	// Save and restore cfgFile
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	err := ctxCmd.RunE(ctxCmd, []string{})
 	if err != nil {
@@ -50,9 +51,9 @@ func TestCtxListContexts(t *testing.T) {
 func TestCtxSwitchContext(t *testing.T) {
 	setupCtxTestConfig(t)
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	// Switch to prod
 	err := ctxCmd.RunE(ctxCmd, []string{"prod"})
@@ -73,9 +74,9 @@ func TestCtxSwitchContext(t *testing.T) {
 func TestCtxSwitchNonExistent(t *testing.T) {
 	setupCtxTestConfig(t)
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	err := ctxCmd.RunE(ctxCmd, []string{"nonexistent"})
 	if err == nil {
@@ -89,9 +90,9 @@ func TestCtxSwitchNonExistent(t *testing.T) {
 func TestCtxCurrentCmd(t *testing.T) {
 	setupCtxTestConfig(t)
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	err := ctxCurrentCmd.RunE(ctxCurrentCmd, []string{})
 	if err != nil {
@@ -102,9 +103,9 @@ func TestCtxCurrentCmd(t *testing.T) {
 func TestCtxDescribeCmd(t *testing.T) {
 	setupCtxTestConfig(t)
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	t.Run("describe existing context", func(t *testing.T) {
 		err := ctxDescribeCmd.RunE(ctxDescribeCmd, []string{"dev"})
@@ -128,9 +129,9 @@ func TestCtxSetCmd(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	t.Run("create new context", func(t *testing.T) {
 		_ = ctxSetCmd.Flags().Set("environment", "https://staging.example.com")
@@ -241,9 +242,9 @@ func TestCtxSetCmd(t *testing.T) {
 func TestCtxDeleteCmd(t *testing.T) {
 	setupCtxTestConfig(t)
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	t.Run("delete non-current context", func(t *testing.T) {
 		err := ctxDeleteCmd.RunE(ctxDeleteCmd, []string{"prod"})
@@ -311,9 +312,9 @@ func TestCtxTokenCmd(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	captureStdout := func(t *testing.T, fn func()) string {
 		t.Helper()
@@ -370,9 +371,9 @@ func TestCtxWithCustomConfigPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "custom-config.yaml")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	// Create config using ctx set
 	_ = ctxSetCmd.Flags().Set("environment", "https://test.example.com")

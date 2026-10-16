@@ -6,10 +6,13 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-var enableCmd = &cobra.Command{
-	Use:   "enable",
-	Short: "Enable cloud monitoring configurations",
-	Long: `Enable a cloud monitoring configuration by optionally updating the connection
+var enableCmd = newEnableCmd()
+
+func newEnableCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "enable",
+		Short: "Enable cloud monitoring configurations",
+		Long: `Enable a cloud monitoring configuration by optionally updating the connection
 credentials and enabling the monitoring config in a single step.
 
 This is a convenience command that combines two operations:
@@ -19,7 +22,7 @@ This is a convenience command that combines two operations:
 Available resources:
   gcp monitoring          Enable GCP monitoring configuration (Preview)
   azure monitoring        Enable Azure monitoring configuration`,
-	Example: `  # Enable GCP monitoring with service account
+		Example: `  # Enable GCP monitoring with service account
   dtctl enable gcp monitoring --name "my-gcp-monitoring" --serviceAccountId "sa@project.iam.gserviceaccount.com"
 
   # Enable Azure monitoring with federated identity
@@ -27,7 +30,10 @@ Available resources:
 
   # Enable monitoring without updating connection credentials
   dtctl enable gcp monitoring --name "my-gcp-monitoring"`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -37,5 +43,4 @@ func init() {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(enableCmd)
 }

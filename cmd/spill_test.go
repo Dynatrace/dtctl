@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -27,10 +28,10 @@ func emptyConfig() *config.Config {
 }
 
 func TestResolveSpillOptions_Defaults(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
 
-	agentMode = false
+	gFlags.agentMode = false
 	got, err := resolveSpillOptions(newSpillTestCmd(), emptyConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestResolveSpillOptions_Defaults(t *testing.T) {
 		t.Errorf("bare default mode = %q, want never", got.Mode)
 	}
 
-	agentMode = true
+	gFlags.agentMode = true
 	got, err = resolveSpillOptions(newSpillTestCmd(), emptyConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -53,9 +54,9 @@ func TestResolveSpillOptions_Defaults(t *testing.T) {
 }
 
 func TestResolveSpillOptions_FlagBeatsEnvBeatsConfig(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
-	agentMode = false
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
+	gFlags.agentMode = false
 
 	cfg := &config.Config{Spill: config.SpillConfig{Mode: "auto"}}
 
@@ -82,9 +83,9 @@ func TestResolveSpillOptions_FlagBeatsEnvBeatsConfig(t *testing.T) {
 }
 
 func TestResolveSpillOptions_BareSpill(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
-	agentMode = false
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
+	gFlags.agentMode = false
 
 	c := newSpillTestCmd()
 	// emulate bare --spill (NoOptDefVal)
@@ -194,15 +195,15 @@ func TestSpillWritesParquet(t *testing.T) {
 // actually use — while an explicit request fails, because silently inlining a
 // result the command line asked to spill would misreport what happened.
 func TestResolveSpillOptions_WithoutHostDiskCapability(t *testing.T) {
-	origAgent := agentMode
+	origAgent := agentMode(context.Background())
 	origCaps := SetCapabilities(Capabilities{}) // grant nothing, as embedders do
 	defer func() {
-		agentMode = origAgent
+		gFlags.agentMode = origAgent
 		SetCapabilities(origCaps)
 	}()
 
 	// Agent mode would default to auto; without the capability it is never.
-	agentMode = true
+	gFlags.agentMode = true
 	got, err := resolveSpillOptions(newSpillTestCmd(), emptyConfig())
 	if err != nil {
 		t.Fatalf("automatic spill must degrade quietly, got error: %v", err)
@@ -248,14 +249,14 @@ func TestResolveSpillOptions_WithoutHostDiskCapability(t *testing.T) {
 // TestResolveSpillOptions_CLIKeepsSpilling guards the other direction: the CLI
 // grants HostDiskSpill, so none of the above changes local behaviour.
 func TestResolveSpillOptions_CLIKeepsSpilling(t *testing.T) {
-	origAgent := agentMode
+	origAgent := agentMode(context.Background())
 	origCaps := SetCapabilities(AllCapabilities())
 	defer func() {
-		agentMode = origAgent
+		gFlags.agentMode = origAgent
 		SetCapabilities(origCaps)
 	}()
 
-	agentMode = true
+	gFlags.agentMode = true
 	got, err := resolveSpillOptions(newSpillTestCmd(), emptyConfig())
 	if err != nil {
 		t.Fatal(err)

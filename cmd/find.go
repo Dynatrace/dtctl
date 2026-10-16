@@ -7,10 +7,13 @@ import (
 )
 
 // findCmd represents the find command
-var findCmd = &cobra.Command{
-	Use:   "find",
-	Short: "Find resources based on criteria",
-	Long: `Find Dynatrace resources that match specific criteria.
+var findCmd = newFindCmd()
+
+func newFindCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "find",
+		Short: "Find resources based on criteria",
+		Long: `Find Dynatrace resources that match specific criteria.
 
 Searches across resources using platform-level matching rather than simple
 listing. Use 'dtctl get' to list all resources of a type, and 'dtctl find'
@@ -18,7 +21,7 @@ when you need to match against specific data or capabilities.
 
 Available finders:
   intents                 Find app intents that match given input data`,
-	Example: `  # Find intents that can handle specific data
+		Example: `  # Find intents that can handle specific data
   dtctl find intents --app-id <app-id>
 
   # Find intents with JSON output
@@ -26,7 +29,10 @@ Available finders:
 
   # Find intents matching a payload
   dtctl find intents --data '{"key": "value"}'`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -37,5 +43,4 @@ func init() {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(findCmd)
 }

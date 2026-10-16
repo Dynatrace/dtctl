@@ -4,21 +4,21 @@ objectId: gcpmon-a1b2c3d4
 value:
   description: Production GCP monitoring
   enabled: true
-  featureSets[#1]: default
+  featureSets[1]: default
   googleCloud:
-    credentials[#1]{connectionId,description,enabled,serviceAccount}:
+    credentials[1]{connectionId,description,enabled,serviceAccount}:
       gcp-conn-x1y2z3,Main SA credential,true,sa-monitor@project-id.iam.gserviceaccount.com
-    locationFiltering[#2]: us-east1,eu-west1
-    projectFiltering[#1]: my-project-123
-    resources[#2]:
+    locationFiltering[2]: us-east1,eu-west1
+    projectFiltering[1]: my-project-123
+    resources[2]:
       - autoDiscoveryEnabled: false
-        metrics[#1]:
-          - metricLabels[#1]: response_class
+        metrics[1]:
+          - metricLabels[1]: response_class
             name: pubsub.googleapis.com/topic/send_request_count
             type: CUSTOM
         resourceType: pubsub_topic
       - autoDiscoveryEnabled: true
-        autodiscoveryExcludeMetricType[#1]: compute.googleapis.com/instance/disk/*
+        autodiscoveryExcludeMetricType[1]: compute.googleapis.com/instance/disk/*
         resourceType: gce_instance
     smartscapeConfiguration:
       enabled: false

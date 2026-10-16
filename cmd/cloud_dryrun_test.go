@@ -46,11 +46,11 @@ func TestCloudCommandsHonorDryRun(t *testing.T) {
 					checked++
 					guard := firstDryRunGuard(fn.Body)
 					require.NotZero(t, guard,
-						"%s:%d calls %s but its enclosing func never reads dryRun — "+
-							"add an `if dryRun { ... return nil }` block before the call",
+						"%s:%d calls %s but its enclosing func never reads dryRun() — "+
+							"add an `if dryRun() { ... return nil }` block before the call",
 						name, fset.Position(call.Pos()).Line, callName(call))
 					require.Less(t, guard, call.Pos(),
-						"%s:%d calls %s before the dryRun check at line %d — "+
+						"%s:%d calls %s before the dryRun() check at line %d — "+
 							"the guard must come first or --dry-run still mutates",
 						name, fset.Position(call.Pos()).Line, callName(call),
 						fset.Position(guard).Line)

@@ -490,8 +490,8 @@ func TestCredentialTeardownHonorsDryRun(t *testing.T) {
 	xdg.Reload()
 	defer xdg.Reload()
 
-	dryRun = true
-	defer func() { dryRun = false }()
+	gFlags.dryRun = true
+	defer func() { gFlags.dryRun = false }()
 
 	cases := []struct {
 		name string
@@ -570,8 +570,8 @@ func TestDryRunPreviewMatchesRealRun(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	dryRun = true
-	defer func() { dryRun = false }()
+	gFlags.dryRun = true
+	defer func() { gFlags.dryRun = false }()
 
 	if err := deleteContext(mustFindCmd("config", "delete-context"), "a", true); err == nil {
 		t.Error("dry run reported success for a shared credential the real run refuses")

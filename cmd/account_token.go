@@ -14,16 +14,24 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/safety"
 )
 
-var accountListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List account resources",
-	RunE:  requireSubcommand,
+var accountListCmd = newAccountListCmd()
+
+func newAccountListCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "list",
+		Short: "List account resources",
+		RunE:  requireSubcommand,
+	}
+	return c
 }
 
-var accountListTokenCmd = &cobra.Command{
-	Use:   "token",
-	Short: "List platform tokens",
-	Long: `List all platform tokens for the account.
+var accountListTokenCmd = newAccountListTokenCmd()
+
+func newAccountListTokenCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "token",
+		Short: "List platform tokens",
+		Long: `List all platform tokens for the account.
 
 Examples:
   # List all tokens
@@ -32,33 +40,43 @@ Examples:
   # Output as JSON
   dtctl account list token -o json
 `,
-	Aliases: []string{"tokens"},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		accClient, accountUUID, err := SetupAccount()
-		if err != nil {
-			return err
-		}
+		Aliases: []string{"tokens"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			accClient, accountUUID, err := setupAccount(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		handler := platformtoken.NewHandler(accClient, accountUUID)
-		tokens, err := handler.List()
-		if err != nil {
-			return err
-		}
+			handler := platformtoken.NewHandler(accClient, accountUUID)
+			tokens, err := handler.List()
+			if err != nil {
+				return err
+			}
 
-		return NewPrinter().PrintList(tokens)
-	},
+			return newPrinterCtx(cmdContext(cmd)).PrintList(tokens)
+		},
+	}
+	return c
 }
 
-var accountCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create account resources",
-	RunE:  requireSubcommand,
+var accountCreateCmd = newAccountCreateCmd()
+
+func newAccountCreateCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "create",
+		Short: "Create account resources",
+		RunE:  requireSubcommand,
+	}
+	return c
 }
 
-var accountCreateTokenCmd = &cobra.Command{
-	Use:   "token",
-	Short: "Create a platform token",
-	Long: `Create a new Dynatrace platform token.
+var accountCreateTokenCmd = newAccountCreateTokenCmd()
+
+func newAccountCreateTokenCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "token",
+		Short: "Create a platform token",
+		Long: `Create a new Dynatrace platform token.
 
 The --user-uuid flag is optional; if omitted, the current user's UUID is
 resolved automatically from the account token's JWT subject claim.
@@ -83,138 +101,159 @@ Examples:
   # Dry run to preview
   dtctl account create token --name ci-pipeline --scope account-idm-read --dry-run
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name, _ := cmd.Flags().GetString("name")
-		rawScopes, _ := cmd.Flags().GetStringArray("scope")
-		scopes := normalizeScopes(rawScopes)
-		expires, _ := cmd.Flags().GetString("expires")
-		expiresAt, _ := cmd.Flags().GetString("expires-at")
-		userUUID, _ := cmd.Flags().GetString("user-uuid")
-		resources, _ := cmd.Flags().GetStringArray("resource")
-		tags, _ := cmd.Flags().GetStringArray("tag")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, _ := cmd.Flags().GetString("name")
+			rawScopes, _ := cmd.Flags().GetStringArray("scope")
+			scopes := normalizeScopes(rawScopes)
+			expires, _ := cmd.Flags().GetString("expires")
+			expiresAt, _ := cmd.Flags().GetString("expires-at")
+			userUUID, _ := cmd.Flags().GetString("user-uuid")
+			resources, _ := cmd.Flags().GetStringArray("resource")
+			tags, _ := cmd.Flags().GetStringArray("tag")
 
-		// --scope is marked required and rejects a blank value at parse time;
-		// a value made only of separators ("--scope ,") gets past both and
-		// still names no scope.
-		if len(scopes) == 0 {
-			return emptyFlagValueError("scope")
-		}
-		if expiresAt != "" && cmd.Flags().Changed("expires") {
-			return fmt.Errorf("--expires and --expires-at are mutually exclusive")
-		}
-
-		var expirationDate string
-		if expiresAt != "" {
-			t, err := time.Parse(time.RFC3339, expiresAt)
-			if err != nil {
-				return fmt.Errorf("invalid --expires-at value %q: must be RFC3339 (e.g. 2026-10-01T00:00:00Z): %w", expiresAt, err)
+			// --scope is marked required and rejects a blank value at parse time;
+			// a value made only of separators ("--scope ,") gets past both and
+			// still names no scope.
+			if len(scopes) == 0 {
+				return emptyFlagValueError("scope")
 			}
-			expirationDate = t.UTC().Format("2006-01-02T15:04:05.000Z")
-		} else {
-			t, err := parseExpiresDuration(expires)
+			if expiresAt != "" && cmd.Flags().Changed("expires") {
+				return fmt.Errorf("--expires and --expires-at are mutually exclusive")
+			}
+
+			var expirationDate string
+			if expiresAt != "" {
+				t, err := time.Parse(time.RFC3339, expiresAt)
+				if err != nil {
+					return fmt.Errorf("invalid --expires-at value %q: must be RFC3339 (e.g. 2026-10-01T00:00:00Z): %w", expiresAt, err)
+				}
+				expirationDate = t.UTC().Format("2006-01-02T15:04:05.000Z")
+			} else {
+				t, err := parseExpiresDuration(expires)
+				if err != nil {
+					return err
+				}
+				expirationDate = t.UTC().Format("2006-01-02T15:04:05.000Z")
+			}
+
+			accClient, accountUUID, err := setupAccountWithSafety(cmdContext(cmd), safety.OperationCreate)
 			if err != nil {
 				return err
 			}
-			expirationDate = t.UTC().Format("2006-01-02T15:04:05.000Z")
-		}
 
-		accClient, accountUUID, err := SetupAccountWithSafety(safety.OperationCreate)
-		if err != nil {
-			return err
-		}
+			if userUUID == "" {
+				userUUID, err = resolveCurrentAccountUserUUID(cmdContext(cmd), accountUUID)
+				if err != nil {
+					return fmt.Errorf("could not auto-resolve user UUID from account token: %w\nHint: provide --user-uuid explicitly", err)
+				}
+			}
 
-		if userUUID == "" {
-			userUUID, err = resolveCurrentAccountUserUUID(accountUUID)
+			if len(resources) == 0 {
+				resources = []string{"urn:dtaccount:" + accountUUID}
+			}
+
+			req := platformtoken.PlatformTokenCreate{
+				Name:           name,
+				UserUUID:       userUUID,
+				Scope:          scopes,
+				Resource:       resources,
+				Tags:           tags,
+				ExpirationDate: expirationDate,
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				report := newDryRunReport(cmd).As("create", "token").OnStderr().
+					Linef("Dry run: would create platform token").
+					Linef("Name:     %s", req.Name).
+					Linef("Scope:    %s", strings.Join(req.Scope, ", ")).
+					Linef("UserUUID: %s", req.UserUUID).
+					Linef("Expires:  %s", req.ExpirationDate).
+					Detail("name", "%s", req.Name).
+					Detail("scope", "%s", strings.Join(req.Scope, ", ")).
+					Detail("user_uuid", "%s", req.UserUUID).
+					Detail("expires", "%s", req.ExpirationDate)
+				// The request carries no secret — the token is minted by the server —
+				// so the exact body is safe to show.
+				if body, err := json.Marshal(req); err == nil {
+					report.Payload(body)
+				}
+				return report.Print()
+			}
+
+			handler := platformtoken.NewHandler(accClient, accountUUID)
+			res, err := handler.Create(req)
 			if err != nil {
-				return fmt.Errorf("could not auto-resolve user UUID from account token: %w\nHint: provide --user-uuid explicitly", err)
+				return err
 			}
-		}
 
-		if len(resources) == 0 {
-			resources = []string{"urn:dtaccount:" + accountUUID}
-		}
-
-		req := platformtoken.PlatformTokenCreate{
-			Name:           name,
-			UserUUID:       userUUID,
-			Scope:          scopes,
-			Resource:       resources,
-			Tags:           tags,
-			ExpirationDate: expirationDate,
-		}
-
-		if dryRun {
-			report := newDryRunReport(cmd).As("create", "token").OnStderr().
-				Linef("Dry run: would create platform token").
-				Linef("Name:     %s", req.Name).
-				Linef("Scope:    %s", strings.Join(req.Scope, ", ")).
-				Linef("UserUUID: %s", req.UserUUID).
-				Linef("Expires:  %s", req.ExpirationDate).
-				Detail("name", "%s", req.Name).
-				Detail("scope", "%s", strings.Join(req.Scope, ", ")).
-				Detail("user_uuid", "%s", req.UserUUID).
-				Detail("expires", "%s", req.ExpirationDate)
-			// The request carries no secret — the token is minted by the server —
-			// so the exact body is safe to show.
-			if body, err := json.Marshal(req); err == nil {
-				report.Payload(body)
-			}
-			return report.Print()
-		}
-
-		handler := platformtoken.NewHandler(accClient, accountUUID)
-		res, err := handler.Create(req)
-		if err != nil {
-			return err
-		}
-
-		output.PrintSuccess("Platform token %q created (expires: %s)", res.Name, expirationDate)
-		output.PrintWarning("Token secret shown once — store it now:")
-		fmt.Println(res.Token)
-		return nil
-	},
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Platform token %q created (expires: %s)", res.Name, expirationDate)
+			output.FprintWarning(currentStderr(cmdContext(cmd)), "Token secret shown once — store it now:")
+			fmt.Fprintln(currentStdout(cmdContext(cmd)), res.Token)
+			return nil
+		},
+	}
+	c.Flags().String("name", "", "token name (required)")
+	c.Flags().StringArray("scope", nil, "token scope; repeat or comma/space/newline-separate for multiple (required)")
+	c.Flags().String("expires", "90d", "token lifetime (e.g. 30d, 720h)")
+	c.Flags().String("expires-at", "", "exact expiration date in RFC3339 format (mutually exclusive with --expires)")
+	c.Flags().String("user-uuid", "", "user UUID the token belongs to (default: current user)")
+	c.Flags().StringArray("resource", nil, "environment URL(s) the token is scoped to (default: current environment)")
+	c.Flags().StringArray("tag", nil, "token tag; may be specified multiple times")
+	markFlagRequiredNonEmpty(c, "name")
+	markFlagRequiredNonEmpty(c, "scope")
+	return c
 }
 
-var accountDeleteCmd = &cobra.Command{
-	Use:   "delete",
-	Short: "Delete account resources",
-	RunE:  requireSubcommand,
+var accountDeleteCmd = newAccountDeleteCmd()
+
+func newAccountDeleteCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete account resources",
+		RunE:  requireSubcommand,
+	}
+	return c
 }
 
-var accountDeleteTokenCmd = &cobra.Command{
-	Use:     "token <tokenId>",
-	Aliases: []string{"revoke"},
-	Short:   "Delete (revoke) a platform token",
-	Long: `Delete (revoke) a platform token by its ID.
+var accountDeleteTokenCmd = newAccountDeleteTokenCmd()
+
+func newAccountDeleteTokenCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "token <tokenId>",
+		Aliases: []string{"revoke"},
+		Short:   "Delete (revoke) a platform token",
+		Long: `Delete (revoke) a platform token by its ID.
 
 Examples:
   # Delete a token
   dtctl account delete token <tokenId>
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		tokenID := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tokenID := args[0]
 
-		if dryRun {
-			return newDryRunReport(cmd).As("delete", "token").OnStderr().
-				Linef("Dry run: would delete platform token %q", tokenID).
-				Detail("id", "%s", tokenID).
-				Print()
-		}
+			if dryRun(cmdContext(cmd)) {
+				return newDryRunReport(cmd).As("delete", "token").OnStderr().
+					Linef("Dry run: would delete platform token %q", tokenID).
+					Detail("id", "%s", tokenID).
+					Print()
+			}
 
-		accClient, accountUUID, err := SetupAccountWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
+			accClient, accountUUID, err := setupAccountWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
+			}
 
-		handler := platformtoken.NewHandler(accClient, accountUUID)
-		if err := handler.Revoke(tokenID); err != nil {
-			return err
-		}
+			handler := platformtoken.NewHandler(accClient, accountUUID)
+			if err := handler.Revoke(tokenID); err != nil {
+				return err
+			}
 
-		output.PrintSuccess("Platform token %q deleted", tokenID)
-		return nil
-	},
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Platform token %q deleted", tokenID)
+			return nil
+		},
+	}
+	return c
 }
 
 // normalizeScopes splits and trims scope values so both "a, b" and "a b" work.
@@ -254,13 +293,4 @@ func init() {
 	accountDeleteCmd.AddCommand(accountDeleteTokenCmd)
 
 	// Create flags
-	accountCreateTokenCmd.Flags().String("name", "", "token name (required)")
-	accountCreateTokenCmd.Flags().StringArray("scope", nil, "token scope; repeat or comma/space/newline-separate for multiple (required)")
-	accountCreateTokenCmd.Flags().String("expires", "90d", "token lifetime (e.g. 30d, 720h)")
-	accountCreateTokenCmd.Flags().String("expires-at", "", "exact expiration date in RFC3339 format (mutually exclusive with --expires)")
-	accountCreateTokenCmd.Flags().String("user-uuid", "", "user UUID the token belongs to (default: current user)")
-	accountCreateTokenCmd.Flags().StringArray("resource", nil, "environment URL(s) the token is scoped to (default: current environment)")
-	accountCreateTokenCmd.Flags().StringArray("tag", nil, "token tag; may be specified multiple times")
-	markFlagRequiredNonEmpty(accountCreateTokenCmd, "name")
-	markFlagRequiredNonEmpty(accountCreateTokenCmd, "scope")
 }

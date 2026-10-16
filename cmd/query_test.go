@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -278,7 +279,7 @@ func TestParseSegmentsFile(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			got, err := parseSegmentsFile(path)
+			got, err := parseSegmentsFile(context.Background(), path)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("parseSegmentsFile() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -310,7 +311,7 @@ func TestParseSegmentsFile(t *testing.T) {
 }
 
 func TestParseSegmentsFile_NotFound(t *testing.T) {
-	_, err := parseSegmentsFile("/nonexistent/path/segments.yaml")
+	_, err := parseSegmentsFile(context.Background(), "/nonexistent/path/segments.yaml")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
@@ -667,10 +668,10 @@ func TestApplySegmentVars(t *testing.T) {
 // resolves to -o auto; any explicit -o wins, and outside agent mode nothing
 // changes.
 func TestAgentResultFormat(t *testing.T) {
-	origFormat, origAgent := outputFormat, agentMode
+	origFormat, origAgent := outputFormat(context.Background()), agentMode(context.Background())
 	flag := rootCmd.PersistentFlags().Lookup("output")
 	origChanged := flag.Changed
-	defer func() { outputFormat, agentMode, flag.Changed = origFormat, origAgent, origChanged }()
+	defer func() { gFlags.outputFormat, gFlags.agentMode, flag.Changed = origFormat, origAgent, origChanged }()
 
 	cases := []struct {
 		name        string
@@ -687,8 +688,8 @@ func TestAgentResultFormat(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agentMode, flag.Changed, outputFormat = c.agent, c.changed, c.format
-			got, byDefault := agentResultFormat()
+			gFlags.agentMode, flag.Changed, gFlags.outputFormat = c.agent, c.changed, c.format
+			got, byDefault := agentResultFormat(context.Background())
 			if got != c.want || byDefault != c.wantDefault {
 				t.Errorf("agentResultFormat() = (%q, %v), want (%q, %v)", got, byDefault, c.want, c.wantDefault)
 			}
@@ -701,10 +702,10 @@ func TestAgentResultFormat(t *testing.T) {
 // the uncompacted -o auto output; an explicit -o csv keeps the rows verbatim
 // (a CSV has no place for a constant map) without a warning.
 func TestAgentModeDefaultsCompose(t *testing.T) {
-	origFormat, origAgent := outputFormat, agentMode
+	origFormat, origAgent := outputFormat(context.Background()), agentMode(context.Background())
 	flag := rootCmd.PersistentFlags().Lookup("output")
 	origChanged := flag.Changed
-	defer func() { outputFormat, agentMode, flag.Changed = origFormat, origAgent, origChanged }()
+	defer func() { gFlags.outputFormat, gFlags.agentMode, flag.Changed = origFormat, origAgent, origChanged }()
 
 	cases := []struct {
 		name        string
@@ -721,18 +722,18 @@ func TestAgentModeDefaultsCompose(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agentMode = true
-			outputFormat, flag.Changed = "table", false
+			gFlags.agentMode = true
+			gFlags.outputFormat, flag.Changed = "table", false
 			if c.outputFlag != "" {
-				outputFormat, flag.Changed = c.outputFlag, true
+				gFlags.outputFormat, flag.Changed = c.outputFlag, true
 			}
 			cmd := &cobra.Command{Use: "q"}
 			cmd.Flags().Bool("compact", false, "")
 			if err := cmd.Flags().Parse(c.args); err != nil {
 				t.Fatal(err)
 			}
-			format, byDefault := agentResultFormat()
-			compact, warn := resolveQueryCompact(cmd, agentMode, format)
+			format, byDefault := agentResultFormat(context.Background())
+			compact, warn := resolveQueryCompact(cmd, agentMode(context.Background()), format)
 			if format != c.wantFormat || byDefault != c.wantDefault || compact != c.wantCompact || warn != "" {
 				t.Errorf("got (format %q, byDefault %v, compact %v, warn %q), want (%q, %v, %v, \"\")",
 					format, byDefault, compact, warn, c.wantFormat, c.wantDefault, c.wantCompact)

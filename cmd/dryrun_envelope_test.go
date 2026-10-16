@@ -37,9 +37,9 @@ type dryRunEnvelope struct {
 // reshape whichever test runs next.
 func runDryRun(t *testing.T, stdin io.Reader, argv ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	origDryRun, origAgentMode, origFormat := dryRun, agentMode, outputFormat
+	origDryRun, origAgentMode, origFormat := gFlags.dryRun, gFlags.agentMode, gFlags.outputFormat
 	t.Cleanup(func() {
-		dryRun, agentMode, outputFormat = origDryRun, origAgentMode, origFormat
+		gFlags.dryRun, gFlags.agentMode, gFlags.outputFormat = origDryRun, origAgentMode, origFormat
 		for _, name := range []string{"dry-run", "agent", "no-agent"} {
 			if f := rootCmd.PersistentFlags().Lookup(name); f != nil {
 				_ = f.Value.Set("false")

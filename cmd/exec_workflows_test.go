@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -67,11 +68,11 @@ func TestExecWorkflowRunE_SendsWorkflowInputRequest(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	cmd := newExecWorkflowRunCmdForTest()
 	_ = cmd.Flags().Set("input", `{"enabled":true,"count":2}`)
@@ -108,11 +109,11 @@ func TestExecWorkflowRunE_SetsMonitorQueryParamWhenWaiting(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	cmd := newExecWorkflowRunCmdForTest()
 	_ = cmd.Flags().Set("wait", "true")
@@ -154,11 +155,11 @@ func TestExecWorkflowRunE_SendsLegacyParamsCompatibilityRequestAndWarning(t *tes
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	cmd := newExecWorkflowRunCmdForTest()
 	var stderr bytes.Buffer

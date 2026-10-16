@@ -1,24 +1,26 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 	"github.com/dynatrace-oss/dtctl/pkg/util/template"
 )
 
 // verifyQueryCmd represents the verify query subcommand
-var verifyQueryCmd = &cobra.Command{
-	Use:     "query [dql-string]",
-	Aliases: []string{"q"},
-	Short:   "Verify a DQL query without executing it",
-	Long: `Verify a DQL query without executing it against Grail storage.
+var verifyQueryCmd = newVerifyQueryCmd()
+
+func newVerifyQueryCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "query [dql-string]",
+		Aliases: []string{"q"},
+		Short:   "Verify a DQL query without executing it",
+		Long: `Verify a DQL query without executing it against Grail storage.
 
 This command validates query syntax, checks for errors and warnings, and optionally 
 returns the canonical representation of the query. This is useful for testing queries 
@@ -108,124 +110,136 @@ Examples:
     exit 1
   fi
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		outputFmt, _ := cmd.Flags().GetString("output")
-		if !isSupportedVerifyOutputFormat(outputFmt) {
-			return fmt.Errorf("unsupported output format %q for verify query (supported: json, yaml, toon)", outputFmt)
-		}
-
-		_, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
-
-		executor := exec.NewDQLExecutor(c)
-
-		queryFile, _ := cmd.Flags().GetString("file")
-		setFlags, _ := cmd.Flags().GetStringArray("set")
-
-		query, err := resolveQueryInput(queryFile, args, osStdin())
-		if err != nil {
-			return err
-		}
-
-		// Apply template rendering if --set flags are provided
-		if len(setFlags) > 0 {
-			vars, err := template.ParseSetFlags(setFlags)
-			if err != nil {
-				return fmt.Errorf("invalid --set flag: %w", err)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			outputFmt, _ := cmd.Flags().GetString("output")
+			if !isSupportedVerifyOutputFormat(outputFmt) {
+				return fmt.Errorf("unsupported output format %q for verify query (supported: json, yaml, toon)", outputFmt)
 			}
 
-			rendered, err := template.RenderTemplate(query, vars)
+			_, c, err := setupClient(cmdContext(cmd))
 			if err != nil {
-				return fmt.Errorf("template rendering failed: %w", err)
+				return err
 			}
 
-			query = rendered
-		}
+			executor := newDQLExecutor(cmdContext(cmd), c)
 
-		// Get verify options
-		canonical, _ := cmd.Flags().GetBool("canonical")
-		timezone, _ := cmd.Flags().GetString("timezone")
-		locale, _ := cmd.Flags().GetString("locale")
-		failOnWarn, _ := cmd.Flags().GetBool("fail-on-warn")
-		clientContext, _ := cmd.Flags().GetString("client-context")
+			queryFile, _ := cmd.Flags().GetString("file")
+			setFlags, _ := cmd.Flags().GetStringArray("set")
 
-		opts := exec.DQLVerifyOptions{
-			GenerateCanonicalQuery: canonical,
-			Timezone:               timezone,
-			Locale:                 locale,
-			ClientContext:          clientContext,
-		}
+			query, err := resolveQueryInput(cmdContext(cmd), queryFile, args, invocationStdin(cmdContext(cmd)))
+			if err != nil {
+				return err
+			}
 
-		// Call VerifyQuery and handle response
-		result, err := executor.VerifyQueryWithContext(cmdContext(cmd), query, opts)
+			// Apply template rendering if --set flags are provided
+			if len(setFlags) > 0 {
+				vars, err := template.ParseSetFlags(setFlags)
+				if err != nil {
+					return fmt.Errorf("invalid --set flag: %w", err)
+				}
 
-		// Get exit code first (needed for all output formats)
-		exitCode := getVerifyExitCode(result, err, failOnWarn)
+				rendered, err := template.RenderTemplate(query, vars)
+				if err != nil {
+					return fmt.Errorf("template rendering failed: %w", err)
+				}
 
-		// Handle errors (network, auth, API)
-		if err != nil {
-			// Exit with the mapped code; nothing further is printed (the
-			// verify contract encodes the failure class in the exit code).
+				query = rendered
+			}
+
+			// Get verify options
+			canonical, _ := cmd.Flags().GetBool("canonical")
+			timezone, _ := cmd.Flags().GetString("timezone")
+			locale, _ := cmd.Flags().GetString("locale")
+			failOnWarn, _ := cmd.Flags().GetBool("fail-on-warn")
+			clientContext, _ := cmd.Flags().GetString("client-context")
+
+			opts := exec.DQLVerifyOptions{
+				GenerateCanonicalQuery: canonical,
+				Timezone:               timezone,
+				Locale:                 locale,
+				ClientContext:          clientContext,
+			}
+
+			// Call VerifyQuery and handle response
+			result, err := executor.VerifyQueryWithContext(cmdContext(cmd), query, opts)
+
+			// Get exit code first (needed for all output formats)
+			exitCode := getVerifyExitCode(result, err, failOnWarn)
+
+			// Handle errors (network, auth, API)
+			if err != nil {
+				// Exit with the mapped code; nothing further is printed (the
+				// verify contract encodes the failure class in the exit code).
+				if exitCode != 0 {
+					return &silentExitError{code: exitCode, reason: err.Error()}
+				}
+				return err
+			}
+
+			// Format output based on --output flag (already validated above)
+			switch outputFmt {
+			case "json":
+				// Print full DQLVerifyResponse as JSON
+				printer := newPrinter(cmdContext(cmd), "json")
+				if err := printer.Print(result); err != nil {
+					return fmt.Errorf("failed to print JSON output: %w", err)
+				}
+			case "yaml", "yml":
+				// Print full DQLVerifyResponse as YAML
+				printer := newPrinter(cmdContext(cmd), "yaml")
+				if err := printer.Print(result); err != nil {
+					return fmt.Errorf("failed to print YAML output: %w", err)
+				}
+			case "toon":
+				// Print full DQLVerifyResponse as TOON
+				printer := newPrinter(cmdContext(cmd), "toon")
+				if err := printer.Print(result); err != nil {
+					return fmt.Errorf("failed to print TOON output: %w", err)
+				}
+			default:
+				// Default: human-readable format
+				if err := formatVerifyResultHuman(cmdContext(cmd), result, query, canonical); err != nil {
+					return fmt.Errorf("failed to format output: %w", err)
+				}
+			}
+
+			// Non-zero code without an error: the verdict was already printed.
 			if exitCode != 0 {
-				return &silentExitError{code: exitCode, reason: err.Error()}
+				return &silentExitError{code: exitCode, reason: "query verification failed"}
 			}
-			return err
-		}
 
-		// Format output based on --output flag (already validated above)
-		switch outputFmt {
-		case "json":
-			// Print full DQLVerifyResponse as JSON
-			printer := output.NewPrinter("json")
-			if err := printer.Print(result); err != nil {
-				return fmt.Errorf("failed to print JSON output: %w", err)
-			}
-		case "yaml", "yml":
-			// Print full DQLVerifyResponse as YAML
-			printer := output.NewPrinter("yaml")
-			if err := printer.Print(result); err != nil {
-				return fmt.Errorf("failed to print YAML output: %w", err)
-			}
-		case "toon":
-			// Print full DQLVerifyResponse as TOON
-			printer := output.NewPrinter("toon")
-			if err := printer.Print(result); err != nil {
-				return fmt.Errorf("failed to print TOON output: %w", err)
-			}
-		default:
-			// Default: human-readable format
-			if err := formatVerifyResultHuman(result, query, canonical); err != nil {
-				return fmt.Errorf("failed to format output: %w", err)
-			}
-		}
-
-		// Non-zero code without an error: the verdict was already printed.
-		if exitCode != 0 {
-			return &silentExitError{code: exitCode, reason: "query verification failed"}
-		}
-
-		return nil
-	},
+			return nil
+		},
+	}
+	c.Flags().StringP("file", "f", "", "read query from file (use '-' for stdin)")
+	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
+	c.Flags().Bool("canonical", false, "print canonical query representation")
+	c.Flags().String("timezone", "", "timezone for query verification (IANA, CET, +01:00, etc.)")
+	c.Flags().String("locale", "", "locale for query verification (en, en_US, de_AT, etc.)")
+	c.Flags().Bool("fail-on-warn", false, "exit with non-zero status on warnings (useful for CI/CD)")
+	c.Flags().String("client-context", "", `optional caller context included in the dt-client-context request header
+useful for AI agents or scripts to declare their intent (e.g. "root-cause-analysis")`)
+	stability.MarkStable(c)
+	rejectEmptyFlag(c, "file")
+	return c
 }
 
 // formatVerifyResultHuman prints verification results in human-readable format
-func formatVerifyResultHuman(result *exec.DQLVerifyResponse, query string, showCanonical bool) error {
+func formatVerifyResultHuman(ctx context.Context, result *exec.DQLVerifyResponse, query string, showCanonical bool) error {
 	useColor := isStderrTerminal()
 
 	// Print validation status
 	if result.Valid {
 		if useColor {
-			fmt.Fprintf(os.Stderr, "%s✔%s Query is valid\n", colorGreen, colorReset)
+			fmt.Fprintf(currentStderr(ctx), "%s✔%s Query is valid\n", colorGreen, colorReset)
 		} else {
-			fmt.Fprintf(os.Stderr, "✔ Query is valid\n")
+			fmt.Fprintf(currentStderr(ctx), "✔ Query is valid\n")
 		}
 	} else {
 		if useColor {
-			fmt.Fprintf(os.Stderr, "%s✖%s Query is invalid\n", colorRed, colorReset)
+			fmt.Fprintf(currentStderr(ctx), "%s✖%s Query is invalid\n", colorRed, colorReset)
 		} else {
-			fmt.Fprintf(os.Stderr, "✖ Query is invalid\n")
+			fmt.Fprintf(currentStderr(ctx), "✖ Query is invalid\n")
 		}
 	}
 
@@ -259,20 +273,20 @@ func formatVerifyResultHuman(result *exec.DQLVerifyResponse, query string, showC
 
 		// Print notification type and message
 		if notification.NotificationType != "" {
-			fmt.Fprintf(os.Stderr, "%s %s: %s", prefix, notification.NotificationType, notification.Message)
+			fmt.Fprintf(currentStderr(ctx), "%s %s: %s", prefix, notification.NotificationType, notification.Message)
 		} else {
-			fmt.Fprintf(os.Stderr, "%s %s", prefix, notification.Message)
+			fmt.Fprintf(currentStderr(ctx), "%s %s", prefix, notification.Message)
 		}
 
 		// Add line/column info if available
 		if notification.SyntaxPosition != nil && notification.SyntaxPosition.Start != nil {
-			fmt.Fprintf(os.Stderr, " (line %d, col %d)", notification.SyntaxPosition.Start.Line, notification.SyntaxPosition.Start.Column)
+			fmt.Fprintf(currentStderr(ctx), " (line %d, col %d)", notification.SyntaxPosition.Start.Line, notification.SyntaxPosition.Start.Column)
 		}
-		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(currentStderr(ctx), "\n")
 
 		// Print caret indicator for syntax errors with position
 		if severity == "ERROR" && notification.SyntaxPosition != nil && notification.SyntaxPosition.Start != nil {
-			if err := printSyntaxError(query, notification.SyntaxPosition, useColor); err != nil {
+			if err := printSyntaxError(ctx, query, notification.SyntaxPosition, useColor); err != nil {
 				// If we can't print the caret, just continue
 				continue
 			}
@@ -281,14 +295,14 @@ func formatVerifyResultHuman(result *exec.DQLVerifyResponse, query string, showC
 
 	// Print canonical query if requested
 	if showCanonical && result.CanonicalQuery != "" {
-		fmt.Fprintf(os.Stderr, "\nCanonical Query:\n%s\n", result.CanonicalQuery)
+		fmt.Fprintf(currentStderr(ctx), "\nCanonical Query:\n%s\n", result.CanonicalQuery)
 	}
 
 	return nil
 }
 
 // printSyntaxError prints the query line with a caret indicator pointing to the error position
-func printSyntaxError(query string, pos *exec.SyntaxPosition, useColor bool) error {
+func printSyntaxError(ctx context.Context, query string, pos *exec.SyntaxPosition, useColor bool) error {
 	if pos == nil || pos.Start == nil {
 		return fmt.Errorf("no position information")
 	}
@@ -312,7 +326,7 @@ func printSyntaxError(query string, pos *exec.SyntaxPosition, useColor bool) err
 	}
 
 	// Print the line
-	fmt.Fprintf(os.Stderr, "  %s\n", line)
+	fmt.Fprintf(currentStderr(ctx), "  %s\n", line)
 
 	// Print caret indicator
 	// Account for the "  " indent
@@ -326,9 +340,9 @@ func printSyntaxError(query string, pos *exec.SyntaxPosition, useColor bool) err
 	carets := strings.Repeat("^", caretLen)
 
 	if useColor {
-		fmt.Fprintf(os.Stderr, "%s%s%s%s\n", spaces, colorRed, carets, colorReset)
+		fmt.Fprintf(currentStderr(ctx), "%s%s%s%s\n", spaces, colorRed, carets, colorReset)
 	} else {
-		fmt.Fprintf(os.Stderr, "%s%s\n", spaces, carets)
+		fmt.Fprintf(currentStderr(ctx), "%s%s\n", spaces, carets)
 	}
 
 	return nil
@@ -390,19 +404,9 @@ func init() {
 	verifyCmd.AddCommand(verifyQueryCmd)
 
 	// Flags for verify query command
-	verifyQueryCmd.Flags().StringP("file", "f", "", "read query from file (use '-' for stdin)")
-	rejectEmptyFlag(verifyQueryCmd, "file")
-	verifyQueryCmd.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	verifyQueryCmd.Flags().Bool("canonical", false, "print canonical query representation")
-	verifyQueryCmd.Flags().String("timezone", "", "timezone for query verification (IANA, CET, +01:00, etc.)")
-	verifyQueryCmd.Flags().String("locale", "", "locale for query verification (en, en_US, de_AT, etc.)")
-	verifyQueryCmd.Flags().Bool("fail-on-warn", false, "exit with non-zero status on warnings (useful for CI/CD)")
-	verifyQueryCmd.Flags().String("client-context", "", `optional caller context included in the dt-client-context request header
-useful for AI agents or scripts to declare their intent (e.g. "root-cause-analysis")`)
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(verifyQueryCmd)
 }

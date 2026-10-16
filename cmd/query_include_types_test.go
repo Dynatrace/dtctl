@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,7 +26,7 @@ func runQueryWithTypes(t *testing.T, args ...string) (string, string) {
 	}))
 	t.Cleanup(srv.Close)
 	clearAgentEnvVars(t)
-	t.Cleanup(restorePristineTree)
+	t.Cleanup(func() { restorePristineTree(context.Background()) })
 
 	var stdout, stderr bytes.Buffer
 	code := Run(append([]string{"query", "fetch logs", "--plain"}, args...), RunOptions{

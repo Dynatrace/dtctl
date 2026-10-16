@@ -306,7 +306,7 @@ on every flag underneath it.
 
 1. **SDK layer** (`sdk/api/<name>/`): Create typed API wrapper with CRUD functions using `httpclient.Client`. No file I/O, no display logic.
 2. **CLI layer** (`pkg/resources/<name>/`): Create resource handler that delegates to SDK. Handle file reading, display fields, name resolution here. Read user-supplied paths through `pkg/vfs`, never `os` directly (see [Embedding Invariants](#-critical-embedding-invariants-)).
-3. **Commands**: Add to `cmd/get.go`, `cmd/describe.go`, etc. Mutating verbs need a safety check; `-f`/`--file` flags go through `vfs`; no `os.Exit`, no ungated subprocess.
+3. **Commands**: Add to `cmd/get.go`, `cmd/describe.go`, etc. Mutating verbs need a safety check; `-f`/`--file` flags go through `vfs`; no `os.Exit`, no ungated subprocess. Build each command in a `newXCmd()` constructor (flags bound to variables local to it, stability tier declared inside), attach it in `init()` as usual **and** list it in `newCommandTree` in `cmd/root_factory.go`; read the run's state through `cmdContext(cmd)` (see [Embedding Invariants](#-critical-embedding-invariants-) rule 7).
 4. Register in resolver
 5. Add tests: `sdk/api/<name>/*_test.go` (SDK unit tests) + `test/e2e/<name>_test.go` (E2E)
 5b. **Declare the stability tier** — every command, stable ones included; the
@@ -562,9 +562,17 @@ them precisely so that cannot happen.
 
 ### 5. Output stays byte-identical to the CLI
 
-Print via `pkg/output`, `fmt.Print*`, or cobra — all resolve `os.Stdout`/
-`os.Stderr` dynamically, so the stream seam catches them. Don't cache a writer
-across invocations; don't make output depend on the host environment.
+Print via `pkg/output`, the invocation's streams (`currentStdout(ctx)` /
+`currentStderr(ctx)` in `cmd/`), or the command's own cobra writers. A `pkg/`
+type takes its writers from its caller (`WithStreams`, `PrinterOptions.Writer`,
+the `...To` / `...With` variants) and keeps the process streams only as its
+default. Never name `os.Stdout`/`os.Stderr` or call `fmt.Print*` in `cmd/` on a
+request path: the serialized seam swaps the process streams, but an invocation
+on a tree of its own cannot — there is one `os.Stdout` and several invocations
+— so such a write lands in the host's log instead of the response. Don't cache
+a writer across invocations; don't make output depend on the host environment.
+
+*Guard*: `go test ./cmd/ -run 'TestNoProcessStreamWritesOnRequestPaths|TestRequestPathsInjectTheirStreams'`
 
 *Guard*: `go test ./pkg/engine/ -run TestEngineOutputEqualsCLI` (builds the real
 binary and diffs CLI vs. engine stdout/stderr/exit code)
@@ -575,6 +583,37 @@ Add it to `unsupportedCommands` in `pkg/engine/policy.go` **with a reason** if i
 manages host-local state (config, keyring, shell, installed tools, an
 interactive session) or would nest the service in itself. The reason is
 user-facing — it appears in the `unsupported_in_service` error's suggestions.
+
+### 7. Commands are built by constructors and read their run's state from their context
+
+Every command is a `func newXCmd() *cobra.Command` that carries its whole
+wiring — flags, required marks, hooks, stability tier — so a second, freshly
+allocated tree can be built from the same constructors (`newCommandTree`,
+`cmd/root_factory.go`). The CLI's own tree is still wired by `init()` from those
+constructors, so a command attached in `init()` but missing from
+`newCommandTree` (or the reverse) is a defect. A command-specific flag binds to a
+variable local to its constructor, never a package variable.
+
+A running command reaches its streams, environment, files, session, capabilities
+and root flag values through `cmdContext(cmd)` and the accessors in
+`cmd/invocation.go` (`currentStdout(ctx)`, `getenv(ctx, key)`, `vfsEnv(ctx)`,
+`curFlags(ctx)`, ...), not through package variables. Each accessor falls back
+to the process-level default when the context carries no invocation, which is
+what keeps the CLI unchanged. Code that runs while a command is being *built* has
+no context yet: it is handed its storage explicitly.
+
+A command that sets its own `PersistentPreRunE` must run its parent's first.
+Cobra runs only the nearest one, and the root's is what runs `initConfig` on a
+concurrent tree and rejects a `--dry-run` the command does not implement on
+both. `attachPreviewNotice` is the pattern.
+
+*Guards*: `go test ./cmd/ -run TestNewCommandTreeMatchesSingleton` — the fresh
+tree has the singleton's surface, command by command and flag by flag —
+`go test ./cmd/ -run TestEveryCommandReachesTheRootPreRunHook`, and
+`go test -race ./pkg/engine/ -run TestConcurrent`, which runs a corpus on
+overlapping invocations and requires every result to equal the serialized one.
+
+Design and rationale: [docs/dev/CONCURRENT_EXECUTION.md](docs/dev/CONCURRENT_EXECUTION.md).
 
 ## Privacy
 

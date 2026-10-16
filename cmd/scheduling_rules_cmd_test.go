@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -64,19 +65,20 @@ func setupSchedulingRuleCmdTest(t *testing.T, srv *httptest.Server, agent, dry b
 	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 	t.Setenv(config.EnvTokenStorage, "file")
 
-	origCfg, origFormat, origAgent := cfgFile, outputFormat, agentMode
-	origDry, origForce, origPlain := dryRun, forceDelete, plainMode
+	origCfg, origFormat, origAgent := cfgFile(context.Background()), outputFormat(context.Background()), agentMode(context.Background())
+	origDry, origPlain := dryRun(context.Background()), plainMode(context.Background())
 	t.Cleanup(func() {
-		cfgFile, outputFormat, agentMode = origCfg, origFormat, origAgent
-		dryRun, forceDelete, plainMode = origDry, origForce, origPlain
+		gFlags.cfgFile, gFlags.outputFormat, gFlags.agentMode = origCfg, origFormat, origAgent
+		gFlags.dryRun, gFlags.plainMode = origDry, origPlain
+		resetCmdFlags(deleteSchedulingRuleCmd)
 	})
 
-	cfgFile = filepath.Join(t.TempDir(), "config")
-	outputFormat = "table"
-	agentMode = agent
-	dryRun = dry
-	forceDelete = true // skip the interactive confirmation
-	plainMode = false
+	gFlags.cfgFile = filepath.Join(t.TempDir(), "config")
+	gFlags.outputFormat = "table"
+	gFlags.agentMode = agent
+	gFlags.dryRun = dry
+	_ = deleteSchedulingRuleCmd.Flags().Set("yes", "true") // skip the interactive confirmation
+	gFlags.plainMode = false
 
 	cfg := config.NewConfig()
 	// dangerously-unrestricted keeps the safety gate out of the way: these tests
@@ -88,7 +90,7 @@ func setupSchedulingRuleCmdTest(t *testing.T, srv *httptest.Server, agent, dry b
 		t.Fatalf("SetToken: %v", err)
 	}
 	cfg.CurrentContext = "test"
-	if err := cfg.SaveTo(cfgFile); err != nil {
+	if err := cfg.SaveTo(cfgFile(context.Background())); err != nil {
 		t.Fatalf("SaveTo: %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -204,7 +205,7 @@ func TestTryPluginDispatch_ExecFailureIsStructuredInAgentMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Stdout = w
-	code, handled := tryPluginDispatch([]string{"-A", "failplug"})
+	code, handled := tryPluginDispatch(context.Background(), []string{"-A", "failplug"})
 	os.Stdout = old
 	_ = w.Close()
 	out, _ := io.ReadAll(r)
@@ -230,10 +231,10 @@ func TestTryPluginDispatch_BuiltinAndUnknownAreNotDispatched(t *testing.T) {
 	// Point PATH at an empty dir: no plugins can be found, and built-in names
 	// must be rejected before lookup anyway.
 	t.Setenv("PATH", t.TempDir())
-	if _, handled := tryPluginDispatch([]string{"get", "nosuchresource"}); handled {
+	if _, handled := tryPluginDispatch(context.Background(), []string{"get", "nosuchresource"}); handled {
 		t.Error("built-in command names must never dispatch to plugins")
 	}
-	if _, handled := tryPluginDispatch([]string{"definitely-not-a-plugin"}); handled {
+	if _, handled := tryPluginDispatch(context.Background(), []string{"definitely-not-a-plugin"}); handled {
 		t.Error("unknown names without a matching binary must not dispatch")
 	}
 }

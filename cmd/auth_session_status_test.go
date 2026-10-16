@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -108,9 +109,9 @@ func TestDoctor_OAuthSessionRow_OK(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", server.URL, "test-oauth")
@@ -122,7 +123,7 @@ func TestDoctor_OAuthSessionRow_OK(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	found := false
 	for _, r := range results {
@@ -149,9 +150,9 @@ func TestDoctor_OAuthSessionRow_SkippedForPlatformToken(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", server.URL, "test-platform")
@@ -163,7 +164,7 @@ func TestDoctor_OAuthSessionRow_SkippedForPlatformToken(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	for _, r := range results {
 		if r.Name == "OAuth session" {
@@ -200,9 +201,9 @@ func TestDoctor_OAuthSessionRow_FailWhenSessionError(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", server.URL, "test-oauth")
@@ -214,7 +215,7 @@ func TestDoctor_OAuthSessionRow_FailWhenSessionError(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	found := false
 	for _, r := range results {
@@ -337,7 +338,7 @@ func TestPrintSessionStatusTable_DoesNotPanic(t *testing.T) {
 					t.Errorf("case %d panicked: %v", i, r)
 				}
 			}()
-			printSessionStatusTable(s)
+			printSessionStatusTable(context.Background(), s)
 		}(i, s)
 	}
 }

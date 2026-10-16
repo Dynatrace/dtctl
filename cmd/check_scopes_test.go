@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -22,11 +23,11 @@ import (
 // test, restoring them afterwards.
 func withScopeState(t *testing.T, check, agent bool, format string, granted []string, known bool) {
 	t.Helper()
-	origCheck, origAgent, origFormat, origFunc := checkScopes, agentMode, outputFormat, grantedScopesFunc
-	checkScopes, agentMode, outputFormat = check, agent, format
-	grantedScopesFunc = func() ([]string, bool) { return granted, known }
+	origCheck, origAgent, origFormat, origFunc := gFlags.checkScopes, agentMode(context.Background()), outputFormat(context.Background()), grantedScopesFunc
+	gFlags.checkScopes, gFlags.agentMode, gFlags.outputFormat = check, agent, format
+	grantedScopesFunc = func(context.Context) ([]string, bool) { return granted, known }
 	t.Cleanup(func() {
-		checkScopes, agentMode, outputFormat, grantedScopesFunc = origCheck, origAgent, origFormat, origFunc
+		gFlags.checkScopes, gFlags.agentMode, gFlags.outputFormat, grantedScopesFunc = origCheck, origAgent, origFormat, origFunc
 	})
 }
 
@@ -138,14 +139,14 @@ func TestRequiredScopesFor(t *testing.T) {
 func TestComputeScopeVerdict(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"automation:workflows:write", "x"}, true)
-		r := computeScopeVerdict("delete", "workflow", []string{"automation:workflows:write"}, nil, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "delete", "workflow", []string{"automation:workflows:write"}, nil, scopeRequirementKnown)
 		require.Equal(t, scopeStatusOK, r.Status)
 		require.Empty(t, r.MissingScopes)
 	})
 
 	t.Run("insufficient", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"automation:workflows:read"}, true)
-		r := computeScopeVerdict("delete", "workflow", []string{"automation:workflows:write"}, nil, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "delete", "workflow", []string{"automation:workflows:write"}, nil, scopeRequirementKnown)
 		require.Equal(t, scopeStatusInsufficient, r.Status)
 		require.Equal(t, []string{"automation:workflows:write"}, r.MissingScopes)
 		require.NotEmpty(t, r.Suggestions)
@@ -153,7 +154,7 @@ func TestComputeScopeVerdict(t *testing.T) {
 
 	t.Run("unknown", func(t *testing.T) {
 		withScopeState(t, true, false, "json", nil, false)
-		r := computeScopeVerdict("delete", "workflow", []string{"automation:workflows:write"}, nil, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "delete", "workflow", []string{"automation:workflows:write"}, nil, scopeRequirementKnown)
 		require.Equal(t, scopeStatusUnknown, r.Status)
 		require.Empty(t, r.GrantedScopes)
 		require.NotEmpty(t, r.Suggestions)
@@ -161,7 +162,7 @@ func TestComputeScopeVerdict(t *testing.T) {
 
 	t.Run("no scopes required", func(t *testing.T) {
 		withScopeState(t, true, false, "json", nil, false)
-		r := computeScopeVerdict("ctx", "set", nil, nil, scopeRequirementNone)
+		r := computeScopeVerdict(context.Background(), "ctx", "set", nil, nil, scopeRequirementNone)
 		require.Equal(t, scopeStatusOK, r.Status)
 		require.Empty(t, r.RequiredScopes)
 	})
@@ -172,7 +173,7 @@ func TestComputeScopeVerdict(t *testing.T) {
 	// that checked nothing is an assurance dtctl has no basis to give.
 	t.Run("per-call requirement is unknown, never ok", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"automation:workflows:write"}, true)
-		r := computeScopeVerdict("exec", "api", nil, nil, scopeRequirementPerCall)
+		r := computeScopeVerdict(context.Background(), "exec", "api", nil, nil, scopeRequirementPerCall)
 		require.Equal(t, scopeStatusUnknown, r.Status,
 			"a check that did not happen must not report ok")
 		require.Empty(t, r.RequiredScopes)
@@ -227,7 +228,7 @@ func TestScopePreflight_AgentBlocksMutatingWhenMissing(t *testing.T) {
 	require.Equal(t, []string{"automation:workflows:write"}, scopeErr.Missing)
 
 	// And it maps to the insufficient_scope envelope + ExitPermissionError.
-	detail := errorToDetail(preErr)
+	detail := errorToDetail(context.Background(), preErr)
 	require.Equal(t, "insufficient_scope", detail.Code)
 	require.Equal(t, []string{"automation:workflows:write"}, detail.MissingScopes)
 	require.Equal(t, client.ExitPermissionError, exitCodeForError(preErr))
@@ -303,7 +304,7 @@ func TestScopePreflight_CheckScopes_AgentMissingUsesErrorEnvelope(t *testing.T) 
 	require.ErrorAs(t, preErr, &scopeErr)
 	require.Equal(t, []string{"automation:workflows:write"}, scopeErr.Missing)
 
-	detail := errorToDetail(preErr)
+	detail := errorToDetail(context.Background(), preErr)
 	require.Equal(t, "insufficient_scope", detail.Code)
 	require.Equal(t, client.ExitPermissionError, exitCodeForError(preErr))
 }

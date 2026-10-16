@@ -5,7 +5,7 @@ package version
 // builds override it via GoReleaser. The annotation keeps it in sync with the
 // release tag automatically via release-please's generic updater — do not edit
 // by hand.
-var Version = "0.41.0" // x-release-please-version
+var Version = "0.43.0" // x-release-please-version
 
 // Commit is the git commit hash (set at build time)
 var Commit = "unknown"

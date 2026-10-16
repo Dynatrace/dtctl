@@ -7,16 +7,16 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-var (
-	getFunctionsAppFilter string
-)
-
 // getFunctionsCmd retrieves App Engine functions
-var getFunctionsCmd = &cobra.Command{
-	Use:     "functions [app-id/function-name]",
-	Aliases: []string{"function", "fn", "func"},
-	Short:   "Get App Engine functions",
-	Long: `Get app functions from installed apps.
+var getFunctionsCmd = newGetFunctionsCmd()
+
+func newGetFunctionsCmd() *cobra.Command {
+	var getFunctionsAppFilter string
+	c := &cobra.Command{
+		Use:     "functions [app-id/function-name]",
+		Aliases: []string{"function", "fn", "func"},
+		Short:   "Get App Engine functions",
+		Long: `Get app functions from installed apps.
 
 Functions are serverless backend functions exposed by installed apps.
 Each function can be invoked using 'dtctl exec function'.
@@ -37,39 +37,41 @@ Examples:
   # Wide output (shows resumable status)
   dtctl get functions -o wide
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := appengine.NewHandler(c)
-
-		// Get specific function if app-id/function-name provided
-		if len(args) > 0 {
-			function, err := handler.GetFunction(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(function)
-		}
 
-		// List functions
-		functions, err := handler.ListFunctions(getFunctionsAppFilter)
-		if err != nil {
-			return err
-		}
+			handler := appengine.NewHandler(c)
 
-		return printer.PrintList(functions)
-	},
+			// Get specific function if app-id/function-name provided
+			if len(args) > 0 {
+				function, err := handler.GetFunction(args[0])
+				if err != nil {
+					return err
+				}
+				return printer.Print(function)
+			}
+
+			// List functions
+			functions, err := handler.ListFunctions(getFunctionsAppFilter)
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(functions)
+		},
+	}
+	c.Flags().StringVar(&getFunctionsAppFilter, "app", "", "filter by app ID")
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
-	getFunctionsCmd.Flags().StringVar(&getFunctionsAppFilter, "app", "", "filter by app ID")
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(getFunctionsCmd)
 }

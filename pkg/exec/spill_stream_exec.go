@@ -2,7 +2,6 @@ package exec
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/dynatrace-oss/dtctl/pkg/output"
@@ -15,13 +14,13 @@ import (
 // branch it prints no metadata footer.
 func (e *DQLExecutor) finishStreamedJSONL(query string, result *DQLQueryResponse) error {
 	for _, w := range approximationWarnings(result) {
-		output.PrintWarning("%s", w)
+		output.FprintWarning(e.errW(), "%s", w)
 	}
 	notifications := result.GetNotifications()
 	if len(notifications) > 0 {
 		e.PrintNotifications(notifications)
 		if advice := unsortedSummarizeAdvice(query, notifications); advice != "" {
-			output.PrintHint("%s", advice)
+			output.FprintHint(e.errW(), "%s", advice)
 		}
 	}
 	return nil
@@ -38,7 +37,7 @@ func (e *DQLExecutor) finishStreamedSpill(query string, result *DQLQueryResponse
 	if err != nil {
 		return err
 	}
-	return output.EncodeEnvelope(os.Stdout, resp)
+	return output.EncodeEnvelope(e.outW(), resp)
 }
 
 func (e *DQLExecutor) buildStreamedSpillResponse(query string, result *DQLQueryResponse, c *streamCollector, opts DQLExecuteOptions) (output.Response, error) {
@@ -150,6 +149,9 @@ func (e *DQLExecutor) buildStreamedSpillResponse(query string, result *DQLQueryR
 		Streamed:    true,
 		Warnings:    warnings,
 		Suggestions: suggestions,
+	}
+	if opts.Decorate != nil {
+		opts.Decorate(ctx, result, nil)
 	}
 
 	return output.Response{

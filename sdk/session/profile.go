@@ -2,7 +2,6 @@ package session
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -84,7 +83,7 @@ func BuiltinProfileNames() []string {
 // (as a user profile or built-in preset) is a fast, explicit error rather than
 // a silent fallback to full, which would be a surprising surface expansion.
 func (c *Config) ResolveProfile() (*Profile, error) {
-	return c.resolveProfile(os.Getenv(ProfileEnvVar))
+	return c.resolveProfile(c.getenv(ProfileEnvVar))
 }
 
 // resolveProfile is the testable core of ResolveProfile with the environment

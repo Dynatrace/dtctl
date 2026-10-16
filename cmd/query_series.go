@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -72,21 +73,23 @@ func resolveSeriesOptions(series string, seriesSet bool, precision int, precisio
 // actually renders with. Agent mode replaces a non-explicit -o (such as one
 // from DTCTL_OUTPUT) with -o auto, so the raw output format would skip the
 // series defaults for a chart or parquet format that never applies.
-func querySeriesOptions(series string, seriesSet bool, precision int, precisionSet bool) (seriesOptions, error) {
-	format, _ := agentResultFormat()
-	return resolveSeriesOptions(series, seriesSet, precision, precisionSet, format, agentMode)
+func querySeriesOptions(ctx context.Context, series string, seriesSet bool, precision int, precisionSet bool) (seriesOptions, error) {
+	format, _ := agentResultFormat(ctx)
+	return resolveSeriesOptions(series, seriesSet, precision, precisionSet, format, agentMode(ctx))
 }
 
-func init() {
-	queryCmd.Flags().String("series", "full", `how to render timeseries arrays (records with timeframe and interval):
+// addQuerySeriesFlags registers --series and --precision on the query command.
+// Called from newQueryCmd, so a per-invocation tree gets them too.
+func addQuerySeriesFlags(c *cobra.Command) {
+	c.Flags().String("series", "full", `how to render timeseries arrays (records with timeframe and interval):
 full = every datapoint; summary = per-series min/avg/max/p95/last/n,
 peak/trough times, a sparkline and a level-shift hint; downsample:N = at most
 N points per series, keeping each bucket's min and max so extremes survive
 default: full, summary in agent mode`)
-	queryCmd.Flags().Int("precision", 0, `round numbers in the result to N significant digits, never into the integer part
+	c.Flags().Int("precision", 0, `round numbers in the result to N significant digits, never into the integer part
 0 = full precision; default: 0, 4 in agent mode (--series=summary statistics use 3 when 0)`)
 
-	_ = queryCmd.RegisterFlagCompletionFunc("series", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(c, "series", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{
 			"full\tevery datapoint (default)",
 			"summary\tper-series statistics and a sparkline",
@@ -96,6 +99,6 @@ default: full, summary in agent mode`)
 
 	// Both change the numbers a caller receives; they ship experimental on the
 	// stable query command until the summary shape has settled.
-	stability.MarkFlag(queryCmd, "series", stability.Experimental, querySeriesSince)
-	stability.MarkFlag(queryCmd, "precision", stability.Experimental, querySeriesSince)
+	stability.MarkFlag(c, "series", stability.Experimental, querySeriesSince)
+	stability.MarkFlag(c, "precision", stability.Experimental, querySeriesSince)
 }

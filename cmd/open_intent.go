@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -13,17 +14,17 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-var (
-	openIntentData     string
-	openIntentDataFile string
-	openIntentBrowser  bool
-)
-
 // openIntentCmd generates and optionally opens an intent URL
-var openIntentCmd = &cobra.Command{
-	Use:   "intent <app-id>/<intent-id>",
-	Short: "Generate and open an intent URL",
-	Long: `Generate an intent URL for opening a resource in a Dynatrace app.
+var openIntentCmd = newOpenIntentCmd()
+
+func newOpenIntentCmd() *cobra.Command {
+	var openIntentBrowser bool
+	var openIntentData string
+	var openIntentDataFile string
+	c := &cobra.Command{
+		Use:   "intent <app-id>/<intent-id>",
+		Short: "Generate and open an intent URL",
+		Long: `Generate an intent URL for opening a resource in a Dynatrace app.
 
 Intent URLs enable navigation to specific app views with contextual data.
 The URL can be printed or opened directly in a browser.
@@ -43,82 +44,88 @@ Examples:
   dtctl open intent dynatrace.distributedtracing/view-trace \\
     --data trace_id=abc123 --browser
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if openIntentData == "" && openIntentDataFile == "" {
-			return fmt.Errorf("either --data or --data-file must be specified")
-		}
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if openIntentData == "" && openIntentDataFile == "" {
+				return fmt.Errorf("either --data or --data-file must be specified")
+			}
 
-		if openIntentData != "" && openIntentDataFile != "" {
-			return fmt.Errorf("--data and --data-file are mutually exclusive")
-		}
+			if openIntentData != "" && openIntentDataFile != "" {
+				return fmt.Errorf("--data and --data-file are mutually exclusive")
+			}
 
-		_, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
-
-		handler := appengine.NewIntentHandler(c)
-
-		// Parse app-id/intent-id
-		fullName := args[0]
-		parts := strings.SplitN(fullName, "/", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid format, expected 'app-id/intent-id', got %q", fullName)
-		}
-		appID := parts[0]
-		intentID := parts[1]
-
-		// Parse data
-		var data map[string]interface{}
-
-		if openIntentDataFile != "" {
-			// Read from file, or stdin for "-" — both through the vfs seam, so
-			// an embedded invocation reads the request's files and stdin.
-			content, err := readFileFlag("data-file", openIntentDataFile)
+			_, c, err := setupClient(cmdContext(cmd))
 			if err != nil {
-				return fmt.Errorf("failed to read data file: %w", err)
+				return err
 			}
 
-			if err := json.Unmarshal(content, &data); err != nil {
-				return fmt.Errorf("failed to parse JSON data: %w", err)
+			handler := appengine.NewIntentHandler(c)
+
+			// Parse app-id/intent-id
+			fullName := args[0]
+			parts := strings.SplitN(fullName, "/", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid format, expected 'app-id/intent-id', got %q", fullName)
 			}
-		} else {
-			// Parse key=value pairs
-			data = make(map[string]interface{})
-			pairs := strings.Split(openIntentData, ",")
-			for _, pair := range pairs {
-				parts := strings.SplitN(pair, "=", 2)
-				if len(parts) != 2 {
-					return fmt.Errorf("invalid data format, expected key=value, got %q", pair)
+			appID := parts[0]
+			intentID := parts[1]
+
+			// Parse data
+			var data map[string]interface{}
+
+			if openIntentDataFile != "" {
+				// Read from file, or stdin for "-" — both through the vfs seam, so
+				// an embedded invocation reads the request's files and stdin.
+				content, err := readFileFlag(cmdContext(cmd), "data-file", openIntentDataFile)
+				if err != nil {
+					return fmt.Errorf("failed to read data file: %w", err)
 				}
-				data[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+
+				if err := json.Unmarshal(content, &data); err != nil {
+					return fmt.Errorf("failed to parse JSON data: %w", err)
+				}
+			} else {
+				// Parse key=value pairs
+				data = make(map[string]interface{})
+				pairs := strings.Split(openIntentData, ",")
+				for _, pair := range pairs {
+					parts := strings.SplitN(pair, "=", 2)
+					if len(parts) != 2 {
+						return fmt.Errorf("invalid data format, expected key=value, got %q", pair)
+					}
+					data[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+				}
 			}
-		}
 
-		// Generate URL
-		intentURL, err := handler.GenerateIntentURL(appID, intentID, data)
-		if err != nil {
-			return err
-		}
-
-		// Print URL
-		fmt.Println(intentURL)
-
-		// Open in browser if requested
-		if openIntentBrowser {
-			if err := openBrowser(intentURL); err != nil {
-				return fmt.Errorf("failed to open browser: %w", err)
+			// Generate URL
+			intentURL, err := handler.GenerateIntentURL(appID, intentID, data)
+			if err != nil {
+				return err
 			}
-		}
 
-		return nil
-	},
+			// Print URL
+			fmt.Fprintln(currentStdout(cmdContext(cmd)), intentURL)
+
+			// Open in browser if requested
+			if openIntentBrowser {
+				if err := openBrowser(cmdContext(cmd), intentURL); err != nil {
+					return fmt.Errorf("failed to open browser: %w", err)
+				}
+			}
+
+			return nil
+		},
+	}
+	c.Flags().StringVar(&openIntentData, "data", "", "data as comma-separated key=value pairs")
+	c.Flags().StringVar(&openIntentDataFile, "data-file", "", "JSON file containing data (use - for stdin)")
+	c.Flags().BoolVar(&openIntentBrowser, "browser", false, "open URL in browser")
+	stability.MarkStable(c)
+	return c
 }
 
 // openBrowser opens a URL in the default browser
-func openBrowser(url string) error {
-	if !caps.BrowserOpen {
+func openBrowser(ctx context.Context, url string) error {
+	if !currentCaps(ctx).BrowserOpen {
 		return &CapabilityError{Feature: "opening a browser (open)"}
 	}
 
@@ -140,13 +147,9 @@ func openBrowser(url string) error {
 
 func init() {
 	openCmd.AddCommand(openIntentCmd)
-	openIntentCmd.Flags().StringVar(&openIntentData, "data", "", "data as comma-separated key=value pairs")
-	openIntentCmd.Flags().StringVar(&openIntentDataFile, "data-file", "", "JSON file containing data (use - for stdin)")
-	openIntentCmd.Flags().BoolVar(&openIntentBrowser, "browser", false, "open URL in browser")
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(openIntentCmd)
 }

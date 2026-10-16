@@ -24,10 +24,13 @@ func isSupportedVerifyOutputFormat(format string) bool {
 }
 
 // verifyCmd represents the verify command
-var verifyCmd = &cobra.Command{
-	Use:   "verify",
-	Short: "Verify resources without executing them",
-	Long: `Verify resources without executing them.
+var verifyCmd = newVerifyCmd()
+
+func newVerifyCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "verify",
+		Short: "Verify resources without executing them",
+		Long: `Verify resources without executing them.
 
 The verify command validates resources before execution, checking for syntax errors,
 semantic issues, and configuration problems. This is useful for:
@@ -60,6 +63,9 @@ Exit Codes:
 
 Use "dtctl verify <command> --help" for more information about a command.
 `,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -71,5 +77,4 @@ func init() {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(verifyCmd)
 }

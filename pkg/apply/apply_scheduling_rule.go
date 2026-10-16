@@ -30,7 +30,7 @@ func (a *Applier) applySchedulingRule(data []byte, opts ApplyOptions) (ApplyResu
 		}
 
 		var warnings []string
-		applyWriteBack(a.sourceFile, result.ID, "scheduling-rule", opts.WriteID, false, &warnings)
+		a.applyWriteBack(a.sourceFile, result.ID, "scheduling-rule", opts.WriteID, false, &warnings)
 
 		return &SchedulingRuleApplyResult{
 			ApplyResultBase: ApplyResultBase{
@@ -63,7 +63,7 @@ func (a *Applier) applySchedulingRule(data []byte, opts ApplyOptions) (ApplyResu
 		}
 
 		var warnings []string
-		applyWriteBack(a.sourceFile, result.ID, "scheduling-rule", opts.WriteID, true, &warnings)
+		a.applyWriteBack(a.sourceFile, result.ID, "scheduling-rule", opts.WriteID, true, &warnings)
 
 		return &SchedulingRuleApplyResult{
 			ApplyResultBase: ApplyResultBase{

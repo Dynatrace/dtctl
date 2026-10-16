@@ -15,10 +15,13 @@ import (
 // It is the update-only counterpart to 'create document': it accepts the same
 // --type + --id handling but fails instead of creating when the target document
 // does not exist. For create-or-update semantics use 'dtctl apply' instead.
-var updateDocumentCmd = &cobra.Command{
-	Use:   "document -f <file> --id <id> [--type <type>]",
-	Short: "Update an existing document of any type from a file",
-	Long: `Update an existing document from a YAML or JSON file.
+var updateDocumentCmd = newUpdateDocumentCmd()
+
+func newUpdateDocumentCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "document -f <file> --id <id> [--type <type>]",
+		Short: "Update an existing document of any type from a file",
+		Long: `Update an existing document from a YAML or JSON file.
 
 This is the update-only counterpart to 'create document'. It works for any
 document type — dashboard, notebook, launchpad, or custom app documents such as
@@ -73,8 +76,21 @@ See also:
   dtctl create document --help   # create a new document of any type
   dtctl apply --help             # create-or-update semantics
 `,
-	Aliases: []string{"doc"},
-	RunE:    updateDocumentRunE,
+		Aliases: []string{"doc"},
+		RunE:    updateDocumentRunE,
+	}
+	c.Flags().StringP("file", "f", "", "file containing the document definition, or - for stdin (required)")
+	c.Flags().String("type", "", "document type (e.g. launchpad, acme:config); read from payload if not provided")
+	c.Flags().String("id", "", "ID of the document to update; read from payload if not provided")
+	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
+	c.Flags().StringArray("label", []string{}, "classification label to set (repeatable); replaces the document's labels (cannot be cleared, only replaced). Falls back to labels in the payload")
+	c.Flags().Bool("create-snapshot", false, "snapshot the document's current state before updating it, so the previous version stays available via 'dtctl history document'/'dtctl restore document'")
+	c.Flags().String("snapshot-description", "", "description for the snapshot created by --create-snapshot (max 128 characters)")
+	c.Flags().Bool("dry-run", false, "preview the update without applying it")
+	c.Flags().Bool("show-diff", false, "show a diff of the change")
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "file")
+	return c
 }
 
 // updateDocumentRunE updates a document by delegating to the shared applier with
@@ -87,7 +103,7 @@ func updateDocumentRunE(cmd *cobra.Command, _ []string) error {
 	id, _ := cmd.Flags().GetString("id")
 	setFlags, _ := cmd.Flags().GetStringArray("set")
 	labels, _ := cmd.Flags().GetStringArray("label")
-	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	dryRunFlag, _ := cmd.Flags().GetBool("dry-run")
 	showDiff, _ := cmd.Flags().GetBool("show-diff")
 	createSnapshot, _ := cmd.Flags().GetBool("create-snapshot")
 	snapshotDescription, _ := cmd.Flags().GetString("snapshot-description")
@@ -96,7 +112,7 @@ func updateDocumentRunE(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	fileData, err := readFileFlag("file", file)
+	fileData, err := readFileFlag(cmdContext(cmd), "file", file)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
@@ -109,17 +125,17 @@ func updateDocumentRunE(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	cfg, err := LoadConfig()
+	cfg, err := loadConfig(cmdContext(cmd))
 	if err != nil {
 		return err
 	}
-	c, err := NewClientFromConfig(cfg)
+	c, err := newClientFromConfig(cmdContext(cmd), cfg)
 	if err != nil {
 		return err
 	}
 
-	applier := apply.NewApplier(c)
-	if !dryRun {
+	applier := newApplier(cmdContext(cmd), c)
+	if !dryRunFlag {
 		checker, err := NewSafetyChecker(cfg)
 		if err != nil {
 			return err
@@ -129,7 +145,7 @@ func updateDocumentRunE(cmd *cobra.Command, _ []string) error {
 
 	results, err := applier.Apply(fileData, apply.ApplyOptions{
 		TemplateVars:        templateVars,
-		DryRun:              dryRun,
+		DryRun:              dryRunFlag,
 		ShowDiff:            showDiff,
 		OverrideID:          id,
 		Type:                docType,
@@ -142,7 +158,7 @@ func updateDocumentRunE(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	printer := NewPrinter()
+	printer := newPrinterCtx(cmdContext(cmd))
 	enrichAgent(printer, "update", "document")
 	if len(results) == 1 {
 		return printer.Print(results[0])
@@ -154,21 +170,5 @@ func updateDocumentRunE(cmd *cobra.Command, _ []string) error {
 	return printer.PrintList(items)
 }
 
-func init() {
-	updateDocumentCmd.Flags().StringP("file", "f", "", "file containing the document definition, or - for stdin (required)")
-	updateDocumentCmd.Flags().String("type", "", "document type (e.g. launchpad, acme:config); read from payload if not provided")
-	updateDocumentCmd.Flags().String("id", "", "ID of the document to update; read from payload if not provided")
-	updateDocumentCmd.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	updateDocumentCmd.Flags().StringArray("label", []string{}, "classification label to set (repeatable); replaces the document's labels (cannot be cleared, only replaced). Falls back to labels in the payload")
-	updateDocumentCmd.Flags().Bool("create-snapshot", false, "snapshot the document's current state before updating it, so the previous version stays available via 'dtctl history document'/'dtctl restore document'")
-	updateDocumentCmd.Flags().String("snapshot-description", "", "description for the snapshot created by --create-snapshot (max 128 characters)")
-	updateDocumentCmd.Flags().Bool("dry-run", false, "preview the update without applying it")
-	updateDocumentCmd.Flags().Bool("show-diff", false, "show a diff of the change")
-	markFlagRequiredNonEmpty(updateDocumentCmd, "file")
-}
-
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(updateDocumentCmd)
-}

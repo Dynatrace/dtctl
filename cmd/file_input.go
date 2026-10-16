@@ -1,13 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/dynatrace-oss/dtctl/pkg/apply"
 	"github.com/dynatrace-oss/dtctl/pkg/suggest"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 // stdinSourceName is how input read from `-f -` is named wherever a command
@@ -22,8 +22,8 @@ const stdinSourceName = apply.StdinSourceFile
 // (TestFileFlagsReadThroughReadFileFlag guards this).
 //
 // The returned error is the raw read error; callers keep their own wrapping.
-func readFileFlag(flag, path string) ([]byte, error) {
-	return readFileFlagFrom(flag, path, osStdin())
+func readFileFlag(ctx context.Context, flag, path string) ([]byte, error) {
+	return readFileFlagFrom(ctx, flag, path, invocationStdin(ctx))
 }
 
 // sourceName is the name to show for the input a file flag names.
@@ -42,9 +42,9 @@ func sourceName(path string) string {
 // rejected too: stdin can be read only once, so a second `-` in the same
 // invocation, or a producer that wrote nothing, would otherwise surface as a
 // confusing parse error far from the cause.
-func readFileFlagFrom(flag, path string, stdin queryStdin) ([]byte, error) {
+func readFileFlagFrom(ctx context.Context, flag, path string, stdin queryStdin) ([]byte, error) {
 	if path != "-" {
-		return vfs.ReadFile(path)
+		return vfsEnv(ctx).ReadFile(path)
 	}
 	if stdin.isTerminal {
 		return nil, &suggest.FlagError{Flag: flag, Message: fmt.Sprintf(

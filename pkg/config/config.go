@@ -90,6 +90,9 @@ func CheckKeyring() error                             { return session.CheckKeyr
 func IsKeyringAvailable() bool                        { return session.IsKeyringAvailable() }
 func KeyringBackend() string                          { return session.KeyringBackend() }
 func IsFileTokenStorage() bool                        { return session.IsFileTokenStorage() }
+func IsKeyringAbsent(err error) bool                  { return session.IsKeyringAbsent(err) }
+func PersistFileTokenStorage() error                  { return session.PersistFileTokenStorage() }
+func FileTokenStorageConsentPath() string             { return session.FileTokenStorageConsentPath() }
 func IsOAuthStorageAvailable() bool                   { return session.IsOAuthStorageAvailable() }
 func OAuthStorageBackend() string                     { return session.OAuthStorageBackend() }
 func MigrateTokensToKeyring(cfg *Config) (int, error) { return session.MigrateTokensToKeyring(cfg) }

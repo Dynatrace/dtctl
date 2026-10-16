@@ -1,17 +1,17 @@
-[#3]:
-  - criteria[#1]{target,timeframeFrom,warning}:
-    99.9,"-7d",99.5
+[3]:
+  - criteria[1]{target,timeframeFrom,warning}:
+      99.9,"-7d",99.5
     description: 99.9% availability for public API endpoints
     id: a1b2c3d4-0001-4000-8000-000000000001
     name: API Availability
-    tags[#2]: "service:api","tier:1"
+    tags[2]: "service:api","tier:1"
     version: "3"
-  - criteria[#1]{target,timeframeFrom}:
-    95,"-30d"
+  - criteria[1]{target,timeframeFrom}:
+      95,"-30d"
     description: P95 response time under 500ms for checkout flow
     id: a1b2c3d4-0002-4000-8000-000000000002
     name: Checkout Latency
-    tags[#1]: "service:checkout"
+    tags[1]: "service:checkout"
     version: "1"
   - description: Error rate below 0.1% across all services
     id: a1b2c3d4-0003-4000-8000-000000000003

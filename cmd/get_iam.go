@@ -8,11 +8,14 @@ import (
 )
 
 // getUsersCmd retrieves IAM users
-var getUsersCmd = &cobra.Command{
-	Use:     "users [uuid]",
-	Aliases: []string{"user"},
-	Short:   "Get IAM users",
-	Long: `Get users from Identity and Access Management.
+var getUsersCmd = newGetUsersCmd()
+
+func newGetUsersCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "users [uuid]",
+		Aliases: []string{"user"},
+		Short:   "Get IAM users",
+		Long: `Get users from Identity and Access Management.
 
 Examples:
   # List all users
@@ -27,40 +30,47 @@ Examples:
   # Output as JSON
   dtctl get users -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := iam.NewHandler(c)
-
-		// Get specific user if UUID provided
-		if len(args) > 0 {
-			user, err := handler.GetUser(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(user)
-		}
 
-		// List all users with optional filter
-		filterStr, _ := cmd.Flags().GetString("filter")
-		list, err := handler.ListUsers(filterStr, nil, GetChunkSize())
-		if err != nil {
-			return err
-		}
+			handler := iam.NewHandler(c)
 
-		return printer.PrintList(list.Results)
-	},
+			// Get specific user if UUID provided
+			if len(args) > 0 {
+				user, err := handler.GetUser(args[0])
+				if err != nil {
+					return err
+				}
+				return printer.Print(user)
+			}
+
+			// List all users with optional filter
+			filterStr, _ := cmd.Flags().GetString("filter")
+			list, err := handler.ListUsers(filterStr, nil, getChunkSize(cmdContext(cmd)))
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(list.Results)
+		},
+	}
+	c.Flags().String("filter", "", "Filter users by email or name (partial match)")
+	stability.MarkStable(c)
+	return c
 }
 
 // getGroupsCmd retrieves IAM groups
-var getGroupsCmd = &cobra.Command{
-	Use:     "groups [uuid]",
-	Aliases: []string{"group"},
-	Short:   "Get IAM groups",
-	Long: `Get groups from Identity and Access Management.
+var getGroupsCmd = newGetGroupsCmd()
+
+func newGetGroupsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "groups [uuid]",
+		Aliases: []string{"group"},
+		Short:   "Get IAM groups",
+		Long: `Get groups from Identity and Access Management.
 
 Examples:
   # List all groups
@@ -72,34 +82,34 @@ Examples:
   # Output as JSON
   dtctl get groups -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		handler := iam.NewHandler(c)
+			handler := iam.NewHandler(c)
 
-		// List all groups with optional filter
-		filterStr, _ := cmd.Flags().GetString("filter")
-		list, err := handler.ListGroups(filterStr, nil, GetChunkSize())
-		if err != nil {
-			return err
-		}
+			// List all groups with optional filter
+			filterStr, _ := cmd.Flags().GetString("filter")
+			list, err := handler.ListGroups(filterStr, nil, getChunkSize(cmdContext(cmd)))
+			if err != nil {
+				return err
+			}
 
-		return printer.PrintList(list.Results)
-	},
+			return printer.PrintList(list.Results)
+		},
+	}
+	c.Flags().String("filter", "", "Filter groups by name (partial match)")
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
 	// IAM flags
-	getUsersCmd.Flags().String("filter", "", "Filter users by email or name (partial match)")
-	getGroupsCmd.Flags().String("filter", "", "Filter groups by name (partial match)")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(getGroupsCmd)
-	stability.MarkStable(getUsersCmd)
 }

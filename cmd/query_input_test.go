@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func (f failingReader) Read([]byte) (int, error) {
 
 func TestResolveQueryInput_InlineArgument(t *testing.T) {
 	const want = `fetch logs | filter status == "ERROR"`
-	got, err := resolveQueryInput("", []string{want}, terminalStdin(t))
+	got, err := resolveQueryInput(context.Background(), "", []string{want}, terminalStdin(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestResolveQueryInput_File(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := resolveQueryInput(path, nil, terminalStdin(t))
+	got, err := resolveQueryInput(context.Background(), path, nil, terminalStdin(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestResolveQueryInput_File(t *testing.T) {
 }
 
 func TestResolveQueryInput_FileMissing(t *testing.T) {
-	_, err := resolveQueryInput(filepath.Join(t.TempDir(), "nope.dql"), nil, terminalStdin(t))
+	_, err := resolveQueryInput(context.Background(), filepath.Join(t.TempDir(), "nope.dql"), nil, terminalStdin(t))
 	if err == nil {
 		t.Fatal("expected an error for a missing file")
 	}
@@ -64,7 +65,7 @@ func TestResolveQueryInput_FileMissing(t *testing.T) {
 }
 
 func TestResolveQueryInput_ExplicitStdin(t *testing.T) {
-	got, err := resolveQueryInput("-", nil, pipedStdin("fetch logs | limit 2"))
+	got, err := resolveQueryInput(context.Background(), "-", nil, pipedStdin("fetch logs | limit 2"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestResolveQueryInput_ExplicitStdin(t *testing.T) {
 
 func TestResolveQueryInput_PipedStdinWithoutFileFlag(t *testing.T) {
 	// `cat query.dql | dtctl query` -- no --file, no argument.
-	got, err := resolveQueryInput("", nil, pipedStdin("fetch logs | limit 3"))
+	got, err := resolveQueryInput(context.Background(), "", nil, pipedStdin("fetch logs | limit 3"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestResolveQueryInput_PipedStdinWithoutFileFlag(t *testing.T) {
 // to block until Ctrl+D and then submit an empty query, which looks like a hung
 // CLI. It must fail fast with guidance instead.
 func TestResolveQueryInput_StdinIsTerminal(t *testing.T) {
-	_, err := resolveQueryInput("-", nil, terminalStdin(t))
+	_, err := resolveQueryInput(context.Background(), "-", nil, terminalStdin(t))
 	if err == nil {
 		t.Fatal("expected an error when --file - is used on a terminal")
 	}
@@ -106,7 +107,7 @@ func TestResolveQueryInput_StdinIsTerminal(t *testing.T) {
 func TestResolveQueryInput_FileAndInlineQueryConflict(t *testing.T) {
 	for _, file := range []string{"-", "query.dql"} {
 		t.Run(file, func(t *testing.T) {
-			_, err := resolveQueryInput(file, []string{"fetch logs | limit 1"}, terminalStdin(t))
+			_, err := resolveQueryInput(context.Background(), file, []string{"fetch logs | limit 1"}, terminalStdin(t))
 			if err == nil {
 				t.Fatal("expected an error when --file and an inline query are combined")
 			}
@@ -121,7 +122,7 @@ func TestResolveQueryInput_FileAndInlineQueryConflict(t *testing.T) {
 }
 
 func TestResolveQueryInput_NothingProvided(t *testing.T) {
-	_, err := resolveQueryInput("", nil, terminalStdin(t))
+	_, err := resolveQueryInput(context.Background(), "", nil, terminalStdin(t))
 	if err == nil {
 		t.Fatal("expected an error when no query source is given")
 	}

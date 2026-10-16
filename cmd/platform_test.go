@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -72,15 +73,15 @@ func setupPlatformCmdTest(t *testing.T, srv *httptest.Server, format string) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	origCfgFile := cfgFile
-	origFormat, origAgent := outputFormat, agentMode
+	origCfgFile := cfgFile(context.Background())
+	origFormat, origAgent := outputFormat(context.Background()), agentMode(context.Background())
 	t.Cleanup(func() {
-		cfgFile = origCfgFile
-		outputFormat, agentMode = origFormat, origAgent
+		gFlags.cfgFile = origCfgFile
+		gFlags.outputFormat, gFlags.agentMode = origFormat, origAgent
 	})
-	cfgFile = configPath
-	outputFormat = format
-	agentMode = false
+	gFlags.cfgFile = configPath
+	gFlags.outputFormat = format
+	gFlags.agentMode = false
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", srv.URL, "test-token")
@@ -219,10 +220,10 @@ func TestPlatformCommandArgs(t *testing.T) {
 }
 
 func TestUsePlatformDescribeTextView(t *testing.T) {
-	originalFormat := outputFormat
-	originalAgentMode := agentMode
-	defer func() { outputFormat = originalFormat }()
-	defer func() { agentMode = originalAgentMode }()
+	originalFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	defer func() { gFlags.outputFormat = originalFormat }()
+	defer func() { gFlags.agentMode = originalAgentMode }()
 
 	tests := []struct {
 		name   string
@@ -238,9 +239,9 @@ func TestUsePlatformDescribeTextView(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agentMode = false
-			outputFormat = tt.format
-			if got := usePlatformDescribeTextView(); got != tt.want {
+			gFlags.agentMode = false
+			gFlags.outputFormat = tt.format
+			if got := usePlatformDescribeTextView(context.Background()); got != tt.want {
 				t.Fatalf("usePlatformDescribeTextView() = %v, want %v", got, tt.want)
 			}
 		})
@@ -249,11 +250,11 @@ func TestUsePlatformDescribeTextView(t *testing.T) {
 	t.Run("agent mode forces structured view", func(t *testing.T) {
 		// Restored: agentMode is package state, and leaving it on leaks into
 		// every test that runs after this one in the package.
-		prev := agentMode
-		agentMode = true
-		t.Cleanup(func() { agentMode = prev })
-		outputFormat = "table"
-		if got := usePlatformDescribeTextView(); got {
+		prev := agentMode(context.Background())
+		gFlags.agentMode = true
+		t.Cleanup(func() { gFlags.agentMode = prev })
+		gFlags.outputFormat = "table"
+		if got := usePlatformDescribeTextView(context.Background()); got {
 			t.Fatalf("usePlatformDescribeTextView() = %v, want false when agent mode enabled", got)
 		}
 	})

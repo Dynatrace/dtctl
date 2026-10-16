@@ -670,6 +670,45 @@ func TestConfig_SetContextWithOptions(t *testing.T) {
 	}
 }
 
+func TestConfig_SetContextWithOptions_UsageTracking(t *testing.T) {
+	cfg := NewConfig()
+	on, off := true, false
+
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "tok", nil)
+	cfg.CurrentContext = "prod"
+	if cfg.UsageTrackingEnabled() {
+		t.Fatal("usage tracking must be off by default")
+	}
+
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "", &ContextOptions{UsageTracking: &on})
+	if !cfg.UsageTrackingEnabled() {
+		t.Fatal("UsageTracking=&true must enable tracking")
+	}
+
+	// An update that does not mention tracking must leave it alone.
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "", &ContextOptions{Description: "x"})
+	if !cfg.UsageTrackingEnabled() {
+		t.Fatal("an unrelated update must not switch tracking off")
+	}
+
+	cfg.SetContextWithOptions("prod", "https://prod.dt.com", "", &ContextOptions{UsageTracking: &off})
+	if cfg.UsageTrackingEnabled() {
+		t.Fatal("UsageTracking=&false must disable tracking")
+	}
+
+	// A new context can be created with tracking on.
+	cfg.SetContextWithOptions("dev", "https://dev.dt.com", "tok", &ContextOptions{UsageTracking: &on})
+	cfg.CurrentContext = "dev"
+	if !cfg.UsageTrackingEnabled() {
+		t.Fatal("new context created with tracking on must report enabled")
+	}
+
+	cfg.CurrentContext = "missing"
+	if cfg.UsageTrackingEnabled() {
+		t.Fatal("an unresolvable current context must report tracking off")
+	}
+}
+
 func TestConfig_SetContextWithOptions_NilOpts(t *testing.T) {
 	cfg := NewConfig()
 
@@ -3511,5 +3550,94 @@ func TestQueryLimits_Validate(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("negative %s: error = %q, want it to name the key", name, err)
 		}
+	}
+}
+
+// TestConfig_UsageTrackingOn_LocalNeedsGlobalOptIn: an auto-discovered local
+// .dtctl.yaml cannot turn the usage ledger on. Its context is tracked only when
+// the global context binding the same token-ref and host opted in.
+func TestConfig_UsageTrackingOn_LocalNeedsGlobalOptIn(t *testing.T) {
+	// NOT parallel: os.Chdir and XDG_CONFIG_HOME are process-global.
+	cases := []struct {
+		name          string
+		globalTracked bool
+		localTracked  bool
+		localEnv      string
+		localRef      string
+		wantOn        bool
+		wantIgnored   bool
+	}{
+		{name: "local on, global off is ignored", localTracked: true, localEnv: "https://global.dt.com", localRef: "prod-token", wantIgnored: true},
+		{name: "global on is inherited", globalTracked: true, localEnv: "https://global.dt.com", localRef: "prod-token", wantOn: true},
+		{name: "both on", globalTracked: true, localTracked: true, localEnv: "https://global.dt.com", localRef: "prod-token", wantOn: true},
+		{name: "global on for another host", globalTracked: true, localTracked: true, localEnv: "https://other.dt.com", localRef: "prod-token", wantIgnored: true},
+		{name: "unbound token-ref", globalTracked: true, localTracked: true, localEnv: "https://global.dt.com", localRef: "unbound-token", wantIgnored: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			xdgDir := filepath.Join(t.TempDir(), "xdg")
+			projectDir := t.TempDir()
+			globalDir := filepath.Join(xdgDir, "dtctl")
+			if err := os.MkdirAll(globalDir, 0700); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+
+			globalCfg := `apiVersion: v1
+kind: Config
+current-context: myctx
+contexts:
+  - name: myctx
+    context:
+      environment: https://global.dt.com
+      token-ref: prod-token
+`
+			if tc.globalTracked {
+				globalCfg += "      usage-tracking: true\n"
+			}
+			if err := os.WriteFile(filepath.Join(globalDir, "config"), []byte(globalCfg), 0600); err != nil {
+				t.Fatalf("write global config: %v", err)
+			}
+
+			t.Setenv("XDG_CONFIG_HOME", xdgDir)
+			xdg.Reload()
+			defer xdg.Reload()
+
+			localCfg := `apiVersion: v1
+kind: Config
+current-context: project
+contexts:
+  - name: project
+    context:
+      environment: ` + tc.localEnv + `
+      token-ref: ` + tc.localRef + `
+`
+			if tc.localTracked {
+				localCfg += "      usage-tracking: true\n"
+			}
+			if err := os.WriteFile(filepath.Join(projectDir, LocalConfigName), []byte(localCfg), 0600); err != nil {
+				t.Fatalf("write local config: %v", err)
+			}
+
+			origWd, _ := os.Getwd()
+			defer func() { _ = os.Chdir(origWd) }()
+			if err := os.Chdir(projectDir); err != nil {
+				t.Fatalf("chdir: %v", err)
+			}
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if !cfg.IsLocal() {
+				t.Fatal("expected the local config to be loaded")
+			}
+			if got := cfg.UsageTrackingEnabled(); got != tc.wantOn {
+				t.Errorf("UsageTrackingEnabled() = %v, want %v", got, tc.wantOn)
+			}
+			if got := cfg.IgnoredUsageTracking("project"); got != tc.wantIgnored {
+				t.Errorf("IgnoredUsageTracking() = %v, want %v", got, tc.wantIgnored)
+			}
+		})
 	}
 }

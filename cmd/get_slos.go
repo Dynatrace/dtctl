@@ -13,11 +13,14 @@ import (
 )
 
 // getSLOsCmd retrieves SLOs
-var getSLOsCmd = &cobra.Command{
-	Use:     "slos [id]",
-	Aliases: []string{"slo"},
-	Short:   "Get service-level objectives",
-	Long: `Get service-level objectives.
+var getSLOsCmd = newGetSLOsCmd()
+
+func newGetSLOsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "slos [id]",
+		Aliases: []string{"slo"},
+		Short:   "Get service-level objectives",
+		Long: `Get service-level objectives.
 
 Examples:
   # List all SLOs
@@ -32,41 +35,55 @@ Examples:
   # Output as JSON
   dtctl get slos -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		filter, _ := cmd.Flags().GetString("filter")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			filter, _ := cmd.Flags().GetString("filter")
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := slo.NewHandler(c)
-
-		// Get specific SLO if ID provided
-		if len(args) > 0 {
-			s, err := handler.Get(args[0])
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(s)
-		}
 
-		// List all SLOs
-		list, err := handler.List(filter, GetChunkSize())
-		if err != nil {
-			return err
-		}
+			handler := slo.NewHandler(c)
 
-		return printer.PrintList(list.SLOs)
-	},
+			// Get specific SLO if ID provided
+			if len(args) > 0 {
+				s, err := handler.Get(args[0])
+				if err != nil {
+					return err
+				}
+				return printer.Print(s)
+			}
+
+			// List all SLOs
+			list, err := handler.List(filter, getChunkSize(cmdContext(cmd)))
+			if err != nil {
+				return err
+			}
+
+			// A definition is not a status; point at exec slo.
+			if ap := enrichAgent(printer, "get", "slo"); ap != nil && len(list.SLOs) > 0 {
+				ap.SetSuggestions([]string{sloEvaluateAdvice})
+			}
+			return printer.PrintList(list.SLOs)
+		},
+	}
+	c.Flags().String("filter", "", "Filter SLOs (e.g., \"name~'production'\")")
+	stability.MarkStable(c)
+	return c
 }
 
+// sloEvaluateAdvice says how to get an SLO's status from its definition.
+const sloEvaluateAdvice = "these are SLO definitions (targets), not their status — evaluate each with 'dtctl exec slo <id>' for its current value, status and error budget"
+
 // getSLOTemplatesCmd retrieves SLO templates
-var getSLOTemplatesCmd = &cobra.Command{
-	Use:     "slo-templates [id]",
-	Aliases: []string{"slo-template"},
-	Short:   "Get SLO objective templates",
-	Long: `Get SLO objective templates.
+var getSLOTemplatesCmd = newGetSLOTemplatesCmd()
+
+func newGetSLOTemplatesCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "slo-templates [id]",
+		Aliases: []string{"slo-template"},
+		Short:   "Get SLO objective templates",
+		Long: `Get SLO objective templates.
 
 Examples:
   # List all SLO templates
@@ -81,40 +98,48 @@ Examples:
   # Output as JSON
   dtctl get slo-templates -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		filter, _ := cmd.Flags().GetString("filter")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			filter, _ := cmd.Flags().GetString("filter")
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := slo.NewHandler(c)
-
-		// Get specific template if ID provided
-		if len(args) > 0 {
-			t, err := handler.GetTemplate(args[0])
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(t)
-		}
 
-		// List all templates
-		list, err := handler.ListTemplates(filter)
-		if err != nil {
-			return err
-		}
+			handler := slo.NewHandler(c)
 
-		return printer.PrintList(list.Items)
-	},
+			// Get specific template if ID provided
+			if len(args) > 0 {
+				t, err := handler.GetTemplate(args[0])
+				if err != nil {
+					return err
+				}
+				return printer.Print(t)
+			}
+
+			// List all templates
+			list, err := handler.ListTemplates(filter)
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(list.Items)
+		},
+	}
+	c.Flags().String("filter", "", "Filter templates (e.g., \"builtIn==true\")")
+	stability.MarkStable(c)
+	return c
 }
 
 // deleteSLOCmd deletes an SLO
-var deleteSLOCmd = &cobra.Command{
-	Use:   "slo <slo-id>",
-	Short: "Delete a service-level objective",
-	Long: `Delete a service-level objective by ID.
+var deleteSLOCmd = newDeleteSLOCmd()
+
+func newDeleteSLOCmd() *cobra.Command {
+	var forceDelete bool
+	c := &cobra.Command{
+		Use:   "slo <slo-id>",
+		Short: "Delete a service-level objective",
+		Long: `Delete a service-level objective by ID.
 
 Examples:
   # Delete an SLO
@@ -123,57 +148,54 @@ Examples:
   # Delete without confirmation
   dtctl delete slo <slo-id> -y
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		sloID := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sloID := args[0]
 
-		_, c, err := SetupWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
-
-		handler := slo.NewHandler(c)
-
-		// Get current version for optimistic locking
-		s, err := handler.Get(sloID)
-		if err != nil {
-			return err
-		}
-
-		if dryRun {
-			return deleteDryRun(cmd, "SLO", s.Name, sloID)
-		}
-
-		// Confirm deletion unless --force or --plain
-		if !forceDelete && !plainMode {
-			if !prompt.ConfirmDeletion("SLO", s.Name, sloID) {
-				fmt.Println("Deletion cancelled")
-				return nil
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
 			}
-		}
 
-		if err := handler.Delete(sloID, s.Version); err != nil {
-			return err
-		}
+			handler := slo.NewHandler(c)
 
-		output.PrintSuccess("SLO %q deleted", s.Name)
-		return nil
-	},
+			// Get current version for optimistic locking
+			s, err := handler.Get(sloID)
+			if err != nil {
+				return err
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "SLO", s.Name, sloID)
+			}
+
+			// Confirm deletion unless --force or --plain
+			if !forceDelete && !plainMode(cmdContext(cmd)) {
+				if !prompt.ConfirmDeletionWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), "SLO", s.Name, sloID) {
+					fmt.Fprintln(currentStdout(cmdContext(cmd)), "Deletion cancelled")
+					return nil
+				}
+			}
+
+			if err := handler.Delete(sloID, s.Version); err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "SLO %q deleted", s.Name)
+			return nil
+		},
+	}
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
 	// SLO flags
-	getSLOsCmd.Flags().String("filter", "", "Filter SLOs (e.g., \"name~'production'\")")
-	getSLOTemplatesCmd.Flags().String("filter", "", "Filter templates (e.g., \"builtIn==true\")")
-
 	// Delete confirmation flags
-	deleteSLOCmd.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(deleteSLOCmd)
-	stability.MarkStable(getSLOTemplatesCmd)
-	stability.MarkStable(getSLOsCmd)
 }

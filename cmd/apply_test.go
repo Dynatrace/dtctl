@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/dynatrace-oss/dtctl/pkg/apply"
 	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
 )
 
@@ -47,25 +49,22 @@ func newEnvShareMock(t *testing.T, fail map[string]bool) (*httptest.Server, map[
 		}
 	})
 
-	// Metadata + isPrivate PATCH (needed by --share-environment public). A
-	// PATCH is counted under "patch:<id>".
+	// :makePublic, counted under "public:<id>". Anything else on a document
+	// (a metadata read, a PATCH) is a call the flag must no longer make.
 	mux.HandleFunc("/platform/document/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/metadata") {
-			w.Header().Set("Content-Type", "application/json")
-			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/platform/document/v1/documents/"), "/metadata")
-			_ = json.NewEncoder(w).Encode(document.DocumentMetadata{ID: id, Name: "doc", Type: "notebook", Version: 1, IsPrivate: true})
+		id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/platform/document/v1/documents/"), ":makePublic")
+		if !ok || r.Method != http.MethodPost {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		if r.Method == http.MethodPatch {
-			key := "patch:" + strings.TrimPrefix(r.URL.Path, "/platform/document/v1/documents/")
-			if _, ok := counts[key]; !ok {
-				var n int64
-				counts[key] = &n
-			}
-			atomic.AddInt64(counts[key], 1)
-			w.WriteHeader(http.StatusOK)
-			return
+		key := "public:" + id
+		if _, ok := counts[key]; !ok {
+			var n int64
+			counts[key] = &n
 		}
+		atomic.AddInt64(counts[key], 1)
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	return httptest.NewServer(mux), counts
@@ -90,13 +89,9 @@ func TestEnsureEnvironmentShareForResults_SkipsNonDocuments(t *testing.T) {
 		&apply.WorkflowApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "wf-1", ResourceType: "workflow"}},
 		&apply.SLOApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "slo-1", ResourceType: "slo"}},
 		&apply.DashboardApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "db-1", ResourceType: "dashboard"}},
-		&apply.DocumentApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "lp-1", ResourceType: "launchpad"}},
 	}
-	if err := ensureEnvironmentShareForResults(c, results, linkAndPublic, "read", false); err != nil {
+	if err := ensureEnvironmentShareForResults(context.Background(), c, results, "read"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := counts["lp-1"]; got == nil || atomic.LoadInt64(got) != 1 {
-		t.Errorf("expected launchpad lp-1 to be shared once, counts=%v", counts)
 	}
 	if got := counts["nb-1"]; got == nil || atomic.LoadInt64(got) != 1 {
 		t.Errorf("expected notebook nb-1 to be shared once, counts=%v", counts)
@@ -120,7 +115,7 @@ func TestEnsureEnvironmentShareForResults_SkipsEmptyID(t *testing.T) {
 	results := []apply.ApplyResult{
 		&apply.NotebookApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "", ResourceType: "notebook"}},
 	}
-	if err := ensureEnvironmentShareForResults(c, results, linkAndPublic, "read", false); err != nil {
+	if err := ensureEnvironmentShareForResults(context.Background(), c, results, "read"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(counts) != 0 {
@@ -139,7 +134,7 @@ func TestEnsureEnvironmentShareForResults_ContinuesAfterFailure(t *testing.T) {
 		&apply.NotebookApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "nb-bad", ResourceType: "notebook"}},
 		&apply.DashboardApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "db-ok", ResourceType: "dashboard"}},
 	}
-	err := ensureEnvironmentShareForResults(c, results, linkAndPublic, "read", false)
+	err := ensureEnvironmentShareForResults(context.Background(), c, results, "read")
 	if err == nil {
 		t.Fatal("expected error from failing share")
 	}
@@ -160,7 +155,7 @@ func TestEnsureEnvironmentShareForResults_MultipleFailuresCombined(t *testing.T)
 		&apply.NotebookApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "nb-1", ResourceType: "notebook"}},
 		&apply.DashboardApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "db-1", ResourceType: "dashboard"}},
 	}
-	err := ensureEnvironmentShareForResults(c, results, linkAndPublic, "read", false)
+	err := ensureEnvironmentShareForResults(context.Background(), c, results, "read")
 	if err == nil {
 		t.Fatal("expected combined error")
 	}
@@ -173,106 +168,101 @@ func TestEnsureEnvironmentShareForResults_MultipleFailuresCombined(t *testing.T)
 	}
 }
 
-// linkAndPublic is what `--share-environment link,public` asks for.
-var linkAndPublic = environmentModes{link: true, public: true}
-
-// TestEnsureEnvironmentShareForResults_Modes: each mode does only its own
-// half, as on `share document --environment`.
-func TestEnsureEnvironmentShareForResults_Modes(t *testing.T) {
+func TestApplyCmd_ShareEnvironmentFlagValidation(t *testing.T) {
+	// The flag validates up-front before any HTTP work, so we exercise it by
+	// setting args on a fresh command tree and asserting the RunE error.
 	tests := []struct {
-		name                string
-		modes               environmentModes
-		wantPost, wantPatch bool
+		value   string
+		wantErr bool
 	}{
-		{"link", environmentModes{link: true}, true, false},
-		{"public", environmentModes{public: true}, false, true},
-		{"link,public", linkAndPublic, true, true},
+		{"", false},
+		{"read", false},
+		{"read-write", false},
+		{"write", true},
+		{"bogus", true},
+		{"READ", true},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			srv, counts := newEnvShareMock(t, nil)
-			defer srv.Close()
-			c := newEnvShareClient(t, srv)
+		t.Run("value="+tt.value, func(t *testing.T) {
+			// Reach into the flag value directly; RunE reads it via cmd.Flags().GetString.
+			f := applyCmd.Flags().Lookup("share-environment")
+			if f == nil {
+				t.Fatal("--share-environment flag not registered")
+			}
+			orig := f.Value.String()
+			defer func() { _ = f.Value.Set(orig) }()
+			if err := f.Value.Set(tt.value); err != nil {
+				t.Fatalf("Set: %v", err)
+			}
 
-			results := []apply.ApplyResult{
-				&apply.DocumentApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "lp-1", ResourceType: "launchpad"}},
-			}
-			if err := ensureEnvironmentShareForResults(c, results, tt.modes, "read", false); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if _, posted := counts["lp-1"]; posted != tt.wantPost {
-				t.Errorf("environment share created = %v, want %v", posted, tt.wantPost)
-			}
-			if _, patched := counts["patch:lp-1"]; patched != tt.wantPatch {
-				t.Errorf("isPrivate patched = %v, want %v", patched, tt.wantPatch)
+			// Invoke the validation directly — the RunE's first few lines are
+			// flag reads + value check. We reproduce that narrow check here to
+			// avoid needing a file/client for a pure validation test.
+			val := f.Value.String()
+			err := validateShareEnvironmentValue(val)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateShareEnvironmentValue(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
 			}
 		})
 	}
 }
 
-// TestEnsureEnvironmentShareForResults_ExistingLinkAtAnotherLevel: without
-// --share-access, a link at another level is neither reused nor replaced,
-// and the error names both ways out.
-func TestEnsureEnvironmentShareForResults_ExistingLinkAtAnotherLevel(t *testing.T) {
-	s, srv := newEnvShareServer(t) // lp-1 has a read share
+// TestEnsureEnvironmentShareForResults_DoesBothHalves: the deprecated flag
+// still does what it always did — a link at the access level and
+// isPrivate=false — through :makePublic, with no metadata read or PATCH (the
+// mock fails on either).
+func TestEnsureEnvironmentShareForResults_DoesBothHalves(t *testing.T) {
+	srv, counts := newEnvShareMock(t, nil)
+	defer srv.Close()
 	c := newEnvShareClient(t, srv)
 
 	results := []apply.ApplyResult{
-		&apply.DocumentApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "lp-1", ResourceType: "launchpad"}},
+		&apply.NotebookApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "nb-1", ResourceType: "notebook"}},
 	}
-	err := ensureEnvironmentShareForResults(c, results, environmentModes{link: true}, "read-write", false)
-	if err == nil {
-		t.Fatal("expected an error")
+	if err := ensureEnvironmentShareForResults(context.Background(), c, results, "read-write"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, want := range []string{"already has a read environment share", "--share-access read ", "--share-access read-write"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q", err, want)
+	for _, key := range []string{"nb-1", "public:nb-1"} {
+		if got := counts[key]; got == nil || atomic.LoadInt64(got) != 1 {
+			t.Errorf("expected %s once, counts=%v", key, counts)
 		}
 	}
-	assertCalls(t, s, "")
 }
 
-func TestApplyCmd_ShareEnvironmentFlagValidation(t *testing.T) {
-	tests := []struct {
-		name  string
-		flags map[string]string
-		want  string // "" = valid
-	}{
-		{"link", map[string]string{"share-environment": "link"}, ""},
-		{"public", map[string]string{"share-environment": "public"}, ""},
-		{"both", map[string]string{"share-environment": "link,public"}, ""},
-		{"link with --share-access", map[string]string{"share-environment": "link", "share-access": "read-write"}, ""},
-		{"old value read", map[string]string{"share-environment": "read"}, "use --share-environment link,public for"},
-		{"old value read-write", map[string]string{"share-environment": "read-write"},
-			"--share-environment link,public --share-access read-write"},
-		{"unknown mode", map[string]string{"share-environment": "bogus"}, "must be 'link', 'public', or both"},
-		{"empty", map[string]string{"share-environment": ""}, "needs a value"},
-		{"--share-access without link", map[string]string{"share-environment": "public", "share-access": "read"},
-			"needs --share-environment link"},
-		{"unknown --share-access", map[string]string{"share-environment": "link", "share-access": "rw"},
-			"invalid --share-access"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			restorePristineTree()
-			t.Cleanup(restorePristineTree)
-			for k, v := range tt.flags {
-				if err := applyCmd.Flags().Set(k, v); err != nil {
-					t.Fatalf("set --%s: %v", k, err)
-				}
-			}
+// TestEnsureEnvironmentShareForResults_KeepsOtherLevel: a link at another
+// level stays. A document can have one per level, so there is nothing to
+// replace, and replacing it used to break every link already handed out.
+func TestEnsureEnvironmentShareForResults_KeepsOtherLevel(t *testing.T) {
+	s, srv := newEnvShareServer(t) // lp-1 has a read share
+	setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+	c := newEnvShareClient(t, srv)
 
-			modes, err := applyShareEnvironmentModes(applyCmd)
-			if err == nil {
-				access, _ := applyCmd.Flags().GetString("share-access")
-				err = validateShareAccess(applyCmd, modes, access)
-			}
-			switch {
-			case tt.want == "" && err != nil:
-				t.Fatalf("unexpected error: %v", err)
-			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
-				t.Fatalf("error = %v, want one mentioning %q", err, tt.want)
-			}
-		})
+	results := []apply.ApplyResult{
+		&apply.NotebookApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "lp-1", ResourceType: "notebook"}},
+	}
+	if err := ensureEnvironmentShareForResults(context.Background(), c, results, "read-write"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertCalls(t, s, "POST environment-share lp-1 read-write\nPOST makePublic")
+}
+
+// TestApplyCmd_ShareEnvironmentDeprecated: the flag keeps its shape from
+// before (a string whose bare form means "read") and is deprecated with a
+// removal version and the replacement, so DTCTL_NO_DEPRECATED masks it.
+func TestApplyCmd_ShareEnvironmentDeprecated(t *testing.T) {
+	f := applyCmd.Flags().Lookup("share-environment")
+	if f == nil {
+		t.Fatal("--share-environment flag not registered")
+	}
+	if f.Value.Type() != "string" || f.NoOptDefVal != "read" {
+		t.Errorf("flag type %q, NoOptDefVal %q; want string and \"read\"", f.Value.Type(), f.NoOptDefVal)
+	}
+	for _, want := range []string{"in 0.44.0", "removal planned in 0.46.0", "share document <id> --environment link,public"} {
+		if !strings.Contains(f.Deprecated, want) {
+			t.Errorf("deprecation %q does not mention %q", f.Deprecated, want)
+		}
+	}
+	if applyCmd.Flags().Lookup("share-access") != nil {
+		t.Error("--share-access must not exist on apply")
 	}
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,7 @@ import (
 // the real work.
 func TestDryRunReachesOptedInCommandInEitherPosition(t *testing.T) {
 	t.Cleanup(func() {
-		dryRun = false
+		gFlags.dryRun = false
 		rootDryRunFlag.Changed = false
 	})
 	for _, c := range dryRunCommands {
@@ -26,7 +27,7 @@ func TestDryRunReachesOptedInCommandInEitherPosition(t *testing.T) {
 			"after":  append(append([]string{}, path...), "--dry-run"),
 		} {
 			t.Run(c.CommandPath()+"/"+name, func(t *testing.T) {
-				dryRun = false
+				gFlags.dryRun = false
 				rootDryRunFlag.Changed = false
 				found, rest, err := rootCmd.Find(args)
 				if err != nil {
@@ -38,7 +39,7 @@ func TestDryRunReachesOptedInCommandInEitherPosition(t *testing.T) {
 				if err := found.ParseFlags(rest); err != nil {
 					t.Fatalf("parse %v: %v", args, err)
 				}
-				if !dryRun {
+				if !dryRun(context.Background()) {
 					t.Errorf("%v: dry run not set; the command would perform the real mutation", args)
 				}
 				if err := rejectUnimplementedDryRun(found); err != nil {

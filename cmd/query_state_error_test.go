@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -24,7 +25,7 @@ func TestErrorToDetail_QueryStateError(t *testing.T) {
 		t.Run(tt.state, func(t *testing.T) {
 			err := fmt.Errorf("run query: %w", &sdkquery.StateError{State: tt.state})
 
-			detail := errorToDetail(err)
+			detail := errorToDetail(context.Background(), err)
 
 			if detail.Code != tt.code {
 				t.Errorf("Code = %q, want %q", detail.Code, tt.code)

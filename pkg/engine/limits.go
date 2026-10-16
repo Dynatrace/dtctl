@@ -7,8 +7,10 @@ import (
 
 // Limits controls resource budgets for a single engine execution.
 type Limits struct {
-	// MaxQueued bounds how many requests may be waiting for or holding the
-	// execution slot at once. Exceeding it returns ErrTooManyQueued.
+	// MaxQueued bounds how many requests may be waiting for or holding an
+	// execution slot at once. Exceeding it returns ErrTooManyQueued. An Engine
+	// built with WithConcurrentExecution(n) has n slots, and raises MaxQueued
+	// to n if it is lower.
 	MaxQueued int
 	// MaxDuration bounds the whole request (queue wait + execution): it is
 	// applied as a context.WithTimeout threaded into the command tree via
@@ -49,12 +51,17 @@ func DefaultLimits() Limits {
 // pass DefaultLimits()'s own (generous) values back if a caller needs to
 // widen just one field.
 func ExecuteWithLimits(ctx context.Context, req Request, limits Limits) (*Result, error) {
-	return executeInner(ctx, req, limits.withDefaults())
+	return executeInner(ctx, req, limits.withDefaults(), defaultAdmission, false)
 }
 
 // withDefaults fills zero-value fields from DefaultLimits().
 func (l Limits) withDefaults() Limits {
-	d := DefaultLimits()
+	return l.withDefaultsFrom(DefaultLimits())
+}
+
+// withDefaultsFrom fills zero-value fields from d, a budget that already
+// carries a value in every field.
+func (l Limits) withDefaultsFrom(d Limits) Limits {
 	if l.MaxQueued == 0 {
 		l.MaxQueued = d.MaxQueued
 	}

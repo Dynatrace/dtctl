@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/shlex"
 
@@ -16,11 +17,22 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
-// engineSlot is the single-execution semaphore: only one invocation runs at a time.
-var engineSlot = make(chan struct{}, 1)
+// defaultAdmission is the admission state behind the package-level Execute
+// and ExecuteWithLimits: a single execution slot, the historical behaviour.
+// Callers that want overlapping executions build an Engine instead.
+var defaultAdmission = &admission{slot: make(chan struct{}, 1)}
 
-// engineQueued tracks how many requests are currently waiting for or holding the slot.
-var engineQueued atomic.Int64
+// admission is one engine's execution budget: a slot channel whose capacity
+// is the concurrency limit, and the queue-depth counter guarding it.
+//
+// This used to be a pair of package variables, which meant two independent
+// callers sharing a process also shared one queue depth — the open question
+// recorded in docs/dev/SERVICE_ENGINE_DESIGN.md ("Per-engine-instance
+// admission state"). Making it a value is what lets Engine size its own.
+type admission struct {
+	slot   chan struct{}
+	queued atomic.Int64
+}
 
 // ErrTooManyQueued is returned by Execute/ExecuteWithLimits when admission
 // control sheds a request because MaxQueued is already at capacity. Callers
@@ -131,16 +143,89 @@ type Result struct {
 
 // Execute runs one dtctl invocation and returns its outcome.
 //
-// A non-nil error means the request never ran: it is malformed (no command,
-// missing tenant credentials, an unparsable command string) or its context
-// was already done. Everything after the run starts — including command
-// failures — is expressed CLI-style in Result: exit code plus stdout/stderr.
+// A non-nil error with a nil Result means the request never ran: it is
+// malformed (no command, missing tenant credentials, an unparsable command
+// string), was shed at admission, or its context ended before it started.
+// Everything after the run starts — including command failures — is expressed
+// CLI-style in Result: exit code plus stdout/stderr. The one exception is an
+// Engine built with WithConcurrentExecution whose context ended while the
+// command ran: it returns the Result as produced together with the context's
+// error, whatever the exit code (a cancelled query exits 0).
 func Execute(ctx context.Context, req Request) (*Result, error) {
 	return ExecuteWithLimits(ctx, req, DefaultLimits())
 }
 
+// Engine executes commands against its own admission budget.
+//
+// By default an Engine runs one invocation at a time, exactly like the
+// package-level Execute. Built with WithConcurrentExecution, it runs several
+// invocations at once in this process, each on a command tree of its own
+// (cmd.RunOptions.Concurrent) — see docs/dev/CONCURRENT_EXECUTION.md for what that
+// costs and what it guarantees. The zero value is not usable; build one with New.
+type Engine struct {
+	limits     Limits
+	adm        *admission
+	concurrent bool
+}
+
+// Option configures an Engine at construction.
+type Option func(*engineOptions)
+
+type engineOptions struct {
+	concurrent    bool
+	maxConcurrent int
+}
+
+// WithConcurrentExecution opts an Engine into running up to maxConcurrent
+// invocations at once in this process (a value below 1 counts as 1). It is the
+// only way in: no Limits field and no default turns it on, so the CLI,
+// `dtctl serve`, the package-level Execute and every Engine built without it
+// keep running one invocation at a time. Meant for a multi-tenant service that
+// has sized its memory for it.
+func WithConcurrentExecution(maxConcurrent int) Option {
+	return func(o *engineOptions) {
+		o.concurrent = true
+		o.maxConcurrent = max(maxConcurrent, 1)
+	}
+}
+
+// New builds an Engine with the given budget. Without WithConcurrentExecution
+// it serializes, exactly like the package-level Execute, but with an admission
+// queue of its own.
+func New(limits Limits, opts ...Option) *Engine {
+	o := engineOptions{maxConcurrent: 1}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	l := limits.withDefaults()
+	// MaxQueued counts requests waiting *or* running, so a queue shallower
+	// than the concurrency limit would shed requests while slots sat idle.
+	// Raising it is the only reading of that combination that is not a bug.
+	if l.MaxQueued < o.maxConcurrent {
+		l.MaxQueued = o.maxConcurrent
+	}
+	return &Engine{
+		limits:     l,
+		adm:        &admission{slot: make(chan struct{}, o.maxConcurrent)},
+		concurrent: o.concurrent,
+	}
+}
+
+// MaxConcurrent reports how many invocations this engine runs at once: 1
+// unless it was built with WithConcurrentExecution.
+func (e *Engine) MaxConcurrent() int { return cap(e.adm.slot) }
+
+// Execute runs one invocation against this engine's budget. Its Result and
+// error read as the package-level Execute documents.
+func (e *Engine) Execute(ctx context.Context, req Request) (*Result, error) {
+	return executeInner(ctx, req, e.limits, e.adm, e.concurrent)
+}
+
+// Limits reports the budget this engine was built with, after defaults.
+func (e *Engine) Limits() Limits { return e.limits }
+
 // executeInner is the shared implementation called by ExecuteWithLimits.
-func executeInner(ctx context.Context, req Request, limits Limits) (*Result, error) {
+func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, concurrent bool) (*Result, error) {
 	argv, err := req.argv()
 	if err != nil {
 		return nil, err
@@ -171,19 +256,19 @@ func executeInner(ctx context.Context, req Request, limits Limits) (*Result, err
 	// Load() here would race: a request that was admissible at increment time
 	// could read a counter a later arrival had already bumped further, and
 	// reject itself for a slot that was in fact still available.
-	if engineQueued.Add(1) > int64(limits.MaxQueued) {
-		engineQueued.Add(-1)
+	if adm.queued.Add(1) > int64(limits.MaxQueued) {
+		adm.queued.Add(-1)
 		return nil, ErrTooManyQueued
 	}
 	select {
-	case engineSlot <- struct{}{}:
+	case adm.slot <- struct{}{}:
 	case <-timeoutCtx.Done():
-		engineQueued.Add(-1)
+		adm.queued.Add(-1)
 		return nil, timeoutCtx.Err()
 	}
 	defer func() {
-		<-engineSlot
-		engineQueued.Add(-1)
+		<-adm.slot
+		adm.queued.Add(-1)
 	}()
 
 	// Catch the race where the deadline fired between acquiring the slot and
@@ -209,6 +294,7 @@ func executeInner(ctx context.Context, req Request, limits Limits) (*Result, err
 	files := vfs.NewMapFS(req.Files)
 	stdout := &cappedBuffer{limit: limits.MaxOutputBytes}
 	stderr := &cappedBuffer{limit: limits.MaxOutputBytes}
+	started := false
 	code := cmd.Run(argv, cmd.RunOptions{
 		// Grant nothing: no plugins, shell aliases, hooks, editors, or
 		// browser opens. Everything a request needs happens in-process.
@@ -232,15 +318,40 @@ func executeInner(ctx context.Context, req Request, limits Limits) (*Result, err
 		Stderr:          stderr,
 		BlockedCommands: unsupportedCommands,
 		Context:         timeoutCtx,
-	})
 
-	return &Result{
+		// Overlapping invocations only when the engine was built with
+		// WithConcurrentExecution; everything else stays serialized.
+		Concurrent: concurrent,
+		OnStart:    func() { started = true },
+	})
+	// Only a concurrent Run gives up before starting: its context ended while a
+	// serialized invocation held the lock.
+	if !started {
+		if err := timeoutCtx.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	res := &Result{
 		ExitCode:  code,
 		Stdout:    stdout.Bytes(),
 		Stderr:    stderr.Bytes(),
 		Files:     files.Files(),
 		Truncated: stdout.truncated || stderr.truncated,
-	}, nil
+	}
+
+	// The context is the invocation's only deadline. When it ended the run, say
+	// so, rather than leave the caller to infer it from whatever the command
+	// made of being cut off: a query reports "Query cancelled." and exits 0.
+	// The Result still comes back, since the command may have written before it
+	// was cut off. Only a concurrent engine does this; the serialized one
+	// reports what the command returned, as it always has.
+	if concurrent {
+		if err := contextEnded(timeoutCtx); err != nil {
+			return res, err
+		}
+	}
+	return res, nil
 }
 
 // argv resolves the request's argument vector: Argv verbatim when set,
@@ -300,4 +411,46 @@ func (r *Request) validate() error {
 		return fmt.Errorf("engine: %w", err)
 	}
 	return nil
+}
+
+// contextEnded reports why ctx has ended, or nil while it has not. The clock is
+// consulted as well as the context's own error: the requests the invocation
+// sent end at the same deadline on timers of their own, and one of those can
+// fire, and the command return, a moment before this context's timer does.
+func contextEnded(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d, ok := ctx.Deadline(); ok && !time.Now().Before(d) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// ExecuteWithLimits runs one invocation against this engine's admission
+// budget but with per-request limits. It is how a caller applies the
+// deadline the request asked for — Limits.MaxDuration becomes the context
+// timeout — without building a new Engine (and a new slot) per request. A
+// zero field in limits is filled from the engine's own budget, not from
+// DefaultLimits, so a host that sized MaxOutputBytes at construction keeps it
+// on a request that only names a MaxDuration. The context is the invocation's
+// only deadline: a concurrent invocation carries it on every outgoing request,
+// and nothing preempts code between requests. A concurrent invocation the
+// deadline cut off returns its Result together with the context's error (see
+// Execute).
+func (e *Engine) ExecuteWithLimits(ctx context.Context, req Request, limits Limits) (*Result, error) {
+	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.concurrent)
+}
+
+// effectiveLimits is the budget one ExecuteWithLimits call runs under: the
+// request's limits, with the engine's filling in what the request left out.
+func (e *Engine) effectiveLimits(limits Limits) Limits {
+	// Admission is a property of the engine, not of a request: the slot
+	// channel was sized at construction and MaxQueued guards it, so a request
+	// may not raise or lower it. Taking it from limits would also mean a
+	// caller that set only MaxDuration silently got MaxQueued=4 from the
+	// defaults, shedding requests the engine had capacity for.
+	merged := limits.withDefaultsFrom(e.limits)
+	merged.MaxQueued = e.limits.MaxQueued
+	return merged
 }

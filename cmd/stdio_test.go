@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"strings"
@@ -30,7 +31,7 @@ func TestRunRedirectedStdout(t *testing.T) {
 // in order after cleanup.
 func TestRedirectStdioLargeOutput(t *testing.T) {
 	var stdout bytes.Buffer
-	cleanup, err := redirectStdio(&stdout, nil, nil)
+	cleanup, err := redirectStdio(context.Background(), &stdout, nil, nil)
 	require.NoError(t, err)
 
 	const chunk = "0123456789abcdef"
@@ -71,7 +72,7 @@ func TestRunRedirectedStreamsSeparated(t *testing.T) {
 // caller's reader during the redirection window and is restored after.
 func TestRedirectStdioStdin(t *testing.T) {
 	orig := os.Stdin
-	cleanup, err := redirectStdio(nil, nil, strings.NewReader("from-the-request"))
+	cleanup, err := redirectStdio(context.Background(), nil, nil, strings.NewReader("from-the-request"))
 	require.NoError(t, err)
 
 	data, err := io.ReadAll(os.Stdin)
@@ -86,7 +87,7 @@ func TestRedirectStdioStdin(t *testing.T) {
 // TestRedirectStdioUnreadStdin: a command that never touches stdin must not
 // wedge the cleanup path.
 func TestRedirectStdioUnreadStdin(t *testing.T) {
-	cleanup, err := redirectStdio(nil, nil, strings.NewReader(strings.Repeat("x", 1<<20)))
+	cleanup, err := redirectStdio(context.Background(), nil, nil, strings.NewReader(strings.Repeat("x", 1<<20)))
 	require.NoError(t, err)
 	cleanup() // must return promptly with the feeder goroutine unblocked
 }

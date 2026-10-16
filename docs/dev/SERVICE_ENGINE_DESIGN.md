@@ -6,6 +6,8 @@ only when opted in (see [Maturity](#maturity))
 **Audience:** anyone changing `cmd/`, adding a command, or reading a user-supplied file.
 
 > **Implementation:** `cmd/run.go` (`Run`, `RunOptions`, tree isolation, serialization),
+> `cmd/root_factory.go` and `cmd/invocation.go` (a tree and state per invocation,
+> see [CONCURRENT_EXECUTION.md](CONCURRENT_EXECUTION.md)),
 > `cmd/capabilities.go` (subprocess gate), `cmd/session.go` (per-request tenant),
 > `cmd/stdio.go` (stream redirection), `cmd/blocked.go` (surface mask),
 > `pkg/vfs/` (file seam), `pkg/engine/` (the embedding surface),
@@ -57,8 +59,9 @@ res, err := engine.Execute(ctx, engine.Request{
   belong behind a process or WASM boundary.
 - **Per-request preemption.** A run that has started cannot be killed
   mid-flight; in-process Go code cannot be preempted safely.
-- **Intra-process parallelism.** See "Serialization" below. Scale with more
-  instances or processes.
+- **Intra-process parallelism by default.** Invocations serialize unless the host
+  opts in; see "Serialization" below. Otherwise scale with more instances or
+  processes.
 - **Authentication.** `pkg/serve` has none of its own. A deployment puts its own
   authn/TLS/rate limiting in front, or embeds `pkg/engine` directly.
 
@@ -69,7 +72,7 @@ All are per-invocation and restored afterwards.
 
 | Seam | `RunOptions` field | Default (CLI) | Embedded |
 |---|---|---|---|
-| Command tree | — | pristine per run | same |
+| Command tree | — | pristine per run | same, or a fresh tree per invocation when concurrent |
 | Subprocesses | `Capabilities` | all granted | none granted |
 | Credentials + config | `Session` | host config, contexts, keyring | request's URL + token, host scrubbed |
 | Environment | `Env` | host environment | host + explicit per-request entries |
@@ -91,12 +94,25 @@ Consequences to internalize before "optimizing" this:
 
 - A server handles one dtctl command at a time per process. `dtctl serve http`
   says so in its help text.
-- Parallelism comes from more instances or more processes, never more
-  goroutines.
+- Parallelism comes from more instances or more processes — or from the host
+  opting in to concurrent execution (below) — never from more goroutines against
+  the singleton tree.
 - A server must not be started *inside* an invocation — it would hold the lock
   for its lifetime and deadlock its own first request. This is why `main`
   dispatches `serve` before the command pipeline, and why `dtctl serve http`
   refuses to run when `cmd.RunActive()` reports an invocation in progress.
+
+### Concurrent execution (opt-in)
+
+`RunOptions.Concurrent`, reached through
+`engine.New(limits, engine.WithConcurrentExecution(n))`, runs an invocation on a
+command tree and state of its own instead of the singleton, so up to `n`
+invocations overlap in one process. Streams, environment, filesystem, session and
+capabilities travel on the invocation's `context.Context` rather than being
+swapped process-wide, and the context is the invocation's only deadline. A process
+runs either one serialized invocation or any number of concurrent ones, never a
+mix. It is off unless a host asks for it; what it guarantees, what it costs and
+what it does not cover are in [CONCURRENT_EXECUTION.md](CONCURRENT_EXECUTION.md).
 
 ### Upstream connections are pooled across requests
 
@@ -407,11 +423,12 @@ on:
 
 ## Open questions
 
-- **Instance-per-request via WASM.** A spike measured 20–47 ms per-instance
-  overhead, which would remove the serialization constraint and give hard,
-  host-enforced per-request deadlines (rather than the cooperative
-  `cmd.Context()` cancellation above). Not pursued yet; the current model is
-  process/instance-level scaling.
-- **Per-engine-instance admission state.** Moving `engineSlot`/`engineQueued`
-  off package globals and onto an engine value would let independent callers
-  (e.g. multiple tenants in one process) each get their own queue depth.
+- **Instance-per-request via WASM.** It would remove the serialization constraint
+  and give hard, host-enforced per-request deadlines (rather than the cooperative
+  `cmd.Context()` cancellation above). Measured with wazero, one fresh instance
+  per command and a precompiled module: about 55 ms of CPU to start each
+  instance (against about 12 ms for a native process, and about 3 ms for a command
+  on its own tree in process) and about 35 MiB per in-flight instance with
+  instance memory outside the Go heap, on a roughly 400 MiB per-process
+  baseline; `wasip1` also has no sockets, so every request needs a host-side
+  bridge. Not pursued; see [CONCURRENT_EXECUTION.md](CONCURRENT_EXECUTION.md#costs).

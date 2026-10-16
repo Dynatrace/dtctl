@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -138,7 +139,7 @@ func TestDeprecatedErrorIsNotAStabilityError(t *testing.T) {
 			"contract has not been weakened, it has an expiry date")
 	}
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 	if detail == nil || detail.Code != "deprecated_surface" {
 		t.Fatalf("agent-mode error code = %+v, want deprecated_surface", detail)
 	}

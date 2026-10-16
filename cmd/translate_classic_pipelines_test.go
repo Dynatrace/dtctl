@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -27,18 +28,18 @@ func TestTranslateClassicPipelinesCmd_Success(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origAgent := agentMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origAgent := agentMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		agentMode = origAgent
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.agentMode = origAgent
 	}()
 
-	cfgFile = configPath
-	plainMode = true
-	agentMode = false
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.agentMode = false
 
 	testutil.ResetCommandFlags(translateClassicPipelinesCmd)
 
@@ -67,15 +68,15 @@ func TestTranslateClassicPipelinesCmd_PassesFlags(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
 
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(translateClassicPipelinesCmd)
 	_ = translateClassicPipelinesCmd.Flags().Set("include-sample-data", "true")
@@ -112,15 +113,15 @@ func TestTranslateClassicPipelinesCmd_InvalidScope(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
 	}()
 
-	cfgFile = configPath
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(translateClassicPipelinesCmd)
 
@@ -148,21 +149,21 @@ func runWithOutput(t *testing.T, format, body string, args []string) string {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origAgent := agentMode
-	origFormat := outputFormat
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origAgent := agentMode(context.Background())
+	origFormat := outputFormat(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		agentMode = origAgent
-		outputFormat = origFormat
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.agentMode = origAgent
+		gFlags.outputFormat = origFormat
 	}()
 
-	cfgFile = configPath
-	plainMode = false
-	agentMode = false
-	outputFormat = format
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = false
+	gFlags.agentMode = false
+	gFlags.outputFormat = format
 
 	testutil.ResetCommandFlags(translateClassicPipelinesCmd)
 
@@ -264,18 +265,18 @@ func TestTranslateClassicPipelinesCmd_AgentMode(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origAgent := agentMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origAgent := agentMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		agentMode = origAgent
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.agentMode = origAgent
 	}()
 
-	cfgFile = configPath
-	plainMode = true
-	agentMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.agentMode = true
 
 	testutil.ResetCommandFlags(translateClassicPipelinesCmd)
 

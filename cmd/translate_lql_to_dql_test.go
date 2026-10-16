@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -30,20 +31,20 @@ func setupLqlToDqlServer(t *testing.T, responseBody string) (*testutil.MockServe
 
 func withLqlToDqlGlobals(t *testing.T, configPath string, fn func()) {
 	t.Helper()
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origAgent := agentMode
-	origFormat := outputFormat
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origAgent := agentMode(context.Background())
+	origFormat := outputFormat(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		agentMode = origAgent
-		outputFormat = origFormat
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.agentMode = origAgent
+		gFlags.outputFormat = origFormat
 	}()
-	cfgFile = configPath
-	plainMode = true
-	agentMode = false
-	outputFormat = ""
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.agentMode = false
+	gFlags.outputFormat = ""
 	fn()
 }
 
@@ -174,7 +175,7 @@ func TestTranslateLqlToDqlCmd_ExplicitOutputFormat(t *testing.T) {
 	defer cleanup()
 
 	withLqlToDqlGlobals(t, configPath, func() {
-		outputFormat = "json"
+		gFlags.outputFormat = "json"
 
 		testutil.ResetCommandFlags(translateLqlToDqlCmd)
 
@@ -200,17 +201,17 @@ func TestTranslateLqlToDqlCmd_AgentMode(t *testing.T) {
 	_, configPath, cleanup := setupLqlToDqlServer(t, lqlToDqlResponse)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origPlain := plainMode
-	origAgent := agentMode
+	origCfgFile := cfgFile(context.Background())
+	origPlain := plainMode(context.Background())
+	origAgent := agentMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		plainMode = origPlain
-		agentMode = origAgent
+		gFlags.cfgFile = origCfgFile
+		gFlags.plainMode = origPlain
+		gFlags.agentMode = origAgent
 	}()
-	cfgFile = configPath
-	plainMode = true
-	agentMode = true
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.agentMode = true
 
 	testutil.ResetCommandFlags(translateLqlToDqlCmd)
 

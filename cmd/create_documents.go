@@ -16,10 +16,13 @@ import (
 )
 
 // createDocumentCmd creates a document of any type from a file
-var createDocumentCmd = &cobra.Command{
-	Use:   "document -f <file> --type <type>",
-	Short: "Create a document of any type from a file",
-	Long: `Create a new document from a YAML or JSON file.
+var createDocumentCmd = newCreateDocumentCmd()
+
+func newCreateDocumentCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "document -f <file> --type <type>",
+		Short: "Create a document of any type from a file",
+		Long: `Create a new document from a YAML or JSON file.
 
 The document type must be provided via --type or included as a "type" field in
 the payload. This command works for any document type: dashboard, notebook,
@@ -46,49 +49,63 @@ Examples:
   # Dry run to preview
   dtctl create document -f launchpad.json --type launchpad --dry-run
 `,
-	Aliases: []string{"doc"},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Determine the document type
-		docType, _ := cmd.Flags().GetString("type")
+		Aliases: []string{"doc"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Determine the document type
+			docType, _ := cmd.Flags().GetString("type")
 
-		// Read the input once: with -f - it is stdin, which cannot be re-read
-		// by the shared helper after the type has been sniffed from it.
-		file, _ := cmd.Flags().GetString("file")
-		var fileData []byte
-		if file != "" {
-			var err error
-			fileData, err = readFileFlag("file", file)
-			if err != nil {
-				return fmt.Errorf("failed to read file: %w", err)
+			// Read the input once: with -f - it is stdin, which cannot be re-read
+			// by the shared helper after the type has been sniffed from it.
+			file, _ := cmd.Flags().GetString("file")
+			var fileData []byte
+			if file != "" {
+				var err error
+				fileData, err = readFileFlag(cmdContext(cmd), "file", file)
+				if err != nil {
+					return fmt.Errorf("failed to read file: %w", err)
+				}
 			}
-		}
 
-		// If no --type flag, try to read from file payload
-		if docType == "" && fileData != nil {
-			jsonData, err := format.ValidateAndConvert(fileData)
-			if err == nil {
-				var doc map[string]interface{}
-				if err := json.Unmarshal(jsonData, &doc); err == nil {
-					if t, ok := doc["type"].(string); ok && t != "" {
-						docType = t
+			// If no --type flag, try to read from file payload
+			if docType == "" && fileData != nil {
+				jsonData, err := format.ValidateAndConvert(fileData)
+				if err == nil {
+					var doc map[string]interface{}
+					if err := json.Unmarshal(jsonData, &doc); err == nil {
+						if t, ok := doc["type"].(string); ok && t != "" {
+							docType = t
+						}
 					}
 				}
 			}
-		}
 
-		if docType == "" {
-			return fmt.Errorf("document type is required: use --type flag or include a \"type\" field in the payload")
-		}
+			if docType == "" {
+				return fmt.Errorf("document type is required: use --type flag or include a \"type\" field in the payload")
+			}
 
-		return createDocumentFromData(cmd, docType, fileData)
-	},
+			return createDocumentFromData(cmd, docType, fileData)
+		},
+	}
+	c.Flags().StringP("file", "f", "", "file containing document definition, or - for stdin (required)")
+	c.Flags().String("type", "", "document type (e.g. launchpad, my-app:config); extracted from payload if not provided")
+	c.Flags().String("name", "", "name for the document (extracted from content if not provided)")
+	c.Flags().String("description", "", "description for the document")
+	c.Flags().String("id", "", "custom ID for the document (auto-generated if not provided)")
+	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
+	c.Flags().StringArray("label", []string{}, "classification label to attach (repeatable); falls back to labels in the payload")
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "file")
+	return c
 }
 
 // createNotebookCmd creates a notebook from a file
-var createNotebookCmd = &cobra.Command{
-	Use:   "notebook -f <file>",
-	Short: "Create a notebook from a file",
-	Long: `Create a new notebook from a YAML or JSON file.
+var createNotebookCmd = newCreateNotebookCmd()
+
+func newCreateNotebookCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "notebook -f <file>",
+		Short: "Create a notebook from a file",
+		Long: `Create a new notebook from a YAML or JSON file.
 
 Examples:
   # Create a notebook from YAML
@@ -103,15 +120,27 @@ Examples:
   # Dry run to preview
   dtctl create notebook -f notebook.yaml --dry-run
 `,
-	Aliases: []string{"nb"},
-	RunE:    createDocumentRunE("notebook"),
+		Aliases: []string{"nb"},
+		RunE:    createDocumentRunE("notebook"),
+	}
+	c.Flags().StringP("file", "f", "", "file containing notebook definition, or - for stdin (required)")
+	c.Flags().String("name", "", "name for the notebook (extracted from content if not provided)")
+	c.Flags().String("description", "", "description for the notebook")
+	c.Flags().String("id", "", "custom ID for the notebook (auto-generated if not provided)")
+	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "file")
+	return c
 }
 
 // createDashboardCmd creates a dashboard from a file
-var createDashboardCmd = &cobra.Command{
-	Use:   "dashboard -f <file>",
-	Short: "Create a dashboard from a file",
-	Long: `Create a new dashboard from a YAML or JSON file.
+var createDashboardCmd = newCreateDashboardCmd()
+
+func newCreateDashboardCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "dashboard -f <file>",
+		Short: "Create a dashboard from a file",
+		Long: `Create a new dashboard from a YAML or JSON file.
 
 IMPORTANT: This command always creates a NEW dashboard, even if your file contains
 an 'id' field. To update an existing dashboard, use 'dtctl apply' instead.
@@ -146,15 +175,24 @@ See also:
   dtctl apply --help    # For updating existing dashboards
   dtctl get dashboard --help    # For exporting dashboards
 `,
-	Aliases: []string{"db"},
-	RunE:    createDocumentRunE("dashboard"),
+		Aliases: []string{"db"},
+		RunE:    createDocumentRunE("dashboard"),
+	}
+	c.Flags().StringP("file", "f", "", "file containing dashboard definition, or - for stdin (required)")
+	c.Flags().String("name", "", "name for the dashboard (extracted from content if not provided)")
+	c.Flags().String("description", "", "description for the dashboard")
+	c.Flags().String("id", "", "custom ID for the dashboard (auto-generated if not provided)")
+	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "file")
+	return c
 }
 
 // createDocumentRunE returns a RunE function for creating documents of a specific type
 func createDocumentRunE(docType string) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		file, _ := cmd.Flags().GetString("file")
-		fileData, err := readFileFlag("file", file)
+		fileData, err := readFileFlag(cmdContext(cmd), "file", file)
 		if err != nil {
 			return fmt.Errorf("failed to read file: %w", err)
 		}
@@ -207,7 +245,7 @@ func createDocumentFromData(cmd *cobra.Command, docType string, fileData []byte)
 
 	// Show validation warnings
 	for _, w := range warnings {
-		output.PrintWarning("%s", w)
+		output.FprintWarning(currentStderr(cmdContext(cmd)), "%s", w)
 	}
 
 	// Use flag values if provided, otherwise use extracted values
@@ -234,7 +272,7 @@ func createDocumentFromData(cmd *cobra.Command, docType string, fileData []byte)
 	tileCount := countDocumentItems(contentData, docType)
 
 	// Handle dry-run
-	if dryRun {
+	if dryRun(cmdContext(cmd)) {
 		report := newDryRunReport(cmd).OnStderr().
 			Linef("Dry run: would create %s", docType).
 			Detail("type", "%s", docType).
@@ -256,7 +294,7 @@ func createDocumentFromData(cmd *cobra.Command, docType string, fileData []byte)
 		return report.Print()
 	}
 
-	_, c, err := SetupWithSafety(safety.OperationCreate)
+	_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)
 	if err != nil {
 		return err
 	}
@@ -289,16 +327,16 @@ func createDocumentFromData(cmd *cobra.Command, docType string, fileData []byte)
 	}
 
 	// Improved output formatting for better visibility
-	output.PrintSuccess("%s created", capitalize(docType))
-	output.PrintInfo("  Name: %s", resultName)
-	output.PrintInfo("  ID:   %s", resultID)
+	output.FprintSuccess(currentStderr(cmdContext(cmd)), "%s created", capitalize(docType))
+	output.FprintInfo(currentStderr(cmdContext(cmd)), "  Name: %s", resultName)
+	output.FprintInfo(currentStderr(cmdContext(cmd)), "  ID:   %s", resultID)
 	if tileCount > 0 {
-		output.PrintInfo("  %s: %d", capitalize(itemName(docType)), tileCount)
+		output.FprintInfo(currentStderr(cmdContext(cmd)), "  %s: %d", capitalize(itemName(docType)), tileCount)
 	}
 	// Only document types with a known viewer app get a URL; for custom types
 	// the app ID is unknown, so print none rather than a broken guess.
 	if url := document.UIURL(c.BaseURL(), docType, result.ID); url != "" {
-		output.PrintInfo("  URL:  %s", url)
+		output.FprintInfo(currentStderr(cmdContext(cmd)), "  URL:  %s", url)
 	}
 	return nil
 }
@@ -424,38 +462,5 @@ func capitalize(s string) string {
 	return strings.ToUpper(string(s[0])) + s[1:]
 }
 
-func init() {
-	// Generic document flags
-	createDocumentCmd.Flags().StringP("file", "f", "", "file containing document definition, or - for stdin (required)")
-	createDocumentCmd.Flags().String("type", "", "document type (e.g. launchpad, my-app:config); extracted from payload if not provided")
-	createDocumentCmd.Flags().String("name", "", "name for the document (extracted from content if not provided)")
-	createDocumentCmd.Flags().String("description", "", "description for the document")
-	createDocumentCmd.Flags().String("id", "", "custom ID for the document (auto-generated if not provided)")
-	createDocumentCmd.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	createDocumentCmd.Flags().StringArray("label", []string{}, "classification label to attach (repeatable); falls back to labels in the payload")
-	markFlagRequiredNonEmpty(createDocumentCmd, "file")
-
-	// Notebook flags
-	createNotebookCmd.Flags().StringP("file", "f", "", "file containing notebook definition, or - for stdin (required)")
-	createNotebookCmd.Flags().String("name", "", "name for the notebook (extracted from content if not provided)")
-	createNotebookCmd.Flags().String("description", "", "description for the notebook")
-	createNotebookCmd.Flags().String("id", "", "custom ID for the notebook (auto-generated if not provided)")
-	createNotebookCmd.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	markFlagRequiredNonEmpty(createNotebookCmd, "file")
-
-	// Dashboard flags
-	createDashboardCmd.Flags().StringP("file", "f", "", "file containing dashboard definition, or - for stdin (required)")
-	createDashboardCmd.Flags().String("name", "", "name for the dashboard (extracted from content if not provided)")
-	createDashboardCmd.Flags().String("description", "", "description for the dashboard")
-	createDashboardCmd.Flags().String("id", "", "custom ID for the dashboard (auto-generated if not provided)")
-	createDashboardCmd.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	markFlagRequiredNonEmpty(createDashboardCmd, "file")
-}
-
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(createDashboardCmd)
-	stability.MarkStable(createDocumentCmd)
-	stability.MarkStable(createNotebookCmd)
-}

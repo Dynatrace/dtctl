@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -15,11 +16,14 @@ import (
 
 // updateExtensionCmd activates a version of an Extensions 2.0 extension as the
 // environment-wide active version.
-var updateExtensionCmd = &cobra.Command{
-	Use:     "extension <name>",
-	Aliases: []string{"ext"},
-	Short:   "Activate a version of an Extensions 2.0 extension",
-	Long: `Activate a specific version of an Extensions 2.0 extension as the
+var updateExtensionCmd = newUpdateExtensionCmd()
+
+func newUpdateExtensionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "extension <name>",
+		Aliases: []string{"ext"},
+		Short:   "Activate a version of an Extensions 2.0 extension",
+		Long: `Activate a specific version of an Extensions 2.0 extension as the
 environment-wide active version.
 
 Exactly one of --version, --latest, or --hub-latest must be provided:
@@ -52,17 +56,30 @@ Examples:
   # Preview what would happen
   dtctl update extension com.dynatrace.extension.host-monitoring --latest --dry-run
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runUpdateOneExtension(cmd, args[0])
-	},
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runUpdateOneExtension(cmd, args[0])
+		},
+	}
+	c.Flags().String("version", "", "specific version to activate (already uploaded to the environment)")
+	c.Flags().Bool("latest", false, "activate the highest installed version")
+	c.Flags().Bool("hub-latest", false, "install the latest Hub release and activate it")
+	c.Flags().Bool("with-configurations", false, "re-validate monitoring configurations against the new version after activation")
+	stability.MarkStable(c)
+	// One of --version, --latest or --hub-latest is required; an explicitly
+	// empty --version must not count as "not given".
+	rejectEmptyFlag(c, "version")
+	return c
 }
 
 // updateExtensionsCmd bulk-upgrades all installed Extensions 2.0 extensions.
-var updateExtensionsCmd = &cobra.Command{
-	Use:   "extensions",
-	Short: "Bulk-upgrade all installed Extensions 2.0 extensions",
-	Long: `Upgrade all Extensions 2.0 extensions installed in the Dynatrace environment.
+var updateExtensionsCmd = newUpdateExtensionsCmd()
+
+func newUpdateExtensionsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "extensions",
+		Short: "Bulk-upgrade all installed Extensions 2.0 extensions",
+		Long: `Upgrade all Extensions 2.0 extensions installed in the Dynatrace environment.
 
 --all is required to prevent accidental bulk mutations.
 
@@ -87,85 +104,92 @@ Examples:
   # Preview what would happen
   dtctl update extensions --all --latest --dry-run
 `,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		all, _ := cmd.Flags().GetBool("all")
-		withConfigs, _ := cmd.Flags().GetBool("with-configurations")
-		hubLatest, _ := cmd.Flags().GetBool("hub-latest")
-		latest, _ := cmd.Flags().GetBool("latest")
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			all, _ := cmd.Flags().GetBool("all")
+			withConfigs, _ := cmd.Flags().GetBool("with-configurations")
+			hubLatest, _ := cmd.Flags().GetBool("hub-latest")
+			latest, _ := cmd.Flags().GetBool("latest")
 
-		// Validate every flag before authenticating or touching the API, so that
-		// an invalid invocation fails the same way with and without --dry-run.
-		if !all {
-			return fmt.Errorf("--all is required to prevent accidental bulk mutations; run with --all to confirm")
-		}
-		// Same version-source rules as for a single extension, sans --version.
-		if !latest && !hubLatest {
-			return fmt.Errorf("one of --latest or --hub-latest is required")
-		}
-		if latest && hubLatest {
-			return fmt.Errorf("--latest and --hub-latest are mutually exclusive")
-		}
-
-		if dryRun {
-			report := newDryRunReport(cmd).Detail("all", "true")
-			if hubLatest {
-				report.
-					Linef("Dry run: would install the latest Hub release of every installed extension and activate it").
-					Detail("version_source", "hub-latest")
-			} else {
-				report.
-					Linef("Dry run: would activate the highest installed version of every installed extension").
-					Detail("version_source", "latest")
+			// Validate every flag before authenticating or touching the API, so that
+			// an invalid invocation fails the same way with and without --dry-run.
+			if !all {
+				return fmt.Errorf("--all is required to prevent accidental bulk mutations; run with --all to confirm")
 			}
-			if withConfigs {
-				report.
-					Linef("Dry run: would migrate every monitoring configuration to the activated version").
-					Detail("with_configurations", "true")
+			// Same version-source rules as for a single extension, sans --version.
+			if !latest && !hubLatest {
+				return fmt.Errorf("one of --latest or --hub-latest is required")
 			}
-			return report.Print()
-		}
+			if latest && hubLatest {
+				return fmt.Errorf("--latest and --hub-latest are mutually exclusive")
+			}
 
-		_, c, err := SetupWithSafety(safety.OperationUpdate)
-		if err != nil {
-			return err
-		}
+			if dryRun(cmdContext(cmd)) {
+				report := newDryRunReport(cmd).Detail("all", "true")
+				if hubLatest {
+					report.
+						Linef("Dry run: would install the latest Hub release of every installed extension and activate it").
+						Detail("version_source", "hub-latest")
+				} else {
+					report.
+						Linef("Dry run: would activate the highest installed version of every installed extension").
+						Detail("version_source", "latest")
+				}
+				if withConfigs {
+					report.
+						Linef("Dry run: would migrate every monitoring configuration to the activated version").
+						Detail("with_configurations", "true")
+				}
+				return report.Print()
+			}
 
-		handler := extension.NewHandler(c)
-		list, err := handler.List(cmd.Context(), "", 0)
-		if err != nil {
-			return fmt.Errorf("list extensions: %w", err)
-		}
-
-		if len(list.Items) == 0 {
-			output.PrintInfo("No extensions installed.")
-			return nil
-		}
-
-		var (
-			upgraded int
-			failed   int
-		)
-
-		for _, ext := range list.Items {
-			name := ext.ExtensionName
-			activatedVersion, err := resolveAndActivate(handler, name, "", latest, hubLatest, withConfigs)
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationUpdate)
 			if err != nil {
-				output.PrintHumanError("  %-60s  FAILED: %v", name, err)
-				failed++
-				continue
+				return err
 			}
 
-			output.PrintInfo("  %-60s  → %s", name, activatedVersion)
-			upgraded++
-		}
+			handler := extension.NewHandler(c)
+			list, err := handler.List(cmd.Context(), "", 0)
+			if err != nil {
+				return fmt.Errorf("list extensions: %w", err)
+			}
 
-		output.PrintSuccess("Upgraded %d extension(s), %d failed", upgraded, failed)
-		if failed > 0 {
-			return fmt.Errorf("%d extension(s) could not be upgraded", failed)
-		}
-		return nil
-	},
+			if len(list.Items) == 0 {
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "No extensions installed.")
+				return nil
+			}
+
+			var (
+				upgraded int
+				failed   int
+			)
+
+			for _, ext := range list.Items {
+				name := ext.ExtensionName
+				activatedVersion, err := resolveAndActivate(cmdContext(cmd), handler, name, "", latest, hubLatest, withConfigs)
+				if err != nil {
+					output.FprintHumanError(currentStderr(cmdContext(cmd)), "  %-60s  FAILED: %v", name, err)
+					failed++
+					continue
+				}
+
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "  %-60s  → %s", name, activatedVersion)
+				upgraded++
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Upgraded %d extension(s), %d failed", upgraded, failed)
+			if failed > 0 {
+				return fmt.Errorf("%d extension(s) could not be upgraded", failed)
+			}
+			return nil
+		},
+	}
+	c.Flags().Bool("all", false, "upgrade all installed extensions (required to prevent accidental bulk mutations)")
+	c.Flags().Bool("latest", false, "activate the highest installed version for each extension")
+	c.Flags().Bool("hub-latest", false, "install the latest Hub release for each extension and activate it")
+	c.Flags().Bool("with-configurations", false, "re-validate monitoring configurations against the new version after activation")
+	stability.MarkStable(c)
+	return c
 }
 
 // runUpdateOneExtension is the RunE body for updateExtensionCmd. It validates the
@@ -195,7 +219,7 @@ func runUpdateOneExtension(cmd *cobra.Command, name string) error {
 		return fmt.Errorf("--version, --latest, and --hub-latest are mutually exclusive")
 	}
 
-	if dryRun {
+	if dryRun(cmdContext(cmd)) {
 		report := newDryRunReport(cmd).Detail("extension", "%s", name)
 		switch {
 		case version != "":
@@ -217,27 +241,27 @@ func runUpdateOneExtension(cmd *cobra.Command, name string) error {
 		return report.Print()
 	}
 
-	_, c, err := SetupWithSafety(safety.OperationUpdate)
+	_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationUpdate)
 	if err != nil {
 		return err
 	}
 
 	handler := extension.NewHandler(c)
 
-	activatedVersion, err := resolveAndActivate(handler, name, version, latest, hubLatest, withConfigs)
+	activatedVersion, err := resolveAndActivate(cmdContext(cmd), handler, name, version, latest, hubLatest, withConfigs)
 	if err != nil {
 		return err
 	}
 
-	output.PrintSuccess("Extension %q activated", name)
-	output.PrintInfo("  Active version: %s", activatedVersion)
+	output.FprintSuccess(currentStderr(cmdContext(cmd)), "Extension %q activated", name)
+	output.FprintInfo(currentStderr(cmdContext(cmd)), "  Active version: %s", activatedVersion)
 	return nil
 }
 
 // resolveAndActivate determines the target version (from flag values), handles
 // monitoring configuration updates in the correct order (configs-first for
 // downgrades, activation-first for upgrades), and returns the activated version.
-func resolveAndActivate(handler *extension.Handler, name, version string, latest, hubLatest, withConfigs bool) (string, error) {
+func resolveAndActivate(ctx context.Context, handler *extension.Handler, name, version string, latest, hubLatest, withConfigs bool) (string, error) {
 	// Step 1: resolve the target version string.
 	switch {
 	case version != "":
@@ -282,7 +306,7 @@ func resolveAndActivate(handler *extension.Handler, name, version string, latest
 			// The direction is unknown. Migrate after activation (the upgrade
 			// path) rather than skipping the migration altogether, so
 			// --with-configurations never silently does nothing.
-			output.PrintWarning("could not determine the active version of %q (%v); monitoring configurations will be migrated after activation", name, err)
+			output.FprintWarning(currentStderr(ctx), "could not determine the active version of %q (%v); monitoring configurations will be migrated after activation", name, err)
 		case extension.SemverGreater(currentActive, version):
 			migrateConfigsFirst = true
 		}
@@ -302,7 +326,7 @@ func resolveAndActivate(handler *extension.Handler, name, version string, latest
 	// Step 4 (upgrade path): migrate configs now that the new version is active.
 	if withConfigs && !migrateConfigsFirst {
 		if cfgErr := refreshMonitoringConfigurations(handler, name, version); cfgErr != nil {
-			output.PrintWarning("version activated but monitoring configuration refresh failed: %v", cfgErr)
+			output.FprintWarning(currentStderr(ctx), "version activated but monitoring configuration refresh failed: %v", cfgErr)
 		}
 	}
 
@@ -365,24 +389,10 @@ func init() {
 	updateCmd.AddCommand(updateExtensionsCmd)
 
 	// Flags for a single extension
-	updateExtensionCmd.Flags().String("version", "", "specific version to activate (already uploaded to the environment)")
-	// One of --version, --latest or --hub-latest is required; an explicitly
-	// empty --version must not count as "not given".
-	rejectEmptyFlag(updateExtensionCmd, "version")
-	updateExtensionCmd.Flags().Bool("latest", false, "activate the highest installed version")
-	updateExtensionCmd.Flags().Bool("hub-latest", false, "install the latest Hub release and activate it")
-	updateExtensionCmd.Flags().Bool("with-configurations", false, "re-validate monitoring configurations against the new version after activation")
-
 	// Flags for bulk upgrade
-	updateExtensionsCmd.Flags().Bool("all", false, "upgrade all installed extensions (required to prevent accidental bulk mutations)")
-	updateExtensionsCmd.Flags().Bool("latest", false, "activate the highest installed version for each extension")
-	updateExtensionsCmd.Flags().Bool("hub-latest", false, "install the latest Hub release for each extension and activate it")
-	updateExtensionsCmd.Flags().Bool("with-configurations", false, "re-validate monitoring configurations against the new version after activation")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(updateExtensionCmd)
-	stability.MarkStable(updateExtensionsCmd)
 }

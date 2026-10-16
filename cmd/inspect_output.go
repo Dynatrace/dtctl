@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"os"
+	"context"
 
 	"github.com/spf13/cobra"
 
@@ -17,7 +17,7 @@ import (
 // flooding context (IN8).
 func emitInspectResult(cmd *cobra.Command, cfg *config.Config, req inspect.Request, res *inspect.Result) error {
 	if res.Kind == output.KindFileSummary {
-		return emitInspectSummary(req, res)
+		return emitInspectSummary(cmdContext(cmd), req, res)
 	}
 	return emitInspectRecords(cmd, cfg, req, res)
 }
@@ -31,21 +31,21 @@ func emitInspectResult(cmd *cobra.Command, cfg *config.Config, req inspect.Reque
 func emitInspectRecords(cmd *cobra.Command, cfg *config.Config, req inspect.Request, res *inspect.Result) error {
 	records := res.Records
 
-	if agentMode {
+	if agentMode(cmdContext(cmd)) {
 		spilled, err := maybeRespill(cmd, cfg, req, res)
 		if err != nil {
 			return err
 		}
 		if spilled != nil {
-			return output.EncodeEnvelope(os.Stdout, *spilled)
+			return output.EncodeEnvelope(currentStdout(cmdContext(cmd)), *spilled)
 		}
 
 		// A non-JSON result encoding (-o csv/parquet/toon) owns the output shape;
 		// defer to the standard agent printer (mirrors `query`'s inline path).
-		if output.NormalizeMeasureEncoding(outputFormat) != "json" {
+		if output.NormalizeMeasureEncoding(outputFormat(cmdContext(cmd))) != "json" {
 			ctx := inspectContext(req, res, len(records))
-			ap := output.NewAgentPrinter(os.Stdout, ctx)
-			ap.SetResultFormat(outputFormat)
+			ap := output.NewAgentPrinter(currentStdout(cmdContext(cmd)), ctx)
+			ap.SetResultFormat(outputFormat(cmdContext(cmd)))
 			return ap.PrintList(records)
 		}
 
@@ -56,26 +56,26 @@ func emitInspectRecords(cmd *cobra.Command, cfg *config.Config, req inspect.Requ
 			Result:          &output.InlineRecords{Kind: output.KindRecords, Records: records},
 			Context:         ctx,
 		}
-		return output.EncodeEnvelope(os.Stdout, resp)
+		return output.EncodeEnvelope(currentStdout(cmdContext(cmd)), resp)
 	}
 
 	// Human / scripted output: print the rows in the chosen format, warnings to
 	// stderr so they never corrupt a piped result.
-	printInspectWarnings(res.Warnings)
-	p := output.NewPrinterWithOpts(output.PrinterOptions{Format: outputFormat, Writer: os.Stdout})
+	printInspectWarnings(cmdContext(cmd), res.Warnings)
+	p := newPrinterOpts(cmdContext(cmd), output.PrinterOptions{Format: outputFormat(cmdContext(cmd)), Writer: currentStdout(cmdContext(cmd))})
 	return p.PrintList(records)
 }
 
 // emitInspectSummary renders a re-derived file-summary (--schema/--stats/--sample).
 // These primitives never carry a --jq filter (it is rejected as mutually
 // exclusive at flag-validation time), so there is no per-record jq to apply here.
-func emitInspectSummary(req inspect.Request, res *inspect.Result) error {
+func emitInspectSummary(ictx context.Context, req inspect.Request, res *inspect.Result) error {
 	total := 0
 	if res.Summary != nil {
 		total = res.Summary.Rows
 	}
 
-	if agentMode {
+	if agentMode(ictx) {
 		ctx := inspectContext(req, res, total)
 		resp := output.Response{
 			OK:              true,
@@ -83,18 +83,18 @@ func emitInspectSummary(req inspect.Request, res *inspect.Result) error {
 			Result:          res.Summary,
 			Context:         ctx,
 		}
-		return output.EncodeEnvelope(os.Stdout, resp)
+		return output.EncodeEnvelope(currentStdout(ictx), resp)
 	}
 
 	// Human output: a struct does not table well, so default tabular formats to
 	// pretty JSON; honour an explicit structured format otherwise.
-	printInspectWarnings(res.Warnings)
-	format := outputFormat
+	printInspectWarnings(ictx, res.Warnings)
+	format := outputFormat(ictx)
 	switch format {
 	case "", "table", "wide":
 		format = "json"
 	}
-	p := output.NewPrinterWithOpts(output.PrinterOptions{Format: format, Writer: os.Stdout})
+	p := newPrinterOpts(ictx, output.PrinterOptions{Format: format, Writer: currentStdout(ictx)})
 	return p.Print(res.Summary)
 }
 
@@ -125,8 +125,8 @@ func inspectSuggestions(req inspect.Request, res *inspect.Result) []string {
 }
 
 // printInspectWarnings prints engine warnings to stderr for a human reader.
-func printInspectWarnings(warnings []string) {
+func printInspectWarnings(ctx context.Context, warnings []string) {
 	for _, w := range warnings {
-		output.PrintWarning("%s", w)
+		output.FprintWarning(currentStderr(ctx), "%s", w)
 	}
 }

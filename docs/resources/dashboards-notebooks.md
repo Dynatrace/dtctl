@@ -126,7 +126,6 @@ dtctl unshare dashboard dash-123 --user user@example.com
 dtctl share dashboard dash-123 --environment link
 dtctl share dashboard dash-123 --environment public
 dtctl share dashboard dash-123 --environment link,public   # both
-dtctl apply -f dashboard.yaml --share-environment public   # same modes on apply
 ```
 
 View and restore version history (Dynatrace keeps document snapshots):

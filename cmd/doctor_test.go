@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestDoctorCheckVersionAlwaysPasses(t *testing.T) {
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 	if len(results) == 0 {
 		t.Fatal("expected at least one result (version check)")
 	}
@@ -29,12 +30,12 @@ func TestDoctorCheckVersionAlwaysPasses(t *testing.T) {
 func TestDoctorNoConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
 	// Point to a non-existent config
-	cfgFile = filepath.Join(tmpDir, "nonexistent", "config")
+	gFlags.cfgFile = filepath.Join(tmpDir, "nonexistent", "config")
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	// Should have version (ok) and config (fail), then stop
 	if len(results) < 2 {
@@ -56,9 +57,9 @@ func TestDoctorNoCurrentContext(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	// Create config with no current context
 	cfg := config.NewConfig()
@@ -68,7 +69,7 @@ func TestDoctorNoCurrentContext(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	// Should have version, config, then context (fail)
 	found := false
@@ -98,9 +99,9 @@ func TestDoctorValidConfigNoToken(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	// Create config with context but no token
 	cfg := config.NewConfig()
@@ -111,7 +112,7 @@ func TestDoctorValidConfigNoToken(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	// Should have version, config, context, then token (fail)
 	found := false
@@ -150,9 +151,9 @@ func TestDoctorFullPassingFlow(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", server.URL, "test-token")
@@ -164,7 +165,7 @@ func TestDoctorFullPassingFlow(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	// Should have at least version, config, context, token, connectivity
 	if len(results) < 5 {
@@ -202,9 +203,9 @@ func TestDoctorConnectivityFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	// Start a server then immediately close it so the port refuses connections fast
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -223,7 +224,7 @@ func TestDoctorConnectivityFailure(t *testing.T) {
 
 	// Use a very short timeout so the test doesn't wait on any OS-level delay
 	fastClient := &http.Client{Timeout: 100 * time.Millisecond}
-	results := runDoctorChecksWithClient(fastClient)
+	results := runDoctorChecksWithClient(context.Background(), fastClient)
 
 	found := false
 	for _, r := range results {
@@ -245,9 +246,9 @@ func TestDoctorConnectivityFailure(t *testing.T) {
 func TestDoctorCmdReturnsErrorOnFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = filepath.Join(tmpDir, "nonexistent", "config")
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = filepath.Join(tmpDir, "nonexistent", "config")
 
 	err := doctorCmd.RunE(doctorCmd, []string{})
 	if err == nil {
@@ -265,7 +266,7 @@ func TestPrintDoctorResults(t *testing.T) {
 		{Name: "Test2", Status: "warn", Detail: "warning"},
 		{Name: "Test3", Status: "fail", Detail: "failure"},
 	}
-	printDoctorResults(results)
+	printDoctorResults(context.Background(), results)
 }
 
 func TestDoctorURLValidation(t *testing.T) {
@@ -305,9 +306,9 @@ func TestDoctorURLValidation(t *testing.T) {
 			tmpDir := t.TempDir()
 			configPath := filepath.Join(tmpDir, "config")
 
-			originalCfgFile := cfgFile
-			defer func() { cfgFile = originalCfgFile }()
-			cfgFile = configPath
+			originalCfgFile := cfgFile(context.Background())
+			defer func() { gFlags.cfgFile = originalCfgFile }()
+			gFlags.cfgFile = configPath
 
 			cfg := config.NewConfig()
 			cfg.SetContext("test", tt.envURL, "test-token")
@@ -320,7 +321,7 @@ func TestDoctorURLValidation(t *testing.T) {
 			}
 
 			fastClient := &http.Client{Timeout: 100 * time.Millisecond}
-			results := runDoctorChecksWithClient(fastClient)
+			results := runDoctorChecksWithClient(context.Background(), fastClient)
 
 			found := false
 			for _, r := range results {
@@ -366,9 +367,9 @@ func TestDoctorPlatformToken403(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", server.URL, "platform-token")
@@ -380,7 +381,7 @@ func TestDoctorPlatformToken403(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	found := false
 	for _, r := range results {
@@ -420,9 +421,9 @@ func TestDoctorFileTokenStorage(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", "https://test.apps.dynatrace.com", "test-token")
@@ -434,7 +435,7 @@ func TestDoctorFileTokenStorage(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	found := false
 	for _, r := range results {
@@ -462,9 +463,9 @@ func TestDoctorKeyringCheck(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", "https://test.apps.dynatrace.com", "test-token")
@@ -476,7 +477,7 @@ func TestDoctorKeyringCheck(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	found := false
 	for _, r := range results {
@@ -505,9 +506,9 @@ func TestDoctorKeyringCollectionRecoverySuggestion(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = configPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", "https://test.apps.dynatrace.com", "test-token")
@@ -527,7 +528,7 @@ func TestDoctorKeyringCollectionRecoverySuggestion(t *testing.T) {
 		return fmt.Errorf("keyring probe failed: %s", config.ErrMsgCollectionUnlock)
 	}
 
-	results := runDoctorChecks()
+	results := runDoctorChecks(context.Background())
 
 	found := false
 	for _, r := range results {

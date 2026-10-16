@@ -76,6 +76,9 @@ type Config struct {
 	// the inline Tokens list. When true, GetToken never consults the keyring,
 	// file store, or OAuth machinery — only the values carried in the struct.
 	inlineOnly bool
+	// env, when set, answers the environment lookups this Config's methods
+	// make instead of the process environment. See WithEnv.
+	env func(key string) (string, bool)
 }
 
 // SealInlineCredentials marks this config as inline-only: token resolution will
@@ -185,6 +188,12 @@ type Context struct {
 	// QueryLimits overrides the global query limits for this context. Unset
 	// fields inherit the global query-limits block.
 	QueryLimits *QueryLimits `yaml:"query-limits,omitempty"`
+	// UsageTracking opts this context into dtctl's local usage ledger: a
+	// per-day tally of the DQL queries dtctl ran and the data they scanned,
+	// kept under the XDG state directory. Off (false) by default, and when
+	// off nothing is written. Only aggregate counters are stored, never query
+	// text, results, identities, or tokens. See docs/USAGE_TRACKING.md.
+	UsageTracking bool `yaml:"usage-tracking,omitempty" table:"-"`
 }
 
 // SpillConfig holds the result-spill settings (D15). Threshold and TTL are kept
@@ -303,6 +312,49 @@ func (c *Config) EffectiveQueryLimits() QueryLimits {
 		merged.SamplingRatio = ov.SamplingRatio
 	}
 	return merged
+}
+
+// UsageTrackingEnabled reports whether the current context opted into the
+// local usage ledger. A config without a resolvable current context reports
+// false: tracking is opt-in, so anything ambiguous resolves to "write nothing".
+func (c *Config) UsageTrackingEnabled() bool {
+	return c.UsageTrackingOn(c.CurrentContext)
+}
+
+// UsageTrackingOn reports whether the named context opted into the local usage
+// ledger (Context.UsageTracking). The ledger writes to the user's disk, so like
+// aliases and hooks the opt-in is honored only from the global config,
+// --config, or DTCTL_CONFIG. An auto-discovered local .dtctl.yaml cannot turn
+// it on; its context is tracked when the global context that binds the same
+// token-ref and environment is.
+func (c *Config) UsageTrackingOn(name string) bool {
+	for i := range c.Contexts {
+		if c.Contexts[i].Name != name {
+			continue
+		}
+		ctx := c.Contexts[i].Context
+		if !c.IsLocal() {
+			return ctx.UsageTracking
+		}
+		b, ok := c.globalBindings[ctx.TokenRef]
+		return ok && slices.Contains(b.tracked, urls.Host(ctx.Environment))
+	}
+	return false
+}
+
+// IgnoredUsageTracking reports whether the named context sets usage-tracking in
+// an auto-discovered local config without the global config opting in, so the
+// setting has no effect. See UsageTrackingOn.
+func (c *Config) IgnoredUsageTracking(name string) bool {
+	if !c.IsLocal() {
+		return false
+	}
+	for _, nc := range c.Contexts {
+		if nc.Name == name {
+			return nc.Context.UsageTracking && !c.UsageTrackingOn(name)
+		}
+	}
+	return false
 }
 
 // NamedToken holds a token with its name
@@ -458,6 +510,10 @@ func (c *Config) markLocal(path string) {
 type globalBinding struct {
 	hosts []string
 	level SafetyLevel
+	// tracked is the subset of hosts whose global context also opted into the
+	// usage ledger. A local config inherits the opt-in from there; it cannot
+	// grant it itself (see UsageTrackingOn).
+	tracked []string
 }
 
 // allows reports whether host is one of the hosts this token-ref is bound to.
@@ -485,7 +541,13 @@ func buildGlobalBindings() map[string]globalBinding {
 		level := nc.Context.GetEffectiveSafetyLevel()
 		b, seen := bindings[ref]
 		if !seen {
-			bindings[ref] = globalBinding{hosts: []string{host}, level: level}
+			b = globalBinding{hosts: []string{host}, level: level}
+		}
+		if nc.Context.UsageTracking && !slices.Contains(b.tracked, host) {
+			b.tracked = append(b.tracked, host)
+		}
+		if !seen {
+			bindings[ref] = b
 			continue
 		}
 		if !b.allows(host) {
@@ -1005,6 +1067,10 @@ type ContextOptions struct {
 	// untouched; an empty non-nil slice clears it, which is how a caller
 	// withdraws every exception at once.
 	StabilityExceptions []string
+	// UsageTracking sets the context's usage-tracking opt-in. nil leaves the
+	// existing value untouched (the caller did not ask to change it), so a
+	// plain update cannot silently switch tracking off.
+	UsageTracking *bool
 }
 
 // SetContext creates or updates a context
@@ -1038,6 +1104,9 @@ func (c *Config) SetContextWithOptions(name, environment, tokenRef string, opts 
 				if opts.StabilityExceptions != nil {
 					c.Contexts[i].Context.StabilityExceptions = opts.StabilityExceptions
 				}
+				if opts.UsageTracking != nil {
+					c.Contexts[i].Context.UsageTracking = *opts.UsageTracking
+				}
 			}
 			return
 		}
@@ -1053,6 +1122,9 @@ func (c *Config) SetContextWithOptions(name, environment, tokenRef string, opts 
 		ctx.Profile = opts.Profile
 		ctx.MinStability = opts.MinStability
 		ctx.StabilityExceptions = opts.StabilityExceptions
+		if opts.UsageTracking != nil {
+			ctx.UsageTracking = *opts.UsageTracking
+		}
 	}
 
 	c.Contexts = append(c.Contexts, NamedContext{

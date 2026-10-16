@@ -528,11 +528,6 @@ func (h *Handler) DeleteEnvironmentShare(shareID string) error {
 	return h.sdk.DeleteEnvironmentShare(context.Background(), shareID)
 }
 
-// SetDocumentPublic flips a document's isPrivate flag to false.
-func (h *Handler) SetDocumentPublic(id string, version int) error {
-	return h.sdk.SetDocumentPublic(context.Background(), id, version)
-}
-
 // ListSnapshots retrieves all snapshots for a document.
 func (h *Handler) ListSnapshots(documentID string) (*SnapshotList, error) {
 	l, err := h.sdk.ListSnapshots(context.Background(), documentID)
@@ -573,39 +568,47 @@ func (h *Handler) GetAtVersion(id string, version int) (*Document, error) {
 
 // EnvironmentLinkResult is what EnsureEnvironmentLink did.
 type EnvironmentLinkResult struct {
-	// Share is the environment share the document now has.
+	// Share is the environment share the document now has at the access level.
 	Share *EnvironmentShare
 	// Created is true when Share was created by this call.
 	Created bool
-	// Replaced lists the environment shares deleted to change the access
-	// level. Links to them no longer work.
-	Replaced []EnvironmentShare
-}
-
-// ExistingEnvironmentShareError is what EnsureEnvironmentLink returns, without
-// changing anything, when the document already has an environment share at
-// another access level and the caller did not ask to replace it.
-type ExistingEnvironmentShareError struct {
-	DocumentID string
-	// Share is the existing share. Its link still works.
-	Share EnvironmentShare
-}
-
-func (e *ExistingEnvironmentShareError) Error() string {
-	return fmt.Sprintf("document %q already has a %s environment share (%s)", e.DocumentID, e.Share.Level(), e.Share.ID)
 }
 
 // EnsureEnvironmentLink idempotently ensures the document has an environment
-// share: a link anyone in the environment can claim. It leaves the document's
-// isPrivate flag alone.
-//
-// An existing share at exactly the access level is reused. An existing share
-// at another level is replaced only when replace is set, because replacing it
-// gives the share a new ID and breaks every link already handed out. Without
-// replace it is an *ExistingEnvironmentShareError: reusing it instead would
-// hand out a link at a level the caller did not ask for.
-func (h *Handler) EnsureEnvironmentLink(documentID, access string, replace bool) (*EnvironmentLinkResult, error) {
-	return h.ensureShareAtAccess(documentID, access, replace)
+// share at exactly the access level: a link anyone in the environment can
+// claim. It leaves the document's isPrivate flag alone, and never touches a
+// share at another level — a document has at most one share per level, so a
+// read and a read-write link coexist and neither has to be replaced.
+func (h *Handler) EnsureEnvironmentLink(documentID, access string) (*EnvironmentLinkResult, error) {
+	existing, err := h.sdk.ListEnvironmentShares(context.Background(), documentID)
+	if err != nil {
+		return nil, err
+	}
+	if match := findSDKShare(existing.Shares, access); match != nil {
+		return &EnvironmentLinkResult{Share: fromSDKEnvironmentShare(match)}, nil
+	}
+
+	created, err := h.sdk.CreateEnvironmentShare(context.Background(), CreateEnvironmentShareRequest{
+		DocumentID: documentID,
+		Access:     access,
+	})
+	if err == nil {
+		return &EnvironmentLinkResult{Share: fromSDKEnvironmentShare(created), Created: true}, nil
+	}
+
+	// A 409 means a share at this level exists: another process created it
+	// between the list and the create. Reuse it.
+	if !errors.Is(err, sdkdocument.ErrShareConflict) {
+		return nil, err
+	}
+	reListed, reErr := h.sdk.ListEnvironmentShares(context.Background(), documentID)
+	if reErr != nil {
+		return nil, fmt.Errorf("create returned conflict and re-list failed: %w", reErr)
+	}
+	if match := findSDKShare(reListed.Shares, access); match != nil {
+		return &EnvironmentLinkResult{Share: fromSDKEnvironmentShare(match)}, nil
+	}
+	return nil, err
 }
 
 // RemoveEnvironmentLinks deletes the document's environment shares. A
@@ -637,131 +640,23 @@ func (h *Handler) RemoveEnvironmentLinks(documentID, access string) (int, error)
 	return deleted, nil
 }
 
-// SetPrivate sets the document's isPrivate flag, reading the current version
-// for optimistic locking and retrying once on a version conflict. It reports
-// whether the flag had to change.
-func (h *Handler) SetPrivate(documentID string, private bool) (bool, error) {
-	set := h.sdk.SetDocumentPublic
+// SetPrivate makes the document private (isPrivate=true) or public
+// (isPrivate=false) through the Document API's :makePrivate/:makePublic
+// actions. Neither takes a version, and both are a no-op when the document is
+// already in that state.
+func (h *Handler) SetPrivate(documentID string, private bool) error {
 	if private {
-		set = h.sdk.SetDocumentPrivate
+		return h.sdk.MakeDocumentPrivate(context.Background(), documentID)
 	}
-
-	meta, err := h.sdk.GetMetadata(context.Background(), documentID)
-	if err != nil {
-		return false, fmt.Errorf("could not read document metadata to set isPrivate=%t: %w", private, err)
-	}
-	if meta.IsPrivate == private {
-		return false, nil
-	}
-	err = set(context.Background(), documentID, meta.Version)
-	if err == nil {
-		return true, nil
-	}
-	if !errors.Is(err, sdkdocument.ErrVersionConflict) {
-		return false, err
-	}
-
-	// Retry once: re-fetch metadata and try again.
-	meta, err = h.sdk.GetMetadata(context.Background(), documentID)
-	if err != nil {
-		return false, fmt.Errorf("retry metadata fetch failed: %w", err)
-	}
-	if meta.IsPrivate == private {
-		return false, nil
-	}
-	if err := set(context.Background(), documentID, meta.Version); err != nil {
-		return false, err
-	}
-	return true, nil
+	return h.sdk.MakeDocumentPublic(context.Background(), documentID)
 }
 
-// ensureShareAtAccess handles the share creation/replacement logic, including 409 race recovery.
-// Without replace, an existing share at another access level is an *ExistingEnvironmentShareError.
-func (h *Handler) ensureShareAtAccess(documentID, access string, replace bool) (*EnvironmentLinkResult, error) {
-	existing, err := h.sdk.ListEnvironmentShares(context.Background(), documentID)
-	if err != nil {
-		return nil, err
-	}
-	res, done, err := h.reuseOrReplace(documentID, existing.Shares, access, replace, "existing")
-	if done || err != nil {
-		return res, err
-	}
-
-	created, err := h.sdk.CreateEnvironmentShare(context.Background(), CreateEnvironmentShareRequest{
-		DocumentID: documentID,
-		Access:     access,
-	})
-	if err == nil {
-		res.Share = fromSDKEnvironmentShare(created)
-		res.Created = true
-		return res, nil
-	}
-
-	// Handle race condition: another process may have created the share
-	if !errors.Is(err, sdkdocument.ErrShareConflict) {
-		return nil, err
-	}
-
-	reListed, reErr := h.sdk.ListEnvironmentShares(context.Background(), documentID)
-	if reErr != nil {
-		return nil, fmt.Errorf("create returned conflict and re-list failed: %w", reErr)
-	}
-	raced, done, err := h.reuseOrReplace(documentID, reListed.Shares, access, replace, "racing")
-	if done || err != nil {
-		return raced, err
-	}
-	final, err := h.sdk.CreateEnvironmentShare(context.Background(), CreateEnvironmentShareRequest{
-		DocumentID: documentID,
-		Access:     access,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &EnvironmentLinkResult{
-		Share:    fromSDKEnvironmentShare(final),
-		Created:  true,
-		Replaced: append(res.Replaced, raced.Replaced...),
-	}, nil
-}
-
-// reuseOrReplace settles the listed environment shares before a create. done
-// means a share at exactly the access level was found, which the caller should
-// return as it is. Otherwise the shares at other levels have been deleted (and
-// are listed in the returned result's Replaced), and the caller should create
-// one. Without replace, a share at another level is an
-// *ExistingEnvironmentShareError and nothing is deleted.
-func (h *Handler) reuseOrReplace(documentID string, shares []sdkdocument.EnvironmentShare, access string, replace bool,
-	which string) (*EnvironmentLinkResult, bool, error) {
-	match, others := findOrCollectSDKShares(shares, access)
-	if match != nil {
-		return &EnvironmentLinkResult{Share: fromSDKEnvironmentShare(match)}, true, nil
-	}
-	if len(others) > 0 && !replace {
-		return nil, false, &ExistingEnvironmentShareError{DocumentID: documentID, Share: *fromSDKEnvironmentShare(&others[0])}
-	}
-
-	res := &EnvironmentLinkResult{}
-	for i := range others {
-		if err := h.sdk.DeleteEnvironmentShare(context.Background(), others[i].ID); err != nil {
-			return nil, false, fmt.Errorf("failed to replace %s environment share: %w", which, err)
-		}
-		res.Replaced = append(res.Replaced, *fromSDKEnvironmentShare(&others[i]))
-	}
-	return res, false, nil
-}
-
-// findOrCollectSDKShares scans SDK shares for an exact access match. Returns the match (if any)
-// and the non-matching shares.
-func findOrCollectSDKShares(shares []sdkdocument.EnvironmentShare, access string) (*sdkdocument.EnvironmentShare, []sdkdocument.EnvironmentShare) {
-	var match *sdkdocument.EnvironmentShare
-	var others []sdkdocument.EnvironmentShare
+// findSDKShare returns the share at exactly the access level, or nil.
+func findSDKShare(shares []sdkdocument.EnvironmentShare, access string) *sdkdocument.EnvironmentShare {
 	for i := range shares {
-		s := shares[i]
-		if s.ExactAccess(access) {
-			match = &s
-		} else {
-			others = append(others, s)
+		if shares[i].ExactAccess(access) {
+			return &shares[i]
 		}
 	}
-	return match, others
+	return nil
 }

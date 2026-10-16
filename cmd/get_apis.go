@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -15,11 +16,14 @@ import (
 // The listing mirrors the environment's own API index — the same document its
 // Swagger UI reads — and neither adds nor filters entries. What is on it is a
 // property of the environment, not of dtctl.
-var getAPIsCmd = &cobra.Command{
-	Use:     "apis",
-	Aliases: []string{"api"},
-	Short:   "List the APIs this environment publishes specifications for",
-	Long: `List the APIs this environment publishes OpenAPI specifications for.
+var getAPIsCmd = newGetAPIsCmd()
+
+func newGetAPIsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "apis",
+		Aliases: []string{"api"},
+		Short:   "List the APIs this environment publishes specifications for",
+		Long: `List the APIs this environment publishes OpenAPI specifications for.
 
 The list comes from the environment's own API index, so it shows exactly what
 that environment publishes — dtctl neither adds nor hides entries.
@@ -44,40 +48,45 @@ Examples:
   # Structured output
   dtctl get apis -o json
 `,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		uncovered, _ := cmd.Flags().GetBool("uncovered")
-		opsCount, _ := cmd.Flags().GetBool("ops-count")
-
-		handler := resapi.NewHandler(c)
-		rows, err := handler.List(resapi.ListOptions{Uncovered: uncovered, OpsCount: opsCount})
-		if err != nil {
-			return err
-		}
-
-		ap := enrichAgent(printer, "get", "apis")
-		if ap != nil {
-			ap.Context().Suggestions = []string{
-				"dtctl describe api <name>  -- list an API's operations",
-				"dtctl describe api <name> --operation 'GET /path'  -- one operation in full",
-				"dtctl get apis --uncovered  -- APIs with no native dtctl command",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
-		}
-		warnUnreadableSpecs(ap, rows)
 
-		return printer.PrintList(rows)
-	},
+			uncovered, _ := cmd.Flags().GetBool("uncovered")
+			opsCount, _ := cmd.Flags().GetBool("ops-count")
+
+			handler := resapi.NewHandler(c)
+			rows, err := handler.List(resapi.ListOptions{Uncovered: uncovered, OpsCount: opsCount})
+			if err != nil {
+				return err
+			}
+
+			ap := enrichAgent(printer, "get", "apis")
+			if ap != nil {
+				ap.Context().Suggestions = []string{
+					"dtctl describe api <name>  -- list an API's operations",
+					"dtctl describe api <name> --operation 'GET /path'  -- one operation in full",
+					"dtctl get apis --uncovered  -- APIs with no native dtctl command",
+				}
+			}
+			warnUnreadableSpecs(cmdContext(cmd), ap, rows)
+
+			return printer.PrintList(rows)
+		},
+	}
+	c.Flags().Bool("uncovered", false, "only APIs with no native dtctl command")
+	c.Flags().Bool("ops-count", false, "fetch every specification to fill in operation counts and categories (one request per API)")
+	stability.MarkStable(c)
+	return c
 }
 
 // warnUnreadableSpecs surfaces rows whose specification could not be read. The
 // count goes to the caller rather than the log: a blank OPS cell otherwise looks
 // like "zero operations", and the per-row reason is in the structured output.
-func warnUnreadableSpecs(ap *output.AgentPrinter, rows []resapi.APIInfo) {
+func warnUnreadableSpecs(ctx context.Context, ap *output.AgentPrinter, rows []resapi.APIInfo) {
 	failed := 0
 	for _, r := range rows {
 		if r.SpecError != "" {
@@ -94,16 +103,13 @@ func warnUnreadableSpecs(ap *output.AgentPrinter, rows []resapi.APIInfo) {
 			fmt.Sprintf(format, failed, len(rows)))
 		return
 	}
-	output.PrintWarning(format, failed, len(rows))
+	output.FprintWarning(currentStderr(ctx), format, failed, len(rows))
 }
 
 func init() {
-	getAPIsCmd.Flags().Bool("uncovered", false, "only APIs with no native dtctl command")
-	getAPIsCmd.Flags().Bool("ops-count", false, "fetch every specification to fill in operation counts and categories (one request per API)")
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(getAPIsCmd)
 }

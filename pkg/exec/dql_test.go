@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
 	"github.com/dynatrace-oss/dtctl/pkg/client"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
 
 	"gopkg.in/yaml.v3"
@@ -3189,5 +3192,40 @@ func TestPrintResults_JQ_EmptyResultIsNotAShapeMismatch(t *testing.T) {
 	}
 	if got == nil || len(got) != 0 {
 		t.Fatalf("out = %#v, want an empty list", got)
+	}
+}
+
+func TestDQLExecutor_WithStreamsKeepsResultsOffTheProcessStreams(t *testing.T) {
+	records := []map[string]interface{}{{"host": "a"}, {"host": "b"}}
+	var out, errOut bytes.Buffer
+	e := (&DQLExecutor{}).WithStreams(&out, &errOut)
+
+	onProcessStdout := captureStdout(t, func() {
+		if err := e.printResults("fetch logs", &DQLQueryResponse{Records: records},
+			DQLExecuteOptions{OutputFormat: "jsonl"}); err != nil {
+			t.Errorf("printResults: %v", err)
+		}
+	})
+
+	if len(onProcessStdout) != 0 {
+		t.Errorf("results reached the process stdout: %q", onProcessStdout)
+	}
+	if got := strings.Count(out.String(), "\n"); got != len(records) {
+		t.Errorf("got %d lines on the executor's writer, want %d: %q", got, len(records), out.String())
+	}
+}
+
+func TestDQLExecutor_WithVFSReadsQueryFilesFromItsEnv(t *testing.T) {
+	// The file exists on the host but not in the executor's filesystem: reading
+	// it must fail, because the executor resolves paths through its own Env.
+	hostPath := filepath.Join(t.TempDir(), "q.dql")
+	if err := os.WriteFile(hostPath, []byte("fetch logs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := vfs.Env{FS: vfs.NewMapFS(nil)}
+
+	err := (&DQLExecutor{}).WithVFS(env).ExecuteFromFile(hostPath, "json")
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("ExecuteFromFile error = %v, want it to wrap fs.ErrNotExist from the executor's own filesystem", err)
 	}
 }

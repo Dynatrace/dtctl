@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -151,7 +152,7 @@ func TestResolveQueryInput_WarnsOnMangledArgument(t *testing.T) {
 	t.Cleanup(swapRawCommandLine(`dtctl query "fetch logs | filter loglevel == "INFO" | limit 10"`))
 
 	const arg = `fetch logs | filter loglevel == INFO | limit 10`
-	got, err := resolveQueryInput("", []string{arg}, terminalStdin(t))
+	got, err := resolveQueryInput(context.Background(), "", []string{arg}, terminalStdin(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestResolveQueryInput_NoWarningForWellQuotedArgument(t *testing.T) {
 	t.Cleanup(swapQueryWarnOut(&buf))
 	t.Cleanup(swapRawCommandLine(`dtctl query "fetch logs | filter loglevel == \"INFO\""`))
 
-	if _, err := resolveQueryInput("", []string{`fetch logs | filter loglevel == "INFO"`}, terminalStdin(t)); err != nil {
+	if _, err := resolveQueryInput(context.Background(), "", []string{`fetch logs | filter loglevel == "INFO"`}, terminalStdin(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if buf.String() != "" {
@@ -183,7 +184,7 @@ func TestResolveQueryInput_NoWarningForStdinQuery(t *testing.T) {
 	t.Cleanup(swapQueryWarnOut(&buf))
 	t.Cleanup(swapRawCommandLine(`dtctl query -f - "unrelated "quoted" thing"`))
 
-	if _, err := resolveQueryInput("-", nil, pipedStdin(`fetch logs | filter loglevel == INFO`)); err != nil {
+	if _, err := resolveQueryInput(context.Background(), "-", nil, pipedStdin(`fetch logs | filter loglevel == INFO`)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if buf.String() != "" {
@@ -193,7 +194,7 @@ func TestResolveQueryInput_NoWarningForStdinQuery(t *testing.T) {
 
 func swapQueryWarnOut(w *strings.Builder) func() {
 	prev := queryWarnOut
-	queryWarnOut = func() io.Writer { return w }
+	queryWarnOut = func(context.Context) io.Writer { return w }
 	return func() { queryWarnOut = prev }
 }
 

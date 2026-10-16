@@ -31,7 +31,7 @@ func (a *Applier) applyAWSMonitoringConfig(data []byte) (ApplyResult, error) {
 			return nil, nameLookupError("AWS monitoring config", config.Value.Description, err)
 		}
 		if existing != nil {
-			stderrWarn(&warnings, "Found existing AWS monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
+			a.stderrWarn(&warnings, "Found existing AWS monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
 			objectID = existing.ObjectID
 			config.ObjectID = objectID
 		}
@@ -45,7 +45,7 @@ func (a *Applier) applyAWSMonitoringConfig(data []byte) (ApplyResult, error) {
 			}
 			config.Value.Version = latestVersion
 			config.Version = latestVersion
-			stderrWarn(&warnings, "Using latest extension version: %s", latestVersion)
+			a.stderrWarn(&warnings, "Using latest extension version: %s", latestVersion)
 		}
 
 		cleanData, err := json.Marshal(config)
@@ -74,7 +74,7 @@ func (a *Applier) applyAWSMonitoringConfig(data []byte) (ApplyResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch existing config to preserve version: %w", err)
 		}
-		stderrWarn(&warnings, "Preserving existing version: %s", existing.Value.Version)
+		a.stderrWarn(&warnings, "Preserving existing version: %s", existing.Value.Version)
 		config.Value.Version = existing.Value.Version
 		config.Version = existing.Value.Version
 	}
@@ -121,7 +121,7 @@ func (a *Applier) dryRunAWSMonitoringConfig(data []byte) (ApplyResult, error) {
 			return nil, nameLookupError("AWS monitoring config", config.Value.Description, err)
 		}
 		if existing != nil {
-			stderrWarn(&warnings, "Found existing AWS monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
+			a.stderrWarn(&warnings, "Found existing AWS monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
 			objectID = existing.ObjectID
 		}
 	}

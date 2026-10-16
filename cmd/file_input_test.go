@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -37,9 +38,10 @@ func TestFileFlagsReadThroughReadFileFlag(t *testing.T) {
 	// pkg/ helpers that read a path argument with vfs.ReadFile, so "-" is a
 	// file name there.
 	pathReaders := map[string]bool{
-		"ExecuteFromFile":    true, // pkg/exec DQLExecutor
-		"ParseInputFromFile": true, // pkg/resources/analyzer
-		"CompareFiles":       true, // pkg/diff Differ
+		"ExecuteFromFile":        true, // pkg/exec DQLExecutor
+		"ParseInputFromFile":     true, // pkg/resources/analyzer
+		"ParseInputFromFileWith": true,
+		"CompareFiles":           true, // pkg/diff Differ
 	}
 
 	files, err := filepath.Glob("*.go")
@@ -68,8 +70,17 @@ func TestFileFlagsReadThroughReadFileFlag(t *testing.T) {
 					fset.Position(call.Pos()), sel.Sel.Name)
 				return true
 			}
-			pkg, ok := sel.X.(*ast.Ident)
-			if !ok || pkg.Name != "vfs" || (sel.Sel.Name != "ReadFile" && sel.Sel.Name != "ReadFileOrStdin") {
+			// The seam is vfs itself, or the invocation's Env, vfsEnv(ctx).
+			isSeam := false
+			switch x := sel.X.(type) {
+			case *ast.Ident:
+				isSeam = x.Name == "vfs"
+			case *ast.CallExpr:
+				if id, ok := x.Fun.(*ast.Ident); ok {
+					isSeam = id.Name == "vfsEnv"
+				}
+			}
+			if !isSeam || (sel.Sel.Name != "ReadFile" && sel.Sel.Name != "ReadFileOrStdin") {
 				return true
 			}
 			seen++
@@ -90,7 +101,7 @@ func TestReadFileFlagFrom(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "r.yaml")
 		require.NoError(t, os.WriteFile(path, []byte("from-file"), 0o600))
 
-		got, err := readFileFlagFrom("file", path, queryStdin{r: strings.NewReader("from-pipe")})
+		got, err := readFileFlagFrom(context.Background(), "file", path, queryStdin{r: strings.NewReader("from-pipe")})
 		require.NoError(t, err)
 		require.Equal(t, "from-file", string(got))
 	})
@@ -100,20 +111,20 @@ func TestReadFileFlagFrom(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "-"), []byte("from-file"), 0o600))
 		t.Chdir(dir)
 
-		got, err := readFileFlagFrom("file", "-", queryStdin{r: strings.NewReader("from-pipe")})
+		got, err := readFileFlagFrom(context.Background(), "file", "-", queryStdin{r: strings.NewReader("from-pipe")})
 		require.NoError(t, err)
 		require.Equal(t, "from-pipe", string(got))
 	})
 
 	t.Run("terminal stdin is a usage error, not a hang", func(t *testing.T) {
-		_, err := readFileFlagFrom("file", "-", queryStdin{r: strings.NewReader("never read"), isTerminal: true})
+		_, err := readFileFlagFrom(context.Background(), "file", "-", queryStdin{r: strings.NewReader("never read"), isTerminal: true})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "stdin is a terminal")
 		require.Equal(t, client.ExitUsageError, exitCodeForError(err))
 	})
 
 	t.Run("empty stdin names stdin", func(t *testing.T) {
-		_, err := readFileFlagFrom("file", "-", queryStdin{r: strings.NewReader("")})
+		_, err := readFileFlagFrom(context.Background(), "file", "-", queryStdin{r: strings.NewReader("")})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no input arrived on stdin")
 	})
@@ -132,7 +143,7 @@ func runWithStdin(t *testing.T, srvURL, stdin string, argv ...string) (int, stri
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "-"), []byte("title: FROM-THE-DISK\ntasks: {}\n"), 0o600))
 	t.Chdir(dir)
 	clearAgentEnvVars(t)
-	t.Cleanup(restorePristineTree)
+	t.Cleanup(func() { restorePristineTree(context.Background()) })
 
 	var stdout, stderr bytes.Buffer
 	code := Run(argv, RunOptions{

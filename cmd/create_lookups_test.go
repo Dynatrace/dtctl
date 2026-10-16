@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -45,9 +46,9 @@ func TestCreateLookupDryRun_FileDashReadsStdin(t *testing.T) {
 	setCreateLookupFlags(t, "-")
 	withAgentMode(t, false)
 
-	originalDryRun := dryRun
-	t.Cleanup(func() { dryRun = originalDryRun })
-	dryRun = true
+	originalDryRun := dryRun(context.Background())
+	t.Cleanup(func() { gFlags.dryRun = originalDryRun })
+	gFlags.dryRun = true
 
 	out := captureStdout(t, func() {
 		if err := createLookupCmd.RunE(createLookupCmd, nil); err != nil {
@@ -64,7 +65,7 @@ func TestCreateLookupDryRun_FileDashReadsStdin(t *testing.T) {
 // nothing to read. io.ReadAll would block until Ctrl+D and then upload an empty
 // table, which reads as a hung CLI, so it must fail fast with guidance.
 func TestReadLookupInput_StdinIsTerminal(t *testing.T) {
-	_, err := readLookupInput("-", true)
+	_, err := readLookupInput(context.Background(), "-", true)
 	if err == nil {
 		t.Fatal("expected an error when --file - is used on a terminal")
 	}
@@ -81,7 +82,7 @@ func TestReadLookupInput_StdinIsTerminal(t *testing.T) {
 func TestReadLookupInput_EmptyInput(t *testing.T) {
 	t.Run("stdin", func(t *testing.T) {
 		withStdin(t, "")
-		_, err := readLookupInput("-", false)
+		_, err := readLookupInput(context.Background(), "-", false)
 		if err == nil {
 			t.Fatal("expected an error for an empty pipe")
 		}
@@ -95,7 +96,7 @@ func TestReadLookupInput_EmptyInput(t *testing.T) {
 		if err := os.WriteFile(file, nil, 0o600); err != nil {
 			t.Fatalf("write CSV: %v", err)
 		}
-		_, err := readLookupInput(file, false)
+		_, err := readLookupInput(context.Background(), file, false)
 		if err == nil {
 			t.Fatal("expected an error for an empty file")
 		}
@@ -156,9 +157,9 @@ func TestCreateLookupDryRun_ReportsAutoDetectedPattern(t *testing.T) {
 	// leaves agentMode set.
 	withAgentMode(t, false)
 
-	originalDryRun := dryRun
-	t.Cleanup(func() { dryRun = originalDryRun })
-	dryRun = true
+	originalDryRun := dryRun(context.Background())
+	t.Cleanup(func() { gFlags.dryRun = originalDryRun })
+	gFlags.dryRun = true
 
 	out := captureStdout(t, func() {
 		if err := createLookupCmd.RunE(createLookupCmd, nil); err != nil {
@@ -186,9 +187,9 @@ func TestCreateLookupDryRun_RejectsUnparseableCSV(t *testing.T) {
 	}
 	setCreateLookupFlags(t, file)
 
-	originalDryRun := dryRun
-	t.Cleanup(func() { dryRun = originalDryRun })
-	dryRun = true
+	originalDryRun := dryRun(context.Background())
+	t.Cleanup(func() { gFlags.dryRun = originalDryRun })
+	gFlags.dryRun = true
 
 	var err error
 	_ = captureStdout(t, func() {
@@ -214,9 +215,9 @@ func TestCreateLookupDryRun_AgentModeEmitsEnvelope(t *testing.T) {
 	setCreateLookupFlags(t, file)
 	withAgentMode(t, true)
 
-	originalDryRun := dryRun
-	t.Cleanup(func() { dryRun = originalDryRun })
-	dryRun = true
+	originalDryRun := dryRun(context.Background())
+	t.Cleanup(func() { gFlags.dryRun = originalDryRun })
+	gFlags.dryRun = true
 
 	out := captureStdout(t, func() {
 		if err := createLookupCmd.RunE(createLookupCmd, nil); err != nil {

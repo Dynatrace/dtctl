@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,11 +14,11 @@ import (
 // with inherited stdio — Windows has no process replacement — and returns
 // the child's exit code verbatim so scripts see the target's code, not a
 // cobra-wrapped error.
-func execForward(bin string, argv []string, env []string) (int, error) {
+func execForward(ctx context.Context, bin string, argv []string, env []string) (int, error) {
 	cmd := exec.Command(bin, argv...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = currentStdout(ctx)
+	cmd.Stderr = currentStderr(ctx)
 	cmd.Env = env
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError

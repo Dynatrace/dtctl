@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,7 @@ func TestDryRunFlagFollowsSharedRunE(t *testing.T) {
 	// and reflect reports a closure by its code pointer — so on a tree an
 	// earlier test has executed, every command would look like the same
 	// implementation. Compare the as-registered functions instead.
-	restorePristineTree()
+	restorePristineTree(context.Background())
 
 	byImpl := map[uintptr][]*cobra.Command{}
 	var walk func(*cobra.Command)
@@ -129,9 +130,9 @@ func TestDeleteDryRunSendsNoMutatingRequest(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			setupPlatformCmdTest(t, srv.Server, "json")
-			origDryRun := dryRun
-			t.Cleanup(func() { dryRun = origDryRun })
-			dryRun = true
+			origDryRun := dryRun(context.Background())
+			t.Cleanup(func() { gFlags.dryRun = origDryRun })
+			gFlags.dryRun = true
 			srv.reset()
 
 			var runErr error
@@ -159,9 +160,9 @@ func TestDeleteSLODryRunSendsNoMutatingRequest(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	setupPlatformCmdTest(t, srv, "json")
-	origDryRun := dryRun
-	t.Cleanup(func() { dryRun = origDryRun })
-	dryRun = true
+	origDryRun := dryRun(context.Background())
+	t.Cleanup(func() { gFlags.dryRun = origDryRun })
+	gFlags.dryRun = true
 
 	var runErr error
 	out := capturePlatformStdout(t, func() {
@@ -178,7 +179,7 @@ func TestDeleteSLODryRunSendsNoMutatingRequest(t *testing.T) {
 // every command to "dtctl verify", which has nothing for a workflow or a login,
 // so the advice cost the caller a second failed command to disprove.
 func TestRejectionSuggestsVerifyOnlyWhenItExists(t *testing.T) {
-	restorePristineTree()
+	restorePristineTree(context.Background())
 
 	find := func(path ...string) *cobra.Command {
 		c, _, err := rootCmd.Find(path)
@@ -212,5 +213,13 @@ func TestRejectionSuggestsVerifyOnlyWhenItExists(t *testing.T) {
 				require.Contains(t, msg, "use '"+tc.want+"'")
 			}
 		})
+	}
+
+	// A per-invocation tree must look up its own verify, not the singleton's.
+	fresh := newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root
+	for path, want := range map[string]string{"verify query": "", "query": "dtctl verify query"} {
+		c, _, err := fresh.Find(strings.Fields(path))
+		require.NoError(t, err)
+		require.Equal(t, want, verifyAlternativeFor(c), "fresh tree: %s", path)
 	}
 }

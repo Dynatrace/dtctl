@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,10 +119,10 @@ func TestGlobalFlags_Config(t *testing.T) {
 			viper.Reset()
 
 			// Set config file flag
-			cfgFile = configPath
+			gFlags.cfgFile = configPath
 
 			// Initialize config
-			initConfig()
+			initConfig(context.Background())
 
 			// Verify config was loaded if custom path provided
 			if tt.configFile != "" && viper.ConfigFileUsed() != configPath {
@@ -226,11 +228,11 @@ func TestLoadConfig(t *testing.T) {
 			}
 
 			// Save original values and environment
-			origCfgFile := cfgFile
+			origCfgFile := cfgFile(context.Background())
 			origContextName := contextName
 			origEnvContext := os.Getenv("DTCTL_CONTEXT")
 			defer func() {
-				cfgFile = origCfgFile
+				gFlags.cfgFile = origCfgFile
 				contextName = origContextName
 				if origEnvContext != "" {
 					_ = os.Setenv("DTCTL_CONTEXT", origEnvContext)
@@ -248,11 +250,11 @@ func TestLoadConfig(t *testing.T) {
 
 			// Reset state
 			viper.Reset()
-			cfgFile = configPath
+			gFlags.cfgFile = configPath
 			contextName = tt.contextFlagValue
 
 			// Initialize config
-			initConfig()
+			initConfig(context.Background())
 
 			// Load config with context override
 			loadedCfg, err := LoadConfig()
@@ -274,7 +276,7 @@ func TestGlobalFlags_Output(t *testing.T) {
 	for _, format := range validFormats {
 		t.Run(format, func(t *testing.T) {
 			viper.Reset()
-			outputFormat = format
+			gFlags.outputFormat = format
 			viper.Set("output", format)
 
 			got := viper.GetString("output")
@@ -311,10 +313,10 @@ func TestGlobalFlags_Verbose(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verbosity = tt.verbosity
+			gFlags.verbosity = tt.verbosity
 
-			if verbosity != tt.want {
-				t.Errorf("verbosity = %v, want %v", verbosity, tt.want)
+			if verbosity(context.Background()) != tt.want {
+				t.Errorf("gFlags.verbosity = %v, want %v", verbosity(context.Background()), tt.want)
 			}
 		})
 	}
@@ -341,10 +343,10 @@ func TestGlobalFlags_DryRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dryRun = tt.dryRun
+			gFlags.dryRun = tt.dryRun
 
-			if dryRun != tt.want {
-				t.Errorf("dryRun = %v, want %v", dryRun, tt.want)
+			if dryRun(context.Background()) != tt.want {
+				t.Errorf("gFlags.dryRun = %v, want %v", dryRun(context.Background()), tt.want)
 			}
 		})
 	}
@@ -371,7 +373,7 @@ func TestGlobalFlags_PlainMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plainMode = tt.plain
+			gFlags.plainMode = tt.plain
 
 			got := GetPlainMode()
 			if got != tt.want {
@@ -407,7 +409,7 @@ func TestGlobalFlags_ChunkSize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chunkSize = tt.chunkSize
+			gFlags.chunkSize = tt.chunkSize
 
 			got := GetChunkSize()
 			if got != tt.want {
@@ -443,8 +445,8 @@ func TestNewPrinter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			outputFormat = tt.outputFormat
-			plainMode = tt.plainMode
+			gFlags.outputFormat = tt.outputFormat
+			gFlags.plainMode = tt.plainMode
 
 			printer := NewPrinter()
 			if printer == nil {
@@ -480,12 +482,12 @@ func TestInitConfig(t *testing.T) {
 				cfg := config.NewConfig()
 				cfg.SetContext("test", "https://test.dt.com", "token")
 				_ = cfg.SaveTo(configPath)
-				cfgFile = configPath
+				gFlags.cfgFile = configPath
 			} else {
-				cfgFile = ""
+				gFlags.cfgFile = ""
 			}
 
-			initConfig()
+			initConfig(context.Background())
 
 			configUsed := viper.ConfigFileUsed()
 			if tt.wantConfigUsed && configUsed == "" {
@@ -504,11 +506,11 @@ func TestInitConfig(t *testing.T) {
 // the audience it was built for. Explicit json must keep agent mode on; an
 // explicit non-JSON format must still opt out.
 func TestAgentModeAutoDetectWithExplicitJSON(t *testing.T) {
-	origAgent, origNoAgent, origOutput := agentMode, noAgent, outputFormat
+	origAgent, origNoAgent, origOutput := agentMode(context.Background()), noAgent(context.Background()), outputFormat(context.Background())
 	outputFlag := rootCmd.PersistentFlags().Lookup("output")
 	origChanged := outputFlag.Changed
 	defer func() {
-		agentMode, noAgent, outputFormat = origAgent, origNoAgent, origOutput
+		gFlags.agentMode, gFlags.noAgent, gFlags.outputFormat = origAgent, origNoAgent, origOutput
 		outputFlag.Changed = origChanged
 		os.Unsetenv("AI_AGENT")
 	}()
@@ -527,12 +529,12 @@ func TestAgentModeAutoDetectWithExplicitJSON(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			agentMode, noAgent = false, false
-			outputFormat = tc.format
+			gFlags.agentMode, gFlags.noAgent = false, false
+			gFlags.outputFormat = tc.format
 			outputFlag.Changed = tc.changed
-			initConfig()
-			if agentMode != tc.want {
-				t.Errorf("agentMode = %v, want %v", agentMode, tc.want)
+			initConfig(context.Background())
+			if agentMode(context.Background()) != tc.want {
+				t.Errorf("gFlags.agentMode = %v, want %v", agentMode(context.Background()), tc.want)
 			}
 		})
 	}
@@ -601,7 +603,7 @@ func TestVerbSynonyms(t *testing.T) {
 		t.Errorf("usage hint missing: %q", cmdErr.UsageHint)
 	}
 	// The hint must reach the agent envelope.
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 	if len(detail.Suggestions) != 2 || !strings.Contains(detail.Suggestions[1], "dtctl get <resource>") {
 		t.Errorf("envelope suggestions = %v", detail.Suggestions)
 	}
@@ -832,7 +834,7 @@ func TestErrorToDetail_DiagnosticError(t *testing.T) {
 		},
 	}
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "auth_required" {
 		t.Errorf("Code = %q, want %q", detail.Code, "auth_required")
@@ -878,7 +880,7 @@ func TestErrorToDetail_DiagnosticErrorStatusCodes(t *testing.T) {
 				StatusCode: tt.statusCode,
 				Message:    "test error",
 			}
-			detail := errorToDetail(err)
+			detail := errorToDetail(context.Background(), err)
 			if detail.Code != tt.wantCode {
 				t.Errorf("Code = %q, want %q", detail.Code, tt.wantCode)
 			}
@@ -889,7 +891,7 @@ func TestErrorToDetail_DiagnosticErrorStatusCodes(t *testing.T) {
 func TestErrorToDetail_APIError(t *testing.T) {
 	err := httpclient.NewAPIError(404, "not found", "workflow does not exist")
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "not_found" {
 		t.Errorf("Code = %q, want %q", detail.Code, "not_found")
@@ -919,7 +921,7 @@ func TestSDKHTTPErrorIsTyped(t *testing.T) {
 			err := fmt.Errorf("failed to get dashboard: %w",
 				httpclient.NewAPIError(tt.status, "Configuration not found", ""))
 
-			detail := errorToDetail(err)
+			detail := errorToDetail(context.Background(), err)
 			if detail.Code != tt.wantCode {
 				t.Errorf("Code = %q, want %q", detail.Code, tt.wantCode)
 			}
@@ -981,7 +983,7 @@ func TestAPIIndexErrorsKeepTheirOwnExitCode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := errorToDetail(tt.err).Code; got != tt.wantCode {
+			if got := errorToDetail(context.Background(), tt.err).Code; got != tt.wantCode {
 				t.Errorf("Code = %q, want %q", got, tt.wantCode)
 			}
 			if got := exitCodeForError(tt.err); got != tt.wantExit {
@@ -994,7 +996,7 @@ func TestAPIIndexErrorsKeepTheirOwnExitCode(t *testing.T) {
 func TestErrorToDetail_APIErrorWithoutDetails(t *testing.T) {
 	err := httpclient.NewAPIError(500, "internal server error", "")
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "server_error" {
 		t.Errorf("Code = %q, want %q", detail.Code, "server_error")
@@ -1029,10 +1031,10 @@ func TestErrorToDetail_FunctionExecutionError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := errorToDetail(tt.err).Code; got != "function_error" {
+			if got := errorToDetail(context.Background(), tt.err).Code; got != "function_error" {
 				t.Errorf("Code = %q, want %q", got, "function_error")
 			}
-			if got := errorToDetail(tt.err).StatusCode; got != 0 {
+			if got := errorToDetail(context.Background(), tt.err).StatusCode; got != 0 {
 				t.Errorf("StatusCode = %d, want 0 — 540 and 541 are not HTTP failures", got)
 			}
 			if got := exitCodeForError(tt.err); got != client.ExitError {
@@ -1053,7 +1055,7 @@ func TestErrorToDetail_SafetyError(t *testing.T) {
 		},
 	}
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "safety_blocked" {
 		t.Errorf("Code = %q, want %q", detail.Code, "safety_blocked")
@@ -1076,7 +1078,7 @@ func TestErrorToDetail_CommandError(t *testing.T) {
 		},
 	}
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "unknown_command" {
 		t.Errorf("Code = %q, want %q", detail.Code, "unknown_command")
@@ -1098,7 +1100,7 @@ func TestErrorToDetail_CommandErrorNoSuggestion(t *testing.T) {
 		Message: `unknown command "xyzzy"`,
 	}
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "unknown_command" {
 		t.Errorf("Code = %q, want %q", detail.Code, "unknown_command")
@@ -1118,7 +1120,7 @@ func TestErrorToDetail_FlagError(t *testing.T) {
 		},
 	}
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "unknown_command" {
 		t.Errorf("Code = %q, want %q", detail.Code, "unknown_command")
@@ -1134,7 +1136,7 @@ func TestErrorToDetail_FlagError(t *testing.T) {
 func TestErrorToDetail_GenericError(t *testing.T) {
 	err := fmt.Errorf("something unexpected happened")
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "error" {
 		t.Errorf("Code = %q, want %q", detail.Code, "error")
@@ -1152,7 +1154,7 @@ func TestErrorToDetail_WrappedDiagnosticError(t *testing.T) {
 	}
 	wrapped := fmt.Errorf("command failed: %w", inner)
 
-	detail := errorToDetail(wrapped)
+	detail := errorToDetail(context.Background(), wrapped)
 
 	if detail.Code != "permission_denied" {
 		t.Errorf("Code = %q, want %q (should unwrap diagnostic.Error)", detail.Code, "permission_denied")
@@ -1167,7 +1169,7 @@ func TestErrorToDetail_DiagnosticPrecedesAPIError(t *testing.T) {
 	apiErr := httpclient.NewAPIError(404, "not found", "")
 	diagErr := &diagnostic.Error{Operation: "get workflows", StatusCode: 404, Err: apiErr}
 
-	detail := errorToDetail(diagErr)
+	detail := errorToDetail(context.Background(), diagErr)
 
 	// Should use diagnostic.Error classification, not raw APIError
 	if detail.Code != "not_found" {
@@ -1185,7 +1187,7 @@ func TestErrorToDetail_HookRejectedError(t *testing.T) {
 		Stderr:   "validation failed: missing required field 'owner'",
 	}
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 
 	if detail.Code != "hook_rejected" {
 		t.Errorf("Code = %q, want %q", detail.Code, "hook_rejected")
@@ -1212,7 +1214,7 @@ func TestErrorToDetail_HookRejectedErrorWrapped(t *testing.T) {
 	}
 	wrapped := fmt.Errorf("apply failed: %w", inner)
 
-	detail := errorToDetail(wrapped)
+	detail := errorToDetail(context.Background(), wrapped)
 
 	if detail.Code != "hook_rejected" {
 		t.Errorf("Code = %q, want %q (should unwrap HookRejectedError)", detail.Code, "hook_rejected")
@@ -1241,11 +1243,28 @@ func TestClassifyGenericError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyGenericError(tt.err)
+			got := classifyGenericError(context.Background(), tt.err)
 			if got != tt.wantCode {
 				t.Errorf("classifyGenericError(%q) = %q, want %q", tt.err, got, tt.wantCode)
 			}
 		})
+	}
+}
+
+// TestClassifyGenericError_DeadlineByType: a deadline whose wording names no
+// timeout is classified "timeout" on a concurrent invocation, where it races
+// the HTTP client timeout, and keeps its historical "error" everywhere else.
+func TestClassifyGenericError_DeadlineByType(t *testing.T) {
+	err := fmt.Errorf("failed to list documents: %w",
+		&url.Error{Op: "Get", URL: "https://env.example.test", Err: context.DeadlineExceeded})
+
+	if got := classifyGenericError(context.Background(), err); got != "error" {
+		t.Errorf("CLI/serialized: classifyGenericError = %q, want %q (unchanged)", got, "error")
+	}
+
+	ctx := withInvocation(context.Background(), &invocation{concurrent: true})
+	if got := classifyGenericError(ctx, err); got != "timeout" {
+		t.Errorf("concurrent: classifyGenericError = %q, want %q", got, "timeout")
 	}
 }
 
@@ -1538,11 +1557,11 @@ func TestFlagsTakingValues_SyncGuard(t *testing.T) {
 }
 
 func TestValidateGlobalFlags_JQFormatConstraint(t *testing.T) {
-	origOutput := outputFormat
-	origJQ := jqFilter
+	origOutput := outputFormat(context.Background())
+	origJQ := jqFilter(context.Background())
 	defer func() {
-		outputFormat = origOutput
-		jqFilter = origJQ
+		gFlags.outputFormat = origOutput
+		gFlags.jqFilter = origJQ
 	}()
 
 	tests := []struct {
@@ -1562,36 +1581,36 @@ func TestValidateGlobalFlags_JQFormatConstraint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			outputFormat = tt.format
-			jqFilter = tt.jq
+			gFlags.outputFormat = tt.format
+			gFlags.jqFilter = tt.jq
 
-			err := validateGlobalFlags()
+			err := validateGlobalFlags(context.Background())
 			if err != nil {
 				t.Fatalf("unexpected error for format=%q jq=%q: %v", tt.format, tt.jq, err)
 			}
-			if outputFormat != tt.wantFormat {
-				t.Fatalf("outputFormat = %q, want %q", outputFormat, tt.wantFormat)
+			if outputFormat(context.Background()) != tt.wantFormat {
+				t.Fatalf("gFlags.outputFormat = %q, want %q", outputFormat(context.Background()), tt.wantFormat)
 			}
 		})
 	}
 }
 
 func TestAgentJQ_KeepContextAndFilterResult(t *testing.T) {
-	origOutput := outputFormat
-	origJQ := jqFilter
-	origAgent := agentMode
-	origPlain := plainMode
+	origOutput := outputFormat(context.Background())
+	origJQ := jqFilter(context.Background())
+	origAgent := agentMode(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		outputFormat = origOutput
-		jqFilter = origJQ
-		agentMode = origAgent
-		plainMode = origPlain
+		gFlags.outputFormat = origOutput
+		gFlags.jqFilter = origJQ
+		gFlags.agentMode = origAgent
+		gFlags.plainMode = origPlain
 	}()
 
-	outputFormat = "json"
-	jqFilter = ".name"
-	agentMode = true
-	plainMode = true
+	gFlags.outputFormat = "json"
+	gFlags.jqFilter = ".name"
+	gFlags.agentMode = true
+	gFlags.plainMode = true
 
 	var buf bytes.Buffer
 	withCapturedStdout(t, &buf, func() {
@@ -1629,21 +1648,21 @@ func TestAgentJQ_KeepContextAndFilterResult(t *testing.T) {
 }
 
 func TestAgentJQ_BadFilterYieldsErrorEnvelope(t *testing.T) {
-	origOutput := outputFormat
-	origJQ := jqFilter
-	origAgent := agentMode
-	origPlain := plainMode
+	origOutput := outputFormat(context.Background())
+	origJQ := jqFilter(context.Background())
+	origAgent := agentMode(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		outputFormat = origOutput
-		jqFilter = origJQ
-		agentMode = origAgent
-		plainMode = origPlain
+		gFlags.outputFormat = origOutput
+		gFlags.jqFilter = origJQ
+		gFlags.agentMode = origAgent
+		gFlags.plainMode = origPlain
 	}()
 
-	outputFormat = "json"
-	jqFilter = ".["
-	agentMode = true
-	plainMode = true
+	gFlags.outputFormat = "json"
+	gFlags.jqFilter = ".["
+	gFlags.agentMode = true
+	gFlags.plainMode = true
 
 	var buf bytes.Buffer
 	withCapturedStdout(t, &buf, func() {
@@ -1652,7 +1671,7 @@ func TestAgentJQ_BadFilterYieldsErrorEnvelope(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected invalid --jq filter error")
 		}
-		detail := errorToDetail(err)
+		detail := errorToDetail(context.Background(), err)
 		if printErr := output.PrintError(os.Stdout, detail); printErr != nil {
 			t.Fatalf("failed to print error envelope: %v", printErr)
 		}
@@ -1680,21 +1699,21 @@ func TestAgentJQ_BadFilterYieldsErrorEnvelope(t *testing.T) {
 // come back as ok=false with the stable jq_shape_mismatch code and the payload's
 // real keys in the message — not as a confident null with exit code 0.
 func TestAgentJQ_WrongShapeYieldsShapeMismatchEnvelope(t *testing.T) {
-	origOutput := outputFormat
-	origJQ := jqFilter
-	origAgent := agentMode
-	origPlain := plainMode
+	origOutput := outputFormat(context.Background())
+	origJQ := jqFilter(context.Background())
+	origAgent := agentMode(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		outputFormat = origOutput
-		jqFilter = origJQ
-		agentMode = origAgent
-		plainMode = origPlain
+		gFlags.outputFormat = origOutput
+		gFlags.jqFilter = origJQ
+		gFlags.agentMode = origAgent
+		gFlags.plainMode = origPlain
 	}()
 
-	outputFormat = "json"
-	jqFilter = ".result.records"
-	agentMode = true
-	plainMode = true
+	gFlags.outputFormat = "json"
+	gFlags.jqFilter = ".result.records"
+	gFlags.agentMode = true
+	gFlags.plainMode = true
 
 	var buf bytes.Buffer
 	withCapturedStdout(t, &buf, func() {
@@ -1703,7 +1722,7 @@ func TestAgentJQ_WrongShapeYieldsShapeMismatchEnvelope(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected a shape-mismatch error for .result.records")
 		}
-		detail := errorToDetail(err)
+		detail := errorToDetail(context.Background(), err)
 		if printErr := output.PrintError(os.Stdout, detail); printErr != nil {
 			t.Fatalf("failed to print error envelope: %v", printErr)
 		}
@@ -1750,5 +1769,48 @@ func withCapturedStdout(t *testing.T, buf *bytes.Buffer, fn func()) {
 	}
 	if _, err := io.Copy(buf, r); err != nil {
 		t.Fatalf("failed to read captured stdout: %v", err)
+	}
+}
+
+// TestNounAdvice pins that `dtctl <noun>` names the commands reading it, not an edit-distance guess.
+func TestNounAdvice(t *testing.T) {
+	cases := []struct {
+		noun string
+		want []string
+	}{
+		{"slo", []string{"dtctl get slos"}},
+		{"workflow", []string{"dtctl get workflows", "dtctl get workflow-executions"}},
+		{"problems", []string{"fetch dt.davis.problems"}},
+		{"synthetic", []string{"fetch dt.synthetic.events"}},
+		{"slo-status", []string{"dtctl get slos"}},
+		{"workflow-runs", []string{"dtctl get workflows", "dtctl get workflow-executions"}},
+	}
+	for _, tc := range cases {
+		err := enhanceCommandError(rootCmd, fmt.Errorf(`unknown command %q for "dtctl"`, tc.noun))
+		var cmdErr *suggest.CommandError
+		if !errors.As(err, &cmdErr) {
+			t.Fatalf("%s: expected CommandError, got %T", tc.noun, err)
+		}
+		if cmdErr.Suggestion != nil {
+			t.Errorf("%s: kept the edit-distance guess %q", tc.noun, cmdErr.Suggestion.Value)
+		}
+		got := strings.Join(errorToDetail(context.Background(), err).Suggestions, "\n")
+		for _, w := range append(tc.want, "dtctl commands") {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: suggestions lack %q:\n%s", tc.noun, w, got)
+			}
+		}
+	}
+	// The same advice under a verb: `dtctl get problems`, `dtctl find slo`.
+	for noun, want := range map[string]string{"problems": "fetch dt.davis.problems", "slo": "dtctl get slos"} {
+		err := requireSubcommand(findCmd, []string{noun})
+		if got := strings.Join(errorToDetail(context.Background(), err).Suggestions, "\n"); !strings.Contains(got, want) {
+			t.Errorf("find %s: suggestions lack %q:\n%s", noun, want, got)
+		}
+	}
+	for _, typo := range []string{"quer", "getx", "account"} {
+		if a := nounAdvice(rootCmd, typo); a != nil {
+			t.Errorf("%s is no noun dtctl reads, got %q", typo, a)
+		}
 	}
 }

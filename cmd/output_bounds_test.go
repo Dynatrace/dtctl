@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -18,10 +19,10 @@ func newOutputBoundsTestCmd(args ...string) *cobra.Command {
 }
 
 func TestResolveOutputBounds_Defaults(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
 
-	agentMode = true
+	gFlags.agentMode = true
 	got, err := resolveOutputBounds(newOutputBoundsTestCmd())
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +31,7 @@ func TestResolveOutputBounds_Defaults(t *testing.T) {
 		t.Errorf("agent defaults = %+v, want field cap %d and no budget", got, output.DefaultAgentMaxFieldChars)
 	}
 
-	agentMode = false
+	gFlags.agentMode = false
 	got, err = resolveOutputBounds(newOutputBoundsTestCmd())
 	if err != nil {
 		t.Fatal(err)
@@ -41,9 +42,9 @@ func TestResolveOutputBounds_Defaults(t *testing.T) {
 }
 
 func TestResolveOutputBounds_Flags(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
-	agentMode = true
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
+	gFlags.agentMode = true
 
 	cases := []struct {
 		args      []string
@@ -68,9 +69,9 @@ func TestResolveOutputBounds_Flags(t *testing.T) {
 }
 
 func TestResolveOutputBounds_Invalid(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
-	agentMode = true
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
+	gFlags.agentMode = true
 
 	for _, args := range [][]string{
 		{"--max-field-chars", "-1"},
@@ -95,9 +96,9 @@ func TestResolveOutputBounds_BytesAndTokensAreExclusive(t *testing.T) {
 }
 
 func TestResolveOutputBounds_IgnoredOutsideAgentMode(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
-	agentMode = false
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
+	gFlags.agentMode = false
 
 	got, err := resolveOutputBounds(newOutputBoundsTestCmd("--max-field-chars", "80", "--max-output-tokens", "100"))
 	if err != nil {

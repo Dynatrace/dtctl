@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -52,9 +53,9 @@ func TestRunInspectList_EmitsFileListEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	origAgent, origFormat, origJQ := agentMode, outputFormat, jqFilter
-	defer func() { agentMode, outputFormat, jqFilter = origAgent, origFormat, origJQ }()
-	agentMode, outputFormat, jqFilter = true, "json", ""
+	origAgent, origFormat, origJQ := agentMode(context.Background()), outputFormat(context.Background()), jqFilter(context.Background())
+	defer func() { gFlags.agentMode, gFlags.outputFormat, gFlags.jqFilter = origAgent, origFormat, origJQ }()
+	gFlags.agentMode, gFlags.outputFormat, gFlags.jqFilter = true, "json", ""
 
 	var runErr error
 	out := captureStdout(t, func() {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -217,9 +218,9 @@ func TestStatusToAgentEntry_NotInstalled(t *testing.T) {
 
 func TestSkillsInstall_RunE(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, err := os.Getwd()
@@ -258,9 +259,9 @@ func TestSkillsInstall_RunE(t *testing.T) {
 
 func TestSkillsInstall_AllAgents(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	for _, agentName := range skills.SupportedAgents() {
 		t.Run(agentName, func(t *testing.T) {
@@ -288,9 +289,9 @@ func TestSkillsInstall_AllAgents(t *testing.T) {
 
 func TestSkillsInstall_RefusesOverwrite(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -324,9 +325,9 @@ func TestSkillsInstall_RefusesOverwrite(t *testing.T) {
 
 func TestSkillsInstall_OverwriteWithForce(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -355,9 +356,9 @@ func TestSkillsInstall_OverwriteWithForce(t *testing.T) {
 
 func TestSkillsInstall_GlobalUnsupported(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -381,9 +382,9 @@ func TestSkillsInstall_AutoDetect(t *testing.T) {
 	clearAgentEnvVars(t)
 	t.Setenv("OPENCODE", "1")
 
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -406,9 +407,9 @@ func TestSkillsInstall_AutoDetect(t *testing.T) {
 
 func TestSkillsInstall_NoAgentDetected(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	resetSkillsFlags(t)
 	// No --for flag, no env var
@@ -424,9 +425,9 @@ func TestSkillsInstall_NoAgentDetected(t *testing.T) {
 
 func TestSkillsUninstall_RunE(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -462,9 +463,9 @@ func TestSkillsUninstall_RunE(t *testing.T) {
 
 func TestSkillsUninstall_NothingInstalled(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -483,9 +484,9 @@ func TestSkillsUninstall_NothingInstalled(t *testing.T) {
 
 func TestSkillsStatus_RunE(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -510,9 +511,9 @@ func TestSkillsStatus_RunE(t *testing.T) {
 
 func TestSkillsStatus_AllAgents(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -529,9 +530,9 @@ func TestSkillsStatus_AllAgents(t *testing.T) {
 
 func TestSkillsStatus_UnknownAgent(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	resetSkillsFlags(t)
 	_ = skillsStatusCmd.Flags().Set("for", "vim-copilot")
@@ -548,9 +549,9 @@ func TestSkillsStatus_UnknownAgent(t *testing.T) {
 
 func TestSkillsInstall_AgentMode(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = true
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = true
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -575,9 +576,9 @@ func TestSkillsInstall_AgentMode(t *testing.T) {
 
 func TestSkillsInstall_AgentModeUpdated(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = true
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = true
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -604,8 +605,8 @@ func TestSkillsInstall_AgentModeUpdated(t *testing.T) {
 
 func TestSkillsUninstall_AgentMode(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -613,7 +614,7 @@ func TestSkillsUninstall_AgentMode(t *testing.T) {
 	_ = os.Chdir(tmpDir)
 
 	// Install first (non-agent mode)
-	agentMode = false
+	gFlags.agentMode = false
 	resetSkillsFlags(t)
 	_ = skillsInstallCmd.Flags().Set("for", "copilot")
 	if err := skillsInstallCmd.RunE(skillsInstallCmd, []string{}); err != nil {
@@ -621,7 +622,7 @@ func TestSkillsUninstall_AgentMode(t *testing.T) {
 	}
 
 	// Uninstall in agent mode
-	agentMode = true
+	gFlags.agentMode = true
 	resetSkillsFlags(t)
 	_ = skillsUninstallCmd.Flags().Set("for", "copilot")
 	err := skillsUninstallCmd.RunE(skillsUninstallCmd, []string{})
@@ -632,9 +633,9 @@ func TestSkillsUninstall_AgentMode(t *testing.T) {
 
 func TestSkillsStatus_AgentModeSingleAgent(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = true
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = true
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -651,9 +652,9 @@ func TestSkillsStatus_AgentModeSingleAgent(t *testing.T) {
 
 func TestSkillsStatus_AgentModeAllAgents(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = true
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = true
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -669,9 +670,9 @@ func TestSkillsStatus_AgentModeAllAgents(t *testing.T) {
 
 func TestSkillsList_AgentMode(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = true
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = true
 
 	resetSkillsFlags(t)
 	_ = skillsInstallCmd.Flags().Set("list", "true")
@@ -928,9 +929,9 @@ func TestAgentCompletionFunc(t *testing.T) {
 // --- runSkillsList (non-agent mode, smoke test) ---
 
 func TestSkillsList_RunE(t *testing.T) {
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	resetSkillsFlags(t)
 	_ = skillsInstallCmd.Flags().Set("list", "true")
@@ -944,9 +945,9 @@ func TestSkillsList_RunE(t *testing.T) {
 
 func TestSkillsInstall_CrossClient(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -980,9 +981,9 @@ func TestSkillsInstall_CrossClient(t *testing.T) {
 
 func TestSkillsInstall_CrossClient_DoesNotRequireAgentDetection(t *testing.T) {
 	clearAgentEnvVars(t) // No agent env vars set
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1001,9 +1002,9 @@ func TestSkillsInstall_CrossClient_DoesNotRequireAgentDetection(t *testing.T) {
 
 func TestSkillsInstall_CrossClientAndForConflict(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	resetSkillsFlags(t)
 	_ = skillsInstallCmd.Flags().Set("cross-client", "true")
@@ -1020,9 +1021,9 @@ func TestSkillsInstall_CrossClientAndForConflict(t *testing.T) {
 
 func TestSkillsInstall_CrossClient_Overwrite(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1056,9 +1057,9 @@ func TestSkillsInstall_CrossClient_Overwrite(t *testing.T) {
 
 func TestSkillsInstall_CrossClient_AgentMode(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = true
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = true
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1082,9 +1083,9 @@ func TestSkillsInstall_CrossClient_AgentMode(t *testing.T) {
 
 func TestSkillsUninstall_CrossClient(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1118,9 +1119,9 @@ func TestSkillsUninstall_CrossClient(t *testing.T) {
 
 func TestSkillsUninstall_CrossClientAndForConflict(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	resetSkillsFlags(t)
 	_ = skillsUninstallCmd.Flags().Set("cross-client", "true")
@@ -1137,9 +1138,9 @@ func TestSkillsUninstall_CrossClientAndForConflict(t *testing.T) {
 
 func TestSkillsStatus_CrossClient_ViaForFlag(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1164,9 +1165,9 @@ func TestSkillsStatus_CrossClient_ViaForFlag(t *testing.T) {
 
 func TestSkillsStatus_ShowsCrossClient(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = true
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = true
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1204,16 +1205,16 @@ func TestPrintStatus_CrossClient_NoBlankEnvVar(t *testing.T) {
 	// prevent the suffix from being added. Since CrossClientAgent has no EnvVar
 	// and won't be returned by DetectAgent(), this tests the guard directly.
 	// We call printStatus and it should not panic or produce bad output.
-	printStatus(crossClientResult, skills.CrossClientAgent, true)
+	printStatus(context.Background(), crossClientResult, skills.CrossClientAgent, true)
 }
 
 // --- --for cross-client on install/uninstall tests ---
 
 func TestSkillsInstall_ForCrossClient(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1237,9 +1238,9 @@ func TestSkillsInstall_ForCrossClient(t *testing.T) {
 
 func TestSkillsUninstall_ForCrossClient(t *testing.T) {
 	clearAgentEnvVars(t)
-	origAgentMode := agentMode
-	defer func() { agentMode = origAgentMode }()
-	agentMode = false
+	origAgentMode := agentMode(context.Background())
+	defer func() { gFlags.agentMode = origAgentMode }()
+	gFlags.agentMode = false
 
 	tmpDir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -1268,5 +1269,117 @@ func TestSkillsUninstall_ForCrossClient(t *testing.T) {
 	// Verify the directory is gone
 	if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
 		t.Error("skill directory should not exist after uninstall")
+	}
+}
+
+// --- Dynatrace for AI companion hint ---
+
+// runSkillsInstallCapture runs `dtctl skills install --for claude <extra>` in a
+// fresh project dir and HOME through Run, returning the exit code and the
+// separate stdout/stderr streams. withCompanion pre-installs the
+// dt-dql-essentials marker skill next to where dtctl will land.
+func runSkillsInstallCapture(t *testing.T, withCompanion bool, extra ...string) (int, string, string) {
+	t.Helper()
+	isolatedConfig(t, "contexts: []\n")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if withCompanion {
+		dir := filepath.Join(tmpDir, ".claude", "skills", "dt-dql-essentials")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: dt-dql-essentials\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	argv := append([]string{"skills", "install", "--for", "claude"}, extra...)
+	code := Run(argv, RunOptions{Stdout: &stdout, Stderr: &stderr})
+	t.Cleanup(func() { resetSkillsFlags(t) })
+	return code, stdout.String(), stderr.String()
+}
+
+func TestSkillsInstall_CompanionHint_Human(t *testing.T) {
+	code, stdout, stderr := runSkillsInstallCapture(t, false, "--no-agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "Hint:") || !strings.Contains(stderr, skills.CompanionInstallCommand) {
+		t.Errorf("stderr should carry the Dynatrace for AI hint, got: %q", stderr)
+	}
+	if strings.Contains(stdout, skills.CompanionInstallCommand) {
+		t.Errorf("hint must not go to stdout, got: %q", stdout)
+	}
+}
+
+func TestSkillsInstall_CompanionHint_HumanAlreadyInstalled(t *testing.T) {
+	code, _, stderr := runSkillsInstallCapture(t, true, "--no-agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	if strings.Contains(stderr, skills.CompanionInstallCommand) {
+		t.Errorf("no hint expected when dt-dql-essentials is installed, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "Installed Claude Code skill") {
+		t.Errorf("install confirmation should still print, got: %q", stderr)
+	}
+}
+
+// decodeInstallEnvelope parses the agent envelope from stdout.
+func decodeInstallEnvelope(t *testing.T, stdout string) output.Response {
+	t.Helper()
+	var resp output.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a single JSON envelope: %v\n%s", err, stdout)
+	}
+	if !resp.OK || resp.Context == nil {
+		t.Fatalf("expected ok envelope with context, got: %s", stdout)
+	}
+	return resp
+}
+
+func TestSkillsInstall_CompanionHint_AgentMode(t *testing.T) {
+	code, stdout, stderr := runSkillsInstallCapture(t, false, "--agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	if strings.Contains(stderr, skills.CompanionInstallCommand) {
+		t.Errorf("agent mode must not print the hint as stray stderr text, got: %q", stderr)
+	}
+	resp := decodeInstallEnvelope(t, stdout)
+	found := false
+	for _, s := range resp.Context.Suggestions {
+		if strings.Contains(s, skills.CompanionInstallCommand) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("context.suggestions should carry the hint, got: %v", resp.Context.Suggestions)
+	}
+}
+
+func TestSkillsInstall_CompanionHint_AgentModeAlreadyInstalled(t *testing.T) {
+	code, stdout, stderr := runSkillsInstallCapture(t, true, "--agent")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
+	}
+	resp := decodeInstallEnvelope(t, stdout)
+	for _, s := range resp.Context.Suggestions {
+		if strings.Contains(s, skills.CompanionInstallCommand) {
+			t.Errorf("no hint expected when dt-dql-essentials is installed, got: %v", resp.Context.Suggestions)
+		}
+	}
+	if len(resp.Context.Suggestions) == 0 {
+		t.Error("the existing 'skills status' suggestion should remain")
 	}
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -353,18 +354,18 @@ func TestDescribeWorkflowCmd_TableOutputFetchesExecutions(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origOutputFormat := outputFormat
-	origPlain := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origOutputFormat := outputFormat(context.Background())
+	origPlain := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		outputFormat = origOutputFormat
-		plainMode = origPlain
+		gFlags.cfgFile = origCfgFile
+		gFlags.outputFormat = origOutputFormat
+		gFlags.plainMode = origPlain
 	}()
 
-	cfgFile = configPath
-	outputFormat = "table"
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.outputFormat = "table"
+	gFlags.plainMode = true
 
 	if err := describeWorkflowCmd.RunE(describeWorkflowCmd, []string{"wf-describe-1"}); err != nil {
 		t.Fatalf("RunE() error = %v", err)

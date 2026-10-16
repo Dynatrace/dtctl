@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -108,7 +109,7 @@ func TestResolveAlias(t *testing.T) {
 				cfg.Aliases = tt.aliases
 			}
 
-			gotArgs, gotShell, err := resolveAlias(tt.args, cfg)
+			gotArgs, gotShell, err := resolveAlias(context.Background(), tt.args, cfg)
 
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
@@ -149,7 +150,7 @@ func TestResolveAlias_BuiltinShadowGuard(t *testing.T) {
 			cfg := config.NewConfig()
 			cfg.Aliases = tt.aliases
 
-			gotArgs, gotShell, err := resolveAlias(tt.args, cfg)
+			gotArgs, gotShell, err := resolveAlias(context.Background(), tt.args, cfg)
 
 			require.NoError(t, err)
 			require.False(t, gotShell, "shadowing alias must not be treated as a shell alias")
@@ -191,7 +192,7 @@ aliases:
 	require.True(t, cfg.IsLocal(), "config must be recognized as local")
 
 	for _, arg := range []string{"wf", "sh"} {
-		gotArgs, gotShell, err := resolveAlias([]string{arg}, cfg)
+		gotArgs, gotShell, err := resolveAlias(context.Background(), []string{arg}, cfg)
 		require.NoError(t, err)
 		require.False(t, gotShell, "local alias %q must not expand as a shell alias", arg)
 		require.Nil(t, gotArgs, "local alias %q must not be honored", arg)

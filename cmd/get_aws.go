@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -18,8 +19,8 @@ type awsConnectionTableRow struct {
 	ObjectID string `table:"ID"`
 }
 
-func useAWSConnectionTableView() bool {
-	return outputFormat == "" || outputFormat == "table" || outputFormat == "wide"
+func useAWSConnectionTableView(ctx context.Context) bool {
+	return outputFormat(ctx) == "" || outputFormat(ctx) == "table" || outputFormat(ctx) == "wide"
 }
 
 func toAWSConnectionTableRow(item *awsconnection.AWSConnection) awsConnectionTableRow {
@@ -39,122 +40,146 @@ func toAWSConnectionTableRows(items []awsconnection.AWSConnection) []awsConnecti
 	return rows
 }
 
-var getAWSConnectionCmd = &cobra.Command{
-	Use:     "connections [id]",
-	Aliases: []string{"connection"},
-	Short:   "Get AWS connections",
-	Long:    `Get one or more AWS connections (authentication credentials).`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
+var getAWSConnectionCmd = newGetAWSConnectionCmd()
 
-		handler := awsconnection.NewHandler(c)
-
-		if len(args) > 0 {
-			identifier := args[0]
-			item, err := handler.FindByName(identifier)
-			if err == nil {
-				if useAWSConnectionTableView() {
-					return printer.Print(toAWSConnectionTableRow(item))
-				}
-				return printer.Print(item)
+func newGetAWSConnectionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "connections [id]",
+		Aliases: []string{"connection"},
+		Short:   "Get AWS connections",
+		Long:    `Get one or more AWS connections (authentication credentials).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
-			if strings.Contains(strings.ToLower(err.Error()), "not found") {
-				item, err = handler.Get(identifier)
-				if err != nil {
-					return fmt.Errorf("connection with name or ID %q not found", identifier)
-				}
-				if useAWSConnectionTableView() {
-					return printer.Print(toAWSConnectionTableRow(item))
-				}
-				return printer.Print(item)
-			}
-			return err
-		}
 
-		items, err := handler.List()
-		if err != nil {
-			return err
-		}
-		if useAWSConnectionTableView() {
-			return printer.PrintList(toAWSConnectionTableRows(items))
-		}
-		return printer.PrintList(items)
-	},
+			handler := awsconnection.NewHandler(c)
+
+			if len(args) > 0 {
+				identifier := args[0]
+				item, err := handler.FindByName(identifier)
+				if err == nil {
+					if useAWSConnectionTableView(cmdContext(cmd)) {
+						return printer.Print(toAWSConnectionTableRow(item))
+					}
+					return printer.Print(item)
+				}
+				if strings.Contains(strings.ToLower(err.Error()), "not found") {
+					item, err = handler.Get(identifier)
+					if err != nil {
+						return fmt.Errorf("connection with name or ID %q not found", identifier)
+					}
+					if useAWSConnectionTableView(cmdContext(cmd)) {
+						return printer.Print(toAWSConnectionTableRow(item))
+					}
+					return printer.Print(item)
+				}
+				return err
+			}
+
+			items, err := handler.List()
+			if err != nil {
+				return err
+			}
+			if useAWSConnectionTableView(cmdContext(cmd)) {
+				return printer.PrintList(toAWSConnectionTableRows(items))
+			}
+			return printer.PrintList(items)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var getAWSMonitoringConfigCmd = &cobra.Command{
-	Use:     "monitoring [id]",
-	Aliases: []string{"monitoring-config", "monitoring-configs"},
-	Short:   "Get AWS monitoring configurations",
-	Long:    `Get one or more AWS monitoring configurations.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-		handler := awsmonitoringconfig.NewHandler(c)
+var getAWSMonitoringConfigCmd = newGetAWSMonitoringConfigCmd()
 
-		if len(args) > 0 {
-			identifier := args[0]
-			item, err := handler.FindByName(identifier)
-			if err == nil {
-				return printer.Print(item)
+func newGetAWSMonitoringConfigCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "monitoring [id]",
+		Aliases: []string{"monitoring-config", "monitoring-configs"},
+		Short:   "Get AWS monitoring configurations",
+		Long:    `Get one or more AWS monitoring configurations.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
-			if strings.Contains(strings.ToLower(err.Error()), "not found") {
-				item, err = handler.Get(identifier)
-				if err != nil {
-					return fmt.Errorf("monitoring config with name/description or ID %q not found", identifier)
+			handler := awsmonitoringconfig.NewHandler(c)
+
+			if len(args) > 0 {
+				identifier := args[0]
+				item, err := handler.FindByName(identifier)
+				if err == nil {
+					return printer.Print(item)
 				}
-				return printer.Print(item)
+				if strings.Contains(strings.ToLower(err.Error()), "not found") {
+					item, err = handler.Get(identifier)
+					if err != nil {
+						return fmt.Errorf("monitoring config with name/description or ID %q not found", identifier)
+					}
+					return printer.Print(item)
+				}
+				return err
 			}
-			return err
-		}
 
-		items, err := handler.List()
-		if err != nil {
-			return err
-		}
-		return printer.PrintList(items)
-	},
+			items, err := handler.List()
+			if err != nil {
+				return err
+			}
+			return printer.PrintList(items)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var getAWSMonitoringConfigRegionsCmd = &cobra.Command{
-	Use:     "monitoring-regions",
-	Aliases: []string{"monitoring-region"},
-	Short:   "Get available AWS monitoring config regions",
-	Long:    `Get available AWS regions from the latest da-aws extension schema.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-		regions, err := awsmonitoringconfig.NewHandler(c).ListAvailableRegions()
-		if err != nil {
-			return err
-		}
-		return printer.PrintList(regions)
-	},
+var getAWSMonitoringConfigRegionsCmd = newGetAWSMonitoringConfigRegionsCmd()
+
+func newGetAWSMonitoringConfigRegionsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "monitoring-regions",
+		Aliases: []string{"monitoring-region"},
+		Short:   "Get available AWS monitoring config regions",
+		Long:    `Get available AWS regions from the latest da-aws extension schema.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+			regions, err := awsmonitoringconfig.NewHandler(c).ListAvailableRegions()
+			if err != nil {
+				return err
+			}
+			return printer.PrintList(regions)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var getAWSMonitoringConfigFeatureSetsCmd = &cobra.Command{
-	Use:     "monitoring-feature-sets",
-	Aliases: []string{"monitoring-feature-set"},
-	Short:   "Get available AWS monitoring config feature sets",
-	Long:    `Get available FeatureSetsType values from the latest da-aws extension schema.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-		fs, err := awsmonitoringconfig.NewHandler(c).ListAvailableFeatureSets()
-		if err != nil {
-			return err
-		}
-		return printer.PrintList(fs)
-	},
+var getAWSMonitoringConfigFeatureSetsCmd = newGetAWSMonitoringConfigFeatureSetsCmd()
+
+func newGetAWSMonitoringConfigFeatureSetsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "monitoring-feature-sets",
+		Aliases: []string{"monitoring-feature-set"},
+		Short:   "Get available AWS monitoring config feature sets",
+		Long:    `Get available FeatureSetsType values from the latest da-aws extension schema.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+			fs, err := awsmonitoringconfig.NewHandler(c).ListAvailableFeatureSets()
+			if err != nil {
+				return err
+			}
+			return printer.PrintList(fs)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -167,8 +192,4 @@ func init() {
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(getAWSConnectionCmd)
-	stability.MarkStable(getAWSMonitoringConfigCmd)
-	stability.MarkStable(getAWSMonitoringConfigFeatureSetsCmd)
-	stability.MarkStable(getAWSMonitoringConfigRegionsCmd)
 }

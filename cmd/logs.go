@@ -17,27 +17,35 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-var taskName string
-var followLogs bool
-var allTaskLogs bool
-var tasksOnlyLogs bool
-
 // followPollInterval is how often --follow polls for new log output.
 var followPollInterval = 2 * time.Second
 
 // logsCmd represents the logs command
-var logsCmd = &cobra.Command{
-	Use:   "logs",
-	Short: "Print logs for resources",
-	Long:  `Print logs for various resources.`,
+var logsCmd = newLogsCmd()
+
+func newLogsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "logs",
+		Short: "Print logs for resources",
+		Long:  `Print logs for various resources.`,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // logsWorkflowExecutionCmd prints logs for a workflow execution
-var logsWorkflowExecutionCmd = &cobra.Command{
-	Use:     "workflow-execution <execution-id>",
-	Aliases: []string{"wfe"},
-	Short:   "Print logs for a workflow execution",
-	Long: `Print logs for a workflow execution or a specific task within it.
+var logsWorkflowExecutionCmd = newLogsWorkflowExecutionCmd()
+
+func newLogsWorkflowExecutionCmd() *cobra.Command {
+	var allTaskLogs bool
+	var followLogs bool
+	var taskName string
+	var tasksOnlyLogs bool
+	c := &cobra.Command{
+		Use:     "workflow-execution <execution-id>",
+		Aliases: []string{"wfe"},
+		Short:   "Print logs for a workflow execution",
+		Long: `Print logs for a workflow execution or a specific task within it.
 
 Examples:
   # Get execution log only (workflow-level log)
@@ -59,87 +67,91 @@ Examples:
   dtctl logs wfe <execution-id> --follow
   dtctl logs wfe <execution-id> -f
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		executionID := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			executionID := args[0]
 
-		// Validate flag combinations
-		if allTaskLogs && tasksOnlyLogs {
-			return fmt.Errorf("cannot use both --all and --tasks flags together")
-		}
-		if taskName != "" && (allTaskLogs || tasksOnlyLogs) {
-			return fmt.Errorf("cannot use --task with --all or --tasks flags")
-		}
-
-		_, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
-
-		handler := workflow.NewExecutionHandler(c)
-
-		if followLogs {
-			if !caps.LongRunningStreams {
-				return &CapabilityError{Feature: "log following"}
+			// Validate flag combinations
+			if allTaskLogs && tasksOnlyLogs {
+				return fmt.Errorf("cannot use both --all and --tasks flags together")
 			}
-			return followExecutionLogs(cmd.Context(), handler, executionID, taskName, allTaskLogs, tasksOnlyLogs)
-		}
+			if taskName != "" && (allTaskLogs || tasksOnlyLogs) {
+				return fmt.Errorf("cannot use --task with --all or --tasks flags")
+			}
 
-		var logs string
-		// taskErr is a partial failure: some task logs could not be fetched.
-		// The logs that were fetched are printed before it is returned.
-		var taskErr *workflow.TaskLogError
-
-		if taskName != "" {
-			// Get logs for specific task
-			logs, err = handler.GetTaskLog(executionID, taskName)
+			_, c, err := setupClient(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-		} else if allTaskLogs {
-			// Get workflow execution log + all task logs
-			logs, err = handler.GetCompleteExecutionLog(executionID)
-			if err != nil && !errors.As(err, &taskErr) {
-				return err
-			}
-		} else if tasksOnlyLogs {
-			// Get task logs only (all tasks with headers)
-			logs, err = handler.GetFullExecutionLog(executionID)
-			if err != nil && !errors.As(err, &taskErr) {
-				return err
-			}
-		} else {
-			// Get execution log only (workflow-level log)
-			logs, err = handler.GetExecutionLog(executionID)
-			if err != nil {
-				return err
-			}
-		}
 
-		if logs == "" {
-			fmt.Println("No logs available.")
-		} else {
-			fmt.Print(logs)
-		}
-		if taskErr != nil {
-			return taskErr
-		}
-		return nil
-	},
+			handler := workflow.NewExecutionHandler(c)
+
+			if followLogs {
+				if !currentCaps(cmdContext(cmd)).LongRunningStreams {
+					return &CapabilityError{Feature: "log following"}
+				}
+				return followExecutionLogs(cmd.Context(), handler, executionID, taskName, allTaskLogs, tasksOnlyLogs)
+			}
+
+			var logs string
+			// taskErr is a partial failure: some task logs could not be fetched.
+			// The logs that were fetched are printed before it is returned.
+			var taskErr *workflow.TaskLogError
+
+			switch {
+			case taskName != "":
+				// Get logs for specific task
+				logs, err = handler.GetTaskLog(executionID, taskName)
+				if err != nil {
+					return err
+				}
+			case allTaskLogs:
+				// Get workflow execution log + all task logs
+				logs, err = handler.GetCompleteExecutionLog(executionID)
+				if err != nil && !errors.As(err, &taskErr) {
+					return err
+				}
+			case tasksOnlyLogs:
+				// Get task logs only (all tasks with headers)
+				logs, err = handler.GetFullExecutionLog(executionID)
+				if err != nil && !errors.As(err, &taskErr) {
+					return err
+				}
+			default:
+				// Get execution log only (workflow-level log)
+				logs, err = handler.GetExecutionLog(executionID)
+				if err != nil {
+					return err
+				}
+			}
+
+			if logs == "" {
+				fmt.Fprintln(currentStdout(cmdContext(cmd)), "No logs available.")
+			} else {
+				fmt.Fprint(currentStdout(cmdContext(cmd)), logs)
+			}
+			if taskErr != nil {
+				return taskErr
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVarP(&taskName, "task", "t", "", "Get logs for a specific task")
+	c.Flags().BoolVarP(&followLogs, "follow", "f", false, "Follow logs in real-time until execution completes")
+	stability.MarkFlag(c, "follow", stability.Experimental, pre10Since)
+	c.Flags().BoolVarP(&allTaskLogs, "all", "a", false, "Get all logs (workflow execution log + all task logs)")
+	c.Flags().BoolVar(&tasksOnlyLogs, "tasks", false, "Get task logs only (all tasks with headers)")
+	stability.Mark(c, stability.Experimental, pre10Since)
+	rejectEmptyFlag(c, "task")
+	return c
 }
 
 // followExecutionLogs streams logs in real-time until the execution completes
 func followExecutionLogs(parentCtx context.Context, handler *workflow.ExecutionHandler, executionID, task string, allLogs, tasksOnly bool) error {
-	// Compose with SIGINT/SIGTERM for graceful shutdown.
-	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
+	// Compose with SIGINT/SIGTERM for graceful shutdown. stop() deregisters the
+	// handler on return, so no goroutine or handler outlives the stream.
+	ctx, stop := signal.NotifyContext(parentCtx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	var printed string
 	// A task log that cannot be fetched mid-stream is warned about, once per
@@ -152,7 +164,7 @@ func followExecutionLogs(parentCtx context.Context, handler *workflow.ExecutionH
 			return err
 		}
 		if msg := taskErr.Error(); msg != lastWarning {
-			output.PrintWarning("%s", msg)
+			output.FprintWarning(currentStderr(parentCtx), "%s", msg)
 			lastWarning = msg
 		}
 		return nil
@@ -161,7 +173,7 @@ func followExecutionLogs(parentCtx context.Context, handler *workflow.ExecutionH
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("\nLog streaming interrupted.")
+			fmt.Fprintln(currentStdout(parentCtx), "\nLog streaming interrupted.")
 			return nil
 		default:
 		}
@@ -186,7 +198,7 @@ func followExecutionLogs(parentCtx context.Context, handler *workflow.ExecutionH
 		}
 
 		// Print only new content
-		fmt.Print(nextFollowChunk(printed, logs))
+		fmt.Fprint(currentStdout(parentCtx), nextFollowChunk(printed, logs))
 		if !strings.HasPrefix(printed, logs) {
 			printed = logs
 		}
@@ -213,9 +225,9 @@ func followExecutionLogs(parentCtx context.Context, handler *workflow.ExecutionH
 			default:
 				logs, _ = handler.GetExecutionLog(executionID)
 			}
-			fmt.Print(nextFollowChunk(printed, logs))
+			fmt.Fprint(currentStdout(parentCtx), nextFollowChunk(printed, logs))
 
-			fmt.Printf("\n--- Execution %s (state: %s) ---\n", exec.State, exec.State)
+			fmt.Fprintf(currentStdout(parentCtx), "\n--- Execution %s (state: %s) ---\n", exec.State, exec.State)
 
 			var taskErr *workflow.TaskLogError
 			if errors.As(finalErr, &taskErr) {
@@ -266,25 +278,14 @@ func isTerminalState(state string) bool {
 func init() {
 	rootCmd.AddCommand(logsCmd)
 	logsCmd.AddCommand(logsWorkflowExecutionCmd)
-	logsWorkflowExecutionCmd.Flags().StringVarP(&taskName, "task", "t", "", "Get logs for a specific task")
-	rejectEmptyFlag(logsWorkflowExecutionCmd, "task")
-	logsWorkflowExecutionCmd.Flags().BoolVarP(&followLogs, "follow", "f", false, "Follow logs in real-time until execution completes")
 	// -f is reserved for --file in 1.0 (contrib breaking-changes/short-flag-f.md).
-	stability.MarkFlag(logsWorkflowExecutionCmd, "follow", stability.Experimental, pre10Since)
-	logsWorkflowExecutionCmd.Flags().BoolVarP(&allTaskLogs, "all", "a", false, "Get all logs (workflow execution log + all task logs)")
-	logsWorkflowExecutionCmd.Flags().BoolVar(&tasksOnlyLogs, "tasks", false, "Get task logs only (all tasks with headers)")
-
 	// In 1.0 this command's output is reshaped, not extended (contrib
 	// breaking-changes/agent-output-envelope.md): agent mode wraps the log in
 	// the standard envelope with --tasks/--all under result.tasks, --follow -A
 	// becomes a usage error, and the plain-mode "No logs available." notice
 	// moves to stderr. Nothing a caller parses today survives, and there is no
 	// flag to hang that on — the contract is the command's.
-	stability.Mark(logsWorkflowExecutionCmd, stability.Experimental, pre10Since)
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(logsCmd)
-}

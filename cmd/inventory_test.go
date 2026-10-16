@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func TestLoadDefinitionsFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	defs, err := loadDefinitionsFile(path)
+	defs, err := loadDefinitionsFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("loadDefinitionsFile() error: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestLoadDefinitionsFile(t *testing.T) {
 		t.Errorf("postgres capability missing: %+v", defs.Capabilities)
 	}
 
-	if _, err := loadDefinitionsFile(filepath.Join(t.TempDir(), "absent.yaml")); err == nil || !strings.Contains(err.Error(), "absent.yaml") {
+	if _, err := loadDefinitionsFile(context.Background(), filepath.Join(t.TempDir(), "absent.yaml")); err == nil || !strings.Contains(err.Error(), "absent.yaml") {
 		t.Errorf("read error must carry the path, got: %v", err)
 	}
 
@@ -59,7 +60,7 @@ func TestLoadDefinitionsFile(t *testing.T) {
 	if err := os.WriteFile(broken, []byte("capabilities:\n  broken: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadDefinitionsFile(broken); err == nil || !strings.Contains(err.Error(), "broken.yaml") || !strings.Contains(err.Error(), "exactly one discovery shape") {
+	if _, err := loadDefinitionsFile(context.Background(), broken); err == nil || !strings.Contains(err.Error(), "broken.yaml") || !strings.Contains(err.Error(), "exactly one discovery shape") {
 		t.Errorf("parse error must carry path and cause, got: %v", err)
 	}
 }
@@ -87,12 +88,12 @@ func TestCapNames(t *testing.T) {
 }
 
 func TestPrintInventoryHumanCapsSegments(t *testing.T) {
-	originalPlainMode := plainMode
+	originalPlainMode := plainMode(context.Background())
 	defer func() {
-		plainMode = originalPlainMode
+		gFlags.plainMode = originalPlainMode
 		output.ResetColorCache()
 	}()
-	plainMode = true
+	gFlags.plainMode = true
 	output.ResetColorCache()
 
 	inv := inventoryFixture()
@@ -100,7 +101,7 @@ func TestPrintInventoryHumanCapsSegments(t *testing.T) {
 	for i := 0; i < 14; i++ {
 		inv.Segments = append(inv.Segments, inventory.SegmentInfo{UID: "s", Name: string(rune('a' + i))})
 	}
-	got := captureStdout(t, func() { printInventoryHuman(inv) })
+	got := captureStdout(t, func() { printInventoryHuman(context.Background(), inv) })
 	if !strings.Contains(got, "(+4 more — full list with -o json)") {
 		t.Errorf("segment list must be capped in human output:\n%s", got)
 	}
@@ -110,16 +111,16 @@ func TestPrintInventoryHumanCapsSegments(t *testing.T) {
 }
 
 func TestPrintInventoryHumanGolden(t *testing.T) {
-	originalPlainMode := plainMode
+	originalPlainMode := plainMode(context.Background())
 	defer func() {
-		plainMode = originalPlainMode
+		gFlags.plainMode = originalPlainMode
 		output.ResetColorCache()
 	}()
-	plainMode = true
+	gFlags.plainMode = true
 	output.ResetColorCache()
 
 	got := captureStdout(t, func() {
-		printInventoryHuman(inventoryFixture())
+		printInventoryHuman(context.Background(), inventoryFixture())
 	})
 	// The collapsed dt.entity.* views surface as a count suffix.
 	if !strings.Contains(got, "(+2 dt.entity.* lookback views)") {

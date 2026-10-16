@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 const previewPath = "/platform/openpipeline/v1/preview/processor"
@@ -195,7 +196,7 @@ func TestReadFileOrStdin(t *testing.T) {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("write temp file: %v", err)
 		}
-		got, err := readFileOrStdin(path)
+		got, err := readFileOrStdin(vfs.Env{}, path)
 		if err != nil {
 			t.Fatalf("readFileOrStdin() error = %v", err)
 		}
@@ -205,7 +206,7 @@ func TestReadFileOrStdin(t *testing.T) {
 	})
 
 	t.Run("missing file is an error", func(t *testing.T) {
-		if _, err := readFileOrStdin(filepath.Join(t.TempDir(), "nope.json")); err == nil {
+		if _, err := readFileOrStdin(vfs.Env{}, filepath.Join(t.TempDir(), "nope.json")); err == nil {
 			t.Fatal("expected error for missing file, got nil")
 		}
 	})
@@ -215,7 +216,7 @@ func TestReadFileOrStdin(t *testing.T) {
 		if err := os.WriteFile(path, []byte(`{not json`), 0o600); err != nil {
 			t.Fatalf("write temp file: %v", err)
 		}
-		if _, err := readFileOrStdin(path); err == nil {
+		if _, err := readFileOrStdin(vfs.Env{}, path); err == nil {
 			t.Fatal("expected error for invalid JSON, got nil")
 		}
 	})
@@ -234,4 +235,24 @@ func jsonEqual(t *testing.T, a, b json.RawMessage) bool {
 	ab, _ := json.Marshal(av)
 	bb, _ := json.Marshal(bv)
 	return string(ab) == string(bb)
+}
+
+// A handler given a vfs.Env reads the processor definition through it.
+func TestHandler_PreviewReadsTheDefinitionThroughItsEnv(t *testing.T) {
+	var reqBody []byte
+	h := newTestHandler(t, http.StatusOK, `{"results":[{"matched":true,"record":{"content":"x"}}]}`, &reqBody)
+	h = h.WithVFS(vfs.Env{FS: vfs.NewMapFS(map[string][]byte{
+		"processor.json": []byte(`{"type":"dql","matcher":"true","dqlScript":"fieldsAdd a = 1"}`),
+	})})
+
+	results, err := h.Preview("processor.json", "logs")
+	if err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	if len(results) != 1 || !results[0].Matched {
+		t.Errorf("results = %+v, want one match", results)
+	}
+	if !strings.Contains(string(reqBody), "fieldsAdd a = 1") {
+		t.Errorf("request body %q lacks the definition from the env's file", reqBody)
+	}
 }

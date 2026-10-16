@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,11 +32,11 @@ func TestConfigFlagRespected(t *testing.T) {
 	defer xdg.Reload()
 
 	// Save original cfgFile value and restore after test
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
 
 	// 2. Set the global cfgFile variable (simulating --config flag)
-	cfgFile = customConfigFile
+	gFlags.cfgFile = customConfigFile
 
 	// 3. Run config set-context command
 	// validation: should create file at customConfigFile
@@ -127,9 +128,9 @@ contexts:
 	}
 
 	// Ensure the --config flag is not in play; only DTCTL_CONFIG.
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = ""
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = ""
 
 	// Run from an empty dir so no local .dtctl.yaml can be auto-discovered.
 	emptyDir := filepath.Join(tmpDir, "empty")
@@ -188,9 +189,9 @@ func TestConfigCommandsRespectCustomPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	customConfigPath := filepath.Join(tmpDir, "custom-config.yaml")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = customConfigPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = customConfigPath
 
 	t.Run("use-context modifies custom path", func(t *testing.T) {
 		// First create two contexts
@@ -291,11 +292,11 @@ func TestConfigMultipleCustomPaths(t *testing.T) {
 	config1Path := filepath.Join(tmpDir, "config1.yaml")
 	config2Path := filepath.Join(tmpDir, "config2.yaml")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
 
 	// Create first config
-	cfgFile = config1Path
+	gFlags.cfgFile = config1Path
 	_ = configSetContextCmd.Flags().Set("environment", "https://config1.example.com")
 	_ = configSetContextCmd.Flags().Set("token-ref", "config1-token")
 	defer func() {
@@ -308,7 +309,7 @@ func TestConfigMultipleCustomPaths(t *testing.T) {
 	}
 
 	// Create second config
-	cfgFile = config2Path
+	gFlags.cfgFile = config2Path
 	_ = configSetContextCmd.Flags().Set("environment", "https://config2.example.com")
 	_ = configSetContextCmd.Flags().Set("token-ref", "config2-token")
 
@@ -346,9 +347,9 @@ func TestConfigSetCredentialsWithCustomPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	customConfigPath := filepath.Join(tmpDir, "custom-config.yaml")
 
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
-	cfgFile = customConfigPath
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
+	gFlags.cfgFile = customConfigPath
 
 	// Create initial config
 	_ = configSetContextCmd.Flags().Set("environment", "https://test.example.com")

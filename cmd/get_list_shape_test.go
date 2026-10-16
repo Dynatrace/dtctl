@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -160,7 +161,7 @@ func runListShape(t *testing.T, srv *httptest.Server, argv ...string) (int, stri
 	clearAgentEnvVars(t)
 	// Run resets the tree before an invocation, not after; tests that call
 	// RunE directly afterwards must not inherit this run's -o/--fields/--agent.
-	t.Cleanup(restorePristineTree)
+	t.Cleanup(func() { restorePristineTree(context.Background()) })
 	return captureRun(t, argv, RunOptions{
 		// --limit/--fields are experimental; a session defaults to a stable floor.
 		Session: &Session{EnvironmentURL: srv.URL, Token: "t", MinStability: "experimental"},
@@ -245,13 +246,13 @@ func (s stderrLog) Write(p []byte) (int, error) {
 // get breakpoints builds its own printer (it writes to rootCmd's writer), so
 // it has to opt into the shaping explicitly rather than via NewPrinter.
 func TestGetBreakpoints_HonorsLimitAndFields(t *testing.T) {
-	origFormat, origAgent, origLimit, origFields := outputFormat, agentMode, getListLimit, getListFields
+	origFormat, origAgent, origLimit, origFields := outputFormat(context.Background()), agentMode(context.Background()), getListLimit, getListFields
 	origOut := rootCmd.OutOrStdout()
 	t.Cleanup(func() {
-		outputFormat, agentMode, getListLimit, getListFields = origFormat, origAgent, origLimit, origFields
+		gFlags.outputFormat, gFlags.agentMode, getListLimit, getListFields = origFormat, origAgent, origLimit, origFields
 		rootCmd.SetOut(origOut)
 	})
-	outputFormat, agentMode = "csv", false
+	gFlags.outputFormat, gFlags.agentMode = "csv", false
 	getListLimit, getListFields = 1, "lineNumber,id"
 
 	rule := func(id string, line float64) map[string]interface{} {
@@ -263,13 +264,13 @@ func TestGetBreakpoints_HonorsLimitAndFields(t *testing.T) {
 		}
 	}
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -293,7 +294,7 @@ func TestGetSnapshots_RejectsFields(t *testing.T) {
 	srv := newListShapeEnv(t)
 
 	clearAgentEnvVars(t)
-	t.Cleanup(restorePristineTree)
+	t.Cleanup(func() { restorePristineTree(context.Background()) })
 	var stderr bytes.Buffer
 	code, _ := captureRun(t, []string{"get", "snapshots", "OrderController.java:306", "--fields", "id"}, RunOptions{
 		Session: &Session{EnvironmentURL: srv.URL, Token: "t", MinStability: "experimental"},
@@ -306,26 +307,26 @@ func TestGetSnapshots_RejectsFields(t *testing.T) {
 // Auto-detected agent mode sets the same agentMode switch as -A (sessions skip
 // auto-detection, so this drives the switch directly).
 func TestGetListShape_DefaultPageFollowsAgentMode(t *testing.T) {
-	origAgent, origInvoked, origLimit := agentMode, invokedGetCmd, getListLimit
-	t.Cleanup(func() { agentMode, invokedGetCmd, getListLimit = origAgent, origInvoked, origLimit })
+	origAgent, origInvoked, origLimit := agentMode(context.Background()), invokedGetCmd, getListLimit
+	t.Cleanup(func() { gFlags.agentMode, invokedGetCmd, getListLimit = origAgent, origInvoked, origLimit })
 	testutil.ResetCommandFlags(getWorkflowsCmd)
 	t.Cleanup(func() { testutil.ResetCommandFlags(getWorkflowsCmd) })
 
 	base := output.NewPrinterWithOpts(output.PrinterOptions{Format: "json", Writer: &bytes.Buffer{}})
 	invokedGetCmd, getListLimit = getBucketsCmd, 0
 
-	agentMode = false
-	require.Same(t, base, shapeListOutput(base, "json", false), "no default page outside agent mode")
+	gFlags.agentMode = false
+	require.Same(t, base, shapeListOutput(context.Background(), base, "json", false), "no default page outside agent mode")
 	require.Equal(t, int64(0), agentPageLimit(getWorkflowsCmd, 0))
 
-	agentMode = true
-	_, wrapped := shapeListOutput(base, "json", false).(*output.ShapingPrinter)
+	gFlags.agentMode = true
+	_, wrapped := shapeListOutput(context.Background(), base, "json", false).(*output.ShapingPrinter)
 	require.True(t, wrapped, "agent mode pages get lists by default")
 	require.Equal(t, int64(agentDefaultPage), agentPageLimit(getWorkflowsCmd, 0))
 
 	// A subcommand with its own --limit is paged server-side, not cut again.
 	invokedGetCmd = getWorkflowsCmd
-	require.Same(t, base, shapeListOutput(base, "json", false))
+	require.Same(t, base, shapeListOutput(context.Background(), base, "json", false))
 
 	require.NoError(t, getWorkflowsCmd.Flags().Set("limit", "0"))
 	require.Equal(t, int64(0), agentPageLimit(getWorkflowsCmd, 0), "an explicit --limit wins")

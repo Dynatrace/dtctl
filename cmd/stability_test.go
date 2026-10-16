@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -313,9 +314,9 @@ func TestDevelopmentSignpostingRequiresDemonstratedKnowledge(t *testing.T) {
 }
 
 func TestDevelopmentSignpostingIsOffInAgentMode(t *testing.T) {
-	prev := agentMode
-	agentMode = true
-	t.Cleanup(func() { agentMode = prev })
+	prev := agentMode(context.Background())
+	gFlags.agentMode = true
+	t.Cleanup(func() { gFlags.agentMode = prev })
 
 	cfg := config.NewConfig()
 	cfg.SetDevelopmentFeature("account", true)
@@ -323,7 +324,7 @@ func TestDevelopmentSignpostingIsOffInAgentMode(t *testing.T) {
 	// An absolute override, not a heuristic. An agent cannot weigh "unfinished,
 	// may disappear" against its task, and naming an opt-in in a
 	// machine-readable envelope invites it to take the opt-in.
-	if developmentSignposting(cfg) {
+	if developmentSignposting(context.Background(), cfg) {
 		t.Error("agent mode must never signpost a development feature")
 	}
 }
@@ -331,7 +332,7 @@ func TestDevelopmentSignpostingIsOffInAgentMode(t *testing.T) {
 func TestStabilityErrorMapsToItsOwnCode(t *testing.T) {
 	// A third code alongside profile_blocked and safety_blocked: the three are
 	// different axes and a caller resolves them differently.
-	detail := errorToDetail(&StabilityError{
+	detail := errorToDetail(context.Background(), &StabilityError{
 		Command: "ingest", Level: stability.Experimental, Floor: stability.Stable,
 	})
 	if detail.Code != "stability_blocked" {
@@ -341,7 +342,7 @@ func TestStabilityErrorMapsToItsOwnCode(t *testing.T) {
 		t.Error("a structured block with no remediation is a dead end")
 	}
 
-	devDetail := errorToDetail(&DevelopmentError{Command: "account", Feature: "account"})
+	devDetail := errorToDetail(context.Background(), &DevelopmentError{Command: "account", Feature: "account"})
 	if devDetail.Code != "development_disabled" {
 		t.Errorf("code = %q, want development_disabled", devDetail.Code)
 	}
@@ -351,7 +352,7 @@ func TestLegacyExperimentalEnvVarsStillEnableTheirFeature(t *testing.T) {
 	// Honored as deprecated aliases so an existing script or deployment does
 	// not break on upgrade.
 	t.Setenv("DTCTL_EXPERIMENTAL_ACCOUNT", "1")
-	enabled := legacyDevelopmentFeatures(nil)
+	enabled := legacyDevelopmentFeatures(context.Background(), nil)
 	if !enabled[accountDevelopmentFeature] {
 		t.Error("DTCTL_EXPERIMENTAL_ACCOUNT no longer enables the account feature")
 	}
@@ -359,7 +360,7 @@ func TestLegacyExperimentalEnvVarsStillEnableTheirFeature(t *testing.T) {
 	// An unset legacy variable is silence, not an explicit off, so it must not
 	// override an opt-in expressed the current way.
 	t.Setenv("DTCTL_EXPERIMENTAL_ACCOUNT", "")
-	enabled = legacyDevelopmentFeatures(map[string]bool{accountDevelopmentFeature: true})
+	enabled = legacyDevelopmentFeatures(context.Background(), map[string]bool{accountDevelopmentFeature: true})
 	if !enabled[accountDevelopmentFeature] {
 		t.Error("an unset legacy variable turned off a current opt-in")
 	}
@@ -378,14 +379,14 @@ func TestEnvironmentOptInSurvivesAMissingConfig(t *testing.T) {
 	// Signposting is off in agent mode unconditionally, so this test has to
 	// state which mode it is asserting about rather than inherit whatever the
 	// previously-run test left in the package variable.
-	prev := agentMode
-	agentMode = false
-	t.Cleanup(func() { agentMode = prev })
+	prev := agentMode(context.Background())
+	gFlags.agentMode = false
+	t.Cleanup(func() { gFlags.agentMode = prev })
 
 	t.Setenv(config.EnvConfig, filepath.Join(t.TempDir(), "absent.yaml"))
 
 	t.Setenv(config.DevelopmentEnvVar, "serve")
-	enabled, signpost := resolveDevelopmentFeatures(nil)
+	enabled, signpost := resolveDevelopmentFeatures(context.Background(), nil)
 	if !stability.Enabled("serve", enabled) {
 		t.Error("an environment opt-in was dropped because no config file exists")
 	}
@@ -394,7 +395,7 @@ func TestEnvironmentOptInSurvivesAMissingConfig(t *testing.T) {
 	}
 
 	t.Setenv(config.MinStabilityEnvVar, "stable")
-	policy, err := resolveStabilityPolicy(nil, enabled)
+	policy, err := resolveStabilityPolicy(context.Background(), nil, enabled)
 	if err != nil {
 		t.Fatalf("resolveStabilityPolicy: %v", err)
 	}

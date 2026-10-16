@@ -88,6 +88,12 @@ func NewProgressReporter(enabled, agentMode bool) *ProgressReporter {
 	return newProgressReporter(enabled, agentMode, os.Stderr)
 }
 
+// NewProgressReporterTo is NewProgressReporter drawing on w instead of the
+// process's stderr, for a caller that owns the invocation's streams.
+func NewProgressReporterTo(enabled, agentMode bool, w io.Writer) *ProgressReporter {
+	return newProgressReporter(enabled, agentMode, w)
+}
+
 // newProgressReporter is the testable core of NewProgressReporter with an
 // injectable writer.
 func newProgressReporter(enabled, agentMode bool, w io.Writer) *ProgressReporter {

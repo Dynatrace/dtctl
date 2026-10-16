@@ -24,10 +24,13 @@ import (
 // inventoryCmd probes the current environment for what data actually exists
 // there. `dtctl commands` answers "what can I run?"; `dtctl inventory` answers
 // "what is there to query?".
-var inventoryCmd = &cobra.Command{
-	Use:   "inventory",
-	Short: "Probe the environment: which data, entity types, and capabilities exist here",
-	Long: `Probe the current context's environment and report what data is available:
+var inventoryCmd = newInventoryCmd()
+
+func newInventoryCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "inventory",
+		Short: "Probe the environment: which data, entity types, and capabilities exist here",
+		Long: `Probe the current context's environment and report what data is available:
 which Grail data objects are fetchable (and which are queried through other
 commands), which buckets and filter segments exist, the live entity-type
 census, and which capabilities (spans, logs, RUM, k8s, cloud integrations,
@@ -65,64 +68,68 @@ These verdicts are retention-scoped: a stream that received data once last week
 reads as present. To ask whether data is arriving for one source right now — after
 an instrumentation change or an ingest — use 'dtctl inventory arrivals'.
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
-
-		defs, err := inventoryDefinitions(cmd)
-		if err != nil {
-			return err
-		}
-		runner := newInventoryRunner(cmd, cfg, c)
-
-		// Segments come from the API, not DQL — fetched here, best-effort. A
-		// failure must stay distinguishable from "no segments exist".
-		var segs []inventory.SegmentInfo
-		var segNote string
-		if list, serr := segment.NewHandler(c).List(); serr == nil {
-			for _, sg := range list.FilterSegments {
-				segs = append(segs, inventory.SegmentInfo{UID: sg.UID, Name: sg.Name, Description: sg.Description})
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, c, err := setupClient(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
-		} else {
-			segNote = fmt.Sprintf("segment discovery failed: %v — the segment list is unknown, not empty", serr)
-		}
 
-		// Cancel cleanly on Ctrl+C: discovery aborts, nothing is half-reported.
-		ctx, cancel := inventoryCancelContext(cmd)
-		defer cancel()
+			defs, err := inventoryDefinitions(cmd)
+			if err != nil {
+				return err
+			}
+			runner := newInventoryRunner(cmd, cfg, c)
 
-		budgetQueries, budgetSeconds := inventoryBudget(cmd)
-		inv, err := inventory.Discover(ctx, runner, defs, inventory.DiscoverOptions{
-			ContextName:   cfg.CurrentContext,
-			Segments:      segs,
-			BudgetQueries: budgetQueries,
-			BudgetSeconds: budgetSeconds,
-		})
-		if err != nil {
-			return err
-		}
-		if segNote != "" {
-			inv.Notes = append(inv.Notes, segNote)
-		}
+			// Segments come from the API, not DQL — fetched here, best-effort. A
+			// failure must stay distinguishable from "no segments exist".
+			var segs []inventory.SegmentInfo
+			var segNote string
+			if list, serr := segment.NewHandler(c).List(); serr == nil {
+				for _, sg := range list.FilterSegments {
+					segs = append(segs, inventory.SegmentInfo{UID: sg.UID, Name: sg.Name, Description: sg.Description})
+				}
+			} else {
+				segNote = fmt.Sprintf("segment discovery failed: %v — the segment list is unknown, not empty", serr)
+			}
 
-		if outputFormat == "table" && !agentMode {
-			printInventoryHuman(inv)
-			return nil
-		}
-		printer := NewPrinter()
-		if ap := enrichAgent(printer, "inventory", ""); ap != nil {
-			ap.SetSuggestions(inventorySuggestions(inv))
-		}
-		return printer.Print(inv)
-	},
+			// Cancel cleanly on Ctrl+C: discovery aborts, nothing is half-reported.
+			ctx, cancel := inventoryCancelContext(cmd)
+			defer cancel()
+
+			budgetQueries, budgetSeconds := inventoryBudget(cmd)
+			inv, err := inventory.Discover(ctx, runner, defs, inventory.DiscoverOptions{
+				ContextName:   cfg.CurrentContext,
+				Segments:      segs,
+				BudgetQueries: budgetQueries,
+				BudgetSeconds: budgetSeconds,
+			})
+			if err != nil {
+				return err
+			}
+			if segNote != "" {
+				inv.Notes = append(inv.Notes, segNote)
+			}
+
+			if outputFormat(cmdContext(cmd)) == "table" && !agentMode(cmdContext(cmd)) {
+				printInventoryHuman(cmdContext(cmd), inv)
+				return nil
+			}
+			printer := newPrinterCtx(cmdContext(cmd))
+			if ap := enrichAgent(printer, "inventory", ""); ap != nil {
+				ap.SetSuggestions(inventorySuggestions(inv))
+			}
+			return printer.Print(inv)
+		},
+	}
+	stability.Mark(c, stability.Experimental, "0.39.0")
+	addInventoryDiscoveryFlags(c)
+	return c
 }
 
 // loadDefinitionsFile reads one capability-definitions file. File I/O stays in
 // the CLI layer — the SDK parses bytes (ParseDefinitions) and never sees paths.
-func loadDefinitionsFile(path string) (*inventory.Definitions, error) {
-	data, err := readFileFlag("definitions", path)
+func loadDefinitionsFile(ctx context.Context, path string) (*inventory.Definitions, error) {
+	data, err := readFileFlag(ctx, "definitions", path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read definitions %s: %w", path, err)
 	}
@@ -180,63 +187,63 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 }
 
 // printInventoryHuman renders the inventory for a terminal.
-func printInventoryHuman(inv *inventory.Inventory) {
+func printInventoryHuman(ctx context.Context, inv *inventory.Inventory) {
 	const w = 14
-	output.DescribeKV("Context:", w, "%s", inv.Context)
-	output.DescribeKV("Generated:", w, "%s", inv.GeneratedAt)
+	output.FprintDescribeKV(currentStdout(ctx), "Context:", w, "%s", inv.Context)
+	output.FprintDescribeKV(currentStdout(ctx), "Generated:", w, "%s", inv.GeneratedAt)
 	if len(inv.Capabilities) > 0 {
-		output.DescribeKV("Capabilities:", w, "%s", strings.Join(inv.Capabilities, ", "))
+		output.FprintDescribeKV(currentStdout(ctx), "Capabilities:", w, "%s", strings.Join(inv.Capabilities, ", "))
 	}
 	if len(inv.Absent) > 0 {
-		output.DescribeSection("Absent (what was checked)")
+		output.FprintDescribeSection(currentStdout(ctx), "Absent (what was checked)")
 		for _, a := range inv.Absent {
-			fmt.Printf("  %s — %s\n", a.Name, a.Evidence)
+			fmt.Fprintf(currentStdout(ctx), "  %s — %s\n", a.Name, a.Evidence)
 		}
 	}
 	if len(inv.Unknown) > 0 {
-		output.DescribeSection("Unknown (no verdict — not evidence of absence)")
+		output.FprintDescribeSection(currentStdout(ctx), "Unknown (no verdict — not evidence of absence)")
 		for _, u := range inv.Unknown {
-			fmt.Printf("  %s — %s\n", u.Name, u.Evidence)
+			fmt.Fprintf(currentStdout(ctx), "  %s — %s\n", u.Name, u.Evidence)
 		}
 	}
 	if len(inv.EntityTypes) > 0 {
-		output.DescribeKV("Entities:", w, "%s", topCensusTypes(inv.EntityTypes, 12))
+		output.FprintDescribeKV(currentStdout(ctx), "Entities:", w, "%s", topCensusTypes(inv.EntityTypes, 12))
 	}
 	if len(inv.DataObjects) > 0 {
 		line := strings.Join(inv.DataObjects, ", ")
 		if inv.EntityViews > 0 {
 			line += fmt.Sprintf(" (+%d dt.entity.* lookback views)", inv.EntityViews)
 		}
-		output.DescribeKV("Data objects:", w, "%s", line)
+		output.FprintDescribeKV(currentStdout(ctx), "Data objects:", w, "%s", line)
 	}
 	if len(inv.QueryOnly) > 0 {
-		output.DescribeKV("Query-only:", w, "%s (no fetch — see notes)", strings.Join(inv.QueryOnly, ", "))
+		output.FprintDescribeKV(currentStdout(ctx), "Query-only:", w, "%s (no fetch — see notes)", strings.Join(inv.QueryOnly, ", "))
 	}
 	if len(inv.Buckets) > 0 {
-		output.DescribeKV("Buckets:", w, "%s", strings.Join(capNames(inv.Buckets, 20), ", "))
+		output.FprintDescribeKV(currentStdout(ctx), "Buckets:", w, "%s", strings.Join(capNames(inv.Buckets, 20), ", "))
 	}
 	if len(inv.Segments) > 0 {
-		output.DescribeSection("Segments (apply with -S <name>)")
+		output.FprintDescribeSection(currentStdout(ctx), "Segments (apply with -S <name>)")
 		const maxSegments = 10
 		for i, s := range inv.Segments {
 			if i >= maxSegments {
-				fmt.Printf("  (+%d more — full list with -o json)\n", len(inv.Segments)-maxSegments)
+				fmt.Fprintf(currentStdout(ctx), "  (+%d more — full list with -o json)\n", len(inv.Segments)-maxSegments)
 				break
 			}
 			desc := ""
 			if s.Description != "" {
 				desc = " — " + s.Description
 			}
-			fmt.Printf("  %s%s\n", s.Name, desc)
+			fmt.Fprintf(currentStdout(ctx), "  %s%s\n", s.Name, desc)
 		}
 	}
 	for _, n := range inv.Notes {
-		output.DescribeKV("Note:", w, "%s", n)
+		output.FprintDescribeKV(currentStdout(ctx), "Note:", w, "%s", n)
 	}
 	if r := inv.Discovery; r != nil {
-		fmt.Fprintf(os.Stderr, "\nDiscovery: %d queries, %.1fs query time\n", r.Queries, r.Seconds)
+		fmt.Fprintf(currentStderr(ctx), "\nDiscovery: %d queries, %.1fs query time\n", r.Queries, r.Seconds)
 		for _, n := range r.Notes {
-			fmt.Fprintf(os.Stderr, "  note: %s\n", n)
+			fmt.Fprintf(currentStderr(ctx), "  note: %s\n", n)
 		}
 	}
 }
@@ -298,7 +305,7 @@ func inventoryDefinitions(cmd *cobra.Command) (map[string]*inventory.CapabilityD
 	}
 	overlays := make([]*inventory.Definitions, 0, len(defFiles))
 	for _, f := range defFiles {
-		d, err := loadDefinitionsFile(f)
+		d, err := loadDefinitionsFile(cmdContext(cmd), f)
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +323,7 @@ func inventoryBudget(cmd *cobra.Command) (int, float64) {
 func newInventoryRunner(cmd *cobra.Command, cfg *config.Config, c *client.Client) *inventoryRunner {
 	scanLimitGB, _ := cmd.Flags().GetFloat64("scan-limit-gbytes")
 	return &inventoryRunner{
-		executor:    NewDQLExecutorFromConfig(cfg, c),
+		executor:    newDQLExecutorFromConfig(cmdContext(cmd), cfg, c),
 		scanLimitGB: scanLimitGB,
 	}
 }
@@ -326,17 +333,9 @@ func newInventoryRunner(cmd *cobra.Command, cfg *config.Config, c *client.Client
 // in-process caller (`dtctl serve`) cancelling a request still aborts the run;
 // rooting it at context.Background() would make discovery outlive the request.
 func inventoryCancelContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(cmdContext(cmd))
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
-	return ctx, func() {
-		signal.Stop(sigCh)
-		cancel()
-	}
+	// NotifyContext's stop also releases the watcher goroutine; signal.Stop
+	// alone left it parked on the channel for the life of the process.
+	return signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
 }
 
 func init() {
@@ -354,7 +353,5 @@ func init() {
 	// Marked on the subtree root, so `inventory arrivals` inherits it —
 	// stability.Effective takes the weakest level along the path. Promoting
 	// this line promotes the subcommands with it; check them before you do.
-	stability.Mark(inventoryCmd, stability.Experimental, "0.39.0")
-	addInventoryDiscoveryFlags(inventoryCmd)
 	inventoryCmd.AddCommand(inventoryArrivalsCmd)
 }

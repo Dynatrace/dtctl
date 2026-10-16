@@ -1,6 +1,6 @@
-allowedOperations[#3]: READ,WRITE,DELETE
+allowedOperations[3]: READ,WRITE,DELETE
 description: Filters data for Kubernetes cluster alpha
-includes[#2]{dataObject,filter}:
+includes[2]{dataObject,filter}:
   _all_data_object,"k8s.cluster.name = \"alpha\""
   logs,"dt.system.bucket = \"custom-logs\""
 isPublic: true

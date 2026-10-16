@@ -6,27 +6,35 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-var createAWSProviderCmd = &cobra.Command{
-	Use:   "aws",
-	Short: "Create AWS resources",
-	RunE:  requireSubcommand,
+var createAWSProviderCmd = newCreateAWSProviderCmd()
+
+func newCreateAWSProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "aws",
+		Short: "Create AWS resources",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var createGCPProviderCmd = &cobra.Command{
-	Use:   "gcp",
-	Short: "Create GCP resources (Preview)",
-	RunE:  requireSubcommand,
+var createGCPProviderCmd = newCreateGCPProviderCmd()
+
+func newCreateGCPProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "gcp",
+		Short: "Create GCP resources (Preview)",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	attachPreviewNotice(c, "GCP")
+	return c
 }
 
 func init() {
 	createCmd.AddCommand(createAWSProviderCmd)
 	createCmd.AddCommand(createGCPProviderCmd)
-	attachPreviewNotice(createGCPProviderCmd, "GCP")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(createAWSProviderCmd)
-	stability.MarkStable(createGCPProviderCmd)
-}

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,13 +23,13 @@ func setupDocumentCmdTest(t *testing.T, srvURL string, level config.SafetyLevel)
 	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 	t.Setenv(config.EnvTokenStorage, "file")
 	configPath := filepath.Join(t.TempDir(), "config")
-	origCfgFile, origDryRun, origForce, origPlain := cfgFile, dryRun, forceDelete, plainMode
-	restorePristineTree()
+	origCfgFile, origDryRun, origPlain := cfgFile(context.Background()), dryRun(context.Background()), plainMode(context.Background())
+	restorePristineTree(context.Background())
 	t.Cleanup(func() {
-		cfgFile, dryRun, forceDelete, plainMode = origCfgFile, origDryRun, origForce, origPlain
-		restorePristineTree()
+		gFlags.cfgFile, gFlags.dryRun, gFlags.plainMode = origCfgFile, origDryRun, origPlain
+		restorePristineTree(context.Background())
 	})
-	cfgFile, dryRun = configPath, false
+	gFlags.cfgFile, gFlags.dryRun = configPath, false
 
 	cfg := config.NewConfig()
 	cfg.SetContextWithOptions("test", srvURL, "test-token", &config.ContextOptions{SafetyLevel: level})
@@ -161,7 +162,7 @@ func TestDeleteDocument_BySlugID(t *testing.T) {
 	var deleted []string
 	srv := slugDocumentServer(t, &deleted)
 	setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
-	forceDelete = true
+	gFlags.plainMode = true
 
 	captureDocStderr(t, func() {
 		if err := deleteDocumentCmd.RunE(deleteDocumentCmd, []string{"team-launchpad"}); err != nil {
@@ -181,7 +182,7 @@ func TestDeleteDocument_BySlugIDStillNeedsSafetyLevel(t *testing.T) {
 	var deleted []string
 	srv := slugDocumentServer(t, &deleted)
 	setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadOnly)
-	forceDelete = true
+	gFlags.plainMode = true
 
 	var err error
 	captureDocStderr(t, func() {

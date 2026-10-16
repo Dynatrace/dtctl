@@ -13,11 +13,14 @@ import (
 )
 
 // getBucketsCmd retrieves Grail buckets
-var getBucketsCmd = &cobra.Command{
-	Use:     "buckets [name]",
-	Aliases: []string{"bucket", "bkt"},
-	Short:   "Get Grail storage buckets",
-	Long: `Get Grail storage buckets.
+var getBucketsCmd = newGetBucketsCmd()
+
+func newGetBucketsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "buckets [name]",
+		Aliases: []string{"bucket", "bkt"},
+		Short:   "Get Grail storage buckets",
+		Long: `Get Grail storage buckets.
 
 Examples:
   # List all buckets
@@ -29,39 +32,46 @@ Examples:
   # Output as JSON
   dtctl get buckets -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := bucket.NewHandler(c)
-
-		// Get specific bucket if name provided
-		if len(args) > 0 {
-			b, err := handler.Get(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(b)
-		}
 
-		// List all buckets
-		list, err := handler.List()
-		if err != nil {
-			return err
-		}
+			handler := bucket.NewHandler(c)
 
-		return printer.PrintList(list.Buckets)
-	},
+			// Get specific bucket if name provided
+			if len(args) > 0 {
+				b, err := handler.Get(args[0])
+				if err != nil {
+					return err
+				}
+				return printer.Print(b)
+			}
+
+			// List all buckets
+			list, err := handler.List()
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(list.Buckets)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // deleteBucketCmd deletes a bucket
-var deleteBucketCmd = &cobra.Command{
-	Use:     "bucket <bucket-name>",
-	Aliases: []string{"buckets", "bkt"},
-	Short:   "Delete a Grail storage bucket",
-	Long: `Delete a Grail storage bucket by name.
+var deleteBucketCmd = newDeleteBucketCmd()
+
+func newDeleteBucketCmd() *cobra.Command {
+	var forceDelete bool
+	c := &cobra.Command{
+		Use:     "bucket <bucket-name>",
+		Aliases: []string{"buckets", "bkt"},
+		Short:   "Delete a Grail storage bucket",
+		Long: `Delete a Grail storage bucket by name.
 
 WARNING: This operation is irreversible and will delete all data in the bucket.
 
@@ -75,61 +85,62 @@ Examples:
   # Delete without confirmation (use with caution)
   dtctl delete bucket <bucket-name> -y
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		bucketName := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bucketName := args[0]
 
-		_, c, err := SetupWithSafety(safety.OperationDeleteBucket)
-		if err != nil {
-			return err
-		}
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationDeleteBucket)
+			if err != nil {
+				return err
+			}
 
-		handler := bucket.NewHandler(c)
+			handler := bucket.NewHandler(c)
 
-		// Verify bucket exists before prompting for confirmation
-		if _, err := handler.Get(bucketName); err != nil {
-			return err
-		}
+			// Verify bucket exists before prompting for confirmation
+			if _, err := handler.Get(bucketName); err != nil {
+				return err
+			}
 
-		if dryRun {
-			return deleteDryRun(cmd, "bucket", "", bucketName)
-		}
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "bucket", "", bucketName)
+			}
 
-		// Handle confirmation for data deletion
-		confirmFlag, _ := cmd.Flags().GetString("confirm")
-		if !forceDelete && !plainMode {
-			// If --confirm flag provided, validate it matches the bucket name
-			if confirmFlag != "" {
-				if !prompt.ValidateConfirmFlag(confirmFlag, bucketName) {
-					return fmt.Errorf("confirmation value %q does not match bucket name %q", confirmFlag, bucketName)
-				}
-			} else {
-				// Interactive confirmation - require typing the bucket name
-				if !prompt.ConfirmDataDeletion("bucket", bucketName) {
-					fmt.Println("Deletion cancelled")
-					return nil
+			// Handle confirmation for data deletion
+			confirmFlag, _ := cmd.Flags().GetString("confirm")
+			if !forceDelete && !plainMode(cmdContext(cmd)) {
+				// If --confirm flag provided, validate it matches the bucket name
+				if confirmFlag != "" {
+					if !prompt.ValidateConfirmFlag(confirmFlag, bucketName) {
+						return fmt.Errorf("confirmation value %q does not match bucket name %q", confirmFlag, bucketName)
+					}
+				} else {
+					// Interactive confirmation - require typing the bucket name
+					if !prompt.ConfirmDataDeletionWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), "bucket", bucketName) {
+						fmt.Fprintln(currentStdout(cmdContext(cmd)), "Deletion cancelled")
+						return nil
+					}
 				}
 			}
-		}
 
-		if err := handler.Delete(bucketName); err != nil {
-			return err
-		}
+			if err := handler.Delete(bucketName); err != nil {
+				return err
+			}
 
-		output.PrintSuccess("Bucket %q deletion initiated (async operation)", bucketName)
-		return nil
-	},
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Bucket %q deletion initiated (async operation)", bucketName)
+			return nil
+		},
+	}
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	c.Flags().String("confirm", "", "Confirm deletion by providing the bucket name (for non-interactive use)")
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
 	// Delete confirmation flags
-	deleteBucketCmd.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
-	deleteBucketCmd.Flags().String("confirm", "", "Confirm deletion by providing the bucket name (for non-interactive use)")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(deleteBucketCmd)
-	stability.MarkStable(getBucketsCmd)
 }

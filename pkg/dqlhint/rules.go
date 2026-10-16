@@ -31,6 +31,14 @@ var rules = []rule{
 	{"timeseries-condition", []string{"MANDATORY_PARAMETER_HAS_TO_BE"}, timeseriesCondition},
 	{"timeseries-aggregation", []string{"MANDATORY_PARAMETER_HAS_TO_BE"}, timeseriesAggregation},
 	{"entity-table", []string{"UNKNOWN_DATA_OBJECT"}, entityTable},
+	{"sql-aggregation", []string{"PARSE_ERROR", "UNKNOWN_COMMAND"}, sqlAggregation},
+	{"single-quotes", []string{"PARSE_ERROR_SINGLE_QUOTES"}, singleQuotes},
+	{"function-synonym", []string{"UNKNOWN_FUNCTION"}, functionSynonym},
+	{"aggregation-reference", []string{"PARAMETER_MUST_NOT_BE_AN_AGGREGATION"}, aggregationReference},
+	{"entity-field", []string{"FIELD_DOES_NOT_EXIST"}, entityField},
+	{"count-filter", []string{"UNKNOWN_PARAMETER_DEFINED"}, countFilter},
+	{"window-outside-fetch", []string{"UNKNOWN_PARAMETER_DEFINED"}, windowOutsideFetch},
+	{"command-synonym", []string{"UNKNOWN_COMMAND"}, commandSynonym},
 }
 
 // filterEquals: `filter x = "v"` — a single = is not a comparison in DQL.

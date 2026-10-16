@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,9 +108,9 @@ func TestBuildInspectRequest_Errors(t *testing.T) {
 // runtime) for the duration of a test, since buildInspectRequest reads it there.
 func withJQ(t *testing.T, filter string) {
 	t.Helper()
-	orig := jqFilter
-	t.Cleanup(func() { jqFilter = orig })
-	jqFilter = filter
+	orig := jqFilter(context.Background())
+	t.Cleanup(func() { gFlags.jqFilter = orig })
+	gFlags.jqFilter = filter
 }
 
 func TestBuildInspectRequest_FilterModes(t *testing.T) {
@@ -199,9 +200,9 @@ func writeRecords(t *testing.T, path string, records []map[string]interface{}) {
 }
 
 func TestMaybeRespill_InlineBelowThreshold(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
-	agentMode = true
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
+	gFlags.agentMode = true
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "q-x.jsonl")
@@ -219,9 +220,9 @@ func TestMaybeRespill_InlineBelowThreshold(t *testing.T) {
 }
 
 func TestMaybeRespill_SpillsAboveThreshold(t *testing.T) {
-	orig := agentMode
-	defer func() { agentMode = orig }()
-	agentMode = true
+	orig := agentMode(context.Background())
+	defer func() { gFlags.agentMode = orig }()
+	gFlags.agentMode = true
 
 	dir := t.TempDir()
 	// Force a tiny threshold via --spill-threshold so a small set still spills.
@@ -260,10 +261,10 @@ func TestMaybeRespill_SpillsAboveThreshold(t *testing.T) {
 // than warning the filter was dropped — the jq output went to the file, not the
 // inline path.
 func TestMaybeRespill_WarnsFilteredOutput(t *testing.T) {
-	origAgent, origJQ := agentMode, jqFilter
-	defer func() { agentMode, jqFilter = origAgent, origJQ }()
-	agentMode = true
-	jqFilter = "select(.status == 500)"
+	origAgent, origJQ := agentMode(context.Background()), jqFilter(context.Background())
+	defer func() { gFlags.agentMode, gFlags.jqFilter = origAgent, origJQ }()
+	gFlags.agentMode = true
+	gFlags.jqFilter = "select(.status == 500)"
 
 	dir := t.TempDir()
 	c := newInspectTestCmd(t, "--spill=auto", "--spill-threshold", "10", "--spill-to", filepath.Join(dir, "out.jsonl"))

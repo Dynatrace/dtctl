@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,13 +53,13 @@ func TestNewSafetyChecker(t *testing.T) {
 			}
 
 			// Setup cmd state
-			origCfgFile := cfgFile
+			origCfgFile := cfgFile(context.Background())
 			defer func() {
-				cfgFile = origCfgFile
+				gFlags.cfgFile = origCfgFile
 			}()
 
 			viper.Reset()
-			cfgFile = configPath
+			gFlags.cfgFile = configPath
 
 			// Load config
 			loadedCfg, err := LoadConfig()
@@ -96,13 +97,13 @@ func TestSafetyChecker_ReadonlyBlocksOperations(t *testing.T) {
 	}
 
 	// Setup cmd state
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
 
 	viper.Reset()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	loadedCfg, err := LoadConfig()
 	if err != nil {
@@ -164,13 +165,13 @@ func TestSafetyChecker_ReadWriteMineBlocksSharedAndUnknown(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
 
 	viper.Reset()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	loadedCfg, err := LoadConfig()
 	if err != nil {
@@ -246,13 +247,13 @@ func TestSafetyChecker_ReadWriteAllBlocksBucket(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
 
 	viper.Reset()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	loadedCfg, err := LoadConfig()
 	if err != nil {
@@ -314,13 +315,13 @@ func TestSafetyChecker_DangerouslyUnrestrictedAllowsAll(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
 
 	viper.Reset()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	loadedCfg, err := LoadConfig()
 	if err != nil {
@@ -372,13 +373,13 @@ func TestDefaultSafetyLevel(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
 
 	viper.Reset()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	loadedCfg, err := LoadConfig()
 	if err != nil {
@@ -424,13 +425,13 @@ func TestSafetyErrorMessages(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	origCfgFile := cfgFile
+	origCfgFile := cfgFile(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
+		gFlags.cfgFile = origCfgFile
 	}()
 
 	viper.Reset()
-	cfgFile = configPath
+	gFlags.cfgFile = configPath
 
 	loadedCfg, err := LoadConfig()
 	if err != nil {

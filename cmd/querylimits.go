@@ -79,8 +79,8 @@ func resolveQueryLimits(cmd *cobra.Command, cfg *config.Config) (config.QueryLim
 	// otherwise looks like it came from a server default, and the advice to
 	// raise --default-scan-limit-gbytes reads oddly when the ceiling came from
 	// the config file.
-	if !fromConfig.IsZero() && verbosity > 0 {
-		output.PrintInfo("applying query limits from config: %s (use --%s to ignore them)",
+	if !fromConfig.IsZero() && verbosity(cmdContext(cmd)) > 0 {
+		output.FprintInfo(currentStderr(cmdContext(cmd)), "applying query limits from config: %s (use --%s to ignore them)",
 			describeQueryLimits(fromConfig), noQueryLimitsFlag)
 	}
 	return lim, nil

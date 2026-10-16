@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -9,11 +10,11 @@ import (
 )
 
 func TestUseAnalyzerDescribeTextView(t *testing.T) {
-	origAgent := agentMode
-	origFormat := outputFormat
+	origAgent := agentMode(context.Background())
+	origFormat := outputFormat(context.Background())
 	t.Cleanup(func() {
-		agentMode = origAgent
-		outputFormat = origFormat
+		gFlags.agentMode = origAgent
+		gFlags.outputFormat = origFormat
 	})
 
 	cases := []struct {
@@ -35,9 +36,9 @@ func TestUseAnalyzerDescribeTextView(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			agentMode = tc.agent
-			outputFormat = tc.format
-			if got := useAnalyzerDescribeTextView(); got != tc.want {
+			gFlags.agentMode = tc.agent
+			gFlags.outputFormat = tc.format
+			if got := useAnalyzerDescribeTextView(context.Background()); got != tc.want {
 				t.Errorf("useAnalyzerDescribeTextView() = %v, want %v (agent=%v format=%q)",
 					got, tc.want, tc.agent, tc.format)
 			}
@@ -72,7 +73,7 @@ func TestPrintAnalyzerDescribe_FullSchema(t *testing.T) {
 		},
 	}
 
-	out := captureStdout(t, func() { printAnalyzerDescribe(desc) })
+	out := captureStdout(t, func() { printAnalyzerDescribe(context.Background(), desc) })
 
 	for _, want := range []string{
 		"Generic Forecast Analyzer",
@@ -108,7 +109,7 @@ func TestPrintAnalyzerDescribe_SchemaUnavailable(t *testing.T) {
 		DisplayName: "Some Analyzer",
 	}
 
-	out := captureStdout(t, func() { printAnalyzerDescribe(desc) })
+	out := captureStdout(t, func() { printAnalyzerDescribe(context.Background(), desc) })
 
 	if !strings.Contains(out, "(schema not introspectable — use -o json or --doc)") {
 		t.Errorf("expected fallback marker for unavailable schema\n---\n%s", out)
@@ -135,7 +136,7 @@ func TestPrintSchemaFields_CompositeMarker(t *testing.T) {
 		},
 	}
 
-	out := captureStdout(t, func() { printSchemaSection("Output", schema) })
+	out := captureStdout(t, func() { printSchemaSection(context.Background(), "Output", schema) })
 
 	if !strings.Contains(out, "(composite — see -o json or --doc)") {
 		t.Errorf("expected composite marker\n---\n%s", out)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,50 +14,56 @@ import (
 )
 
 // describeWorkflowCmd shows detailed info about a workflow
-var describeWorkflowCmd = &cobra.Command{
-	Use:     "workflow <workflow-id>",
-	Aliases: []string{"wf"},
-	Short:   "Show details of a workflow",
-	Long: `Show detailed information about a workflow including triggers, tasks, and recent executions.
+var describeWorkflowCmd = newDescribeWorkflowCmd()
+
+func newDescribeWorkflowCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "workflow <workflow-id>",
+		Aliases: []string{"wf"},
+		Short:   "Show details of a workflow",
+		Long: `Show detailed information about a workflow including triggers, tasks, and recent executions.
 
 Examples:
   # Describe a workflow
   dtctl describe workflow <workflow-id>
   dtctl describe wf <workflow-id>
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		workflowID := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			workflowID := args[0]
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := workflow.NewHandler(c)
-		execHandler := workflow.NewExecutionHandler(c)
-
-		// Get workflow details
-		wf, err := handler.Get(workflowID)
-		if err != nil {
-			return err
-		}
-
-		// For table output, show detailed human-readable information
-		if outputFormat == "table" {
-			execList, err := execHandler.List(workflow.ExecutionFilters{WorkflowID: workflowID}, 10)
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
-				execList = nil
+				return err
 			}
-			printWorkflowDescribeTable(os.Stdout, wf, execList)
 
-			return nil
-		}
+			handler := workflow.NewHandler(c)
+			execHandler := workflow.NewExecutionHandler(c)
 
-		// For other formats, use standard printer
-		enrichAgent(printer, "describe", "workflow")
-		return printer.Print(wf)
-	},
+			// Get workflow details
+			wf, err := handler.Get(workflowID)
+			if err != nil {
+				return err
+			}
+
+			// For table output, show detailed human-readable information
+			if outputFormat(cmdContext(cmd)) == "table" {
+				execList, err := execHandler.List(workflow.ExecutionFilters{WorkflowID: workflowID}, 10)
+				if err != nil {
+					execList = nil
+				}
+				printWorkflowDescribeTable(currentStdout(cmdContext(cmd)), wf, execList)
+
+				return nil
+			}
+
+			// For other formats, use standard printer
+			enrichAgent(printer, "describe", "workflow")
+			return printer.Print(wf)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func printWorkflowDescribeTable(w io.Writer, wf *workflow.Workflow, execList *workflow.ExecutionList) {
@@ -188,92 +193,96 @@ func nestedTriggerString(root map[string]interface{}, path ...string) string {
 }
 
 // describeWorkflowExecutionCmd shows detailed info about a workflow execution
-var describeWorkflowExecutionCmd = &cobra.Command{
-	Use:     "workflow-execution <execution-id>",
-	Aliases: []string{"wfe"},
-	Short:   "Show details of a workflow execution",
-	Long: `Show detailed information about a workflow execution including task states.
+var describeWorkflowExecutionCmd = newDescribeWorkflowExecutionCmd()
+
+func newDescribeWorkflowExecutionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "workflow-execution <execution-id>",
+		Aliases: []string{"wfe"},
+		Short:   "Show details of a workflow execution",
+		Long: `Show detailed information about a workflow execution including task states.
 
 Examples:
   # Describe a workflow execution
   dtctl describe workflow-execution <execution-id>
   dtctl describe wfe <execution-id>
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		executionID := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			executionID := args[0]
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := workflow.NewExecutionHandler(c)
-
-		// Get execution details
-		exec, err := handler.Get(executionID)
-		if err != nil {
-			return err
-		}
-
-		// Get task executions
-		tasks, err := handler.ListTasks(executionID)
-		if err != nil {
-			return err
-		}
-
-		// For table output, show detailed human-readable information
-		if outputFormat == "table" {
-			const w = 12
-			output.DescribeKV("ID:", w, "%s", exec.ID)
-			output.DescribeKV("Workflow:", w, "%s", exec.Workflow)
-			output.DescribeKV("Title:", w, "%s", exec.Title)
-			output.DescribeKV("State:", w, "%s", exec.State)
-			output.DescribeKV("Started:", w, "%s", exec.StartedAt.Format("2006-01-02 15:04:05"))
-			if exec.EndedAt != nil {
-				output.DescribeKV("Ended:", w, "%s", exec.EndedAt.Format("2006-01-02 15:04:05"))
-			}
-			output.DescribeKV("Duration:", w, "%s", formatDuration(exec.Runtime))
-			output.DescribeKV("Trigger:", w, "%s", exec.TriggerType)
-			if exec.StateInfo != nil && *exec.StateInfo != "" {
-				output.DescribeKV("State Info:", w, "%s", *exec.StateInfo)
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
 
-			// Print tasks table
-			if len(tasks) > 0 {
-				fmt.Println()
-				output.DescribeSection("Tasks:")
+			handler := workflow.NewExecutionHandler(c)
 
-				// Find max name length for alignment
-				maxNameLen := 4 // "NAME"
-				for _, t := range tasks {
-					if len(t.Name) > maxNameLen {
-						maxNameLen = len(t.Name)
+			// Get execution details
+			exec, err := handler.Get(executionID)
+			if err != nil {
+				return err
+			}
+
+			// Get task executions
+			tasks, err := handler.ListTasks(executionID)
+			if err != nil {
+				return err
+			}
+
+			// For table output, show detailed human-readable information
+			if outputFormat(cmdContext(cmd)) == "table" {
+				const w = 12
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "ID:", w, "%s", exec.ID)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Workflow:", w, "%s", exec.Workflow)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Title:", w, "%s", exec.Title)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "State:", w, "%s", exec.State)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Started:", w, "%s", exec.StartedAt.Format("2006-01-02 15:04:05"))
+				if exec.EndedAt != nil {
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Ended:", w, "%s", exec.EndedAt.Format("2006-01-02 15:04:05"))
+				}
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Duration:", w, "%s", formatDuration(exec.Runtime))
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Trigger:", w, "%s", exec.TriggerType)
+				if exec.StateInfo != nil && *exec.StateInfo != "" {
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "State Info:", w, "%s", *exec.StateInfo)
+				}
+
+				// Print tasks table
+				if len(tasks) > 0 {
+					fmt.Fprintln(currentStdout(cmdContext(cmd)))
+					output.FprintDescribeSection(currentStdout(cmdContext(cmd)), "Tasks:")
+
+					// Find max name length for alignment
+					maxNameLen := 4 // "NAME"
+					for _, t := range tasks {
+						if len(t.Name) > maxNameLen {
+							maxNameLen = len(t.Name)
+						}
+					}
+
+					// Print header
+					fmt.Fprintf(currentStdout(cmdContext(cmd)), "  %-*s  %-10s  %s\n", maxNameLen, "NAME", "STATE", "DURATION")
+
+					// Print tasks
+					for _, t := range tasks {
+						duration := formatDuration(t.Runtime)
+						fmt.Fprintf(currentStdout(cmdContext(cmd)), "  %-*s  %-10s  %s\n", maxNameLen, t.Name, t.State, duration)
 					}
 				}
 
-				// Print header
-				fmt.Printf("  %-*s  %-10s  %s\n", maxNameLen, "NAME", "STATE", "DURATION")
-
-				// Print tasks
-				for _, t := range tasks {
-					duration := formatDuration(t.Runtime)
-					fmt.Printf("  %-*s  %-10s  %s\n", maxNameLen, t.Name, t.State, duration)
-				}
+				return nil
 			}
 
-			return nil
-		}
-
-		// For other formats, use standard printer
-		enrichAgent(printer, "describe", "workflow-execution")
-		return printer.Print(exec)
-	},
+			// For other formats, use standard printer
+			enrichAgent(printer, "describe", "workflow-execution")
+			return printer.Print(exec)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(describeWorkflowCmd)
-	stability.MarkStable(describeWorkflowExecutionCmd)
 }

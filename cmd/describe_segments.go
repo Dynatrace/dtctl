@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,43 +15,49 @@ import (
 )
 
 // describeSegmentCmd shows detailed info about a segment
-var describeSegmentCmd = &cobra.Command{
-	Use:     "segment <uid>",
-	Aliases: []string{"seg", "filter-segment", "filter-segments"},
-	Short:   "Show details of a Grail filter segment",
-	Long: `Show detailed information about a Grail filter segment.
+var describeSegmentCmd = newDescribeSegmentCmd()
+
+func newDescribeSegmentCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "segment <uid>",
+		Aliases: []string{"seg", "filter-segment", "filter-segments"},
+		Short:   "Show details of a Grail filter segment",
+		Long: `Show detailed information about a Grail filter segment.
 
 Examples:
   # Describe a segment
   dtctl describe segment <uid>
   dtctl describe seg <uid>
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		uid := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			uid := args[0]
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		handler := segment.NewHandler(c)
+			handler := segment.NewHandler(c)
 
-		seg, err := handler.Get(uid)
-		if err != nil {
-			return err
-		}
+			seg, err := handler.Get(uid)
+			if err != nil {
+				return err
+			}
 
-		// For table output, show detailed human-readable information
-		if outputFormat == "table" {
-			printSegmentDescribeTable(os.Stdout, seg)
-			return nil
-		}
+			// For table output, show detailed human-readable information
+			if outputFormat(cmdContext(cmd)) == "table" {
+				printSegmentDescribeTable(currentStdout(cmdContext(cmd)), seg)
+				return nil
+			}
 
-		// For other formats, use standard printer
-		enrichAgent(printer, "describe", "segment")
-		return printer.Print(seg)
-	},
+			// For other formats, use standard printer
+			enrichAgent(printer, "describe", "segment")
+			return printer.Print(seg)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // printSegmentDescribeTable renders a segment in the human-readable describe table format.
@@ -111,5 +116,4 @@ func printSegmentDescribeTable(w io.Writer, seg *segment.FilterSegment) {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(describeSegmentCmd)
 }

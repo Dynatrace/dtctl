@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -21,8 +22,8 @@ const matcherVerifyPath = "/platform/openpipeline/v1/matcher/verify"
 // shared cmd package from flipping the human-vs-structured output branch.
 func pinVerifyGlobals(t *testing.T, configPath string) (restore func()) {
 	t.Helper()
-	origCfg, origPlain, origJQ := cfgFile, plainMode, jqFilter
-	origAgent, origFormat := agentMode, outputFormat
+	origCfg, origPlain, origJQ := cfgFile(context.Background()), plainMode(context.Background()), jqFilter(context.Background())
+	origAgent, origFormat := agentMode(context.Background()), outputFormat(context.Background())
 
 	outputFlag := rootCmd.PersistentFlags().Lookup("output")
 	origOutputChanged := false
@@ -30,18 +31,18 @@ func pinVerifyGlobals(t *testing.T, configPath string) (restore func()) {
 		origOutputChanged = outputFlag.Changed
 	}
 
-	cfgFile = configPath
-	plainMode = true
-	jqFilter = ""
-	agentMode = false
-	outputFormat = "table"
+	gFlags.cfgFile = configPath
+	gFlags.plainMode = true
+	gFlags.jqFilter = ""
+	gFlags.agentMode = false
+	gFlags.outputFormat = "table"
 	if outputFlag != nil {
 		outputFlag.Changed = false
 	}
 
 	return func() {
-		cfgFile, plainMode, jqFilter = origCfg, origPlain, origJQ
-		agentMode, outputFormat = origAgent, origFormat
+		gFlags.cfgFile, gFlags.plainMode, gFlags.jqFilter = origCfg, origPlain, origJQ
+		gFlags.agentMode, gFlags.outputFormat = origAgent, origFormat
 		if outputFlag != nil {
 			outputFlag.Changed = origOutputChanged
 		}
@@ -101,7 +102,7 @@ func TestVerifyOpenPipelineMatcherCmd_JSONOutput(t *testing.T) {
 	// An explicit -o json routes through the printer instead of the human
 	// summary. Flip the global format and the root flag's Changed bit; both are
 	// restored by the setup helper's cleanup.
-	outputFormat = "json"
+	gFlags.outputFormat = "json"
 	rootCmd.PersistentFlags().Lookup("output").Changed = true
 
 	var runErr error
@@ -121,7 +122,7 @@ func TestVerifyOpenPipelineMatcherCmd_UnsupportedOutputFormat(t *testing.T) {
 
 	// csv/wide are rejected for the verify family (same as "verify query"),
 	// so the command errors before making a request.
-	outputFormat = "csv"
+	gFlags.outputFormat = "csv"
 	rootCmd.PersistentFlags().Lookup("output").Changed = true
 
 	err := verifyOpenPipelineMatcherCmd.RunE(verifyOpenPipelineMatcherCmd, []string{`matchesValue(content, "x")`})
@@ -206,7 +207,7 @@ func TestReadVerifyExpressionFromFile(t *testing.T) {
 		if err := os.WriteFile(path, []byte("some expression\n"), 0o600); err != nil {
 			t.Fatalf("write temp file: %v", err)
 		}
-		got, err := readVerifyExpressionFromFile(path)
+		got, err := readVerifyExpressionFromFile(context.Background(), path)
 		if err != nil {
 			t.Fatalf("readVerifyExpressionFromFile() error = %v", err)
 		}
@@ -216,7 +217,7 @@ func TestReadVerifyExpressionFromFile(t *testing.T) {
 	})
 
 	t.Run("missing file is an error", func(t *testing.T) {
-		if _, err := readVerifyExpressionFromFile(filepath.Join(t.TempDir(), "missing")); err == nil {
+		if _, err := readVerifyExpressionFromFile(context.Background(), filepath.Join(t.TempDir(), "missing")); err == nil {
 			t.Fatal("expected error for missing file, got nil")
 		}
 	})

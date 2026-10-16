@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -43,7 +43,7 @@ func runInspectList(cmd *cobra.Command, args []string) error {
 
 	// Local command: config is loaded best-effort, only to learn the active
 	// context (for the partition to list) and the configured spill dir.
-	cfg, _ := LoadConfig()
+	cfg, _ := loadConfig(cmdContext(cmd))
 	opts, err := resolveSpillOptions(cmd, cfg)
 	if err != nil {
 		return err
@@ -60,7 +60,7 @@ func runInspectList(cmd *cobra.Command, args []string) error {
 		// No writable/known spill location resolves — there is nothing to list.
 		// Emit an empty listing with a note rather than an error: "nothing spilled"
 		// is a valid, useful answer for a handle-recovery probe.
-		return emitInspectList(dir, managed, nil, []string{"no spill location is configured or writable, so no spilled files could be listed"})
+		return emitInspectList(cmdContext(cmd), dir, managed, nil, []string{"no spill location is configured or writable, so no spilled files could be listed"})
 	}
 	if managed {
 		// Mirror the write-side partitioning (D9): list only the active context's
@@ -92,28 +92,28 @@ func runInspectList(cmd *cobra.Command, args []string) error {
 		warnings = append(warnings, fmt.Sprintf("%d listed file(s) have no manifest — their query and sampling provenance are unknown", missing))
 	}
 
-	return emitInspectList(dir, managed, entries, warnings)
+	return emitInspectList(cmdContext(cmd), dir, managed, entries, warnings)
 }
 
 // emitInspectList renders a KindFileList listing. Agent mode emits the
 // discriminated envelope (opaque to pre-inspect consumers, D31); human / scripted
 // mode prints the nested structure (a file list does not table well, so a
 // tabular format defaults to JSON, mirroring the --schema/--stats summary path).
-func emitInspectList(dir string, managed bool, entries []output.SpillFileEntry, warnings []string) error {
+func emitInspectList(ictx context.Context, dir string, managed bool, entries []output.SpillFileEntry, warnings []string) error {
 	list := &output.SpillList{Kind: output.KindFileList, Dir: dir, Managed: managed, Files: entries}
 	total := len(entries)
 
-	if agentMode {
+	if agentMode(ictx) {
 		ctx := &output.ResponseContext{
 			Verb:        "inspect",
 			Total:       &total,
 			Warnings:    warnings,
 			Suggestions: inspectListSuggestions(entries),
 		}
-		if jqFilter != "" {
-			ap := output.NewAgentPrinter(os.Stdout, ctx)
-			ap.SetResultFormat(outputFormat)
-			ap.SetJQFilter(jqFilter)
+		if jqFilter(ictx) != "" {
+			ap := output.NewAgentPrinter(currentStdout(ictx), ctx)
+			ap.SetResultFormat(outputFormat(ictx))
+			ap.SetJQFilter(jqFilter(ictx))
 			return ap.Print(list)
 		}
 		resp := output.Response{
@@ -122,19 +122,19 @@ func emitInspectList(dir string, managed bool, entries []output.SpillFileEntry, 
 			Result:          list,
 			Context:         ctx,
 		}
-		return output.EncodeEnvelope(os.Stdout, resp)
+		return output.EncodeEnvelope(currentStdout(ictx), resp)
 	}
 
-	printInspectWarnings(warnings)
-	format := outputFormat
-	if jqFilter != "" {
+	printInspectWarnings(ictx, warnings)
+	format := outputFormat(ictx)
+	if jqFilter(ictx) != "" {
 		format = output.NormalizeJQOutputFormat(format)
 	}
 	switch format {
 	case "", "table", "wide":
 		format = "json"
 	}
-	p := output.NewPrinterWithOpts(output.PrinterOptions{Format: format, Writer: os.Stdout, JQFilter: jqFilter})
+	p := newPrinterOpts(ictx, output.PrinterOptions{Format: format, Writer: currentStdout(ictx), JQFilter: jqFilter(ictx)})
 	return p.Print(list)
 }
 

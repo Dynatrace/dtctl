@@ -10,11 +10,14 @@ import (
 )
 
 // getExtensionsCmd retrieves Extensions 2.0 extensions
-var getExtensionsCmd = &cobra.Command{
-	Use:     "extensions [name]",
-	Aliases: []string{"extension", "ext", "exts"},
-	Short:   "Get Extensions 2.0 extensions",
-	Long: `Get Extensions 2.0 extensions.
+var getExtensionsCmd = newGetExtensionsCmd()
+
+func newGetExtensionsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "extensions [name]",
+		Aliases: []string{"extension", "ext", "exts"},
+		Short:   "Get Extensions 2.0 extensions",
+		Long: `Get Extensions 2.0 extensions.
 
 Examples:
   # List all extensions
@@ -29,40 +32,47 @@ Examples:
   # Output as JSON
   dtctl get extensions -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name, _ := cmd.Flags().GetString("name")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, _ := cmd.Flags().GetString("name")
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := extension.NewHandler(c)
-
-		// Get specific extension versions if name provided as argument
-		if len(args) > 0 {
-			versions, err := handler.Get(args[0])
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.PrintList(versions.Items)
-		}
 
-		list, err := handler.List(cmd.Context(), name, GetChunkSize())
-		if err != nil {
-			return err
-		}
+			handler := extension.NewHandler(c)
 
-		return printer.PrintList(list.Items)
-	},
+			// Get specific extension versions if name provided as argument
+			if len(args) > 0 {
+				versions, err := handler.Get(args[0])
+				if err != nil {
+					return err
+				}
+				return printer.PrintList(versions.Items)
+			}
+
+			list, err := handler.List(cmd.Context(), name, getChunkSize(cmdContext(cmd)))
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(list.Items)
+		},
+	}
+	c.Flags().String("name", "", "Filter extensions by name")
+	stability.MarkStable(c)
+	return c
 }
 
 // getExtensionConfigsCmd retrieves monitoring configurations for an extension
-var getExtensionConfigsCmd = &cobra.Command{
-	Use:     "extension-configs <extension-name>",
-	Aliases: []string{"extension-config", "ext-configs", "ext-config"},
-	Short:   "Get monitoring configurations for an extension",
-	Long: `Get monitoring configurations for an Extensions 2.0 extension.
+var getExtensionConfigsCmd = newGetExtensionConfigsCmd()
+
+func newGetExtensionConfigsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "extension-configs <extension-name>",
+		Aliases: []string{"extension-config", "ext-configs", "ext-config"},
+		Short:   "Get monitoring configurations for an extension",
+		Long: `Get monitoring configurations for an Extensions 2.0 extension.
 
 Examples:
   # List all monitoring configurations for an extension
@@ -74,57 +84,56 @@ Examples:
   # Output as JSON
   dtctl get extension-configs com.dynatrace.extension.host-monitoring -o json
 `,
-	// Not ExactArgs: evals showed agents calling this bare 8×/batch and getting
-	// the unhelpful "accepts 1 arg(s), received 0".
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 1 {
-			return fmt.Errorf("extension-configs requires the extension name — list installed extensions first: dtctl get extensions")
-		}
-		return nil
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		extensionName := args[0]
-		configID, _ := cmd.Flags().GetString("config-id")
-		version, _ := cmd.Flags().GetString("version")
+		// Not ExactArgs: evals showed agents calling this bare 8×/batch and getting
+		// the unhelpful "accepts 1 arg(s), received 0".
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("extension-configs requires the extension name — list installed extensions first: dtctl get extensions")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			extensionName := args[0]
+			configID, _ := cmd.Flags().GetString("config-id")
+			version, _ := cmd.Flags().GetString("version")
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := extension.NewHandler(c)
-
-		// Get specific monitoring configuration if config ID provided
-		if configID != "" {
-			config, err := handler.GetMonitoringConfiguration(extensionName, configID)
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(config)
-		}
 
-		// List all monitoring configurations
-		list, err := handler.ListMonitoringConfigurations(extensionName, version, GetChunkSize())
-		if err != nil {
-			return err
-		}
+			handler := extension.NewHandler(c)
 
-		return printer.PrintList(list.Items)
-	},
+			// Get specific monitoring configuration if config ID provided
+			if configID != "" {
+				config, err := handler.GetMonitoringConfiguration(extensionName, configID)
+				if err != nil {
+					return err
+				}
+				return printer.Print(config)
+			}
+
+			// List all monitoring configurations
+			list, err := handler.ListMonitoringConfigurations(extensionName, version, getChunkSize(cmdContext(cmd)))
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(list.Items)
+		},
+	}
+	c.Flags().String("config-id", "", "Get a specific monitoring configuration by ID")
+	c.Flags().String("version", "", "Filter configs by extension version")
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
 	// Extension flags
-	getExtensionsCmd.Flags().String("name", "", "Filter extensions by name")
-
 	// Extension config flags
-	getExtensionConfigsCmd.Flags().String("config-id", "", "Get a specific monitoring configuration by ID")
-	getExtensionConfigsCmd.Flags().String("version", "", "Filter configs by extension version")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(getExtensionConfigsCmd)
-	stability.MarkStable(getExtensionsCmd)
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -283,40 +284,40 @@ func TestCloudMonitoringReadModifyWriteKeepsUnmodelledFields(t *testing.T) {
 		check func(t *testing.T, sent map[string]any)
 	}{
 		{name: "enable aws monitoring", cloud: "aws", cmd: enableAWSMonitoringCmd,
-			setup: func(n string) { enableAWSMonitoringName = n },
+			setup: func(n string) { _ = enableAWSMonitoringCmd.Flags().Set("name", n) },
 			check: func(t *testing.T, sent map[string]any) { assertPathEquals(t, sent, "value.enabled", true) }},
 		{name: "enable azure monitoring", cloud: "azure", cmd: enableAzureMonitoringCmd,
-			setup: func(n string) { enableAzureMonitoringName = n },
+			setup: func(n string) { _ = enableAzureMonitoringCmd.Flags().Set("name", n) },
 			check: func(t *testing.T, sent map[string]any) { assertPathEquals(t, sent, "value.enabled", true) }},
 		{name: "enable gcp monitoring", cloud: "gcp", cmd: enableGCPMonitoringCmd,
-			setup: func(n string) { enableGCPMonitoringName = n },
+			setup: func(n string) { _ = enableGCPMonitoringCmd.Flags().Set("name", n) },
 			check: func(t *testing.T, sent map[string]any) { assertPathEquals(t, sent, "value.enabled", true) }},
 		{name: "disable aws monitoring", cloud: "aws", cmd: disableAWSMonitoringCmd,
-			setup: func(n string) { disableAWSMonitoringName = n }},
+			setup: func(n string) { _ = disableAWSMonitoringCmd.Flags().Set("name", n) }},
 		{name: "disable azure monitoring", cloud: "azure", cmd: disableAzureMonitoringCmd,
-			setup: func(n string) { disableAzureMonitoringName = n }},
+			setup: func(n string) { _ = disableAzureMonitoringCmd.Flags().Set("name", n) }},
 		{name: "disable gcp monitoring", cloud: "gcp", cmd: disableGCPMonitoringCmd,
-			setup: func(n string) { disableGCPMonitoringName = n }},
+			setup: func(n string) { _ = disableGCPMonitoringCmd.Flags().Set("name", n) }},
 		{name: "update aws monitoring", cloud: "aws", cmd: updateAWSMonitoringConfigCmd,
 			setup: func(n string) {
-				updateAWSMonitoringConfigName = n
-				updateAWSMonitoringConfigRegions = "us-east-1,eu-central-1"
+				_ = updateAWSMonitoringConfigCmd.Flags().Set("name", n)
+				_ = updateAWSMonitoringConfigCmd.Flags().Set("regions", "us-east-1,eu-central-1")
 			},
 			check: func(t *testing.T, sent map[string]any) {
 				assertPathEquals(t, sent, "value.aws.regionFiltering", []any{"us-east-1", "eu-central-1"})
 			}},
 		{name: "update azure monitoring", cloud: "azure", cmd: updateAzureMonitoringConfigCmd,
 			setup: func(n string) {
-				updateAzureMonitoringConfigName = n
-				updateAzureMonitoringConfigLocationFiltering = "eastus,westeurope"
+				_ = updateAzureMonitoringConfigCmd.Flags().Set("name", n)
+				_ = updateAzureMonitoringConfigCmd.Flags().Set("locationFiltering", "eastus,westeurope")
 			},
 			check: func(t *testing.T, sent map[string]any) {
 				assertPathEquals(t, sent, "value.azure.locationFiltering", []any{"eastus", "westeurope"})
 			}},
 		{name: "update gcp monitoring", cloud: "gcp", cmd: updateGCPMonitoringConfigCmd,
 			setup: func(n string) {
-				updateGCPMonitoringConfigName = n
-				updateGCPMonitoringConfigLocationFiltering = "us-central1,europe-west1"
+				_ = updateGCPMonitoringConfigCmd.Flags().Set("name", n)
+				_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "us-central1,europe-west1")
 			},
 			check: func(t *testing.T, sent map[string]any) {
 				assertPathEquals(t, sent, "value.googleCloud.locationFiltering", []any{"us-central1", "europe-west1"})
@@ -330,14 +331,12 @@ func TestCloudMonitoringReadModifyWriteKeepsUnmodelledFields(t *testing.T) {
 			fx := unmodelledCloudFixtures[byCloud[tc.cloud]]
 			setupPlatformCmdTest(t, srv.Server, "json")
 
-			origDryRun := dryRun
+			origDryRun := dryRun(context.Background())
 			t.Cleanup(func() {
-				dryRun = origDryRun
+				gFlags.dryRun = origDryRun
 				resetCloudFlagVars()
-				enableAWSMonitoringName, enableAzureMonitoringName, enableGCPMonitoringName = "", "", ""
-				disableAWSMonitoringName, disableAzureMonitoringName, disableGCPMonitoringName = "", "", ""
 			})
-			dryRun = false
+			gFlags.dryRun = false
 			resetCloudFlagVars()
 			tc.setup(fx.name)
 

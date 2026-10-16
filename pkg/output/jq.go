@@ -2,6 +2,7 @@ package output
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -87,6 +88,12 @@ func ApplyJQ(filter string, input interface{}) (interface{}, error) {
 			break
 		}
 		if runErr, ok := v.(error); ok {
+			// "cannot iterate over: null" is the same missing-key mistake as a path resolving to null.
+			if key := leadingJQKey(filter); key != "" && !hasJQKey(generic, key) {
+				if _, isObj := generic.(map[string]interface{}); isObj {
+					return nil, jqShapeMismatch(filter, generic)
+				}
+			}
 			return nil, fmt.Errorf("failed to apply --jq filter: %w", runErr)
 		}
 		results = append(results, v)
@@ -127,6 +134,16 @@ func jqShapeMismatch(filter string, input interface{}) error {
 			filter, describeJQInput(input)),
 		Suggestions: suggestions,
 	}
+}
+
+var leadingKeyRe = regexp.MustCompile(`^\s*\.([A-Za-z_][A-Za-z0-9_]*)`)
+
+// leadingJQKey is the first object key a filter addresses, or "".
+func leadingJQKey(filter string) string {
+	if m := leadingKeyRe.FindStringSubmatch(filter); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // hasJQKey reports whether input is an object carrying key.

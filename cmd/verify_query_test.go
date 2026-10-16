@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func TestFormatVerifyResultHuman_ValidQuery(t *testing.T) {
 		},
 	}
 
-	err := formatVerifyResultHuman(result, "fetch logs", false)
+	err := formatVerifyResultHuman(context.Background(), result, "fetch logs", false)
 	if err != nil {
 		t.Fatalf("formatVerifyResultHuman failed: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestFormatVerifyResultHuman_InvalidQuery(t *testing.T) {
 	}
 
 	query := "fetch logs | summrize count()"
-	err := formatVerifyResultHuman(result, query, false)
+	err := formatVerifyResultHuman(context.Background(), result, query, false)
 	if err != nil {
 		t.Fatalf("formatVerifyResultHuman failed: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestFormatVerifyResultHuman_WithCanonical(t *testing.T) {
 		CanonicalQuery: "fetch logs\n| limit 1000",
 	}
 
-	err := formatVerifyResultHuman(result, "fetch logs", true)
+	err := formatVerifyResultHuman(context.Background(), result, "fetch logs", true)
 	if err != nil {
 		t.Fatalf("formatVerifyResultHuman failed: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestPrintSyntaxError(t *testing.T) {
 		End:   &exec.Position{Line: 1, Column: 22},
 	}
 
-	err := printSyntaxError(query, pos, false)
+	err := printSyntaxError(context.Background(), query, pos, false)
 	if err != nil {
 		t.Fatalf("printSyntaxError failed: %v", err)
 	}

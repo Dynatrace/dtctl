@@ -77,7 +77,7 @@ func TestVerifyOpenPipelineDQLProcessorCmd_FromFile(t *testing.T) {
 func TestVerifyOpenPipelineDQLProcessorCmd_JSONOutput(t *testing.T) {
 	setupVerifyDQLProcessorTest(t, `{"valid":true,"notifications":[]}`)
 
-	outputFormat = "json"
+	gFlags.outputFormat = "json"
 	rootCmd.PersistentFlags().Lookup("output").Changed = true
 
 	var runErr error

@@ -1,18 +1,19 @@
 package cmd
 
 import (
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
 // completionCmd represents the completion command
-var completionCmd = &cobra.Command{
-	Use:   "completion [bash|zsh|fish|powershell]",
-	Short: "Generate shell completion scripts",
-	Long: `Generate shell completion scripts for dtctl.
+var completionCmd = newCompletionCmd()
+
+func newCompletionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "completion [bash|zsh|fish|powershell]",
+		Short: "Generate shell completion scripts",
+		Long: `Generate shell completion scripts for dtctl.
 
 Examples:
   # bash (temporary)
@@ -43,20 +44,23 @@ Note:
     rm -f ~/.zcompdump* ~/.zsh/completions/_dtctl
     dtctl completion zsh > ~/.zsh/completions/_dtctl
 `,
-	ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
-	Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
-	Run: func(cmd *cobra.Command, args []string) {
-		switch args[0] {
-		case "bash":
-			_ = cmd.Root().GenBashCompletionV2(os.Stdout, true)
-		case "zsh":
-			_ = cmd.Root().GenZshCompletion(os.Stdout)
-		case "fish":
-			_ = cmd.Root().GenFishCompletion(os.Stdout, true)
-		case "powershell":
-			_ = cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
-		}
-	},
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
+		Run: func(cmd *cobra.Command, args []string) {
+			switch args[0] {
+			case "bash":
+				_ = cmd.Root().GenBashCompletionV2(currentStdout(cmdContext(cmd)), true)
+			case "zsh":
+				_ = cmd.Root().GenZshCompletion(currentStdout(cmdContext(cmd)))
+			case "fish":
+				_ = cmd.Root().GenFishCompletion(currentStdout(cmdContext(cmd)), true)
+			case "powershell":
+				_ = cmd.Root().GenPowerShellCompletionWithDesc(currentStdout(cmdContext(cmd)))
+			}
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -66,5 +70,4 @@ func init() {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(completionCmd)
 }

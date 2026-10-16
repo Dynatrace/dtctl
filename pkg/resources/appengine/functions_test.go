@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 func TestReadFileOrStdin(t *testing.T) {
@@ -107,5 +108,21 @@ func TestFunctionHandler_InvokeFunction_CustomError(t *testing.T) {
 				t.Errorf("InvokeFunction() error = %q, want it to contain %q", err.Error(), tt.errContains)
 			}
 		})
+	}
+}
+
+func TestReadFileOrStdinWith_UsesTheGivenEnv(t *testing.T) {
+	env := vfs.Env{
+		FS:    vfs.NewMapFS(map[string][]byte{"code.js": []byte("export default 1")}),
+		Stdin: strings.NewReader("from stdin"),
+	}
+
+	got, err := ReadFileOrStdinWith(env, "code.js")
+	if err != nil || got != "export default 1" {
+		t.Errorf("ReadFileOrStdinWith(file) = %q, %v, want the file from the Env's filesystem", got, err)
+	}
+	got, err = ReadFileOrStdinWith(env, "-")
+	if err != nil || got != "from stdin" {
+		t.Errorf("ReadFileOrStdinWith(-) = %q, %v, want the Env's stdin", got, err)
 	}
 }

@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -202,12 +202,12 @@ func hasSubcommand(parent, child *cobra.Command) bool {
 //
 // Returns nil when there is no usable config, which every caller treats as "no
 // constraint": the real command surfaces the config error later, with context.
-func configForArgs(args []string) *config.Config {
+func configForArgs(ctx context.Context, args []string) *config.Config {
 	// Session-backed invocations resolve against the synthetic config: no
 	// user-defined profiles and no context binding, but the per-request
 	// environment (RunOptions.Env) still applies.
-	if runSession != nil {
-		return runSession.syntheticConfig()
+	if currentSession(ctx) != nil {
+		return withInvocationEnv(ctx, currentSession(ctx).syntheticConfig())
 	}
 	var (
 		cfg *config.Config
@@ -224,7 +224,7 @@ func configForArgs(args []string) *config.Config {
 	if ctxOverride := extractContextOverride(args); ctxOverride != "" {
 		cfg.CurrentContext = ctxOverride
 	}
-	return cfg
+	return withInvocationEnv(ctx, cfg)
 }
 
 // surfaceConfig is configForArgs with an empty config substituted for "no
@@ -234,20 +234,20 @@ func configForArgs(args []string) *config.Config {
 // and DTCTL_MIN_STABILITY, since both are read through a Config. The legacy
 // DTCTL_EXPERIMENTAL_* variables never had that dependency, so honoring only
 // them would also make the deprecated spelling the more reliable one.
-func surfaceConfig(args []string) *config.Config {
-	if cfg := configForArgs(args); cfg != nil {
+func surfaceConfig(ctx context.Context, args []string) *config.Config {
+	if cfg := configForArgs(ctx, args); cfg != nil {
 		return cfg
 	}
-	return config.NewConfig()
+	return withInvocationEnv(ctx, config.NewConfig())
 }
 
 // resolveDevelopmentFeatures returns the development features this invocation
 // has opted into, plus whether a disabled development command may explain
 // itself.
-func resolveDevelopmentFeatures(args []string) (map[string]bool, bool) {
-	cfg := surfaceConfig(args)
-	return legacyDevelopmentFeatures(cfg.EnabledDevelopmentFeatures()),
-		developmentSignposting(cfg)
+func resolveDevelopmentFeatures(ctx context.Context, args []string) (map[string]bool, bool) {
+	cfg := surfaceConfig(ctx, args)
+	return legacyDevelopmentFeatures(ctx, cfg.EnabledDevelopmentFeatures()),
+		developmentSignposting(ctx, cfg)
 }
 
 // DevelopmentFeatureEnabled reports whether one development feature is opted
@@ -257,11 +257,25 @@ func resolveDevelopmentFeatures(args []string) (map[string]bool, bool) {
 // main must decide whether to dispatch `dtctl serve` before the command
 // pipeline runs at all, because a server has to start outside the
 // per-invocation lock. Everything inside the pipeline uses the resolved set.
+//
+// It resolves the process-level state. Code that runs inside an invocation uses
+// developmentFeatureEnabled, which reads the state carried on its context.
 func DevelopmentFeatureEnabled(feature string) bool {
+	return developmentFeatureEnabled(context.Background(), feature)
+}
+
+// DevelopmentFeatureEnabled reports whether one development feature is opted
+// into, resolving from the ambient config and environment.
+//
+// It exists for the one caller that cannot wait for the registration stage:
+// main must decide whether to dispatch `dtctl serve` before the command
+// pipeline runs at all, because a server has to start outside the
+// per-invocation lock. Everything inside the pipeline uses the resolved set.
+func developmentFeatureEnabled(ctx context.Context, feature string) bool {
 	// No args: main's dispatch requires `serve` to be argv[1], so no --config
 	// can precede it, and this is also reachable from a library caller inside a
 	// test binary, whose os.Args holds -test.* flags rather than CLI argv.
-	enabled, _ := resolveDevelopmentFeatures(nil)
+	enabled, _ := resolveDevelopmentFeatures(ctx, nil)
 	return stability.Enabled(feature, enabled)
 }
 
@@ -278,9 +292,9 @@ var legacyDevelopmentEnvVars = map[string]string{
 // variables into an enabled set. They can only ever *add* a feature: an unset
 // legacy variable is silence, not an explicit off, so it must not override an
 // opt-in expressed the current way.
-func legacyDevelopmentFeatures(enabled map[string]bool) map[string]bool {
+func legacyDevelopmentFeatures(ctx context.Context, enabled map[string]bool) map[string]bool {
 	for envVar, feature := range legacyDevelopmentEnvVars {
-		if !truthyEnv(envVar) {
+		if !truthyEnv(ctx, envVar) {
 			continue
 		}
 		if enabled == nil {
@@ -294,8 +308,8 @@ func legacyDevelopmentFeatures(enabled map[string]bool) map[string]bool {
 // truthyEnv reports whether an environment variable holds anything other than
 // the falsy set. Preserves the matrix the retired ExperimentalEnabled used, so
 // a deployment that wrote "1", "true" or "yes" keeps working unchanged.
-func truthyEnv(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+func truthyEnv(ctx context.Context, name string) bool {
+	switch strings.ToLower(strings.TrimSpace(getenv(ctx, name))) {
 	case "", "0", "false", "no", "off":
 		return false
 	default:
@@ -317,8 +331,8 @@ func truthyEnv(name string) bool {
 // disappear" against its task; naming an opt-in in a machine-readable envelope
 // invites it to take the opt-in, and the resulting automation would be built on
 // surface with no contract at all.
-func developmentSignposting(cfg *config.Config) bool {
-	if agentMode {
+func developmentSignposting(ctx context.Context, cfg *config.Config) bool {
+	if agentMode(ctx) {
 		return false
 	}
 	if cfg.DevelopmentEnvSet() {
@@ -335,9 +349,9 @@ func developmentSignposting(cfg *config.Config) bool {
 // embedding — the platform service running dtctl for a workflow action — the
 // caller controls argv, so a flag would hand the opt-in to exactly the party
 // the floor exists to constrain.
-func resolveStabilityPolicy(args []string, devEnabled map[string]bool) (stability.Policy, error) {
+func resolveStabilityPolicy(ctx context.Context, args []string, devEnabled map[string]bool) (stability.Policy, error) {
 	granted := stability.DefaultRegistry().EnabledPaths(devEnabled)
-	cfg := surfaceConfig(args)
+	cfg := surfaceConfig(ctx, args)
 	floor, err := cfg.ResolveMinStability()
 	if err != nil {
 		return stability.Policy{}, err

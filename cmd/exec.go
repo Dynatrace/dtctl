@@ -7,10 +7,13 @@ import (
 )
 
 // execCmd represents the exec command
-var execCmd = &cobra.Command{
-	Use:   "exec",
-	Short: "Execute queries, workflows, or functions",
-	Long: `Execute operations on the Dynatrace platform: run workflows, invoke
+var execCmd = newExecCmd()
+
+func newExecCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "exec",
+		Short: "Execute queries, workflows, or functions",
+		Long: `Execute operations on the Dynatrace platform: run workflows, invoke
 serverless functions, evaluate SLOs, chat with Davis CoPilot, or preview
 OpenPipeline processor definitions against sample records.
 
@@ -23,7 +26,7 @@ Available operations:
   slo                     Evaluate a service-level objective
   copilot (cp, chat)      Chat with Davis CoPilot interactively
   preview-processor       Preview an OpenPipeline processor against sample records`,
-	Example: `  # Execute a workflow and wait for completion
+		Example: `  # Execute a workflow and wait for completion
   dtctl exec workflow <workflow-id>
 
   # Execute a workflow with JSON input
@@ -40,7 +43,10 @@ Available operations:
 
   # Preview a processor definition against sample records
   dtctl exec preview-processor -f processor.json`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -59,5 +65,4 @@ func init() {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(execCmd)
 }

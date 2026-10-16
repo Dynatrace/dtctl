@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -23,9 +24,9 @@ import (
 // file first broke the config teardown tests.
 func runCLI(t *testing.T, argv ...string) (int, string) {
 	t.Helper()
-	origDryRun, origAgentMode, origFormat := dryRun, agentMode, outputFormat
+	origDryRun, origAgentMode, origFormat := dryRun(context.Background()), agentMode(context.Background()), outputFormat(context.Background())
 	t.Cleanup(func() {
-		dryRun, agentMode, outputFormat = origDryRun, origAgentMode, origFormat
+		gFlags.dryRun, gFlags.agentMode, gFlags.outputFormat = origDryRun, origAgentMode, origFormat
 		for _, name := range []string{"dry-run", "agent", "no-agent"} {
 			if f := rootCmd.PersistentFlags().Lookup(name); f != nil {
 				_ = f.Value.Set("false")

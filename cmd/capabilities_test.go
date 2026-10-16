@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func TestLaunchEditorCapabilityDisabled(t *testing.T) {
 	prev := SetCapabilities(Capabilities{})
 	t.Cleanup(func() { SetCapabilities(prev) })
 
-	err := launchEditor("vim", filepath.Join(t.TempDir(), "x.yaml"))
+	err := launchEditor(context.Background(), "vim", filepath.Join(t.TempDir(), "x.yaml"))
 	var capErr *CapabilityError
 	require.ErrorAs(t, err, &capErr)
 	require.Contains(t, capErr.Error(), "interactive editing")
@@ -38,19 +39,19 @@ func TestPluginDispatchCapabilityDisabled(t *testing.T) {
 	// With the capability off the gate must reject before any PATH lookup,
 	// so even a name that would resolve to a plugin falls through to the
 	// normal unknown-command error path.
-	code, handled := tryPluginDispatch([]string{"definitely-not-a-builtin"})
+	code, handled := tryPluginDispatch(context.Background(), []string{"definitely-not-a-builtin"})
 	require.False(t, handled, "dispatch must decline when PluginDispatch is off")
 	require.Zero(t, code)
 }
 
 func TestErrorToDetailCapabilityError(t *testing.T) {
 	err := &CapabilityError{Feature: "apply hooks"}
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 	require.Equal(t, "capability_disabled", detail.Code)
 	require.Equal(t, err.Error(), detail.Message)
 
 	// Wrapped errors must still map (errors.As semantics).
-	detail = errorToDetail(errors.Join(errors.New("outer"), err))
+	detail = errorToDetail(context.Background(), errors.Join(errors.New("outer"), err))
 	require.Equal(t, "capability_disabled", detail.Code)
 }
 

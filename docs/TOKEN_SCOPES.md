@@ -52,6 +52,7 @@ storage:application.snapshots:read,
 storage:user.events:read,
 storage:user.sessions:read,
 storage:user.replays:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:bucket-definitions:read,
 storage:fieldsets:read,
@@ -65,6 +66,7 @@ davis:analyzers:read,
 app-engine:apps:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `readwrite-mine`
@@ -121,7 +123,8 @@ app-engine:apps:run,
 app-engine:functions:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `readwrite-all`
@@ -173,6 +176,7 @@ storage:application.snapshots:read,
 storage:user.events:read,
 storage:user.sessions:read,
 storage:user.replays:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:buckets:write,
 storage:bucket-definitions:read,
@@ -199,7 +203,8 @@ app-engine:functions:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `dangerously-unrestricted`
@@ -253,6 +258,7 @@ storage:application.snapshots:read,
 storage:user.events:read,
 storage:user.sessions:read,
 storage:user.replays:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:buckets:write,
 storage:bucket-definitions:read,
@@ -290,7 +296,8 @@ app-engine:edge-connects:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
 app-engine:edge-connects:delete,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ---

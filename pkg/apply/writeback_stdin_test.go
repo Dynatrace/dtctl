@@ -23,7 +23,7 @@ func TestApplyWriteBack_StdinSourceIsNeverAFile(t *testing.T) {
 			orig := os.Stderr
 			os.Stderr = w
 			var warnings []string
-			applyWriteBack(StdinSourceFile, "wf-1", "workflow", writeID, false, &warnings)
+			(&Applier{}).applyWriteBack(StdinSourceFile, "wf-1", "workflow", writeID, false, &warnings)
 			os.Stderr = orig
 			_ = w.Close()
 			out, _ := io.ReadAll(r)

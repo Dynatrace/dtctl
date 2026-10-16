@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -16,10 +17,13 @@ import (
 )
 
 // describeCmd represents the describe command
-var describeCmd = &cobra.Command{
-	Use:   "describe",
-	Short: "Show details of a specific resource",
-	Long: `Show detailed information about a specific resource.
+var describeCmd = newDescribeCmd()
+
+func newDescribeCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "describe",
+		Short: "Show details of a specific resource",
+		Long: `Show detailed information about a specific resource.
 
 Unlike 'get', which outputs a list or a raw resource definition, 'describe'
 provides a human-readable summary with contextual details: trigger
@@ -36,7 +40,7 @@ Supported resources:
   extensions (ext)        extension-configs (extcfg) hub-extensions
   analyzers (az)          api                        environment
   license`,
-	Example: `  # Describe a workflow to see its trigger and task details
+		Example: `  # Describe a workflow to see its trigger and task details
   dtctl describe workflow my-workflow
 
   # Describe a dashboard by name
@@ -47,25 +51,47 @@ Supported resources:
 
   # Describe an SLO to see its evaluation status
   dtctl describe slo <slo-id>`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var describeAzureProviderCmd = &cobra.Command{
-	Use:   "azure",
-	Short: "Describe Azure resources",
-	RunE:  requireSubcommand,
+var describeAzureProviderCmd = newDescribeAzureProviderCmd()
+
+func newDescribeAzureProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "azure",
+		Short: "Describe Azure resources",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var describeAWSProviderCmd = &cobra.Command{
-	Use:   "aws",
-	Short: "Describe AWS resources",
-	RunE:  requireSubcommand,
+var describeAWSProviderCmd = newDescribeAWSProviderCmd()
+
+func newDescribeAWSProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "aws",
+		Short: "Describe AWS resources",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var describeGCPProviderCmd = &cobra.Command{
-	Use:   "gcp",
-	Short: "Describe GCP resources (Preview)",
-	RunE:  requireSubcommand,
+var describeGCPProviderCmd = newDescribeGCPProviderCmd()
+
+func newDescribeGCPProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "gcp",
+		Short: "Describe GCP resources (Preview)",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	attachPreviewNotice(c, "GCP")
+	return c
 }
 
 // formatDuration formats seconds into a human-readable duration
@@ -104,114 +130,126 @@ func formatBytes(bytes int64) string {
 }
 
 // describeAzureConnectionCmd shows details of an Azure connection (credential)
-var describeAzureConnectionCmd = &cobra.Command{
-	Use:     "connection <id>",
-	Aliases: []string{"connections", "azconn"},
-	Short:   "Show details of an Azure connection (credential)",
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
+var describeAzureConnectionCmd = newDescribeAzureConnectionCmd()
 
-		h := azureconnection.NewHandler(c)
-		item, err := h.Get(args[0])
-		if err != nil {
-			return err
-		}
-
-		// For table output, show detailed human-readable information
-		if outputFormat == "table" {
-			const w = 6
-			output.DescribeKV("ID:", w, "%s", item.ObjectID)
-			output.DescribeKV("Name:", w, "%s", item.Value.Name)
-			output.DescribeKV("Type:", w, "%s", item.Value.Type)
-
-			if item.Value.ClientSecret != nil {
-				output.DescribeSection("Client Secret Config:")
-				output.DescribeKV("  Application ID:", 19, "%s", item.Value.ClientSecret.ApplicationID)
-				output.DescribeKV("  Directory ID:", 19, "%s", item.Value.ClientSecret.DirectoryID)
-				output.DescribeKV("  Consumers:", 19, "%v", item.Value.ClientSecret.Consumers)
+func newDescribeAzureConnectionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "connection <id>",
+		Aliases: []string{"connections", "azconn"},
+		Short:   "Show details of an Azure connection (credential)",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
 
-			if item.Value.FederatedIdentityCredential != nil {
-				output.DescribeSection("Federated Identity Config:")
-				output.DescribeKV("  Consumers:", 14, "%v", item.Value.FederatedIdentityCredential.Consumers)
+			h := azureconnection.NewHandler(c)
+			item, err := h.Get(args[0])
+			if err != nil {
+				return err
 			}
 
-			return nil
-		}
+			// For table output, show detailed human-readable information
+			if outputFormat(cmdContext(cmd)) == "table" {
+				const w = 6
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "ID:", w, "%s", item.ObjectID)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Name:", w, "%s", item.Value.Name)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Type:", w, "%s", item.Value.Type)
 
-		// For other formats, use standard printer
-		enrichAgent(printer, "describe", "azure-connection")
-		return printer.Print(item)
-	},
+				if item.Value.ClientSecret != nil {
+					output.FprintDescribeSection(currentStdout(cmdContext(cmd)), "Client Secret Config:")
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Application ID:", 19, "%s", item.Value.ClientSecret.ApplicationID)
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Directory ID:", 19, "%s", item.Value.ClientSecret.DirectoryID)
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Consumers:", 19, "%v", item.Value.ClientSecret.Consumers)
+				}
+
+				if item.Value.FederatedIdentityCredential != nil {
+					output.FprintDescribeSection(currentStdout(cmdContext(cmd)), "Federated Identity Config:")
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Consumers:", 14, "%v", item.Value.FederatedIdentityCredential.Consumers)
+				}
+
+				return nil
+			}
+
+			// For other formats, use standard printer
+			enrichAgent(printer, "describe", "azure-connection")
+			return printer.Print(item)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // describeAzureMonitoringConfigCmd shows details of an Azure monitoring configuration
-var describeAzureMonitoringConfigCmd = &cobra.Command{
-	Use:     "monitoring <id-or-name>",
-	Aliases: []string{"monitoring-config", "monitoring-configs", "azmon"},
-	Short:   "Show details of an Azure monitoring configuration",
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+var describeAzureMonitoringConfigCmd = newDescribeAzureMonitoringConfigCmd()
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
+func newDescribeAzureMonitoringConfigCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "monitoring <id-or-name>",
+		Aliases: []string{"monitoring-config", "monitoring-configs", "azmon"},
+		Short:   "Show details of an Azure monitoring configuration",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		h := azuremonitoringconfig.NewHandler(c)
-
-		item, err := h.FindByName(identifier)
-		if err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "not found") {
-				item, err = h.Get(identifier)
-				if err != nil {
-					return fmt.Errorf("monitoring config with name/description or ID %q not found", identifier)
-				}
-			} else {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
 				return err
 			}
-		}
 
-		// For table output, show detailed human-readable information
-		if outputFormat == "table" {
-			const w = 13
-			output.DescribeKV("ID:", w, "%s", item.ObjectID)
-			output.DescribeKV("Description:", w, "%s", item.Value.Description)
-			output.DescribeKV("Enabled:", w, "%v", item.Value.Enabled)
-			output.DescribeKV("Version:", w, "%s", item.Value.Version)
-			output.DescribeSection("Azure Config:")
-			output.DescribeKV("  Deployment Scope:", 32, "%s", item.Value.Azure.DeploymentScope)
-			output.DescribeKV("  Subscription Filtering Mode:", 32, "%s", item.Value.Azure.SubscriptionFilteringMode)
-			output.DescribeKV("  Configuration Mode:", 32, "%s", item.Value.Azure.ConfigurationMode)
-			output.DescribeKV("  Deployment Mode:", 32, "%s", item.Value.Azure.DeploymentMode)
+			h := azuremonitoringconfig.NewHandler(c)
 
-			if len(item.Value.Azure.Credentials) > 0 {
-				output.DescribeSection("  Credentials:")
-				for _, cred := range item.Value.Azure.Credentials {
-					output.DescribeKV("    - Description:", 21, "%s", cred.Description)
-					output.DescribeKV("      Connection ID:", 21, "%s", cred.ConnectionId)
-					output.DescribeKV("      Type:", 21, "%s", cred.Type)
+			item, err := h.FindByName(identifier)
+			if err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "not found") {
+					item, err = h.Get(identifier)
+					if err != nil {
+						return fmt.Errorf("monitoring config with name/description or ID %q not found", identifier)
+					}
+				} else {
+					return err
 				}
 			}
 
-			printAzureMonitoringConfigStatus(c, item.ObjectID)
+			// For table output, show detailed human-readable information
+			if outputFormat(cmdContext(cmd)) == "table" {
+				const w = 13
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "ID:", w, "%s", item.ObjectID)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Description:", w, "%s", item.Value.Description)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Enabled:", w, "%v", item.Value.Enabled)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Version:", w, "%s", item.Value.Version)
+				output.FprintDescribeSection(currentStdout(cmdContext(cmd)), "Azure Config:")
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Deployment Scope:", 32, "%s", item.Value.Azure.DeploymentScope)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Subscription Filtering Mode:", 32, "%s", item.Value.Azure.SubscriptionFilteringMode)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Configuration Mode:", 32, "%s", item.Value.Azure.ConfigurationMode)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "  Deployment Mode:", 32, "%s", item.Value.Azure.DeploymentMode)
 
-			return nil
-		}
+				if len(item.Value.Azure.Credentials) > 0 {
+					output.FprintDescribeSection(currentStdout(cmdContext(cmd)), "  Credentials:")
+					for _, cred := range item.Value.Azure.Credentials {
+						output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "    - Description:", 21, "%s", cred.Description)
+						output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "      Connection ID:", 21, "%s", cred.ConnectionId)
+						output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "      Type:", 21, "%s", cred.Type)
+					}
+				}
 
-		// For other formats, use standard printer
-		enrichAgent(printer, "describe", "azure-monitoring")
-		return printer.Print(item)
-	},
+				printAzureMonitoringConfigStatus(cmdContext(cmd), c, item.ObjectID)
+
+				return nil
+			}
+
+			// For other formats, use standard printer
+			enrichAgent(printer, "describe", "azure-monitoring")
+			return printer.Print(item)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-func printAzureMonitoringConfigStatus(c *client.Client, configID string) {
-	executor := exec.NewDQLExecutor(c)
+func printAzureMonitoringConfigStatus(ctx context.Context, c *client.Client, configID string) {
+	executor := newDQLExecutor(ctx, c)
 
 	smartscapeQuery := fmt.Sprintf(`timeseries sum(dt.sfm.da.azure.smartscape.updates.count), interval:1h, by:{dt.config.id}
 | filter dt.config.id == %q`, configID)
@@ -223,50 +261,50 @@ func printAzureMonitoringConfigStatus(c *client.Client, configID string) {
 | sort timestamp desc
 | limit 100`, configID)
 
-	fmt.Println()
-	output.DescribeSection("Status:")
+	fmt.Fprintln(currentStdout(ctx))
+	output.FprintDescribeSection(currentStdout(ctx), "Status:")
 
 	smartscapeResult, err := executor.ExecuteQuery(smartscapeQuery)
 	if err != nil {
-		fmt.Printf("  Smartscape updates: query failed (%v)\n", err)
+		fmt.Fprintf(currentStdout(ctx), "  Smartscape updates: query failed (%v)\n", err)
 	} else {
 		smartscapeRecords := exec.ExtractQueryRecords(smartscapeResult)
 		if latest, ok := exec.ExtractLatestPointFromTimeseries(smartscapeRecords, "sum(dt.sfm.da.azure.smartscape.updates.count)"); ok {
 			if !latest.Timestamp.IsZero() {
-				fmt.Printf("  Smartscape updates (latest sum, 1h): %.2f at %s\n", latest.Value, latest.Timestamp.Format(time.RFC3339))
+				fmt.Fprintf(currentStdout(ctx), "  Smartscape updates (latest sum, 1h): %.2f at %s\n", latest.Value, latest.Timestamp.Format(time.RFC3339))
 			} else {
-				fmt.Printf("  Smartscape updates (latest sum, 1h): %.2f\n", latest.Value)
+				fmt.Fprintf(currentStdout(ctx), "  Smartscape updates (latest sum, 1h): %.2f\n", latest.Value)
 			}
 		} else {
-			fmt.Println("  Smartscape updates: no data")
+			fmt.Fprintln(currentStdout(ctx), "  Smartscape updates: no data")
 		}
 	}
 
 	metricsResult, err := executor.ExecuteQuery(metricsQuery)
 	if err != nil {
-		fmt.Printf("  Metrics ingest: query failed (%v)\n", err)
+		fmt.Fprintf(currentStdout(ctx), "  Metrics ingest: query failed (%v)\n", err)
 	} else {
 		metricsRecords := exec.ExtractQueryRecords(metricsResult)
 		if latest, ok := exec.ExtractLatestPointFromTimeseries(metricsRecords, "sum(dt.sfm.da.azure.metric.data_points.count)"); ok {
 			if !latest.Timestamp.IsZero() {
-				fmt.Printf("  Metrics ingest (latest sum, 1h): %.2f at %s\n", latest.Value, latest.Timestamp.Format(time.RFC3339))
+				fmt.Fprintf(currentStdout(ctx), "  Metrics ingest (latest sum, 1h): %.2f at %s\n", latest.Value, latest.Timestamp.Format(time.RFC3339))
 			} else {
-				fmt.Printf("  Metrics ingest (latest sum, 1h): %.2f\n", latest.Value)
+				fmt.Fprintf(currentStdout(ctx), "  Metrics ingest (latest sum, 1h): %.2f\n", latest.Value)
 			}
 		} else {
-			fmt.Println("  Metrics ingest: no data")
+			fmt.Fprintln(currentStdout(ctx), "  Metrics ingest: no data")
 		}
 	}
 
 	eventsResult, err := executor.ExecuteQuery(eventsQuery)
 	if err != nil {
-		fmt.Printf("  Events: query failed (%v)\n", err)
+		fmt.Fprintf(currentStdout(ctx), "  Events: query failed (%v)\n", err)
 		return
 	}
 
 	eventRecords := exec.ExtractQueryRecords(eventsResult)
 	if len(eventRecords) == 0 {
-		fmt.Println("  Events: no recent data acquisition events")
+		fmt.Fprintln(currentStdout(ctx), "  Events: no recent data acquisition events")
 		return
 	}
 
@@ -274,18 +312,18 @@ func printAzureMonitoringConfigStatus(c *client.Client, configID string) {
 	if latestStatus == "" {
 		latestStatus = "UNKNOWN"
 	}
-	fmt.Printf("  Latest event status: %s\n", latestStatus)
+	fmt.Fprintf(currentStdout(ctx), "  Latest event status: %s\n", latestStatus)
 
-	fmt.Println()
-	output.DescribeSection("Recent events:")
-	fmt.Printf("%-35s  %s\n", "TIMESTAMP", "DA.CLOUDS.CONTENT")
+	fmt.Fprintln(currentStdout(ctx))
+	output.FprintDescribeSection(currentStdout(ctx), "Recent events:")
+	fmt.Fprintf(currentStdout(ctx), "%-35s  %s\n", "TIMESTAMP", "DA.CLOUDS.CONTENT")
 	for _, rec := range eventRecords {
 		timestamp := stringFromRecord(rec, "timestamp")
 		content := stringFromRecord(rec, "da.clouds.content")
 		if content == "" {
 			content = "-"
 		}
-		fmt.Printf("%-35s  %s\n", timestamp, content)
+		fmt.Fprintf(currentStdout(ctx), "%-35s  %s\n", timestamp, content)
 	}
 }
 
@@ -307,14 +345,12 @@ func init() {
 	describeCmd.AddCommand(describeAzureProviderCmd)
 	describeCmd.AddCommand(describeAWSProviderCmd)
 	describeCmd.AddCommand(describeGCPProviderCmd)
-	attachPreviewNotice(describeGCPProviderCmd, "GCP")
 	describeAzureProviderCmd.AddCommand(describeAzureConnectionCmd)
 	describeAzureProviderCmd.AddCommand(describeAzureMonitoringConfigCmd)
 	rootCmd.AddCommand(describeCmd)
 	describeCmd.AddCommand(describeWorkflowCmd)
 	describeCmd.AddCommand(describeSchedulingRuleCmd)
 	describeCmd.AddCommand(describeBreakpointCmd)
-	markLiveDebuggerExperimental(describeBreakpointCmd)
 	describeCmd.AddCommand(describeWorkflowExecutionCmd)
 	describeCmd.AddCommand(describeDashboardCmd)
 	describeCmd.AddCommand(describeNotebookCmd)
@@ -344,11 +380,3 @@ func init() {
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(describeCmd)
-	stability.MarkStable(describeAWSProviderCmd)
-	stability.MarkStable(describeAzureProviderCmd)
-	stability.MarkStable(describeAzureConnectionCmd)
-	stability.MarkStable(describeAzureMonitoringConfigCmd)
-	stability.MarkStable(describeGCPProviderCmd)
-}

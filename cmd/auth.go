@@ -15,12 +15,8 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/diagnostic"
 	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/dynatrace-oss/dtctl/pkg/prompt"
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
-)
-
-var (
-	idOnly  bool
-	refresh bool
 )
 
 // authCheckKeyringFunc and authEnsureKeyringFunc are the functions used to
@@ -30,6 +26,77 @@ var (
 	authCheckKeyringFunc  = config.CheckKeyring
 	authEnsureKeyringFunc = config.EnsureKeyringCollection
 )
+
+// Hooks for the one-time file-storage consent prompt in auth login. They
+// default to the real terminal checks on the invocation's streams and can be
+// overridden in tests.
+var (
+	authIsInteractiveFunc = func(ctx context.Context) bool {
+		in, ok := currentStdin(ctx).(*os.File)
+		return !getPlainMode(ctx) && !getAgentMode(ctx) && ok && isTerminal(in) && writerIsTerminal(currentStderr(ctx))
+	}
+	authConfirmFunc = func(ctx context.Context, message string) bool {
+		return prompt.ConfirmWith(currentStdin(ctx), currentStdout(ctx), message)
+	}
+)
+
+// offerFileTokenStorage handles a keyring failure that file storage can solve.
+// It returns true when file storage is in place for this login, either because
+// the user already chose it or because they just agreed to it.
+//
+// It never switches silently: tokens in a file are a weaker store than a
+// keyring, so the user decides, and only when the machine has no keyring at all
+// (a locked or broken keyring stays an error) and a person is there to answer.
+// The answer is remembered, so the question is asked once per machine.
+func offerFileTokenStorage(ctx context.Context, keyringErr error) bool {
+	stderr := currentStderr(ctx)
+	if config.IsFileTokenStorage() {
+		output.FprintWarning(stderr, "Keyring unavailable; using file-based token storage (%s)", config.OAuthStorageBackend())
+		output.FprintWarning(stderr, "Tokens will be stored in plaintext. Ensure only you can read the file.")
+		return true
+	}
+	if !config.IsKeyringAbsent(keyringErr) || !authIsInteractiveFunc(ctx) {
+		return false
+	}
+	output.FprintWarning(stderr, "No system keyring found on this machine (%v)", keyringErr)
+	if !authConfirmFunc(ctx, fmt.Sprintf("Store OAuth tokens in %s instead? (owner-only, not encrypted)", config.OAuthStorageBackend())) {
+		return false
+	}
+	if err := config.PersistFileTokenStorage(); err != nil {
+		output.FprintWarning(stderr, "Could not remember this choice (%v); set %s=file to repeat it", err, config.EnvTokenStorage)
+		// Token storage is resolved process-wide (sdk/session reads the process
+		// environment), so this is the only way to apply it to this login. It is
+		// reachable only from a terminal, which an embedded invocation never has.
+		_ = os.Setenv(config.EnvTokenStorage, "file")
+		return true
+	}
+	output.FprintInfo(stderr, "Remembered. To undo: delete %s, or set %s=keyring", config.FileTokenStorageConsentPath(), config.EnvTokenStorage)
+	return true
+}
+
+// tokenStorageUnavailableSuggestions lists the ways out when no token storage
+// could be set up, most relevant first.
+func tokenStorageUnavailableSuggestions(ctx context.Context, keyringErr error, contextName, environment string) []string {
+	var s []string
+	if config.IsKeyringAbsent(keyringErr) {
+		s = append(s,
+			fmt.Sprintf("No keyring on this machine: run `dtctl auth login` in a terminal to be asked once, or set %s=file", config.EnvTokenStorage))
+	} else {
+		s = append(s,
+			fmt.Sprintf("Unlock or repair the keyring, or set %s=file to use file-based token storage", config.EnvTokenStorage))
+	}
+	s = append(s,
+		fmt.Sprintf("Or skip OAuth with a platform token: dtctl config set-context %s --environment %q --token-ref my-token", contextName, environment),
+		"  dtctl config set-credentials my-token --token <YOUR_PLATFORM_TOKEN>",
+		"Token scopes: dtctl help token-scopes",
+	)
+	if isKeyringDisabled(ctx) {
+		s = append(s, fmt.Sprintf("Unset %s if it was set unintentionally", config.EnvDisableKeyring))
+	}
+	return s
+}
+
+func isKeyringDisabled(ctx context.Context) bool { return getenv(ctx, config.EnvDisableKeyring) != "" }
 
 // authClientCredentialsFunc performs the client credentials grant during
 // auth login. It defaults to the real implementation and can be overridden in
@@ -47,10 +114,16 @@ var authBrowserFlowFunc = func(ctx context.Context, flow *auth.OAuthFlow) (*auth
 }
 
 // authCmd represents the auth command
-var authCmd = &cobra.Command{
-	Use:   "auth",
-	Short: "Manage authentication and user identity",
-	Long:  `View authentication information and test permissions.`,
+var authCmd = newAuthCmd()
+
+func newAuthCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "auth",
+		Short: "Manage authentication and user identity",
+		Long:  `View authentication information and test permissions.`,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // WhoamiResult contains the current user information for output
@@ -150,10 +223,15 @@ func buildSessionStatus(contextName string, ctx *config.Context, tokenName strin
 }
 
 // authWhoamiCmd shows current user identity
-var authWhoamiCmd = &cobra.Command{
-	Use:   "whoami",
-	Short: "Display the current user identity",
-	Long: `Display information about the currently authenticated user.
+var authWhoamiCmd = newAuthWhoamiCmd()
+
+func newAuthWhoamiCmd() *cobra.Command {
+	var idOnly bool
+	var refresh bool
+	c := &cobra.Command{
+		Use:   "whoami",
+		Short: "Display the current user identity",
+		Long: `Display information about the currently authenticated user.
 
 This command shows the user ID, name, and email address associated with
 the current authentication token. It also displays the active context
@@ -162,7 +240,7 @@ and environment.
 The user information is retrieved from the Dynatrace metadata API.
 If that fails (e.g., missing scope), it falls back to decoding the
 JWT token's 'sub' claim.`,
-	Example: `  # View current user info
+		Example: `  # View current user info
   dtctl auth whoami
 
   # Get just the user ID (useful for scripting)
@@ -170,79 +248,87 @@ JWT token's 'sub' claim.`,
 
   # Output as JSON
   dtctl auth whoami -o json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := LoadConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		ctx, err := cfg.CurrentContextObj()
-		if err != nil {
-			return fmt.Errorf("failed to get current context: %w", err)
-		}
-
-		c, err := NewClientFromConfig(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
-		}
-
-		// If --id-only, just get the user ID
-		if idOnly {
-			userID, err := c.CurrentUserID()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
-				return fmt.Errorf("failed to get user ID: %w", err)
+				return fmt.Errorf("failed to load config: %w", err)
 			}
-			fmt.Println(userID)
-			return nil
-		}
 
-		// Try to get full user info from metadata API
-		userInfo, err := c.CurrentUser()
-		if err != nil {
-			// Fallback to JWT decoding for user ID only
-			userID, jwtErr := client.ExtractUserIDFromToken(cfg.MustGetToken(ctx.TokenRef))
-			if jwtErr != nil {
-				return fmt.Errorf("failed to get user info: %w (JWT fallback also failed: %v)", err, jwtErr)
+			ctx, err := cfg.CurrentContextObj()
+			if err != nil {
+				return fmt.Errorf("failed to get current context: %w", err)
 			}
-			userInfo = &client.UserInfo{
-				UserID: userID,
+
+			c, err := newClientFromConfig(cmdContext(cmd), cfg)
+			if err != nil {
+				return fmt.Errorf("failed to create client: %w", err)
 			}
-		}
 
-		result := WhoamiResult{
-			UserID:       userInfo.UserID,
-			UserName:     userInfo.UserName,
-			EmailAddress: userInfo.EmailAddress,
-			Context:      cfg.CurrentContext,
-			Environment:  ctx.Environment,
-		}
-
-		printer := NewPrinter()
-
-		// For table output, use a custom format
-		if outputFormat == "table" || outputFormat == "" {
-			const w = 13
-			output.DescribeKV("User ID:", w, "%s", result.UserID)
-			if result.UserName != "" {
-				output.DescribeKV("User Name:", w, "%s", result.UserName)
+			// If --id-only, just get the user ID
+			if idOnly {
+				userID, err := c.CurrentUserID()
+				if err != nil {
+					return fmt.Errorf("failed to get user ID: %w", err)
+				}
+				fmt.Fprintln(currentStdout(cmdContext(cmd)), userID)
+				return nil
 			}
-			if result.EmailAddress != "" {
-				output.DescribeKV("Email:", w, "%s", result.EmailAddress)
-			}
-			output.DescribeKV("Context:", w, "%s", result.Context)
-			output.DescribeKV("Environment:", w, "%s", result.Environment)
-			return nil
-		}
 
-		return printer.Print(result)
-	},
+			// Try to get full user info from metadata API
+			userInfo, err := c.CurrentUser()
+			if err != nil {
+				// Fallback to JWT decoding for user ID only
+				userID, jwtErr := client.ExtractUserIDFromToken(cfg.MustGetToken(ctx.TokenRef))
+				if jwtErr != nil {
+					return fmt.Errorf("failed to get user info: %w (JWT fallback also failed: %v)", err, jwtErr)
+				}
+				userInfo = &client.UserInfo{
+					UserID: userID,
+				}
+			}
+
+			result := WhoamiResult{
+				UserID:       userInfo.UserID,
+				UserName:     userInfo.UserName,
+				EmailAddress: userInfo.EmailAddress,
+				Context:      cfg.CurrentContext,
+				Environment:  ctx.Environment,
+			}
+
+			printer := newPrinterCtx(cmdContext(cmd))
+
+			// For table output, use a custom format
+			if outputFormat(cmdContext(cmd)) == "table" || outputFormat(cmdContext(cmd)) == "" {
+				const w = 13
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "User ID:", w, "%s", result.UserID)
+				if result.UserName != "" {
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "User Name:", w, "%s", result.UserName)
+				}
+				if result.EmailAddress != "" {
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Email:", w, "%s", result.EmailAddress)
+				}
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Context:", w, "%s", result.Context)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Environment:", w, "%s", result.Environment)
+				return nil
+			}
+
+			return printer.Print(result)
+		},
+	}
+	c.Flags().BoolVar(&idOnly, "id-only", false, "output only the user ID")
+	c.Flags().BoolVar(&refresh, "refresh", false, "force refresh of cached user info")
+	stability.MarkStable(c)
+	return c
 }
 
 // authStatusCmd shows OAuth session health for the current context
-var authStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Display OAuth session status and token health",
-	Long: `Display the OAuth session state for the current context.
+var authStatusCmd = newAuthStatusCmd()
+
+func newAuthStatusCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "status",
+		Short: "Display OAuth session status and token health",
+		Long: `Display the OAuth session state for the current context.
 
 Shows whether an access token is stored, when it expires, whether a
 refresh token is present (so the CLI can automatically refresh expired
@@ -250,61 +336,64 @@ access tokens), and the scopes granted to the session.
 
 For platform tokens (non-OAuth), reports the auth type and skips
 OAuth-specific fields.`,
-	Example: `  # Show session status for the current context
+		Example: `  # Show session status for the current context
   dtctl auth status
 
   # Output as JSON
   dtctl auth status -o json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := LoadConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
 
-		if cfg.CurrentContext == "" {
-			return fmt.Errorf("no current context set")
-		}
+			if cfg.CurrentContext == "" {
+				return fmt.Errorf("no current context set")
+			}
 
-		ctx, err := cfg.CurrentContextObj()
-		if err != nil {
-			return fmt.Errorf("failed to get current context: %w", err)
-		}
+			ctx, err := cfg.CurrentContextObj()
+			if err != nil {
+				return fmt.Errorf("failed to get current context: %w", err)
+			}
 
-		status, err := buildSessionStatusFunc(cfg.CurrentContext, ctx, ctx.TokenRef)
-		if err != nil {
-			return fmt.Errorf("failed to build session status: %w", err)
-		}
+			status, err := buildSessionStatusFunc(cfg.CurrentContext, ctx, ctx.TokenRef)
+			if err != nil {
+				return fmt.Errorf("failed to build session status: %w", err)
+			}
 
-		if outputFormat == "table" || outputFormat == "" {
-			printSessionStatusTable(status)
-			return nil
-		}
+			if outputFormat(cmdContext(cmd)) == "table" || outputFormat(cmdContext(cmd)) == "" {
+				printSessionStatusTable(cmdContext(cmd), status)
+				return nil
+			}
 
-		return NewPrinter().Print(status)
-	},
+			return newPrinterCtx(cmdContext(cmd)).Print(status)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-func printSessionStatusTable(status *SessionStatus) {
+func printSessionStatusTable(ctx context.Context, status *SessionStatus) {
 	const w = 17
-	output.DescribeKV("Context:", w, "%s", status.Context)
-	output.DescribeKV("Environment:", w, "%s", status.Environment)
+	output.FprintDescribeKV(currentStdout(ctx), "Context:", w, "%s", status.Context)
+	output.FprintDescribeKV(currentStdout(ctx), "Environment:", w, "%s", status.Environment)
 
 	if !status.IsOAuth {
-		output.DescribeKV("Auth type:", w, "%s", "platform token")
+		output.FprintDescribeKV(currentStdout(ctx), "Auth type:", w, "%s", "platform token")
 		return
 	}
 
-	output.DescribeKV("Auth type:", w, "%s", "OAuth")
+	output.FprintDescribeKV(currentStdout(ctx), "Auth type:", w, "%s", "OAuth")
 	if status.Storage != "" {
-		output.DescribeKV("Storage:", w, "%s", status.Storage)
+		output.FprintDescribeKV(currentStdout(ctx), "Storage:", w, "%s", status.Storage)
 	}
 
-	output.DescribeKV("Access token:", w, "%s", accessTokenSummary(status))
-	output.DescribeKV("Refresh token:", w, "%s", refreshTokenSummary(status))
+	output.FprintDescribeKV(currentStdout(ctx), "Access token:", w, "%s", accessTokenSummary(status))
+	output.FprintDescribeKV(currentStdout(ctx), "Refresh token:", w, "%s", refreshTokenSummary(status))
 
 	if !status.RefreshTokenPresent {
-		fmt.Fprintln(os.Stderr)
-		output.PrintWarning("No refresh token — run 'dtctl auth login' to enable automatic token refresh")
+		fmt.Fprintln(currentStderr(ctx))
+		output.FprintWarning(currentStderr(ctx), "No refresh token — run 'dtctl auth login' to enable automatic token refresh")
 	}
 }
 
@@ -439,10 +528,13 @@ func describeMissingClientCredentials(clientID, clientSecret string) string {
 }
 
 // authLoginCmd initiates browser-based OAuth login
-var authLoginCmd = &cobra.Command{
-	Use:   "login",
-	Short: "Authenticate using browser-based OAuth login",
-	Long: `Authenticate with Dynatrace using OAuth 2.0 browser-based login.
+var authLoginCmd = newAuthLoginCmd()
+
+func newAuthLoginCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "login",
+		Short: "Authenticate using browser-based OAuth login",
+		Long: `Authenticate with Dynatrace using OAuth 2.0 browser-based login.
 
 This command will:
 1. Open your default browser to the Dynatrace login page
@@ -466,6 +558,13 @@ Token storage:
   read — re-authenticate after switching. Useful for headless systems, WSL,
   containers, or Windows Admin sessions where keyring writes fail.
 
+  On a machine with no keyring at all (typical for headless Linux), a login run
+  in a terminal asks once whether to use the file store instead, and remembers
+  the answer. dtctl never switches to files silently, and non-interactive runs
+  (scripts, CI, --plain, --agent) never ask: set DTCTL_TOKEN_STORAGE=file there.
+  To undo a remembered choice, delete the marker file doctor names, or set
+  DTCTL_TOKEN_STORAGE=keyring.
+
 If neither keyring nor file storage is available, use API token authentication
 instead (dtctl config set-credentials).
 
@@ -483,7 +582,7 @@ Non-interactive login (CI/CD):
   --timeout bounds the token request, and --safety-level still gates dtctl
   itself. The safety level does not narrow the token: without --scopes the
   token carries every scope the OAuth client was granted.`,
-	Example: `  # Re-authenticate the current context (e.g. after token expiry)
+		Example: `  # Re-authenticate the current context (e.g. after token expiry)
   dtctl auth login
 
   # Login and create a new context named "my-env"
@@ -501,280 +600,287 @@ Non-interactive login (CI/CD):
   export DTCTL_ACCOUNT_URN=urn:dtaccount:00000000-0000-0000-0000-000000000000
   export DTCTL_TOKEN_STORAGE=file
   dtctl auth login --context ci --environment https://abc12345.apps.dynatrace.com --safety-level readonly`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Get flags
-		contextName, _ := cmd.Flags().GetString("context")
-		environment, _ := cmd.Flags().GetString("environment")
-		tokenName, _ := cmd.Flags().GetString("token-name")
-		timeoutStr, _ := cmd.Flags().GetString("timeout")
-		safetyLevelStr, _ := cmd.Flags().GetString("safety-level")
-		clientID, _ := cmd.Flags().GetString("client-id")
-		clientSecret, _ := cmd.Flags().GetString("client-secret")
-		accountURN, _ := cmd.Flags().GetString("account-urn")
-		grantScopes, _ := cmd.Flags().GetStringSlice("scopes")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Get flags
+			contextName, _ := cmd.Flags().GetString("context")
+			environment, _ := cmd.Flags().GetString("environment")
+			tokenName, _ := cmd.Flags().GetString("token-name")
+			timeoutStr, _ := cmd.Flags().GetString("timeout")
+			safetyLevelStr, _ := cmd.Flags().GetString("safety-level")
+			clientID, _ := cmd.Flags().GetString("client-id")
+			clientSecret, _ := cmd.Flags().GetString("client-secret")
+			accountURN, _ := cmd.Flags().GetString("account-urn")
+			grantScopes, _ := cmd.Flags().GetStringSlice("scopes")
 
-		// Environment variables are the safer way to supply these in CI: command
-		// line flags are visible to every other process via the process table.
-		if clientID == "" {
-			clientID = os.Getenv(envLoginClientID)
-		}
-		if clientSecret == "" {
-			clientSecret = os.Getenv(envLoginClientSecret)
-		}
-		if accountURN == "" {
-			accountURN = os.Getenv(envLoginAccountURN)
-		}
-
-		// Any client credentials input at all selects the non-interactive grant,
-		// including the parameters that are useless without the pair. Falling
-		// back to the browser flow because half the configuration is missing is
-		// the unexplained hang that this command exists to avoid.
-		nonInteractive := clientID != "" || clientSecret != "" || accountURN != "" || len(grantScopes) > 0
-		if nonInteractive && (clientID == "" || clientSecret == "") {
-			return &diagnostic.Error{
-				Operation: "auth login",
-				Message: fmt.Sprintf("the client credentials grant requires both a client ID and a client secret (%s)",
-					describeMissingClientCredentials(clientID, clientSecret)),
-				Suggestions: []string{
-					fmt.Sprintf("Set both %s and %s", envLoginClientID, envLoginClientSecret),
-					"Or pass --client-id and --client-secret",
-					fmt.Sprintf("Omit all of --client-id/--client-secret/--account-urn/--scopes (and %s/%s/%s) to use the interactive browser login",
-						envLoginClientID, envLoginClientSecret, envLoginAccountURN),
-				},
+			// Environment variables are the safer way to supply these in CI: command
+			// line flags are visible to every other process via the process table.
+			if clientID == "" {
+				clientID = os.Getenv(envLoginClientID)
 			}
-		}
-
-		// Resolve contextName, environment and tokenName from the config when not
-		// supplied as explicit flags.
-		if contextName == "" || environment == "" {
-			contextHint := "Use 'dtctl ctx' to list available context names, then pass --context <name> --environment <url>"
-			cfg, err := LoadConfig()
-			if err != nil {
-				if contextName == "" {
-					return &diagnostic.Error{
-						Operation:   "auth login",
-						Message:     "--context and --environment are required (no existing config found)",
-						Suggestions: []string{contextHint},
-						Err:         err,
-					}
-				}
-				// contextName provided but config unreadable — environment must be supplied explicitly.
-			} else {
-				var resolveErr error
-				contextName, environment, tokenName, resolveErr = resolveLoginContext(cfg, contextName, environment, tokenName)
-				if resolveErr != nil {
-					return &diagnostic.Error{
-						Operation:   "auth login",
-						Message:     "--context and --environment are required when no current context is set",
-						Suggestions: []string{contextHint, "Set a current context with 'dtctl ctx use-context <name>'"},
-					}
-				}
+			if clientSecret == "" {
+				clientSecret = os.Getenv(envLoginClientSecret)
 			}
-			// If environment is still empty, the named context is new — --environment must be provided.
-			if environment == "" {
+			if accountURN == "" {
+				accountURN = os.Getenv(envLoginAccountURN)
+			}
+
+			// Any client credentials input at all selects the non-interactive grant,
+			// including the parameters that are useless without the pair. Falling
+			// back to the browser flow because half the configuration is missing is
+			// the unexplained hang that this command exists to avoid.
+			nonInteractive := clientID != "" || clientSecret != "" || accountURN != "" || len(grantScopes) > 0
+			if nonInteractive && (clientID == "" || clientSecret == "") {
 				return &diagnostic.Error{
-					Operation:   "auth login",
-					Message:     fmt.Sprintf("--environment is required: context %q not found in config", contextName),
-					Suggestions: []string{contextHint},
+					Operation: "auth login",
+					Message: fmt.Sprintf("the client credentials grant requires both a client ID and a client secret (%s)",
+						describeMissingClientCredentials(clientID, clientSecret)),
+					Suggestions: []string{
+						fmt.Sprintf("Set both %s and %s", envLoginClientID, envLoginClientSecret),
+						"Or pass --client-id and --client-secret",
+						fmt.Sprintf("Omit all of --client-id/--client-secret/--account-urn/--scopes (and %s/%s/%s) to use the interactive browser login",
+							envLoginClientID, envLoginClientSecret, envLoginAccountURN),
+					},
 				}
 			}
-		}
 
-		// Default token name to context name if not provided
-		if tokenName == "" {
-			tokenName = contextName + "-oauth"
-		}
-
-		// Parse timeout
-		timeout, err := time.ParseDuration(timeoutStr)
-		if err != nil {
-			return fmt.Errorf("invalid timeout: %w", err)
-		}
-
-		// Parse and validate safety level
-		safetyLevel := config.SafetyLevel(safetyLevelStr)
-		if safetyLevelStr == "" {
-			safetyLevel = config.DefaultSafetyLevel
-		} else if !safetyLevel.IsValid() {
-			return fmt.Errorf("invalid safety level: %s (valid values: %v)", safetyLevelStr, config.ValidSafetyLevels())
-		}
-
-		// Load config
-		cfg, err := LoadConfig()
-		if err != nil {
-			// If config doesn't exist, create a new one
-			cfg = config.NewConfig()
-		}
-
-		// Ensure a token storage backend is available before starting OAuth flow.
-		// Keyring is preferred; file-based storage is the fallback for headless/WSL/CI environments.
-		if keyringErr := authCheckKeyringFunc(); keyringErr != nil {
-			recovered := false
-			// On Linux/WSL the persistent keyring collection may not exist yet.
-			// Attempt to create it — this may trigger an OS password prompt.
-			if strings.Contains(keyringErr.Error(), config.ErrMsgCollectionUnlock) {
-				output.PrintInfo("No keyring collection found — creating one (you may be prompted for a password)...")
-				if initErr := authEnsureKeyringFunc(cmd.Context()); initErr == nil {
-					if authCheckKeyringFunc() == nil {
-						output.PrintSuccess("Keyring collection created successfully")
-						recovered = true
+			// Resolve contextName, environment and tokenName from the config when not
+			// supplied as explicit flags.
+			if contextName == "" || environment == "" {
+				contextHint := "Use 'dtctl ctx' to list available context names, then pass --context <name> --environment <url>"
+				cfg, err := loadConfig(cmdContext(cmd))
+				if err != nil {
+					if contextName == "" {
+						return &diagnostic.Error{
+							Operation:   "auth login",
+							Message:     "--context and --environment are required (no existing config found)",
+							Suggestions: []string{contextHint},
+							Err:         err,
+						}
 					}
-				}
-			}
-			if !recovered {
-				// Keyring is unavailable — check if file-based storage can be used instead
-				if config.IsFileTokenStorage() {
-					output.PrintWarning("Keyring unavailable; using file-based token storage (%s)", config.OAuthStorageBackend())
-					output.PrintWarning("Tokens will be stored in plaintext. Ensure only you can read the file.")
+					// contextName provided but config unreadable — environment must be supplied explicitly.
 				} else {
+					var resolveErr error
+					contextName, environment, tokenName, resolveErr = resolveLoginContext(cfg, contextName, environment, tokenName)
+					if resolveErr != nil {
+						return &diagnostic.Error{
+							Operation:   "auth login",
+							Message:     "--context and --environment are required when no current context is set",
+							Suggestions: []string{contextHint, "Set a current context with 'dtctl ctx use-context <name>'"},
+						}
+					}
+				}
+				// If environment is still empty, the named context is new — --environment must be provided.
+				if environment == "" {
 					return &diagnostic.Error{
-						Operation: "auth login",
-						Message:   fmt.Sprintf("OAuth login requires a token storage backend, but the system keyring is unavailable: %v", keyringErr),
-						Suggestions: []string{
-							fmt.Sprintf("Set %s=file to use file-based token storage (recommended for headless/WSL/CI)", config.EnvTokenStorage),
-							"Or use token-based authentication instead:",
-							fmt.Sprintf("  dtctl config set-context %s --environment %q --token-ref my-token", contextName, environment),
-							"  dtctl config set-credentials my-token --token <YOUR_PLATFORM_TOKEN>",
-							"Create a platform token at: https://myaccount.dynatrace.com/platformTokens (Account Management > My platform tokens > Platform token)",
-							"For required token scopes, see: dtctl help token-scopes (or docs/TOKEN_SCOPES.md)",
-							"On Linux, ensure a Secret Service provider is running (e.g. gnome-keyring-daemon --start --components=secrets)",
-							fmt.Sprintf("Unset %s if it was set unintentionally", config.EnvDisableKeyring),
-						},
+						Operation:   "auth login",
+						Message:     fmt.Sprintf("--environment is required: context %q not found in config", contextName),
+						Suggestions: []string{contextHint},
 					}
 				}
 			}
-		}
 
-		// Warn about potentially wrong environment URLs
-		if problems := diagnostic.CheckEnvironmentURL(environment); len(problems) > 0 {
-			for _, p := range problems {
-				output.PrintWarning("%s", p.Message)
-				if p.SuggestedURL != "" {
-					output.PrintHint("Did you mean: %s", p.SuggestedURL)
+			// Default token name to context name if not provided
+			if tokenName == "" {
+				tokenName = contextName + "-oauth"
+			}
+
+			// Parse timeout
+			timeout, err := time.ParseDuration(timeoutStr)
+			if err != nil {
+				return fmt.Errorf("invalid timeout: %w", err)
+			}
+
+			// Parse and validate safety level
+			safetyLevel := config.SafetyLevel(safetyLevelStr)
+			if safetyLevelStr == "" {
+				safetyLevel = config.DefaultSafetyLevel
+			} else if !safetyLevel.IsValid() {
+				return fmt.Errorf("invalid safety level: %s (valid values: %v)", safetyLevelStr, config.ValidSafetyLevels())
+			}
+
+			// Load config
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				// If config doesn't exist, create a new one
+				cfg = config.NewConfig()
+			}
+
+			// Ensure a token storage backend is available before starting OAuth flow.
+			// Keyring is preferred; file-based storage is the fallback for headless/WSL/CI environments.
+			if keyringErr := authCheckKeyringFunc(); keyringErr != nil {
+				recovered := false
+				// On Linux/WSL the persistent keyring collection may not exist yet.
+				// Attempt to create it — this may trigger an OS password prompt.
+				if strings.Contains(keyringErr.Error(), config.ErrMsgCollectionUnlock) {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "No keyring collection found — creating one (you may be prompted for a password)...")
+					if initErr := authEnsureKeyringFunc(cmd.Context()); initErr == nil {
+						if authCheckKeyringFunc() == nil {
+							output.FprintSuccess(currentStderr(cmdContext(cmd)), "Keyring collection created successfully")
+							recovered = true
+						}
+					}
+				}
+				if !recovered {
+					// Keyring is unavailable — use file-based storage if the user has
+					// chosen it (or agrees to it now); otherwise explain the way out.
+					if !offerFileTokenStorage(cmdContext(cmd), keyringErr) {
+						return &diagnostic.Error{
+							Operation:   "auth login",
+							Message:     fmt.Sprintf("OAuth login requires a token storage backend, but the system keyring is unavailable: %v", keyringErr),
+							Suggestions: tokenStorageUnavailableSuggestions(cmdContext(cmd), keyringErr, contextName, environment),
+						}
+					}
 				}
 			}
-			fmt.Fprintln(os.Stderr)
-		}
 
-		// Detect environment and create appropriate OAuth config with safety level
-		oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, safetyLevel)
-
-		// Log which environment we detected
-		output.PrintInfo("Detected environment: %s", oauthConfig.Environment)
-		output.PrintInfo("Safety level: %s", oauthConfig.SafetyLevel)
-
-		// Create OAuth flow
-		flow, err := auth.NewOAuthFlow(oauthConfig)
-		if err != nil {
-			return fmt.Errorf("failed to initialize OAuth: %w", err)
-		}
-
-		// --timeout bounds the whole login attempt, whichever grant is used: an
-		// unbounded token request is exactly the CI hang this command avoids.
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		var tokens *auth.TokenSet
-		if nonInteractive {
-			// Client credentials grant: no browser, no redirect, no user. Scopes
-			// default to whatever the OAuth client was granted unless --scopes
-			// narrows them.
-			if len(grantScopes) == 0 {
-				output.PrintWarning("No --scopes given: the token carries every scope the OAuth client was granted.")
-				// The browser flow requests the safety level's scope set at the
-				// IdP, so there the two move together. Here they do not, and a
-				// narrowing safety level would otherwise read as if it had.
-				if safetyLevel != config.SafetyLevelDangerouslyUnrestricted {
-					output.PrintWarning("--safety-level %s gates dtctl itself; it does not narrow the token.", safetyLevel)
-					output.PrintHint("Pass --scopes, or provision the OAuth client with only the scopes this pipeline needs.")
+			// Warn about potentially wrong environment URLs
+			if problems := diagnostic.CheckEnvironmentURL(environment); len(problems) > 0 {
+				for _, p := range problems {
+					output.FprintWarning(currentStderr(cmdContext(cmd)), "%s", p.Message)
+					if p.SuggestedURL != "" {
+						output.FprintHint(currentStderr(cmdContext(cmd)), "Did you mean: %s", p.SuggestedURL)
+					}
 				}
+				fmt.Fprintln(currentStderr(cmdContext(cmd)))
 			}
-			output.PrintInfo("Authenticating with the client credentials grant (no browser)...")
-			tokens, err = authClientCredentialsFunc(ctx, flow, clientID, clientSecret, accountURN, grantScopes)
+
+			// Detect environment and create appropriate OAuth config with safety level
+			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, safetyLevel)
+
+			// Log which environment we detected
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "Detected environment: %s", oauthConfig.Environment)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "Safety level: %s", oauthConfig.SafetyLevel)
+
+			// Create OAuth flow
+			flow, err := auth.NewOAuthFlow(oauthConfig)
 			if err != nil {
-				return fmt.Errorf("authentication failed: %w", err)
-			}
-			output.PrintSuccess("Authentication successful!")
-			// The endpoint may return fewer scopes than requested, so report what
-			// the token actually carries rather than what was asked for.
-			if tokens.Scope != "" {
-				output.PrintInfo("Granted scopes: %s", tokens.Scope)
-			}
-		} else {
-			output.PrintInfo("Requesting OAuth scopes for safety level %s...", oauthConfig.SafetyLevel)
-
-			output.PrintInfo("Starting OAuth authentication flow...")
-			tokens, err = authBrowserFlowFunc(ctx, flow)
-			if err != nil {
-				return fmt.Errorf("authentication failed: %w", err)
+				return fmt.Errorf("failed to initialize OAuth: %w", err)
 			}
 
-			output.PrintSuccess("Authentication successful!")
+			// --timeout bounds the whole login attempt, whichever grant is used: an
+			// unbounded token request is exactly the CI hang this command avoids.
+			ctx, cancel := context.WithTimeout(cmdContext(cmd), timeout)
+			defer cancel()
 
-			// Get user info. The client credentials grant authenticates the
-			// application itself, so it has no user identity to report.
-			userInfo, userErr := flow.GetUserInfo(tokens.AccessToken)
-			if userErr != nil {
-				output.PrintWarning("Failed to retrieve user info: %v", userErr)
+			var tokens *auth.TokenSet
+			if nonInteractive {
+				// Client credentials grant: no browser, no redirect, no user. Scopes
+				// default to whatever the OAuth client was granted unless --scopes
+				// narrows them.
+				if len(grantScopes) == 0 {
+					output.FprintWarning(currentStderr(cmdContext(cmd)), "No --scopes given: the token carries every scope the OAuth client was granted.")
+					// The browser flow requests the safety level's scope set at the
+					// IdP, so there the two move together. Here they do not, and a
+					// narrowing safety level would otherwise read as if it had.
+					if safetyLevel != config.SafetyLevelDangerouslyUnrestricted {
+						output.FprintWarning(currentStderr(cmdContext(cmd)), "--safety-level %s gates dtctl itself; it does not narrow the token.", safetyLevel)
+						output.FprintHint(currentStderr(cmdContext(cmd)), "Pass --scopes, or provision the OAuth client with only the scopes this pipeline needs.")
+					}
+				}
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Authenticating with the client credentials grant (no browser)...")
+				tokens, err = authClientCredentialsFunc(ctx, flow, clientID, clientSecret, accountURN, grantScopes)
+				if err != nil {
+					return fmt.Errorf("authentication failed: %w", err)
+				}
+				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Authentication successful!")
+				// The endpoint may return fewer scopes than requested, so report what
+				// the token actually carries rather than what was asked for.
+				if tokens.Scope != "" {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "Granted scopes: %s", tokens.Scope)
+				}
 			} else {
-				output.PrintInfo("Logged in as: %s (%s)", userInfo.Name, userInfo.Email)
-			}
-		}
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Requesting OAuth scopes for safety level %s...", oauthConfig.SafetyLevel)
 
-		// Store tokens
-		tokenManager, err := auth.NewTokenManager(oauthConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create token manager: %w", err)
-		}
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Starting OAuth authentication flow...")
+				tokens, err = authBrowserFlowFunc(ctx, flow)
+				if err != nil {
+					return fmt.Errorf("authentication failed: %w", err)
+				}
 
-		// Report the store the tokens actually landed in: the keyring probe only
-		// tests reads, so a keyring that refused the write still looks
-		// available (#393).
-		storage, err := tokenManager.SaveTokenWithStorage(tokenName, tokens)
-		if err != nil {
-			return fmt.Errorf("failed to store tokens: %w", err)
-		}
+				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Authentication successful!")
 
-		output.PrintSuccess("Tokens stored in %s as '%s'", storage.Label(), tokenName)
-
-		// Identify placeholder contexts from the raw (unexpanded) config.
-		// A context is a placeholder if its environment expands to the empty string
-		// (either literally empty or an unset env-var reference like ${DT_ENVIRONMENT_URL}).
-		placeholderNames := make(map[string]bool)
-		if rawCfg, err := loadRawConfig(); err == nil {
-			for _, nc := range rawCfg.Contexts {
-				if os.ExpandEnv(nc.Context.Environment) == "" {
-					placeholderNames[nc.Name] = true
+				// Get user info. The client credentials grant authenticates the
+				// application itself, so it has no user identity to report.
+				userInfo, userErr := flow.GetUserInfo(tokens.AccessToken)
+				if userErr != nil {
+					output.FprintWarning(currentStderr(cmdContext(cmd)), "Failed to retrieve user info: %v", userErr)
+				} else {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "Logged in as: %s (%s)", userInfo.Name, userInfo.Email)
 				}
 			}
-		}
 
-		finalizeLoginConfig(cfg, contextName, environment, tokenName, safetyLevel, placeholderNames)
+			// Store tokens
+			tokenManager, err := auth.NewTokenManager(oauthConfig)
+			if err != nil {
+				return fmt.Errorf("failed to create token manager: %w", err)
+			}
 
-		// Save config (respects local .dtctl.yaml if present)
-		if err := saveConfig(cfg); err != nil {
-			return fmt.Errorf("failed to save config: %w", err)
-		}
+			// Report the store the tokens actually landed in: the keyring probe only
+			// tests reads, so a keyring that refused the write still looks
+			// available (#393).
+			storage, err := tokenManager.SaveTokenWithStorage(tokenName, tokens)
+			if err != nil {
+				return fmt.Errorf("failed to store tokens: %w", err)
+			}
 
-		output.PrintSuccess("Context '%s' configured and activated", contextName)
-		output.PrintInfo("\nYou can now use dtctl commands with this context.")
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Tokens stored in %s as '%s'", storage.Label(), tokenName)
 
-		return nil
-	},
+			// Identify placeholder contexts from the raw (unexpanded) config.
+			// A context is a placeholder if its environment expands to the empty string
+			// (either literally empty or an unset env-var reference like ${DT_ENVIRONMENT_URL}).
+			placeholderNames := make(map[string]bool)
+			if rawCfg, err := loadRawConfig(cmdContext(cmd)); err == nil {
+				for _, nc := range rawCfg.Contexts {
+					if os.ExpandEnv(nc.Context.Environment) == "" {
+						placeholderNames[nc.Name] = true
+					}
+				}
+			}
+
+			finalizeLoginConfig(cfg, contextName, environment, tokenName, safetyLevel, placeholderNames)
+
+			// Save config (respects local .dtctl.yaml if present)
+			if err := saveConfig(cmdContext(cmd), cfg); err != nil {
+				return fmt.Errorf("failed to save config: %w", err)
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Context '%s' configured and activated", contextName)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "\nYou can now use dtctl commands with this context.")
+
+			return nil
+		},
+	}
+	c.Flags().String("context", "", "name for the context to create or update (defaults to current context)")
+	c.Flags().String("environment", "", "Dynatrace environment URL (defaults to current context's environment)")
+	c.Flags().String("token-name", "", "name for storing the OAuth token (defaults to existing token name or <context>-oauth)")
+	c.Flags().String("timeout", "5m", "timeout for the authentication flow (bounds the browser flow and the client credentials token request)")
+	c.Flags().String("safety-level", string(config.DefaultSafetyLevel), "safety level for the context (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)")
+	c.Flags().String("client-id", "", "OAuth client ID for the non-interactive client credentials grant (env: "+envLoginClientID+")")
+	c.Flags().String("client-secret", "", "OAuth client secret for the client credentials grant; prefer the environment variable (env: "+envLoginClientSecret+")")
+	c.Flags().String("account-urn", "", "account URN sent as the resource indicator, e.g. urn:dtaccount:<uuid> (env: "+envLoginAccountURN+")")
+	c.Flags().StringSlice("scopes", nil, "scopes to request for the client credentials grant (defaults to the client's own scopes)")
+	stability.MarkStable(c)
+	// Left out, it defaults from the config; an explicitly empty value (an
+	// unset shell variable) must not silently take that default.
+	rejectEmptyFlag(c, "environment")
+	return c
 }
 
 // authLogoutCmd logs out and removes OAuth tokens
-var authLogoutCmd = &cobra.Command{
-	Use:   "logout [context-name]",
-	Short: "Logout and remove OAuth tokens",
-	Long: `Remove stored OAuth tokens for a context.
+var authLogoutCmd = newAuthLogoutCmd()
+
+func newAuthLogoutCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "logout [context-name]",
+		Short: "Logout and remove OAuth tokens",
+		Long: `Remove stored OAuth tokens for a context.
 
 This command will:
 1. Remove OAuth tokens from the system keyring
 2. Optionally remove the context configuration
 
 If no context name is provided, the current context will be used.`,
-	Example: `  # Logout from current context
+		Example: `  # Logout from current context
   dtctl auth logout
 
   # Logout from specific context
@@ -782,161 +888,171 @@ If no context name is provided, the current context will be used.`,
 
   # Logout and remove context
   dtctl auth logout my-env --remove-context`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Load config
-		cfg, err := LoadConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		// Determine context name
-		var contextName string
-		if len(args) > 0 {
-			contextName = args[0]
-		} else {
-			contextName = cfg.CurrentContext
-		}
-
-		if contextName == "" {
-			return fmt.Errorf("no context specified and no current context set")
-		}
-
-		// Find context
-		ctx, err := cfg.GetContext(contextName)
-		if err != nil {
-			return fmt.Errorf("context not found: %w", err)
-		}
-
-		// Get token name
-		tokenName := ctx.Context.TokenRef
-		if tokenName == "" {
-			return fmt.Errorf("context has no token reference")
-		}
-
-		// Detect environment from context URL
-		oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(ctx.Context.Environment, ctx.Context.SafetyLevel)
-
-		// Delete OAuth token
-		tokenManager, err := auth.NewTokenManager(oauthConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create token manager: %w", err)
-		}
-
-		if err := tokenManager.DeleteToken(tokenName); err != nil {
-			output.PrintWarning("Failed to delete token from keyring: %v", err)
-		} else {
-			output.PrintSuccess("Removed OAuth token '%s'", tokenName)
-		}
-
-		// Optionally remove context
-		removeContext, _ := cmd.Flags().GetBool("remove-context")
-		if removeContext {
-			if err := cfg.DeleteContext(contextName); err != nil {
-				return fmt.Errorf("failed to remove context: %w", err)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Load config
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			// The in-memory CurrentContext may carry the session-local
-			// --context/DTCTL_CONTEXT override, which must never be
-			// persisted (LoadConfig's contract). Re-derive the stored value
-			// from the file before deciding whether to clear it.
-			if raw, err := loadConfigRaw(); err == nil {
-				cfg.CurrentContext = raw.CurrentContext
-			}
-			// If we deleted the current context, clear it
-			if cfg.CurrentContext == contextName {
-				cfg.CurrentContext = ""
+			// Determine context name
+			var contextName string
+			if len(args) > 0 {
+				contextName = args[0]
+			} else {
+				contextName = cfg.CurrentContext
 			}
 
-			if err := saveConfig(cfg); err != nil {
-				return fmt.Errorf("failed to save config: %w", err)
+			if contextName == "" {
+				return fmt.Errorf("no context specified and no current context set")
 			}
 
-			output.PrintSuccess("Removed context '%s'", contextName)
-		}
+			// Find context
+			ctx, err := cfg.GetContext(contextName)
+			if err != nil {
+				return fmt.Errorf("context not found: %w", err)
+			}
 
-		return nil
-	},
+			// Get token name
+			tokenName := ctx.Context.TokenRef
+			if tokenName == "" {
+				return fmt.Errorf("context has no token reference")
+			}
+
+			// Detect environment from context URL
+			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(ctx.Context.Environment, ctx.Context.SafetyLevel)
+
+			// Delete OAuth token
+			tokenManager, err := auth.NewTokenManager(oauthConfig)
+			if err != nil {
+				return fmt.Errorf("failed to create token manager: %w", err)
+			}
+
+			if err := tokenManager.DeleteToken(tokenName); err != nil {
+				output.FprintWarning(currentStderr(cmdContext(cmd)), "Failed to delete token from keyring: %v", err)
+			} else {
+				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Removed OAuth token '%s'", tokenName)
+			}
+
+			// Optionally remove context
+			removeContext, _ := cmd.Flags().GetBool("remove-context")
+			if removeContext {
+				if err := cfg.DeleteContext(contextName); err != nil {
+					return fmt.Errorf("failed to remove context: %w", err)
+				}
+
+				// The in-memory CurrentContext may carry the session-local
+				// --context/DTCTL_CONTEXT override, which must never be
+				// persisted (LoadConfig's contract). Re-derive the stored value
+				// from the file before deciding whether to clear it.
+				if raw, err := loadConfigRaw(cmdContext(cmd)); err == nil {
+					cfg.CurrentContext = raw.CurrentContext
+				}
+				// If we deleted the current context, clear it
+				if cfg.CurrentContext == contextName {
+					cfg.CurrentContext = ""
+				}
+
+				if err := saveConfig(cmdContext(cmd), cfg); err != nil {
+					return fmt.Errorf("failed to save config: %w", err)
+				}
+
+				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Removed context '%s'", contextName)
+			}
+
+			return nil
+		},
+	}
+	c.Flags().Bool("remove-context", false, "also remove the context configuration")
+	stability.MarkStable(c)
+	return c
 }
 
 // authRefreshCmd refreshes OAuth tokens
-var authRefreshCmd = &cobra.Command{
-	Use:   "refresh [context-name]",
-	Short: "Refresh OAuth tokens",
-	Long: `Refresh OAuth access tokens using the refresh token.
+var authRefreshCmd = newAuthRefreshCmd()
+
+func newAuthRefreshCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "refresh [context-name]",
+		Short: "Refresh OAuth tokens",
+		Long: `Refresh OAuth access tokens using the refresh token.
 
 This command manually triggers a token refresh. Normally, dtctl will
 automatically refresh tokens when needed, but this command can be used
 to force a refresh.`,
-	Example: `  # Refresh tokens for current context
+		Example: `  # Refresh tokens for current context
   dtctl auth refresh
 
   # Refresh tokens for specific context
   dtctl auth refresh my-env`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Load config
-		cfg, err := LoadConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		// Determine context name
-		var contextName string
-		if len(args) > 0 {
-			contextName = args[0]
-		} else {
-			contextName = cfg.CurrentContext
-		}
-
-		if contextName == "" {
-			return fmt.Errorf("no context specified and no current context set")
-		}
-
-		// Find context
-		ctx, err := cfg.GetContext(contextName)
-		if err != nil {
-			return fmt.Errorf("context not found: %w", err)
-		}
-
-		// Get token name
-		tokenName := ctx.Context.TokenRef
-		if tokenName == "" {
-			return fmt.Errorf("context has no token reference")
-		}
-
-		// Detect environment from context URL
-		oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(ctx.Context.Environment, ctx.Context.SafetyLevel)
-
-		// Refresh token
-		tokenManager, err := auth.NewTokenManager(oauthConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create token manager: %w", err)
-		}
-
-		output.PrintInfo("Refreshing OAuth tokens...")
-		tokens, err := tokenManager.RefreshToken(tokenName)
-		if err != nil {
-			// A client credentials token has no refresh token by design, so
-			// "refresh" is a dead end for it — point at the way out instead of
-			// reporting a missing token the operator cannot supply.
-			if errors.Is(err, auth.ErrNoRefreshToken) {
-				return &diagnostic.Error{
-					Operation: "auth refresh",
-					Message:   fmt.Sprintf("context %q has no refresh token, so its access token cannot be renewed in place", contextName),
-					Suggestions: []string{
-						fmt.Sprintf("Run 'dtctl auth login --context %s' to obtain a new access token", contextName),
-						"A token from the client credentials grant never carries a refresh token (RFC 6749 section 4.4.3); re-running login is the renewal path",
-					},
-					Err: err,
-				}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Load config
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
 			}
-			return fmt.Errorf("failed to refresh tokens: %w", err)
-		}
 
-		output.PrintSuccess("Tokens refreshed")
-		output.PrintInfo("New token expires at: %s", tokens.ExpiresAt.Format(time.RFC3339))
+			// Determine context name
+			var contextName string
+			if len(args) > 0 {
+				contextName = args[0]
+			} else {
+				contextName = cfg.CurrentContext
+			}
 
-		return nil
-	},
+			if contextName == "" {
+				return fmt.Errorf("no context specified and no current context set")
+			}
+
+			// Find context
+			ctx, err := cfg.GetContext(contextName)
+			if err != nil {
+				return fmt.Errorf("context not found: %w", err)
+			}
+
+			// Get token name
+			tokenName := ctx.Context.TokenRef
+			if tokenName == "" {
+				return fmt.Errorf("context has no token reference")
+			}
+
+			// Detect environment from context URL
+			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(ctx.Context.Environment, ctx.Context.SafetyLevel)
+
+			// Refresh token
+			tokenManager, err := auth.NewTokenManager(oauthConfig)
+			if err != nil {
+				return fmt.Errorf("failed to create token manager: %w", err)
+			}
+
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "Refreshing OAuth tokens...")
+			tokens, err := tokenManager.RefreshToken(tokenName)
+			if err != nil {
+				// A client credentials token has no refresh token by design, so
+				// "refresh" is a dead end for it — point at the way out instead of
+				// reporting a missing token the operator cannot supply.
+				if errors.Is(err, auth.ErrNoRefreshToken) {
+					return &diagnostic.Error{
+						Operation: "auth refresh",
+						Message:   fmt.Sprintf("context %q has no refresh token, so its access token cannot be renewed in place", contextName),
+						Suggestions: []string{
+							fmt.Sprintf("Run 'dtctl auth login --context %s' to obtain a new access token", contextName),
+							"A token from the client credentials grant never carries a refresh token (RFC 6749 section 4.4.3); re-running login is the renewal path",
+						},
+						Err: err,
+					}
+				}
+				return fmt.Errorf("failed to refresh tokens: %w", err)
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Tokens refreshed")
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "New token expires at: %s", tokens.ExpiresAt.Format(time.RFC3339))
+
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -949,34 +1065,11 @@ func init() {
 	authCmd.AddCommand(authRefreshCmd)
 
 	// Flags for whoami
-	authWhoamiCmd.Flags().BoolVar(&idOnly, "id-only", false, "output only the user ID")
-	authWhoamiCmd.Flags().BoolVar(&refresh, "refresh", false, "force refresh of cached user info")
-
 	// Flags for login
-	authLoginCmd.Flags().String("context", "", "name for the context to create or update (defaults to current context)")
-	authLoginCmd.Flags().String("environment", "", "Dynatrace environment URL (defaults to current context's environment)")
-	// Left out, it defaults from the config; an explicitly empty value (an
-	// unset shell variable) must not silently take that default.
-	rejectEmptyFlag(authLoginCmd, "environment")
-	authLoginCmd.Flags().String("token-name", "", "name for storing the OAuth token (defaults to existing token name or <context>-oauth)")
-	authLoginCmd.Flags().String("timeout", "5m", "timeout for the authentication flow (bounds the browser flow and the client credentials token request)")
-	authLoginCmd.Flags().String("safety-level", string(config.DefaultSafetyLevel), "safety level for the context (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)")
-	authLoginCmd.Flags().String("client-id", "", "OAuth client ID for the non-interactive client credentials grant (env: "+envLoginClientID+")")
-	authLoginCmd.Flags().String("client-secret", "", "OAuth client secret for the client credentials grant; prefer the environment variable (env: "+envLoginClientSecret+")")
-	authLoginCmd.Flags().String("account-urn", "", "account URN sent as the resource indicator, e.g. urn:dtaccount:<uuid> (env: "+envLoginAccountURN+")")
-	authLoginCmd.Flags().StringSlice("scopes", nil, "scopes to request for the client credentials grant (defaults to the client's own scopes)")
-
 	// Flags for logout
-	authLogoutCmd.Flags().Bool("remove-context", false, "also remove the context configuration")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(authCmd)
-	stability.MarkStable(authLoginCmd)
-	stability.MarkStable(authLogoutCmd)
-	stability.MarkStable(authRefreshCmd)
-	stability.MarkStable(authStatusCmd)
-	stability.MarkStable(authWhoamiCmd)
 }

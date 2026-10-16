@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,7 @@ func decodeServiceUserAgentEnvelope(t *testing.T, output, verb string) serviceUs
 }
 
 func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
-	oldAgentMode, oldPlainMode, oldOutputFormat, oldDryRun := agentMode, plainMode, outputFormat, dryRun
+	oldAgentMode, oldPlainMode, oldOutputFormat, oldDryRun := agentMode(context.Background()), plainMode(context.Background()), outputFormat(context.Background()), dryRun(context.Background())
 	oldSetup, oldSafetySetup := setupServiceUserAccount, setupServiceUserAccountWithSafety
 	nameFlag := accountCreateServiceUserCmd.Flags().Lookup("name")
 	descriptionFlag := accountCreateServiceUserCmd.Flags().Lookup("description")
@@ -44,7 +45,7 @@ func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
 	outputFlag := rootCmd.PersistentFlags().Lookup("output")
 	oldOutputChanged := outputFlag.Changed
 	t.Cleanup(func() {
-		agentMode, plainMode, outputFormat, dryRun = oldAgentMode, oldPlainMode, oldOutputFormat, oldDryRun
+		gFlags.agentMode, gFlags.plainMode, gFlags.outputFormat, gFlags.dryRun = oldAgentMode, oldPlainMode, oldOutputFormat, oldDryRun
 		setupServiceUserAccount, setupServiceUserAccountWithSafety = oldSetup, oldSafetySetup
 		// Reset name via Reset() because nonEmptyStringValue rejects Set("").
 		if oldName == "" {
@@ -79,7 +80,7 @@ func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
 		t.Fatalf("httpclient.New: %v", err)
 	}
 
-	agentMode, plainMode, outputFormat = true, true, ""
+	gFlags.agentMode, gFlags.plainMode, gFlags.outputFormat = true, true, ""
 	outputFlag.Changed = false
 	setupServiceUserAccount = func() (*httpclient.Client, string, error) {
 		return client, "00000000-0000-4000-8000-000000000001", nil
@@ -101,7 +102,7 @@ func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
 	}
 
 	t.Run("list success", func(t *testing.T) {
-		dryRun = false
+		gFlags.dryRun = false
 		envelope := run(t, "list", func() error { return accountListServiceUserCmd.RunE(accountListServiceUserCmd, nil) })
 		var users []map[string]any
 		if err := json.Unmarshal(envelope.Result, &users); err != nil || len(users) != 1 || users[0]["uid"] == "" {
@@ -110,7 +111,7 @@ func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
 	})
 
 	t.Run("create success", func(t *testing.T) {
-		dryRun = false
+		gFlags.dryRun = false
 		envelope := run(t, "create", func() error { return accountCreateServiceUserCmd.RunE(accountCreateServiceUserCmd, nil) })
 		var result map[string]any
 		if err := json.Unmarshal(envelope.Result, &result); err != nil || result["uid"] == "" {
@@ -119,7 +120,7 @@ func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
 	})
 
 	t.Run("delete success", func(t *testing.T) {
-		dryRun = false
+		gFlags.dryRun = false
 		envelope := run(t, "delete", func() error {
 			return accountDeleteServiceUserCmd.RunE(accountDeleteServiceUserCmd, []string{"00000000-0000-4000-8000-000000000101"})
 		})
@@ -130,7 +131,7 @@ func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
 	})
 
 	t.Run("create dry run", func(t *testing.T) {
-		dryRun = true
+		gFlags.dryRun = true
 		envelope := run(t, "create", func() error { return accountCreateServiceUserCmd.RunE(accountCreateServiceUserCmd, nil) })
 		var result map[string]any
 		if err := json.Unmarshal(envelope.Result, &result); err != nil || result["dryRun"] != true {
@@ -139,7 +140,7 @@ func TestServiceUserAgentOutputEnvelopes(t *testing.T) {
 	})
 
 	t.Run("delete dry run", func(t *testing.T) {
-		dryRun = true
+		gFlags.dryRun = true
 		envelope := run(t, "delete", func() error {
 			return accountDeleteServiceUserCmd.RunE(accountDeleteServiceUserCmd, []string{"00000000-0000-4000-8000-000000000101"})
 		})

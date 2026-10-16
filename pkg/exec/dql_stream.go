@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/dynatrace-oss/dtctl/pkg/output"
@@ -113,7 +112,7 @@ func (e *DQLExecutor) planStream(opts DQLExecuteOptions) (*streamPlan, bool) {
 	return &streamPlan{
 		kind:       sinkSpill,
 		spillDir:   dir,
-		switchRows: streamSwitchRows(opts, format),
+		switchRows: streamSwitchRows(e.outW(), opts, format),
 		bufferCap:  bufferCap(opts),
 		tabular:    seriesTabular(format, opts),
 		format:     format,
@@ -164,11 +163,11 @@ func (e *DQLExecutor) streamedSpillDir(opts DQLExecuteOptions) (string, bool) {
 // (inlineLayout), so the two settle the same result the same way: costed
 // indented, a compact envelope would switch to streaming at under half the rows
 // the buffered path still emits inline.
-func streamSwitchRows(opts DQLExecuteOptions, format string) int {
+func streamSwitchRows(stdout io.Writer, opts DQLExecuteOptions, format string) int {
 	if opts.Spill.Mode == SpillAlways {
 		return 0
 	}
-	per, frame := minRowCost(format, inlineLayout(opts, format))
+	per, frame := minRowCost(format, inlineLayout(stdout, opts, format))
 	if opts.Spill.Threshold <= 0 || per <= 0 {
 		return 0
 	}
@@ -345,7 +344,7 @@ func (c *streamCollector) startStreaming() error {
 		if c.beforeStdout != nil {
 			c.beforeStdout()
 		}
-		c.stdout = bufio.NewWriterSize(os.Stdout, 64<<10)
+		c.stdout = bufio.NewWriterSize(c.e.outW(), 64<<10)
 		c.enc = json.NewEncoder(c.stdout)
 	}
 	c.stats = output.NewStatsAccumulator(output.DefaultStatsTopK, output.DefaultStatsMaxDistinct)

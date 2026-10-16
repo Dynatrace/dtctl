@@ -4,7 +4,7 @@ type: CLIENT_SECRET
 value:
   clientSecret:
     applicationId: app-id-1234-5678
-    consumers[#2]: ME,DA
+    consumers[2]: ME,DA
     directoryId: dir-id-abcd-efgh
   name: production-azure
   type: CLIENT_SECRET

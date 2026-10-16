@@ -17,19 +17,28 @@ import (
 )
 
 // claimCmd represents the claim command
-var claimCmd = &cobra.Command{
-	Use:   "claim",
-	Short: "Claim access to a shared resource",
-	Long:  `Claim access to a resource that was shared with you.`,
+var claimCmd = newClaimCmd()
+
+func newClaimCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "claim",
+		Short: "Claim access to a shared resource",
+		Long:  `Claim access to a resource that was shared with you.`,
+	}
+	stability.Mark(c, stability.Experimental, "0.41.0")
+	return c
 }
 
 // claimEnvironmentShareCmd claims an environment share, mirroring the
 // browser's "Copy link to share" -> open flow.
-var claimEnvironmentShareCmd = &cobra.Command{
-	Use:     "environment-share <share-id | share-url>",
-	Aliases: []string{"share", "envshare"},
-	Short:   "Claim an environment share by ID or URL",
-	Long: `Claim an environment share and learn which document it points to.
+var claimEnvironmentShareCmd = newClaimEnvironmentShareCmd()
+
+func newClaimEnvironmentShareCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "environment-share <share-id | share-url>",
+		Aliases: []string{"share", "envshare"},
+		Short:   "Claim an environment share by ID or URL",
+		Long: `Claim an environment share and learn which document it points to.
 
 A share link copied from the browser carries only the share ID:
 
@@ -46,55 +55,58 @@ Examples:
   dtctl claim environment-share 018f1234-abcd-7000-8000-000000000000
   dtctl claim environment-share 'https://xyz.apps.dynatrace.com/ui/document/v0/#share=018f1234-abcd-7000-8000-000000000000'
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		shareID, host, err := document.ParseShareRef(args[0])
-		if err != nil {
-			return err
-		}
-
-		cfg, c, printer, err := SetupWithSafetyAndPrinter(safety.OperationCreate)
-		if err != nil {
-			return err
-		}
-
-		if host != "" {
-			if ctx, cerr := cfg.CurrentContextObj(); cerr == nil && !sameEnvironment(host, ctx.Environment) {
-				return shareHostMismatch(cfg, host, ctx.Environment)
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			shareID, host, err := document.ParseShareRef(args[0])
+			if err != nil {
+				return err
 			}
-		}
 
-		if dryRun {
-			return newDryRunReport(cmd).
-				Linef("Dry run: would claim environment share %q", shareID).
-				Detail("share_id", "%s", shareID).
-				Print()
-		}
-
-		h := document.NewHandler(c)
-		claim, err := h.ClaimEnvironmentShare(shareID)
-		if err != nil {
-			return claimError(err, cfg, shareID)
-		}
-
-		var warnings []string
-		if meta, merr := h.GetMetadata(claim.DocumentID); merr == nil {
-			claim.Name = meta.Name
-		} else {
-			warnings = append(warnings, fmt.Sprintf("claimed, but reading the document's name failed: %v", merr))
-		}
-		claim.URL = document.UIURL(c.BaseURL(), claim.DocumentType, claim.DocumentID)
-
-		if ap := enrichAgent(printer, "claim", "environment-share"); ap != nil {
-			ap.SetSuggestions([]string{claimFollowUp(claim)})
-			ap.SetWarnings(warnings)
-		} else {
-			for _, w := range warnings {
-				output.PrintWarning("%s", w)
+			cfg, c, printer, err := setupWithSafetyAndPrinter(cmdContext(cmd), safety.OperationCreate)
+			if err != nil {
+				return err
 			}
-		}
-		return printer.Print(claim)
-	},
+
+			if host != "" {
+				if ctx, cerr := cfg.CurrentContextObj(); cerr == nil && !sameEnvironment(host, ctx.Environment) {
+					return shareHostMismatch(cfg, host, ctx.Environment)
+				}
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				return newDryRunReport(cmd).
+					Linef("Dry run: would claim environment share %q", shareID).
+					Detail("share_id", "%s", shareID).
+					Print()
+			}
+
+			h := document.NewHandler(c)
+			claim, err := h.ClaimEnvironmentShare(shareID)
+			if err != nil {
+				return claimError(err, cfg, shareID)
+			}
+
+			var warnings []string
+			if meta, merr := h.GetMetadata(claim.DocumentID); merr == nil {
+				claim.Name = meta.Name
+			} else {
+				warnings = append(warnings, fmt.Sprintf("claimed, but reading the document's name failed: %v", merr))
+			}
+			claim.URL = document.UIURL(c.BaseURL(), claim.DocumentType, claim.DocumentID)
+
+			if ap := enrichAgent(printer, "claim", "environment-share"); ap != nil {
+				ap.SetSuggestions([]string{claimFollowUp(claim)})
+				ap.SetWarnings(warnings)
+			} else {
+				for _, w := range warnings {
+					output.FprintWarning(currentStderr(cmdContext(cmd)), "%s", w)
+				}
+			}
+			return printer.Print(claim)
+		},
+	}
+	stability.Mark(c, stability.Experimental, "0.41.0")
+	return c
 }
 
 // sameEnvironment reports whether a share link's host is the environment's.
@@ -173,7 +185,4 @@ func claimFollowUp(c *document.EnvironmentShareClaim) string {
 func init() {
 	rootCmd.AddCommand(claimCmd)
 	claimCmd.AddCommand(claimEnvironmentShareCmd)
-
-	stability.Mark(claimCmd, stability.Experimental, "0.41.0")
-	stability.Mark(claimEnvironmentShareCmd, stability.Experimental, "0.41.0")
 }

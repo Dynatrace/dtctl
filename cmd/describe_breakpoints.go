@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -13,11 +14,14 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
 )
 
-var describeBreakpointCmd = &cobra.Command{
-	Use:     "breakpoint <id|filename:line>",
-	Aliases: []string{"breakpoints", "bp"},
-	Short:   "Show status details for Live Debugger breakpoint(s)",
-	Long: `Show detailed status information for a Live Debugger breakpoint.
+var describeBreakpointCmd = newDescribeBreakpointCmd()
+
+func newDescribeBreakpointCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "breakpoint <id|filename:line>",
+		Aliases: []string{"breakpoints", "bp"},
+		Short:   "Show status details for Live Debugger breakpoint(s)",
+		Long: `Show detailed status information for a Live Debugger breakpoint.
 
 Examples:
   # Describe a breakpoint by mutable rule ID
@@ -26,10 +30,13 @@ Examples:
   # Describe all breakpoints at a source location
   dtctl describe breakpoint OrderController.java:306
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDescribeBreakpoint(cmd, args[0])
-	},
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDescribeBreakpoint(cmd, args[0])
+		},
+	}
+	markLiveDebuggerExperimental(c)
+	return c
 }
 
 type breakpointStatusResult struct {
@@ -74,9 +81,9 @@ func runDescribeBreakpoint(cmd *cobra.Command, identifier string) error {
 }
 
 func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps liveDebuggerDeps) error {
-	verbose := isDebugVerbose()
+	verbose := isDebugVerbose(cmdContext(cmd))
 
-	cfg, err := deps.loadConfig()
+	cfg, err := deps.loadConfig(cmdContext(cmd))
 	if err != nil {
 		return err
 	}
@@ -86,7 +93,7 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
-	c, err := deps.newClient(cfg)
+	c, err := deps.newClient(cmdContext(cmd), cfg)
 	if err != nil {
 		return err
 	}
@@ -99,12 +106,12 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
 	if err != nil {
 		if verbose {
-			_ = printGraphQLResponse("getOrCreateWorkspaceV2", workspaceResp)
+			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
 		}
 		return err
 	}
 	if verbose {
-		if err := printGraphQLResponse("getOrCreateWorkspaceV2", workspaceResp); err != nil {
+		if err := printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp); err != nil {
 			return err
 		}
 	}
@@ -112,12 +119,12 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 	workspaceRulesResp, err := deps.getWorkspaceRules(handler, workspaceID)
 	if err != nil {
 		if verbose {
-			_ = printGraphQLResponse("getWorkspaceRules", workspaceRulesResp)
+			_ = printGraphQLResponse(cmdContext(cmd), "getWorkspaceRules", workspaceRulesResp)
 		}
 		return err
 	}
 	if verbose {
-		if err := printGraphQLResponse("getWorkspaceRules", workspaceRulesResp); err != nil {
+		if err := printGraphQLResponse(cmdContext(cmd), "getWorkspaceRules", workspaceRulesResp); err != nil {
 			return err
 		}
 	}
@@ -141,12 +148,12 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		statusResp, err := deps.getRuleStatusBreakdown(handler, ruleID)
 		if err != nil {
 			if verbose {
-				_ = printGraphQLResponse("GetRuleStatusBreakdown", statusResp)
+				_ = printGraphQLResponse(cmdContext(cmd), "GetRuleStatusBreakdown", statusResp)
 			}
 			return err
 		}
 		if verbose {
-			if err := printGraphQLResponse("GetRuleStatusBreakdown", statusResp); err != nil {
+			if err := printGraphQLResponse(cmdContext(cmd), "GetRuleStatusBreakdown", statusResp); err != nil {
 				return err
 			}
 		}
@@ -158,8 +165,8 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		results = append(results, result)
 	}
 
-	if !useBreakpointDescribeTextView() {
-		printer := NewPrinter()
+	if !useBreakpointDescribeTextView(cmdContext(cmd)) {
+		printer := newPrinterCtx(cmdContext(cmd))
 		_ = enrichAgent(printer, "describe", "breakpoint")
 		if len(results) == 1 {
 			return printer.Print(results[0])
@@ -169,19 +176,19 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 
 	for i, result := range results {
 		if i > 0 {
-			_, _ = fmt.Fprintln(rootCmd.OutOrStdout())
+			_, _ = fmt.Fprintln(currentStdoutOr(cmdContext(cmd), rootCmd.OutOrStdout()))
 		}
-		printBreakpointStatusResult(result)
+		printBreakpointStatusResult(cmdContext(cmd), result)
 	}
 
 	return nil
 }
 
-func useBreakpointDescribeTextView() bool {
-	if agentMode {
+func useBreakpointDescribeTextView(ctx context.Context) bool {
+	if agentMode(ctx) {
 		return false
 	}
-	return outputFormat == "" || outputFormat == "table" || outputFormat == "wide" || outputFormat == "csv"
+	return outputFormat(ctx) == "" || outputFormat(ctx) == "table" || outputFormat(ctx) == "wide" || outputFormat(ctx) == "csv"
 }
 
 func buildBreakpointStatusResult(rule livedebugger.BreakpointRule, statusResp map[string]interface{}) (breakpointStatusResult, error) {
@@ -452,8 +459,8 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-func printBreakpointStatusResult(result breakpointStatusResult) {
-	w := rootCmd.OutOrStdout()
+func printBreakpointStatusResult(ctx context.Context, result breakpointStatusResult) {
+	w := currentStdoutOr(ctx, rootCmd.OutOrStdout())
 	const kw = 16
 	output.FprintDescribeKV(w, "ID:", kw, "%s", result.ID)
 	if result.Location != "" {
@@ -469,7 +476,7 @@ func printBreakpointStatusResult(result breakpointStatusResult) {
 	output.FprintDescribeKV(w, "Status:", kw, "%s", result.Status)
 	_, _ = fmt.Fprintln(w)
 
-	tw := tabwriter.NewWriter(rootCmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	tw := tabwriter.NewWriter(currentStdoutOr(ctx, rootCmd.OutOrStdout()), 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "Active rooks:\t%d\n", len(result.ActiveRooks))
 	fmt.Fprintf(tw, "Pending rooks:\t%d\n", len(result.PendingRooks))
 	fmt.Fprintf(tw, "Warnings:\t%d\n", len(result.Warnings))
@@ -478,78 +485,78 @@ func printBreakpointStatusResult(result breakpointStatusResult) {
 	fmt.Fprintf(tw, "Controller errors:\t%d\n", len(result.ControllerErrors))
 	_ = tw.Flush()
 
-	printBreakpointRooksSection("Active rooks", result.ActiveRooks)
-	printBreakpointTipsSection("Active tips", result.ActiveTips)
-	printBreakpointRooksSection("Pending rooks", result.PendingRooks)
-	printBreakpointTipsSection("Pending tips", result.PendingTips)
-	printBreakpointIssuesSection("Warnings", result.Warnings)
-	printBreakpointIssuesSection("Errors", result.Errors)
-	printBreakpointIssuesSection("Controller warnings", result.ControllerWarnings)
-	printBreakpointIssuesSection("Controller errors", result.ControllerErrors)
+	printBreakpointRooksSection(ctx, "Active rooks", result.ActiveRooks)
+	printBreakpointTipsSection(ctx, "Active tips", result.ActiveTips)
+	printBreakpointRooksSection(ctx, "Pending rooks", result.PendingRooks)
+	printBreakpointTipsSection(ctx, "Pending tips", result.PendingTips)
+	printBreakpointIssuesSection(ctx, "Warnings", result.Warnings)
+	printBreakpointIssuesSection(ctx, "Errors", result.Errors)
+	printBreakpointIssuesSection(ctx, "Controller warnings", result.ControllerWarnings)
+	printBreakpointIssuesSection(ctx, "Controller errors", result.ControllerErrors)
 }
 
-func printBreakpointRooksSection(title string, rooks []breakpointRookInfo) {
+func printBreakpointRooksSection(ctx context.Context, title string, rooks []breakpointRookInfo) {
 	if len(rooks) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintln(rootCmd.OutOrStdout())
-	output.FprintDescribeSection(rootCmd.OutOrStdout(), title+":")
+	_, _ = fmt.Fprintln(currentStdoutOr(ctx, rootCmd.OutOrStdout()))
+	output.FprintDescribeSection(currentStdoutOr(ctx, rootCmd.OutOrStdout()), title+":")
 	for _, rook := range rooks {
 		label := strings.TrimSpace(strings.Join([]string{rook.Hostname, rook.Executable}, " / "))
 		if label == "/" || label == "" {
 			label = rook.ID
 		}
 		if rook.ID != "" && rook.ID != label {
-			_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "  - %s (%s)\n", label, rook.ID)
+			_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "  - %s (%s)\n", label, rook.ID)
 			continue
 		}
-		_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "  - %s\n", label)
+		_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "  - %s\n", label)
 	}
 }
 
-func printBreakpointTipsSection(title string, tips []breakpointTip) {
+func printBreakpointTipsSection(ctx context.Context, title string, tips []breakpointTip) {
 	if len(tips) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintln(rootCmd.OutOrStdout())
-	output.FprintDescribeSection(rootCmd.OutOrStdout(), title+":")
+	_, _ = fmt.Fprintln(currentStdoutOr(ctx, rootCmd.OutOrStdout()))
+	output.FprintDescribeSection(currentStdoutOr(ctx, rootCmd.OutOrStdout()), title+":")
 	for _, tip := range tips {
 		if tip.DocsLink != "" {
-			_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "  - %s (%s)\n", tip.Description, tip.DocsLink)
+			_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "  - %s (%s)\n", tip.Description, tip.DocsLink)
 			continue
 		}
-		_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "  - %s\n", tip.Description)
+		_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "  - %s\n", tip.Description)
 	}
 }
 
-func printBreakpointIssuesSection(title string, issues []breakpointStatusIssue) {
+func printBreakpointIssuesSection(ctx context.Context, title string, issues []breakpointStatusIssue) {
 	if len(issues) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintln(rootCmd.OutOrStdout())
-	output.FprintDescribeSection(rootCmd.OutOrStdout(), title+":")
+	_, _ = fmt.Fprintln(currentStdoutOr(ctx, rootCmd.OutOrStdout()))
+	output.FprintDescribeSection(currentStdoutOr(ctx, rootCmd.OutOrStdout()), title+":")
 	for _, issue := range issues {
-		_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "  - %s\n", issue.Title)
+		_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "  - %s\n", issue.Title)
 		if issue.Description != "" {
-			_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "    Description: %s\n", issue.Description)
+			_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "    Description: %s\n", issue.Description)
 		}
 		if issue.DocsLink != "" {
-			_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "    Docs:        %s\n", issue.DocsLink)
+			_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "    Docs:        %s\n", issue.DocsLink)
 		}
 		if len(issue.Rooks) > 0 {
-			_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "    Rooks:       %d\n", len(issue.Rooks))
+			_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "    Rooks:       %d\n", len(issue.Rooks))
 			for _, rook := range issue.Rooks {
 				label := strings.TrimSpace(strings.Join([]string{rook.Hostname, rook.Executable}, " / "))
 				if label == "/" || label == "" {
 					label = rook.ID
 				}
-				_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "      - %s\n", label)
+				_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "      - %s\n", label)
 			}
 		}
 		if len(issue.Controllers) > 0 {
-			_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "    Controllers: %d\n", len(issue.Controllers))
+			_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "    Controllers: %d\n", len(issue.Controllers))
 			for _, controller := range issue.Controllers {
-				_, _ = fmt.Fprintf(rootCmd.OutOrStdout(), "      - %s\n", controller)
+				_, _ = fmt.Fprintf(currentStdoutOr(ctx, rootCmd.OutOrStdout()), "      - %s\n", controller)
 			}
 		}
 	}

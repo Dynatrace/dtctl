@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 func TestInjectIDIntoFileContent(t *testing.T) {
@@ -125,7 +127,7 @@ content:
 			t.Fatal(err)
 		}
 
-		if err := writeIDToFile(f, "dash-abc-123"); err != nil {
+		if err := (&Applier{}).writeIDToFile(f, "dash-abc-123"); err != nil {
 			t.Fatalf("writeIDToFile: %v", err)
 		}
 
@@ -138,7 +140,7 @@ content:
 		}
 
 		// Running again must be a no-op (file already has id)
-		if err := writeIDToFile(f, "different-id"); err != nil {
+		if err := (&Applier{}).writeIDToFile(f, "different-id"); err != nil {
 			t.Fatalf("second writeIDToFile: %v", err)
 		}
 		got2 := readFileForTest(t, f)
@@ -156,7 +158,7 @@ content:
 			t.Fatal(err)
 		}
 
-		if err := writeIDToFile(f, "wf-xyz-999"); err != nil {
+		if err := (&Applier{}).writeIDToFile(f, "wf-xyz-999"); err != nil {
 			t.Fatalf("writeIDToFile: %v", err)
 		}
 
@@ -167,14 +169,14 @@ content:
 	})
 
 	t.Run("empty filename returns error", func(t *testing.T) {
-		err := writeIDToFile("", "some-id")
+		err := (&Applier{}).writeIDToFile("", "some-id")
 		if err == nil {
 			t.Error("expected error for empty filename")
 		}
 	})
 
 	t.Run("nonexistent file returns error", func(t *testing.T) {
-		err := writeIDToFile("/nonexistent/path/file.yaml", "some-id")
+		err := (&Applier{}).writeIDToFile("/nonexistent/path/file.yaml", "some-id")
 		if err == nil {
 			t.Error("expected error for nonexistent file")
 		}
@@ -241,4 +243,21 @@ func readFileForTest(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// An applier given a vfs.Env writes ids back through it: into the invocation's
+// own filesystem, and not onto the host's disk.
+func TestWriteIDToFile_UsesTheAppliersEnv(t *testing.T) {
+	fs := vfs.NewMapFS(map[string][]byte{"dash.yaml": []byte("name: My Dashboard\ntype: dashboard\n")})
+	a := (&Applier{}).WithVFS(vfs.Env{FS: fs})
+
+	if err := a.writeIDToFile("dash.yaml", "abc-123"); err != nil {
+		t.Fatalf("writeIDToFile: %v", err)
+	}
+	if got := string(fs.Files()["dash.yaml"]); !strings.Contains(got, "id: abc-123") {
+		t.Errorf("the env's file = %q, want the id written back", got)
+	}
+	if _, err := os.Stat("dash.yaml"); err == nil {
+		t.Error("the id write-back created a file on the host's disk")
+	}
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -15,10 +16,13 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/util/format"
 )
 
-var diffCmd = &cobra.Command{
-	Use:   "diff [RESOURCE_TYPE] [NAME1] [NAME2] [flags]",
-	Short: "Show differences between resources or files",
-	Long: `Compare local files (desired state) with server resources (current state).
+var diffCmd = newDiffCmd()
+
+func newDiffCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "diff [RESOURCE_TYPE] [NAME1] [NAME2] [flags]",
+		Short: "Show differences between resources or files",
+		Long: `Compare local files (desired state) with server resources (current state).
 
 This command follows kubectl conventions where -f specifies the desired state
 and the server provides the current state. The command auto-detects resource
@@ -53,27 +57,29 @@ Exit Codes:
   0 - No differences found
   1 - Differences found
   2 - Error occurred`,
-	Args: cobra.RangeArgs(0, 3),
-	RunE: runDiff,
+		Args: cobra.RangeArgs(0, 3),
+		RunE: runDiff,
+	}
+	c.Flags().StringSliceP("file", "f", []string{}, "Files to compare (can specify twice; - reads one side from stdin)")
+	c.Flags().String("format", "unified", "Diff format: unified, side-by-side, json-patch, semantic")
+	c.Flags().Bool("semantic", false, "Use semantic diff (resource-aware)")
+	c.Flags().Bool("side-by-side", false, "Show side-by-side comparison")
+	c.Flags().BoolP("quiet", "q", false, "No output, just exit code")
+	c.Flags().Bool("ignore-metadata", false, "Ignore metadata fields (timestamps, versions)")
+	c.Flags().Bool("ignore-order", false, "Ignore array order for comparison")
+	c.Flags().Int("context", 3, "Number of context lines")
+	c.Flags().Bool("color", true, "Colorize output")
+	c.Flags().StringP("output", "o", "", "Output format (overrides --format): json-patch, semantic")
+	stability.MarkFlag(c, "context", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "output", stability.Experimental, pre10Since)
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
 	rootCmd.AddCommand(diffCmd)
-
-	diffCmd.Flags().StringSliceP("file", "f", []string{}, "Files to compare (can specify twice; - reads one side from stdin)")
-	diffCmd.Flags().String("format", "unified", "Diff format: unified, side-by-side, json-patch, semantic")
-	diffCmd.Flags().Bool("semantic", false, "Use semantic diff (resource-aware)")
-	diffCmd.Flags().Bool("side-by-side", false, "Show side-by-side comparison")
-	diffCmd.Flags().BoolP("quiet", "q", false, "No output, just exit code")
-	diffCmd.Flags().Bool("ignore-metadata", false, "Ignore metadata fields (timestamps, versions)")
-	diffCmd.Flags().Bool("ignore-order", false, "Ignore array order for comparison")
-	diffCmd.Flags().Int("context", 3, "Number of context lines")
-	diffCmd.Flags().Bool("color", true, "Colorize output")
-	diffCmd.Flags().StringP("output", "o", "", "Output format (overrides --format): json-patch, semantic")
 	// Renamed or removed in 1.0 because it hides a global flag
 	// (contrib breaking-changes/unshadow-global-flags.md).
-	stability.MarkFlag(diffCmd, "context", stability.Experimental, pre10Since)
-	stability.MarkFlag(diffCmd, "output", stability.Experimental, pre10Since)
 }
 
 const (
@@ -92,10 +98,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	ignoreOrder, _ := cmd.Flags().GetBool("ignore-order")
 	contextLines, _ := cmd.Flags().GetInt("context")
 	colorize, _ := cmd.Flags().GetBool("color")
-	outputFormat, _ := cmd.Flags().GetString("output")
+	outputFlag, _ := cmd.Flags().GetString("output")
 
-	if outputFormat != "" {
-		format = outputFormat
+	if outputFlag != "" {
+		format = outputFlag
 	}
 
 	if sideBySide {
@@ -117,20 +123,20 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		Semantic:       semantic,
 	}
 
-	differ := diff.NewDiffer(opts)
+	differ := diff.NewDiffer(opts).WithVFS(vfsEnv(cmdContext(cmd)))
 
 	var result *diff.DiffResult
 	var err error
 
 	switch {
 	case len(files) == 2:
-		result, err = handleTwoFiles(differ, files[0], files[1])
+		result, err = handleTwoFiles(cmdContext(cmd), differ, files[0], files[1])
 	case len(files) == 1 && len(args) == 0:
-		result, err = handleFileVsRemote(differ, files[0])
+		result, err = handleFileVsRemote(cmdContext(cmd), differ, files[0])
 	case len(files) == 1 && len(args) >= 2:
-		result, err = handleFileVsNamedResource(differ, files[0], args[0], args[1])
+		result, err = handleFileVsNamedResource(cmdContext(cmd), differ, files[0], args[0], args[1])
 	case len(files) == 0 && len(args) == 3:
-		result, err = handleTwoRemoteResources(differ, args[0], args[1], args[2])
+		result, err = handleTwoRemoteResources(cmdContext(cmd), differ, args[0], args[1], args[2])
 	default:
 		return fmt.Errorf("invalid arguments: use -f FILE1 -f FILE2, or -f FILE, or RESOURCE_TYPE NAME1 NAME2")
 	}
@@ -140,7 +146,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	if !quiet {
-		fmt.Print(result.Patch)
+		fmt.Fprint(currentStdout(cmdContext(cmd)), result.Patch)
 	}
 
 	if result.HasChanges {
@@ -151,29 +157,29 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func handleTwoFiles(differ *diff.Differ, file1, file2 string) (*diff.DiffResult, error) {
+func handleTwoFiles(ctx context.Context, differ *diff.Differ, file1, file2 string) (*diff.DiffResult, error) {
 	// Stdin can be read only once, so it can be at most one side.
 	if file1 == "-" && file2 == "-" {
 		return nil, &suggest.FlagError{Flag: "file", Message: "-f - can name only one side of a diff: stdin can be read once"}
 	}
-	left, err := readFileFlag("file", file1)
+	left, err := readFileFlag(ctx, "file", file1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read left file: %w", err)
 	}
-	right, err := readFileFlag("file", file2)
+	right, err := readFileFlag(ctx, "file", file2)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read right file: %w", err)
 	}
 	return differ.CompareData(left, right, sourceName(file1), sourceName(file2))
 }
 
-func handleFileVsRemote(differ *diff.Differ, file string) (*diff.DiffResult, error) {
-	_, c, err := SetupClient()
+func handleFileVsRemote(ctx context.Context, differ *diff.Differ, file string) (*diff.DiffResult, error) {
+	_, c, err := setupClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	localData, err := parseYAMLFile(file)
+	localData, err := parseYAMLFile(ctx, file)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse file: %w", err)
 	}
@@ -191,13 +197,13 @@ func handleFileVsRemote(differ *diff.Differ, file string) (*diff.DiffResult, err
 	return differ.Compare(remoteData, localData, fmt.Sprintf("remote: %s/%s", resourceType, resourceID), fmt.Sprintf("local: %s", sourceName(file)))
 }
 
-func handleFileVsNamedResource(differ *diff.Differ, file, resourceType, resourceID string) (*diff.DiffResult, error) {
-	_, c, err := SetupClient()
+func handleFileVsNamedResource(ctx context.Context, differ *diff.Differ, file, resourceType, resourceID string) (*diff.DiffResult, error) {
+	_, c, err := setupClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	localData, err := parseYAMLFile(file)
+	localData, err := parseYAMLFile(ctx, file)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse file: %w", err)
 	}
@@ -210,8 +216,8 @@ func handleFileVsNamedResource(differ *diff.Differ, file, resourceType, resource
 	return differ.Compare(remoteData, localData, fmt.Sprintf("remote: %s/%s", resourceType, resourceID), fmt.Sprintf("local: %s", sourceName(file)))
 }
 
-func handleTwoRemoteResources(differ *diff.Differ, resourceType, id1, id2 string) (*diff.DiffResult, error) {
-	_, c, err := SetupClient()
+func handleTwoRemoteResources(ctx context.Context, differ *diff.Differ, resourceType, id1, id2 string) (*diff.DiffResult, error) {
+	_, c, err := setupClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -229,8 +235,8 @@ func handleTwoRemoteResources(differ *diff.Differ, resourceType, id1, id2 string
 	return differ.Compare(resource1, resource2, fmt.Sprintf("%s/%s", resourceType, id1), fmt.Sprintf("%s/%s", resourceType, id2))
 }
 
-func parseYAMLFile(path string) (interface{}, error) {
-	data, err := readFileFlag("file", path)
+func parseYAMLFile(ctx context.Context, path string) (interface{}, error) {
+	data, err := readFileFlag(ctx, "file", path)
 	if err != nil {
 		return nil, err
 	}
@@ -326,5 +332,4 @@ func normalizeResourceType(resourceType string) string {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(diffCmd)
 }

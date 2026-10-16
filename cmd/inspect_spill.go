@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,7 +38,7 @@ func maybeRespill(cmd *cobra.Command, cfg *config.Config, req inspect.Request, r
 
 	// Only reached in agent mode, so the rows would go out as result.records of
 	// an envelope: measure them in the layout EncodeEnvelope gives stdout (#570).
-	measured, encoding := output.MeasureSerializedBytes(res.Records, outputFormat, output.EnvelopeRecordsLayout(os.Stdout))
+	measured, encoding := output.MeasureSerializedBytes(res.Records, outputFormat(cmdContext(cmd)), output.EnvelopeRecordsLayout(currentStdout(cmdContext(cmd))))
 	if opts.Mode == exec.SpillAuto && measured <= opts.Threshold {
 		return nil, nil // inline: small enough
 	}
@@ -80,7 +79,7 @@ func maybeRespill(cmd *cobra.Command, cfg *config.Config, req inspect.Request, r
 	decided := "spilled"
 	if !summaryOnly {
 		written, werr := output.WriteSpillFile(targetPath, func(w io.Writer) error {
-			p := output.NewPrinterWithOpts(output.PrinterOptions{
+			p := newPrinterOpts(cmdContext(cmd), output.PrinterOptions{
 				Format: format,
 				Writer: w,
 				Types:  respillTypes(res.Sidecar),

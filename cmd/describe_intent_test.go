@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"testing"
 
 	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
@@ -65,7 +66,7 @@ func TestDescribeIntentProperty(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := captureStdout(t, func() { describeIntentProperty(tt.propName, tt.prop) })
+			got := captureStdout(t, func() { describeIntentProperty(os.Stdout, tt.propName, tt.prop) })
 			if got != tt.want {
 				t.Errorf("output mismatch\n got:\n%s\nwant:\n%s", got, tt.want)
 			}

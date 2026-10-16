@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -40,18 +41,18 @@ func TestGetWfeTaskResult_RunE(t *testing.T) {
 	configPath, cleanup := testutil.SetupTestConfig(t, ms.URL)
 	defer cleanup()
 
-	origCfgFile := cfgFile
-	origOutputFormat := outputFormat
-	origPlainMode := plainMode
+	origCfgFile := cfgFile(context.Background())
+	origOutputFormat := outputFormat(context.Background())
+	origPlainMode := plainMode(context.Background())
 	defer func() {
-		cfgFile = origCfgFile
-		outputFormat = origOutputFormat
-		plainMode = origPlainMode
+		gFlags.cfgFile = origCfgFile
+		gFlags.outputFormat = origOutputFormat
+		gFlags.plainMode = origPlainMode
 	}()
 
-	cfgFile = configPath
-	outputFormat = "json"
-	plainMode = true
+	gFlags.cfgFile = configPath
+	gFlags.outputFormat = "json"
+	gFlags.plainMode = true
 
 	testutil.ResetCommandFlags(getWfeTaskResultCmd)
 	_ = getWfeTaskResultCmd.Flags().Set("task", "rca_analysis")

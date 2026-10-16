@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,7 +25,7 @@ func TestApplyRunEnvironment_ScrubAndRestore(t *testing.T) {
 	t.Setenv(config.EnvDisableKeyring, "")
 	os.Unsetenv(config.EnvDisableKeyring)
 
-	cleanup, err := applyRunEnvironment(RunOptions{
+	cleanup, err := applyRunEnvironment(context.Background(), RunOptions{
 		Session: &Session{EnvironmentURL: "https://x.example.invalid", Token: "t"},
 		Env:     map[string]string{"DTCTL_PROFILE": "query"},
 	})
@@ -162,7 +163,7 @@ func TestSessionScrubsSurfaceShapingEnvVars(t *testing.T) {
 		t.Setenv(key, "host-value")
 	}
 
-	cleanup, err := applyRunEnvironment(RunOptions{
+	cleanup, err := applyRunEnvironment(context.Background(), RunOptions{
 		Session: &Session{EnvironmentURL: "https://x.example.invalid", Token: "t"},
 	})
 	require.NoError(t, err)

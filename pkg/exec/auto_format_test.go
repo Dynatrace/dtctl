@@ -202,3 +202,31 @@ func TestBuildSpillResponse_AutoByDefault(t *testing.T) {
 		})
 	}
 }
+
+// TestPrintResults_AgentJQWithoutFormatIsJSON pins JSON output for --jq with no -o.
+func TestPrintResults_AgentJQWithoutFormatIsJSON(t *testing.T) {
+	records := []map[string]interface{}{{"host": "a", "count": float64(1)}, {"host": "b", "count": float64(2)}}
+	e := &DQLExecutor{}
+	out := captureStdout(t, func() {
+		err := e.printResults("fetch logs", &DQLQueryResponse{Records: records}, DQLExecuteOptions{
+			AgentMode:           true,
+			OutputFormat:        "auto",
+			AutoFormatByDefault: true,
+			JQFilter:            ".records",
+			Spill:               SpillOptions{Mode: SpillAuto, Threshold: 1 << 20, Dir: t.TempDir(), Format: "json"},
+		})
+		if err != nil {
+			t.Fatalf("printResults: %v", err)
+		}
+	})
+	var resp struct {
+		Result  []map[string]interface{} `json:"result"`
+		Context output.ResponseContext   `json:"context"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		t.Fatalf("result is not JSON rows: %v\n%s", err, out)
+	}
+	if (resp.Context.Format != "" && resp.Context.Format != "json") || len(resp.Result) != 2 {
+		t.Errorf("format=%q rows=%d, want JSON and 2", resp.Context.Format, len(resp.Result))
+	}
+}

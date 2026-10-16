@@ -13,11 +13,14 @@ import (
 )
 
 // getAnomalyDetectorsCmd retrieves anomaly detectors
-var getAnomalyDetectorsCmd = &cobra.Command{
-	Use:     "anomaly-detectors [id]",
-	Aliases: []string{"anomaly-detector", "ad"},
-	Short:   "Get custom anomaly detectors",
-	Long: `Get custom anomaly detectors (builtin:davis.anomaly-detectors).
+var getAnomalyDetectorsCmd = newGetAnomalyDetectorsCmd()
+
+func newGetAnomalyDetectorsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "anomaly-detectors [id]",
+		Aliases: []string{"anomaly-detector", "ad"},
+		Short:   "Get custom anomaly detectors",
+		Long: `Get custom anomaly detectors (builtin:davis.anomaly-detectors).
 
 Examples:
   # List all anomaly detectors
@@ -38,65 +41,74 @@ Examples:
   # Wide output with object IDs
   dtctl get anomaly-detectors -o wide
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		handler := anomalydetector.NewHandler(c)
+			handler := anomalydetector.NewHandler(c)
 
-		// Get specific detector if ID provided
-		if len(args) > 0 {
-			ad, err := resolveAnomalyDetector(handler, args[0])
+			// Get specific detector if ID provided
+			if len(args) > 0 {
+				ad, err := resolveAnomalyDetector(handler, args[0])
+				if err != nil {
+					return err
+				}
+
+				ap := enrichAgent(printer, "get", "anomaly-detector")
+				if ap != nil {
+					ap.SetSuggestions([]string{
+						fmt.Sprintf("dtctl describe anomaly-detector %s -- view full configuration and recent problems", ad.ObjectID),
+						fmt.Sprintf("dtctl edit anomaly-detector %s -- modify detector configuration", ad.ObjectID),
+						"dtctl get anomaly-detectors -- list all detectors",
+					})
+				}
+				return printer.Print(ad)
+			}
+
+			// List all detectors
+			opts := anomalydetector.ListOptions{}
+
+			// Handle tri-state --enabled flag
+			if cmd.Flags().Changed("enabled") {
+				enabled, _ := cmd.Flags().GetBool("enabled")
+				opts.Enabled = &enabled
+			}
+
+			detectors, err := handler.List(opts)
 			if err != nil {
 				return err
 			}
 
 			ap := enrichAgent(printer, "get", "anomaly-detector")
 			if ap != nil {
-				ap.SetSuggestions([]string{
-					fmt.Sprintf("dtctl describe anomaly-detector %s -- view full configuration and recent problems", ad.ObjectID),
-					fmt.Sprintf("dtctl edit anomaly-detector %s -- modify detector configuration", ad.ObjectID),
-					"dtctl get anomaly-detectors -- list all detectors",
-				})
+				ap.SetTotal(len(detectors))
+				ap.Context().Suggestions = []string{
+					"dtctl describe anomaly-detector <title> -- view full configuration and recent problems",
+					"dtctl get anomaly-detectors --enabled -- list only active detectors",
+					"dtctl edit anomaly-detector <title> -- modify detector configuration",
+				}
 			}
-			return printer.Print(ad)
-		}
-
-		// List all detectors
-		opts := anomalydetector.ListOptions{}
-
-		// Handle tri-state --enabled flag
-		if cmd.Flags().Changed("enabled") {
-			enabled, _ := cmd.Flags().GetBool("enabled")
-			opts.Enabled = &enabled
-		}
-
-		detectors, err := handler.List(opts)
-		if err != nil {
-			return err
-		}
-
-		ap := enrichAgent(printer, "get", "anomaly-detector")
-		if ap != nil {
-			ap.SetTotal(len(detectors))
-			ap.Context().Suggestions = []string{
-				"dtctl describe anomaly-detector <title> -- view full configuration and recent problems",
-				"dtctl get anomaly-detectors --enabled -- list only active detectors",
-				"dtctl edit anomaly-detector <title> -- modify detector configuration",
-			}
-		}
-		return printer.PrintList(detectors)
-	},
+			return printer.PrintList(detectors)
+		},
+	}
+	c.Flags().Bool("enabled", true, "Filter by enabled state (--enabled for enabled only, --enabled=false for disabled only)")
+	_ = c.Flags().SetAnnotation("enabled", "cobra_annotation_bash_completion_custom", []string{})
+	stability.MarkStable(c)
+	return c
 }
 
 // deleteAnomalyDetectorCmd deletes an anomaly detector
-var deleteAnomalyDetectorCmd = &cobra.Command{
-	Use:     "anomaly-detector <id-or-title>",
-	Aliases: []string{"ad"},
-	Short:   "Delete a custom anomaly detector",
-	Long: `Delete a custom anomaly detector by object ID or title.
+var deleteAnomalyDetectorCmd = newDeleteAnomalyDetectorCmd()
+
+func newDeleteAnomalyDetectorCmd() *cobra.Command {
+	var forceDelete bool
+	c := &cobra.Command{
+		Use:     "anomaly-detector <id-or-title>",
+		Aliases: []string{"ad"},
+		Short:   "Delete a custom anomaly detector",
+		Long: `Delete a custom anomaly detector by object ID or title.
 
 Examples:
   # Delete by object ID
@@ -108,69 +120,68 @@ Examples:
   # Delete without confirmation
   dtctl delete anomaly-detector <object-id> -y
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		_, c, err := SetupWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
-
-		handler := anomalydetector.NewHandler(c)
-
-		// Resolve identifier (could be objectID or title)
-		ad, err := resolveAnomalyDetector(handler, identifier)
-		if err != nil {
-			return err
-		}
-
-		if dryRun {
-			return deleteDryRun(cmd, "anomaly detector", ad.Title, ad.ObjectID)
-		}
-
-		// Confirm deletion unless --yes or --plain
-		if !forceDelete && !plainMode {
-			if !prompt.ConfirmDeletion("anomaly detector", ad.Title, ad.ObjectID) {
-				fmt.Println("Deletion cancelled")
-				return nil
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
 			}
-		}
 
-		if err := handler.Delete(ad.ObjectID); err != nil {
-			return err
-		}
+			handler := anomalydetector.NewHandler(c)
 
-		// In agent mode, output structured response
-		if agentMode {
-			printer := NewPrinter()
-			ap := enrichAgent(printer, "delete", "anomaly-detector")
-			if ap != nil {
-				ap.SetSuggestions([]string{
-					"Deleted. Verify with 'dtctl get anomaly-detectors'",
+			// Resolve identifier (could be objectID or title)
+			ad, err := resolveAnomalyDetector(handler, identifier)
+			if err != nil {
+				return err
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "anomaly detector", ad.Title, ad.ObjectID)
+			}
+
+			// Confirm deletion unless --yes or --plain
+			if !forceDelete && !plainMode(cmdContext(cmd)) {
+				if !prompt.ConfirmDeletionWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), "anomaly detector", ad.Title, ad.ObjectID) {
+					fmt.Fprintln(currentStdout(cmdContext(cmd)), "Deletion cancelled")
+					return nil
+				}
+			}
+
+			if err := handler.Delete(ad.ObjectID); err != nil {
+				return err
+			}
+
+			// In agent mode, output structured response
+			if agentMode(cmdContext(cmd)) {
+				printer := newPrinterCtx(cmdContext(cmd))
+				ap := enrichAgent(printer, "delete", "anomaly-detector")
+				if ap != nil {
+					ap.SetSuggestions([]string{
+						"Deleted. Verify with 'dtctl get anomaly-detectors'",
+					})
+				}
+				return printer.Print(map[string]string{
+					"objectId": ad.ObjectID,
+					"title":    ad.Title,
+					"status":   "deleted",
 				})
 			}
-			return printer.Print(map[string]string{
-				"objectId": ad.ObjectID,
-				"title":    ad.Title,
-				"status":   "deleted",
-			})
-		}
 
-		output.PrintSuccess("Anomaly detector %q deleted", ad.Title)
-		return nil
-	},
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Anomaly detector %q deleted", ad.Title)
+			return nil
+		},
+	}
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
 	// --enabled flag: tri-state (absent=all, --enabled=true, --enabled=false)
-	getAnomalyDetectorsCmd.Flags().Bool("enabled", true, "Filter by enabled state (--enabled for enabled only, --enabled=false for disabled only)")
-
 	// Delete confirmation flags
-	deleteAnomalyDetectorCmd.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
-
 	// Suppress the default value in help output for the tri-state flag
-	_ = getAnomalyDetectorsCmd.Flags().SetAnnotation("enabled", "cobra_annotation_bash_completion_custom", []string{})
 }
 
 // resolveAnomalyDetector tries to find a detector by ID or title, used by describe/edit/delete commands.
@@ -202,6 +213,4 @@ func resolveAnomalyDetector(handler *anomalydetector.Handler, identifier string)
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(deleteAnomalyDetectorCmd)
-	stability.MarkStable(getAnomalyDetectorsCmd)
 }

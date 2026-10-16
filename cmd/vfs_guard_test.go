@@ -67,6 +67,14 @@ var hostFileAccessAllowlist = map[string]string{
 	"pkg/output/spill_list.go": "enumerates dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
 	"pkg/inspect/reader.go":    "streams a spilled result file from the host disk; `inspect` is blocked in a service and nothing spills there",
 
+	// The usage ledger is a counter file dtctl keeps in its own XDG state
+	// directory for a context that opted in. Recording needs the
+	// HostUsageLedger capability (never granted embedded) and `usage` itself
+	// is blocked in a service.
+	"pkg/usage/usage.go":        "reads/writes dtctl's own usage ledger (HostUsageLedger capability; `usage` is blocked in a service)",
+	"pkg/usage/lock_unix.go":    "locks dtctl's own usage ledger (HostUsageLedger capability; `usage` is blocked in a service)",
+	"pkg/usage/lock_windows.go": "locks dtctl's own usage ledger (HostUsageLedger capability; `usage` is blocked in a service)",
+
 	// Plugin discovery stats candidate executables on PATH; skills installation
 	// writes files into locally installed AI assistants' directories. Both are
 	// host state, gated by the PluginDispatch capability and the `skills` block.

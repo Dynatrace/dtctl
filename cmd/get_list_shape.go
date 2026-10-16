@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"os"
+	"context"
 
 	"github.com/spf13/cobra"
 
@@ -15,10 +15,44 @@ import (
 // an inherited one of the same name. Shaping happens in the printer
 // (output.ShapingPrinter), after the command fetched its data, so no
 // subcommand needs to know about either flag.
+//
+// These are the singleton's storage. A per-invocation tree binds the same
+// flags to its invocation instead (addGetListShapeFlags); read them through
+// listShapeLimit and listShapeFields.
 var (
 	getListLimit  int
 	getListFields string
 )
+
+// addGetListShapeFlags registers --limit and --fields on the get verb, bound to
+// the given storage: the singleton's variables above, or a concurrent
+// invocation's own. The storage is passed in because a command being built has
+// no context yet to find the invocation through.
+func addGetListShapeFlags(c *cobra.Command, limit *int, fields *string) {
+	c.PersistentFlags().IntVar(limit, "limit", 0,
+		"return at most this many items (0 = all; agent mode defaults to 50); applied after fetching, so --chunk-size still controls paging")
+	c.PersistentFlags().StringVar(fields, "fields", "",
+		"comma-separated fields to keep, in this order; dotted paths reach nested fields (modificationInfo.lastModifiedTime). table/csv/toon flatten them into columns")
+
+	stability.MarkFlag(c, "limit", stability.Experimental, listShapeSince)
+	stability.MarkFlag(c, "fields", stability.Experimental, listShapeSince)
+}
+
+// listShapeLimit and listShapeFields are this invocation's get-wide --limit
+// and --fields.
+func listShapeLimit(ctx context.Context) int {
+	if inv := concurrentInvocation(ctx); inv != nil {
+		return inv.getListLimit
+	}
+	return getListLimit
+}
+
+func listShapeFields(ctx context.Context) string {
+	if inv := concurrentInvocation(ctx); inv != nil {
+		return inv.getListFields
+	}
+	return getListFields
+}
 
 // listShapeSince is the release that introduced --limit/--fields on get.
 const listShapeSince = "0.40.0"
@@ -32,11 +66,24 @@ const agentDefaultPage = 50
 // invokedGetCmd is the get subcommand this invocation is running, set by the
 // RunE wrapper installGetListPaging adds. NewPrinter has no command in hand,
 // and the default page must apply to get list verbs only.
+//
+// Serialized invocations use this package-level var (safe under runMu).
+// Concurrent invocations store it on their invocation via currentInvokedGetCmd.
 var invokedGetCmd *cobra.Command
 
+// currentInvokedGetCmd returns the get subcommand for this invocation:
+// the per-invocation field when a concurrent invocation is active, else the
+// package-level var (serialized path, safe under runMu).
+func currentInvokedGetCmd(ctx context.Context) *cobra.Command {
+	if inv := current(ctx); inv != nil && inv.concurrent {
+		return inv.invokedGetCmd
+	}
+	return invokedGetCmd
+}
+
 // installGetListPaging wraps every runnable command under cmd so that it
-// records itself in invokedGetCmd for the duration of its RunE. Like the scope
-// preflight, it is re-applied on each invocation over the pristine tree.
+// records itself for the duration of its RunE. Like the scope preflight, it is
+// re-applied on each invocation over the pristine tree.
 func installGetListPaging(cmd *cobra.Command) {
 	for _, sub := range cmd.Commands() {
 		installGetListPaging(sub)
@@ -46,8 +93,13 @@ func installGetListPaging(cmd *cobra.Command) {
 		return
 	}
 	cmd.RunE = func(c *cobra.Command, args []string) error {
-		invokedGetCmd = c
-		defer func() { invokedGetCmd = nil }()
+		if inv := current(cmdContext(c)); inv != nil && inv.concurrent {
+			inv.invokedGetCmd = c
+			defer func() { inv.invokedGetCmd = nil }()
+		} else {
+			invokedGetCmd = c
+			defer func() { invokedGetCmd = nil }()
+		}
 		return orig(c, args)
 	}
 }
@@ -56,30 +108,20 @@ func installGetListPaging(cmd *cobra.Command) {
 // --limit should request: the agent-mode default page unless --limit was
 // given explicitly (including --limit 0), in which case limit as passed.
 func agentPageLimit(cmd *cobra.Command, limit int64) int64 {
-	if agentMode && !cmd.Flags().Changed("limit") {
+	if agentMode(cmdContext(cmd)) && !cmd.Flags().Changed("limit") {
 		return agentDefaultPage
 	}
 	return limit
-}
-
-func init() {
-	getCmd.PersistentFlags().IntVar(&getListLimit, "limit", 0,
-		"return at most this many items (0 = all; agent mode defaults to 50); applied after fetching, so --chunk-size still controls paging")
-	getCmd.PersistentFlags().StringVar(&getListFields, "fields", "",
-		"comma-separated fields to keep, in this order; dotted paths reach nested fields (modificationInfo.lastModifiedTime). table/csv/toon flatten them into columns")
-
-	stability.MarkFlag(getCmd, "limit", stability.Experimental, listShapeSince)
-	stability.MarkFlag(getCmd, "fields", stability.Experimental, listShapeSince)
 }
 
 // shapeListOutput wraps p with the --limit/--fields shaping when either flag
 // was given, and returns p untouched otherwise so the default output stays
 // byte-identical. format is the effective output format and tabular selects
 // the flattened column form (see output.ShapeOptions).
-func shapeListOutput(p output.Printer, format string, tabular bool) output.Printer {
-	fields := output.ParseFields(getListFields)
-	limit := getListLimit
-	if agentMode && usesDefaultGetLimit(invokedGetCmd) {
+func shapeListOutput(ctx context.Context, p output.Printer, format string, tabular bool) output.Printer {
+	fields := output.ParseFields(listShapeFields(ctx))
+	limit := listShapeLimit(ctx)
+	if agentMode(ctx) && usesDefaultGetLimit(currentInvokedGetCmd(ctx)) {
 		limit = agentDefaultPage
 	}
 	if limit == 0 && len(fields) == 0 {
@@ -90,7 +132,7 @@ func shapeListOutput(p output.Printer, format string, tabular bool) output.Print
 		Fields:  fields,
 		Tabular: tabular,
 		Format:  format,
-		Notices: os.Stderr,
+		Notices: currentStderr(ctx),
 	})
 }
 
@@ -102,5 +144,18 @@ func usesDefaultGetLimit(c *cobra.Command) bool {
 		return false
 	}
 	f := c.Flags().Lookup("limit")
-	return f != nil && f == getCmd.PersistentFlags().Lookup("limit") && !f.Changed
+	verb := getVerbOf(c)
+	return f != nil && verb != nil && f == verb.PersistentFlags().Lookup("limit") && !f.Changed
+}
+
+// getVerbOf returns the `get` verb c sits under, on whichever tree c belongs
+// to — the singleton or a per-invocation one — or nil when c is not a get
+// subcommand.
+func getVerbOf(c *cobra.Command) *cobra.Command {
+	for p := c; p != nil; p = p.Parent() {
+		if parent := p.Parent(); parent != nil && !parent.HasParent() && p.Name() == "get" {
+			return p
+		}
+	}
+	return nil
 }

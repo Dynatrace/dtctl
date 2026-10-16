@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,17 +13,26 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/watch"
 )
 
-var getBreakpointsCmd = &cobra.Command{
-	Use:   "breakpoints",
-	Short: "List all breakpoints in the current workspace",
-	RunE:  runGetBreakpoints,
+var getBreakpointsCmd = newGetBreakpointsCmd()
+
+func newGetBreakpointsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "breakpoints",
+		Short: "List all breakpoints in the current workspace",
+		RunE:  runGetBreakpoints,
+	}
+	markLiveDebuggerExperimental(c)
+	return c
 }
 
 // getCmd represents the get command
-var getCmd = &cobra.Command{
-	Use:   "get",
-	Short: "Display one or many resources",
-	Long: `Display one or many resources from the Dynatrace platform.
+var getCmd = newGetCmd(&getListLimit, &getListFields)
+
+func newGetCmd(limit *int, fields *string) *cobra.Command {
+	c := &cobra.Command{
+		Use:   "get",
+		Short: "Display one or many resources",
+		Long: `Display one or many resources from the Dynatrace platform.
 
 When called with a resource type only, lists all resources of that type.
 When called with a resource type and ID or name, retrieves that specific resource.
@@ -44,7 +52,7 @@ Supported resources:
   environment                 license                 license-settings
 
 Use 'dtctl get <resource> --help' for resource-specific options.`,
-	Example: `  # List all workflows
+		Example: `  # List all workflows
   dtctl get workflows
 
   # Get a specific workflow by name or ID
@@ -61,7 +69,11 @@ Use 'dtctl get <resource> --help' for resource-specific options.`,
 
   # List with wide output (extra columns)
   dtctl get workflows -o wide`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	addGetListShapeFlags(c, limit, fields)
+	return c
 }
 
 // executeWithWatch wraps a fetcher function with watch mode support
@@ -70,7 +82,7 @@ func executeWithWatch(cmd *cobra.Command, fetcher watch.ResourceFetcher, printer
 	if !watchMode {
 		return nil
 	}
-	if !caps.LongRunningStreams {
+	if !currentCaps(cmdContext(cmd)).LongRunningStreams {
 		return &CapabilityError{Feature: "watch mode"}
 	}
 
@@ -81,18 +93,18 @@ func executeWithWatch(cmd *cobra.Command, fetcher watch.ResourceFetcher, printer
 		interval = time.Second
 	}
 
-	cfg, err := LoadConfig()
+	cfg, err := loadConfig(cmdContext(cmd))
 	if err != nil {
 		return err
 	}
 
-	c, err := NewClientFromConfig(cfg)
+	c, err := newClientFromConfig(cmdContext(cmd), cfg)
 	if err != nil {
 		return err
 	}
 
 	basePrinter := printer.(output.Printer)
-	watchPrinter := output.NewWatchPrinter(basePrinter)
+	watchPrinter := output.NewWatchPrinterWithWriter(basePrinter, currentStdout(cmdContext(cmd)), output.ColorEnabled())
 
 	watcher := watch.NewWatcher(watch.WatcherOptions{
 		Interval:    interval,
@@ -102,15 +114,11 @@ func executeWithWatch(cmd *cobra.Command, fetcher watch.ResourceFetcher, printer
 		ShowInitial: !watchOnly,
 	})
 
-	ctx, cancel := context.WithCancel(cmd.Context())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
+	// NotifyContext rather than Notify plus a goroutine: stop() deregisters the
+	// handler when the watch ends, so an embedder running many requests does
+	// not accumulate one parked goroutine and one SIGTERM handler per watch.
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	return watcher.Start(ctx)
 }
@@ -151,7 +159,6 @@ func init() {
 	getCmd.AddCommand(getSettingsCmd)
 	getCmd.AddCommand(getBreakpointsCmd)
 	getCmd.AddCommand(getSnapshotsCmd)
-	markLiveDebuggerExperimental(getBreakpointsCmd)
 	getCmd.AddCommand(getExtensionsCmd)
 	getCmd.AddCommand(getExtensionConfigsCmd)
 	getCmd.AddCommand(getDocumentsCmd)
@@ -167,6 +174,3 @@ func init() {
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(getCmd)
-}

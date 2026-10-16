@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,10 +17,13 @@ import (
 // ctxCmd is a top-level shortcut for context management.
 // It provides quick access to the most common context operations
 // without the "config" prefix.
-var ctxCmd = &cobra.Command{
-	Use:   "ctx [context-name]",
-	Short: "Manage contexts (shortcut for config context commands)",
-	Long: `Quick context management without the "config" prefix.
+var ctxCmd = newCtxCmd()
+
+func newCtxCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "ctx [context-name]",
+		Short: "Manage contexts (shortcut for config context commands)",
+		Long: `Quick context management without the "config" prefix.
 
 When called without arguments, lists all contexts.
 When called with a context name, switches to that context.
@@ -44,30 +47,33 @@ Examples:
   # Delete a context
   dtctl ctx delete old-env
 `,
-	Args: cobra.MaximumNArgs(1),
-	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) != 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		cfg, err := LoadConfig()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		var names []string
-		for _, nc := range cfg.Contexts {
-			names = append(names, nc.Name)
-		}
-		return names, cobra.ShellCompDirectiveNoFileComp
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			// No args: list contexts (same as config get-contexts)
-			return listContexts()
-		}
+		Args: cobra.MaximumNArgs(1),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			var names []string
+			for _, nc := range cfg.Contexts {
+				names = append(names, nc.Name)
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				// No args: list contexts (same as config get-contexts)
+				return listContexts(cmdContext(cmd))
+			}
 
-		// One arg: switch to that context (same as config use-context)
-		return useContext(args[0])
-	},
+			// One arg: switch to that context (same as config use-context)
+			return useContext(cmdContext(cmd), args[0])
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // ctxTokenCmd prints the resolved token for the current (or named) context.
@@ -75,75 +81,96 @@ Examples:
 // (no "Bearer "/"Api-Token " scheme prefix), so callers must add the scheme themselves.
 // OAuth tokens are auto-refreshed if expired, so the printed value matches what
 // dtctl itself sends.
-var ctxTokenCmd = &cobra.Command{
-	Use:   "token [context-name]",
-	Short: "Print the resolved token for a context",
-	Args:  cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := LoadConfig()
-		if err != nil {
-			return err
-		}
-		name := cfg.CurrentContext
-		if len(args) == 1 {
-			name = args[0]
-		}
-		nc, err := cfg.GetContext(name)
-		if err != nil {
-			return err
-		}
-		tok, err := client.GetTokenForContext(cfg, nc.Context.Environment, nc.Context.TokenRef)
-		if err != nil {
-			return err
-		}
-		fmt.Println(tok)
-		return nil
-	},
+var ctxTokenCmd = newCtxTokenCmd()
+
+func newCtxTokenCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "token [context-name]",
+		Short: "Print the resolved token for a context",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+			name := cfg.CurrentContext
+			if len(args) == 1 {
+				name = args[0]
+			}
+			nc, err := cfg.GetContext(name)
+			if err != nil {
+				return err
+			}
+			tok, err := client.GetTokenForContext(cfg, nc.Context.Environment, nc.Context.TokenRef)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(currentStdout(cmdContext(cmd)), tok)
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // ctxCurrentCmd shows the current context name
-var ctxCurrentCmd = &cobra.Command{
-	Use:   "current",
-	Short: "Display the current context name",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := LoadConfig()
-		if err != nil {
-			return err
-		}
-		fmt.Println(cfg.CurrentContext)
-		return nil
-	},
+var ctxCurrentCmd = newCtxCurrentCmd()
+
+func newCtxCurrentCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "current",
+		Short: "Display the current context name",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(currentStdout(cmdContext(cmd)), cfg.CurrentContext)
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // ctxDescribeCmd shows detailed context information
-var ctxDescribeCmd = &cobra.Command{
-	Use:   "describe <context-name>",
-	Short: "Show detailed information about a context",
-	Args:  cobra.ExactArgs(1),
-	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) != 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		cfg, err := LoadConfig()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		var names []string
-		for _, nc := range cfg.Contexts {
-			names = append(names, nc.Name)
-		}
-		return names, cobra.ShellCompDirectiveNoFileComp
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return describeContext(args[0])
-	},
+var ctxDescribeCmd = newCtxDescribeCmd()
+
+func newCtxDescribeCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "describe <context-name>",
+		Short: "Show detailed information about a context",
+		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			var names []string
+			for _, nc := range cfg.Contexts {
+				names = append(names, nc.Name)
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return describeContext(cmdContext(cmd), args[0])
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // ctxSetCmd creates or updates a context and activates it
-var ctxSetCmd = &cobra.Command{
-	Use:   "set <context-name>",
-	Short: "Create or update a context and set it as current",
-	Long: `Create or update a context with connection and safety settings.
+var ctxSetCmd = newCtxSetCmd()
+
+func newCtxSetCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "set <context-name>",
+		Short: "Create or update a context and set it as current",
+		Long: `Create or update a context with connection and safety settings.
 
 The context is always set as the current context after being created or updated.
 To switch to an existing context without changing its settings, use: dtctl ctx <name>
@@ -158,41 +185,53 @@ Examples:
   dtctl ctx set prod --environment https://prod.example.com --safety-level readonly
   dtctl ctx set staging --environment https://staging.example.com --token-ref my-token
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return setContext(args[0], contextSettingsFromFlags(cmd))
-	},
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return setContext(cmdContext(cmd), args[0], contextSettingsFromFlags(cmd))
+		},
+	}
+	stability.MarkStable(c)
+	addContextFlags(c)
+	return c
 }
 
 // ctxDeleteCmd deletes a context
-var ctxDeleteCmd = &cobra.Command{
-	Use:     "delete <context-name>",
-	Aliases: []string{"rm"},
-	Short:   "Delete a context",
-	Args:    cobra.ExactArgs(1),
-	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) != 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		cfg, err := LoadConfig()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		var names []string
-		for _, nc := range cfg.Contexts {
-			names = append(names, nc.Name)
-		}
-		return names, cobra.ShellCompDirectiveNoFileComp
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		deleteCredential, _ := cmd.Flags().GetBool("delete-credentials")
-		return deleteContext(cmd, args[0], deleteCredential)
-	},
+var ctxDeleteCmd = newCtxDeleteCmd()
+
+func newCtxDeleteCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "delete <context-name>",
+		Aliases: []string{"rm"},
+		Short:   "Delete a context",
+		Args:    cobra.ExactArgs(1),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			var names []string
+			for _, nc := range cfg.Contexts {
+				names = append(names, nc.Name)
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			deleteCredential, _ := cmd.Flags().GetBool("delete-credentials")
+			return deleteContext(cmd, args[0], deleteCredential)
+		},
+	}
+	c.Flags().Bool("delete-credentials", false,
+		"also delete the credential the context references (leaves it in place otherwise)")
+	stability.MarkStable(c)
+	return c
 }
 
 // listContexts lists all available contexts (shared logic)
-func listContexts() error {
-	cfg, err := LoadConfig()
+func listContexts(ctx context.Context) error {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -216,13 +255,13 @@ func listContexts() error {
 		})
 	}
 
-	printer := NewPrinter()
+	printer := newPrinterCtx(ctx)
 	return printer.PrintList(items)
 }
 
 // useContext switches to a named context (shared logic)
-func useContext(name string) error {
-	cfg, err := loadConfigRaw()
+func useContext(ctx context.Context, name string) error {
+	cfg, err := loadConfigRaw(ctx)
 	if err != nil {
 		return err
 	}
@@ -241,17 +280,17 @@ func useContext(name string) error {
 
 	cfg.CurrentContext = name
 
-	if err := saveConfig(cfg); err != nil {
+	if err := saveConfig(ctx, cfg); err != nil {
 		return err
 	}
 
-	output.PrintSuccess("Switched to context %q", name)
+	output.FprintSuccess(currentStderr(ctx), "Switched to context %q", name)
 	return nil
 }
 
 // describeContext shows detailed info about a named context (shared logic)
-func describeContext(name string) error {
-	cfg, err := LoadConfig()
+func describeContext(ctx context.Context, name string) error {
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -279,29 +318,33 @@ func describeContext(name string) error {
 	level := cfg.EffectiveSafetyLevelFor(&found.Context)
 
 	const w = 14
-	output.DescribeKV("Name:", w, "%s%s", found.Name, currentMark)
-	output.DescribeKV("Environment:", w, "%s", found.Context.Environment)
-	output.DescribeKV("Token-Ref:", w, "%s", found.Context.TokenRef)
-	output.DescribeKV("Safety Level:", w, "%s", level)
+	output.FprintDescribeKV(currentStdout(ctx), "Name:", w, "%s%s", found.Name, currentMark)
+	output.FprintDescribeKV(currentStdout(ctx), "Environment:", w, "%s", found.Context.Environment)
+	output.FprintDescribeKV(currentStdout(ctx), "Token-Ref:", w, "%s", found.Context.TokenRef)
+	output.FprintDescribeKV(currentStdout(ctx), "Safety Level:", w, "%s", level)
 
 	switch level {
 	case config.SafetyLevelReadOnly:
-		fmt.Printf("%*s(No modifications allowed)\n", w, "")
+		fmt.Fprintf(currentStdout(ctx), "%*s(No modifications allowed)\n", w, "")
 	case config.SafetyLevelReadWriteMine:
-		fmt.Printf("%*s(Create/update/delete own resources)\n", w, "")
+		fmt.Fprintf(currentStdout(ctx), "%*s(Create/update/delete own resources)\n", w, "")
 	case config.SafetyLevelReadWriteAll:
-		fmt.Printf("%*s(Modify all resources, no bucket deletion)\n", w, "")
+		fmt.Fprintf(currentStdout(ctx), "%*s(Modify all resources, no bucket deletion)\n", w, "")
 	case config.SafetyLevelDangerouslyUnrestricted:
-		fmt.Printf("%*s(All operations including bucket deletion)\n", w, "")
+		fmt.Fprintf(currentStdout(ctx), "%*s(All operations including bucket deletion)\n", w, "")
 	}
 
 	if found.Context.Profile != "" {
-		output.DescribeKV("Profile:", w, "%s", found.Context.Profile)
-		fmt.Printf("%*s(Restricts the visible command surface)\n", w, "")
+		output.FprintDescribeKV(currentStdout(ctx), "Profile:", w, "%s", found.Context.Profile)
+		fmt.Fprintf(currentStdout(ctx), "%*s(Restricts the visible command surface)\n", w, "")
 	}
 
 	if found.Context.Description != "" {
-		output.DescribeKV("Description:", w, "%s", found.Context.Description)
+		output.FprintDescribeKV(currentStdout(ctx), "Description:", w, "%s", found.Context.Description)
+	}
+
+	if cfg.UsageTrackingOn(found.Name) {
+		output.FprintDescribeKV(currentStdout(ctx), "Usage:", w, "%s", "tracked locally (see 'dtctl usage')")
 	}
 
 	return nil
@@ -324,6 +367,9 @@ type contextSettings struct {
 	// floor. nil leaves the existing list untouched (the flag was not passed);
 	// a non-nil empty slice clears it.
 	stabilityExceptions []string
+	// usageTracking switches the context's local usage ledger on or off. nil
+	// leaves it untouched (the flag was not passed).
+	usageTracking *bool
 	// global writes to the global config instead of a discovered .dtctl.yaml.
 	global bool
 }
@@ -340,6 +386,10 @@ func contextSettingsFromFlags(cmd *cobra.Command) contextSettings {
 	s.profile, _ = cmd.Flags().GetString("profile")
 	s.minStability, _ = cmd.Flags().GetString("min-stability")
 	s.global, _ = cmd.Flags().GetBool("global")
+	if cmd.Flags().Changed("usage-tracking") {
+		on, _ := cmd.Flags().GetBool("usage-tracking")
+		s.usageTracking = &on
+	}
 	if cmd.Flags().Changed("stability-exception") {
 		vals, _ := cmd.Flags().GetStringArray("stability-exception")
 		// Non-nil even when empty: `--stability-exception ""` is how a caller
@@ -368,19 +418,21 @@ func addContextFlags(cmd *cobra.Command) {
 	cmd.Flags().String("min-stability", "", "stability floor: weakest contract a command or flag may offer here (stable, experimental)")
 	cmd.Flags().StringArray("stability-exception", nil, "admit one below-floor command or flag (repeatable; e.g. 'inventory' or 'query --decode-snapshots')")
 	cmd.Flags().Bool("global", false, "write to the global config instead of a discovered .dtctl.yaml")
-	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfileNames)
-	_ = cmd.RegisterFlagCompletionFunc("min-stability", completeStabilityLevels)
+	cmd.Flags().Bool("usage-tracking", false, "keep a local tally of the DQL queries dtctl runs in this context and the data they scan (see 'dtctl usage'; --usage-tracking=false turns it off)")
+	stability.MarkFlag(cmd, "usage-tracking", stability.Experimental, "0.43.0")
+	registerFlagCompletion(cmd, "profile", completeProfileNames)
+	registerFlagCompletion(cmd, "min-stability", completeStabilityLevels)
 }
 
 // setContext creates or updates a named context (shared logic)
-func setContext(name string, s contextSettings) error {
+func setContext(ctx context.Context, name string, s contextSettings) error {
 	environment := s.environment
 	tokenRef := s.tokenRef
 	safetyLevel := s.safetyLevel
 	description := s.description
 	profile := s.profile
 	global := s.global
-	cfg, err := loadConfigForWrite(global)
+	cfg, err := loadConfigForWrite(ctx, global)
 	if err != nil {
 		cfg = config.NewConfig()
 	}
@@ -405,12 +457,12 @@ func setContext(name string, s contextSettings) error {
 	if environment != "" {
 		if problems := diagnostic.CheckEnvironmentURL(environment); len(problems) > 0 {
 			for _, p := range problems {
-				output.PrintWarning("%s", p.Message)
+				output.FprintWarning(currentStderr(ctx), "%s", p.Message)
 				if p.SuggestedURL != "" {
-					output.PrintHint("Did you mean: %s", p.SuggestedURL)
+					output.FprintHint(currentStderr(ctx), "Did you mean: %s", p.SuggestedURL)
 				}
 			}
-			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(currentStderr(ctx))
 		}
 	}
 
@@ -425,7 +477,7 @@ func setContext(name string, s contextSettings) error {
 	// profile may be defined later, or in a different config file. A soft warning
 	// catches the common typo without blocking legitimate ahead-of-time binding.
 	if profile != "" && profile != config.ProfileFull && !cfg.ProfileExists(profile) {
-		output.PrintWarning("profile %q is not defined yet; define it under 'profiles:' or it will error when the context is used", profile)
+		output.FprintWarning(currentStderr(ctx), "profile %q is not defined yet; define it under 'profiles:' or it will error when the context is used", profile)
 	}
 
 	// An invalid floor is a hard error, not a silent fallback: for a floor,
@@ -438,12 +490,19 @@ func setContext(name string, s contextSettings) error {
 		return err
 	}
 
+	// The usage ledger writes to the user's disk, so only the global config can
+	// opt in (see Config.UsageTrackingOn); turning it off locally is harmless.
+	if s.usageTracking != nil && *s.usageTracking && cfg.IsLocal() {
+		return fmt.Errorf("usage tracking can only be turned on in the global config, not the local config %s; re-run with --global", cfg.LocalConfigPath())
+	}
+
 	opts := &config.ContextOptions{
 		SafetyLevel:         config.SafetyLevel(safetyLevel),
 		Description:         description,
 		Profile:             profile,
 		MinStability:        minStability,
 		StabilityExceptions: s.stabilityExceptions,
+		UsageTracking:       s.usageTracking,
 	}
 
 	cfg.SetContextWithOptions(name, environment, tokenRef, opts)
@@ -453,17 +512,24 @@ func setContext(name string, s contextSettings) error {
 	// expectation is that the named context becomes current afterward.
 	cfg.CurrentContext = name
 
-	if err := saveConfigForWrite(cfg, global); err != nil {
+	if err := saveConfigForWrite(ctx, cfg, global); err != nil {
 		return err
 	}
 
 	if isUpdate {
-		output.PrintSuccess("Context %q updated and set as current", name)
+		output.FprintSuccess(currentStderr(ctx), "Context %q updated and set as current", name)
 	} else {
-		output.PrintSuccess("Context %q created and set as current", name)
+		output.FprintSuccess(currentStderr(ctx), "Context %q created and set as current", name)
+	}
+	if s.usageTracking != nil {
+		if *s.usageTracking {
+			output.FprintInfo(currentStderr(ctx), "Usage tracking is on for %q: dtctl keeps a local per-day tally of its queries and the data they scan. View it with 'dtctl usage'.", name)
+		} else {
+			output.FprintInfo(currentStderr(ctx), "Usage tracking is off for %q. Tallies already recorded are kept; clear them with 'dtctl usage reset'.", name)
+		}
 	}
 	if !global {
-		warnLocalWriteTarget(fmt.Sprintf("Context %q", name))
+		warnLocalWriteTarget(ctx, fmt.Sprintf("Context %q", name))
 	}
 	return nil
 }
@@ -479,7 +545,7 @@ func deleteContext(cmd *cobra.Command, name string, deleteCredential bool) error
 	// and the expanding loader would resolve every ${VAR} in it and save the
 	// resolved values back — writing credentials into the file in plaintext.
 	// See CONFIG_CONTRACT.md, "Write rules".
-	cfg, err := loadRawConfig()
+	cfg, err := loadRawConfig(cmdContext(cmd))
 	if err != nil {
 		return err
 	}
@@ -514,7 +580,7 @@ func deleteContext(cmd *cobra.Command, name string, deleteCredential bool) error
 		}
 	}
 
-	if dryRun {
+	if dryRun(cmdContext(cmd)) {
 		report := newDryRunReport(cmd).
 			Linef("Dry run: would delete context %q", name).
 			Detail("context", "%s", name)
@@ -538,22 +604,22 @@ func deleteContext(cmd *cobra.Command, name string, deleteCredential bool) error
 
 	if cfg.CurrentContext == name {
 		cfg.CurrentContext = ""
-		output.PrintWarning("Deleted the current context. Use 'dtctl ctx <name>' to set a new one.")
+		output.FprintWarning(currentStderr(cmdContext(cmd)), "Deleted the current context. Use 'dtctl ctx <name>' to set a new one.")
 	}
 
-	if err := saveConfig(cfg); err != nil {
+	if err := saveConfig(cmdContext(cmd), cfg); err != nil {
 		return err
 	}
 
-	output.PrintSuccess("Context %q deleted", name)
+	output.FprintSuccess(currentStderr(cmdContext(cmd)), "Context %q deleted", name)
 
 	switch {
 	case tokenRef == "":
 		// Nothing was referenced, so nothing can be left behind.
 	case deleteCredential:
-		output.PrintSuccess("Credentials %q deleted", tokenRef)
+		output.FprintSuccess(currentStderr(cmdContext(cmd)), "Credentials %q deleted", tokenRef)
 	default:
-		output.PrintInfo("Credentials %q were kept. Remove them with 'dtctl config delete-credentials %s'.", tokenRef, tokenRef)
+		output.FprintInfo(currentStderr(cmdContext(cmd)), "Credentials %q were kept. Remove them with 'dtctl config delete-credentials %s'.", tokenRef, tokenRef)
 	}
 	return nil
 }
@@ -567,13 +633,6 @@ func init() {
 	ctxCmd.AddCommand(ctxSetCmd)
 	ctxCmd.AddCommand(ctxDeleteCmd)
 
-	// Flags for ctx delete
-	ctxDeleteCmd.Flags().Bool("delete-credentials", false,
-		"also delete the credential the context references (leaves it in place otherwise)")
-
-	// Flags for ctx set
-	addContextFlags(ctxSetCmd)
-	_ = ctxSetCmd.RegisterFlagCompletionFunc("profile", completeProfileNames)
 }
 
 // completeStabilityLevels provides shell completion for a --min-stability flag.
@@ -588,11 +647,3 @@ func completeStabilityLevels(*cobra.Command, []string, string) ([]string, cobra.
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(ctxCmd)
-	stability.MarkStable(ctxCurrentCmd)
-	stability.MarkStable(ctxDeleteCmd)
-	stability.MarkStable(ctxDescribeCmd)
-	stability.MarkStable(ctxSetCmd)
-	stability.MarkStable(ctxTokenCmd)
-}

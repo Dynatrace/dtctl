@@ -2,7 +2,6 @@ package session
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 )
@@ -169,7 +168,7 @@ func ParseStabilityLevel(s string) (StabilityLevel, error) {
 // An invalid value is a fast, explicit error rather than a silent fallback,
 // which for a floor would be a surprising *widening* of the surface.
 func (c *Config) ResolveMinStability() (StabilityLevel, error) {
-	return c.resolveMinStability(os.Getenv(MinStabilityEnvVar))
+	return c.resolveMinStability(c.getenv(MinStabilityEnvVar))
 }
 
 // resolveMinStability is the testable core of ResolveMinStability with the
@@ -216,7 +215,7 @@ func (c *Config) StabilityExceptions() []string {
 // The returned set may contain DevelopmentAll, which callers treat as "every
 // registered feature".
 func (c *Config) EnabledDevelopmentFeatures() map[string]bool {
-	return c.enabledDevelopmentFeatures(os.Getenv(DevelopmentEnvVar))
+	return c.enabledDevelopmentFeatures(c.getenv(DevelopmentEnvVar))
 }
 
 // enabledDevelopmentFeatures is the testable core of
@@ -254,7 +253,7 @@ func (c *Config) enabledDevelopmentFeatures(envValue string) map[string]bool {
 // the signal used to decide whether a disabled development command explains
 // itself or stays silent.
 func (c *Config) DevelopmentEnvSet() bool {
-	_, ok := os.LookupEnv(DevelopmentEnvVar)
+	_, ok := c.lookupEnv(DevelopmentEnvVar)
 	return ok
 }
 
@@ -272,7 +271,7 @@ func (c *Config) DevelopmentEnvSet() bool {
 // Unlike a bad floor, a misread value here cannot widen anything, so there is
 // no error return: the mode only ever removes surface.
 func (c *Config) NoDeprecated() bool {
-	if v, ok := os.LookupEnv(NoDeprecatedEnvVar); ok {
+	if v, ok := c.lookupEnv(NoDeprecatedEnvVar); ok {
 		return truthyEnvValue(v)
 	}
 	ctx, err := c.CurrentContextObj()

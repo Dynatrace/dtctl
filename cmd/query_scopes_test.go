@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ import (
 func withGrantedScopes(t *testing.T, granted []string, known bool) {
 	t.Helper()
 	orig := grantedScopesFunc
-	grantedScopesFunc = func() ([]string, bool) { return granted, known }
+	grantedScopesFunc = func(context.Context) ([]string, bool) { return granted, known }
 	t.Cleanup(func() { grantedScopesFunc = orig })
 }
 
@@ -26,7 +27,7 @@ const smartscapeLogQuery = "fetch logs | fieldsAdd svc = getNodeName(dt.smartsca
 func TestDQLScopePrecheck_FailsFastOnMissingScope(t *testing.T) {
 	withGrantedScopes(t, []string{"storage:logs:read", "storage:entities:read", "storage:buckets:read"}, true)
 
-	err := dqlScopePrecheck(smartscapeLogQuery)
+	err := dqlScopePrecheck(context.Background(), smartscapeLogQuery)
 
 	var scopeErr *ScopeError
 	require.ErrorAs(t, err, &scopeErr)
@@ -34,7 +35,7 @@ func TestDQLScopePrecheck_FailsFastOnMissingScope(t *testing.T) {
 	require.Equal(t, []string{"storage:logs:read", "storage:smartscape:read"}, scopeErr.Required)
 	require.Equal(t, "getNodeName() needs storage:smartscape:read, which this token lacks", err.Error())
 
-	detail := errorToDetail(err)
+	detail := errorToDetail(context.Background(), err)
 	require.Equal(t, "insufficient_scope", detail.Code)
 	require.Equal(t, []string{"storage:smartscape:read"}, detail.MissingScopes)
 	require.Equal(t, err.Error(), detail.Message)
@@ -48,7 +49,7 @@ func TestDQLScopePrecheck_FailsFastOnMissingScope(t *testing.T) {
 func TestDQLScopePrecheck_EntityAlternativeNeedsEntityScope(t *testing.T) {
 	withGrantedScopes(t, []string{"storage:logs:read"}, true)
 
-	detail := errorToDetail(dqlScopePrecheck(smartscapeLogQuery))
+	detail := errorToDetail(context.Background(), dqlScopePrecheck(context.Background(), smartscapeLogQuery))
 
 	require.Equal(t, "insufficient_scope", detail.Code)
 	joined := strings.Join(detail.Suggestions, "\n")
@@ -60,7 +61,7 @@ func TestDQLScopePrecheck_EntityAlternativeNeedsEntityScope(t *testing.T) {
 func TestDQLScopePrecheck_SeveralMissingScopes(t *testing.T) {
 	withGrantedScopes(t, []string{"storage:events:read"}, true)
 
-	err := dqlScopePrecheck(smartscapeLogQuery)
+	err := dqlScopePrecheck(context.Background(), smartscapeLogQuery)
 
 	var scopeErr *ScopeError
 	require.ErrorAs(t, err, &scopeErr)
@@ -94,7 +95,7 @@ func TestDQLScopePrecheck_Abstains(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			withGrantedScopes(t, tt.granted, tt.known)
-			require.NoError(t, dqlScopePrecheck(tt.query))
+			require.NoError(t, dqlScopePrecheck(context.Background(), tt.query))
 		})
 	}
 }
@@ -107,7 +108,7 @@ func TestDQLScopePrecheck_SkippedForSessionInvocations(t *testing.T) {
 	runSession = &Session{}
 	t.Cleanup(func() { runSession = orig })
 
-	require.NoError(t, dqlScopePrecheck(smartscapeLogQuery))
+	require.NoError(t, dqlScopePrecheck(context.Background(), smartscapeLogQuery))
 }
 
 func TestErrorToDetail_NotAuthorizedForTable(t *testing.T) {
@@ -142,7 +143,7 @@ func TestErrorToDetail_NotAuthorizedForTable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			wrapped := fmt.Errorf("query failed: %w", tt.err)
-			detail := errorToDetail(wrapped)
+			detail := errorToDetail(context.Background(), wrapped)
 			require.Equal(t, "insufficient_scope", detail.Code)
 			require.Equal(t, tt.wantMissing, detail.MissingScopes)
 			require.Equal(t, 403, detail.StatusCode)
@@ -155,33 +156,33 @@ func TestErrorToDetail_NotAuthorizedForTable(t *testing.T) {
 func TestErrorToDetail_NotAuthorizedForSmartscapeSuggestsAlternative(t *testing.T) {
 	err := &sdkquery.QueryError{StatusCode: 403, ErrorType: "NOT_AUTHORIZED_FOR_TABLE",
 		Message: "not authorized", Detail: "storage:smartscape:read"}
-	joined := strings.Join(errorToDetail(err).Suggestions, "\n")
+	joined := strings.Join(errorToDetail(context.Background(), err).Suggestions, "\n")
 	require.Contains(t, joined, "service.name")
 }
 
 func TestErrorToDetail_OtherQueryErrorsKeepTheirCode(t *testing.T) {
 	err := &sdkquery.QueryError{StatusCode: 400, ErrorType: "UNKNOWN_DATA_OBJECT", Message: "nope"}
-	require.Equal(t, "unknown_data_object", errorToDetail(err).Code)
+	require.Equal(t, "unknown_data_object", errorToDetail(context.Background(), err).Code)
 	require.Equal(t, client.ExitError, exitCodeForError(err))
 }
 
 func TestGrantedScopes_PartialListIsUnknown(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config")
-	origCfg := cfgFile
-	cfgFile = configPath
-	t.Cleanup(func() { cfgFile = origCfg })
+	origCfg := cfgFile(context.Background())
+	gFlags.cfgFile = configPath
+	t.Cleanup(func() { gFlags.cfgFile = origCfg })
 	cfg := config.NewConfig()
 	cfg.SetContext("test", "https://example.invalid", "test-oauth")
 	cfg.CurrentContext = "test"
 	require.NoError(t, cfg.SaveTo(configPath))
 
 	withStubbedSessionStatus(t, &SessionStatus{IsOAuth: true, GrantedScopes: []string{"storage:logs:read"}})
-	scopes, known := grantedScopes()
+	scopes, known := grantedScopes(context.Background())
 	require.True(t, known)
 	require.Equal(t, []string{"storage:logs:read"}, scopes)
 
 	// Read back from the access token's claim: a subset, so it proves nothing.
 	withStubbedSessionStatus(t, &SessionStatus{IsOAuth: true, GrantedScopes: []string{"storage:logs:read"}, grantedScopesPartial: true})
-	_, known = grantedScopes()
+	_, known = grantedScopes(context.Background())
 	require.False(t, known)
 }

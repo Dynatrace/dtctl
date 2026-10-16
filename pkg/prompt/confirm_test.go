@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -330,5 +331,55 @@ func TestValidateConfirmFlag(t *testing.T) {
 					tt.confirmValue, tt.resourceName, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestConfirmWith_UsesItsOwnStreams(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"y", "y\n", true},
+		{"yes in capitals", "YES\n", true},
+		{"n", "n\n", false},
+		{"empty answer", "\n", false},
+		{"closed input", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if got := ConfirmWith(strings.NewReader(tt.input), &out, "Proceed?"); got != tt.want {
+				t.Errorf("ConfirmWith = %v, want %v", got, tt.want)
+			}
+			if out.String() != "Proceed? [y/N]: " {
+				t.Errorf("prompt = %q, want it on the given writer", out.String())
+			}
+		})
+	}
+}
+
+func TestConfirmDeletionWith_DescribesTheResourceOnItsWriter(t *testing.T) {
+	var out bytes.Buffer
+	if !ConfirmDeletionWith(strings.NewReader("y\n"), &out, "workflow", "nightly", "wf-1") {
+		t.Fatal("ConfirmDeletionWith = false, want true for a y answer")
+	}
+	for _, want := range []string{"delete the following workflow", "Name: nightly", "ID:   wf-1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("prompt %q does not contain %q", out.String(), want)
+		}
+	}
+}
+
+func TestConfirmDataDeletionWith_RequiresTheName(t *testing.T) {
+	var out bytes.Buffer
+	if !ConfirmDataDeletionWith(strings.NewReader("logs\n"), &out, "bucket", "logs") {
+		t.Error("typing the name must confirm")
+	}
+	if ConfirmDataDeletionWith(strings.NewReader("other\n"), &out, "bucket", "logs") {
+		t.Error("typing another name must not confirm")
+	}
+	if !strings.Contains(out.String(), "Type the bucket name 'logs' to confirm: ") {
+		t.Errorf("prompt %q must be written to the given writer", out.String())
 	}
 }

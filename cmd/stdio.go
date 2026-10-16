@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"io"
 	"os"
 	"sync"
@@ -11,15 +12,32 @@ import (
 // os.Stdin (rather than threading writers through every command) catches
 // every output path at once — fmt.Print*, the output package, cobra help,
 // error envelopes — which is exactly the CLI-identical byte stream the
-// service contract wants (docs/dev/SERVICE_ENGINE_DESIGN.md). Safe because
-// invocations are
-// serialized (runMu) and the pristine-tree restore clears any cobra-bound
-// writers.
+// service contract wants (docs/dev/SERVICE_ENGINE_DESIGN.md). Safe for a
+// serialized invocation because it holds runMu exclusively and the
+// pristine-tree restore clears any cobra-bound writers; a concurrent
+// invocation never swaps the process streams (below).
 //
 // The returned cleanup restores the process streams and blocks until all
 // piped output has been drained into the destination writers.
-func redirectStdio(stdout, stderr io.Writer, stdin io.Reader) (cleanup func(), err error) {
+func redirectStdio(ctx context.Context, stdout, stderr io.Writer, stdin io.Reader) (cleanup func(), err error) {
 	if stdout == nil && stderr == nil && stdin == nil {
+		return func() {}, nil
+	}
+
+	// A concurrent invocation must not
+	// touch the process streams — there is one os.Stdout and several
+	// invocations, so the last one to redirect would collect everybody's
+	// output. Record the writers on the invocation instead and let
+	// currentStdout/currentStderr/currentStdin route each write to the
+	// invocation its context carries.
+	//
+	// Output that does not go through those accessors lands on the real
+	// process stdout instead: lost from the response rather than delivered
+	// into another tenant's, but written to the host's log, so it is not a
+	// harmless failure mode. TestNoProcessStreamWritesOnRequestPaths keeps
+	// every write in cmd/ and pkg/ on the accessors.
+	if inv := current(ctx); inv != nil && inv.concurrent {
+		inv.stdout, inv.stderr, inv.stdin = stdout, stderr, stdin
 		return func() {}, nil
 	}
 

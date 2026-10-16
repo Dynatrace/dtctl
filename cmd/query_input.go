@@ -1,14 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strings"
-
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 // queryStdin is the standard input the query-accepting commands read from. The
@@ -20,15 +19,19 @@ type queryStdin struct {
 }
 
 // queryWarnOut resolves the stream query-input warnings go to. It must resolve
-// os.Stderr at call time, not capture it: the stdio seam swaps that variable
+// currentStderr() at call time, not capture it: the stdio seam swaps that variable
 // per invocation (see stdio.go), so a cached writer would send an embedded
 // invocation's warning to the host's stderr instead of the request's. It is a
 // function variable so tests can capture the output.
-var queryWarnOut = func() io.Writer { return os.Stderr }
+var queryWarnOut = currentStderr
 
-// osStdin wraps the process's real stdin.
-func osStdin() queryStdin {
-	return queryStdin{r: os.Stdin, isTerminal: isTerminal(os.Stdin)}
+// invocationStdin wraps this invocation's stdin: the process's for the CLI
+// (swapped by the stdio seam for a serialized embedder), the request's own
+// reader for a concurrent one. Only a real file can be a terminal.
+func invocationStdin(ctx context.Context) queryStdin {
+	in := currentStdin(ctx)
+	f, ok := in.(*os.File)
+	return queryStdin{r: in, isTerminal: ok && isTerminal(f)}
 }
 
 // resolveQueryInput returns the DQL query text for the commands that accept one
@@ -45,7 +48,7 @@ func osStdin() queryStdin {
 //     (`dtctl query -f - <<'EOF'`) into a here-string (`dtctl query -f - @'...'@`).
 //     A here-string is a plain string *value*, not a redirection, so nothing
 //     ever arrives on stdin.
-func resolveQueryInput(queryFile string, args []string, stdin queryStdin) (string, error) {
+func resolveQueryInput(ctx context.Context, queryFile string, args []string, stdin queryStdin) (string, error) {
 	if queryFile != "" && len(args) > 0 {
 		return "", fmt.Errorf("both --file and an inline query were given -- use one or the other\n\n%s", queryInputHelp())
 	}
@@ -59,7 +62,7 @@ func resolveQueryInput(queryFile string, args []string, stdin queryStdin) (strin
 	case queryFile != "":
 		// A user-named path goes through the vfs seam: under an embedded
 		// invocation the file exists only in the request (see pkg/vfs).
-		content, err := vfs.ReadFile(queryFile)
+		content, err := vfsEnv(ctx).ReadFile(queryFile)
 		if err != nil {
 			return "", fmt.Errorf("failed to read query file: %w", err)
 		}
@@ -68,7 +71,7 @@ func resolveQueryInput(queryFile string, args []string, stdin queryStdin) (strin
 		// Only an argv-sourced query can have been mangled in transit; a file or
 		// a pipe delivers bytes untouched.
 		if looksQuoteMangled(rawCommandLine(), args[0]) {
-			fmt.Fprintln(queryWarnOut(), quoteMangleWarning(args[0]))
+			fmt.Fprintln(queryWarnOut(ctx), quoteMangleWarning(args[0]))
 		}
 		return args[0], nil
 	case !stdin.isTerminal:

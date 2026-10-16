@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -16,179 +17,220 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-var (
-	createAzureConnectionName          string
-	createAzureConnectionType          string
-	createAzureConnectionDirectoryID   string
-	createAzureConnectionApplicationID string
-	createAzureConnectionClientSecret  string
-	createAzureConnectionIssuer        string
+var createAzureProviderCmd = newCreateAzureProviderCmd()
 
-	createAzureMonitoringConfigName              string
-	createAzureMonitoringConfigCredentials       string
-	createAzureMonitoringConfigLocationFiltering string
-	createAzureMonitoringConfigFeatureSets       string
-	createAzureMonitoringConfigCentral           bool
-)
-
-var createAzureProviderCmd = &cobra.Command{
-	Use:   "azure",
-	Short: "Create Azure resources",
-	RunE:  requireSubcommand,
+func newCreateAzureProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "azure",
+		Short: "Create Azure resources",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var createAzureConnectionCmd = &cobra.Command{
-	Use:     "connection",
-	Aliases: []string{"connections"},
-	Short:   "Create Azure connection from flags",
-	Long: `Create Azure connection using command flags.
+var createAzureConnectionCmd = newCreateAzureConnectionCmd()
+
+func newCreateAzureConnectionCmd() *cobra.Command {
+	var createAzureConnectionApplicationID string
+	var createAzureConnectionClientSecret string
+	var createAzureConnectionDirectoryID string
+	var createAzureConnectionIssuer string
+	var createAzureConnectionName string
+	var createAzureConnectionType string
+	c := &cobra.Command{
+		Use:     "connection",
+		Aliases: []string{"connections"},
+		Short:   "Create Azure connection from flags",
+		Long: `Create Azure connection using command flags.
 
 Examples:
   dtctl create azure connection --name "siwek" --type "federatedIdentityCredential"
   dtctl create azure connection --name "siwek" --type "clientSecret" --directoryId "$TENANT_ID" --applicationId "$CLIENT_ID" --clientSecret "$CLIENT_SECRET"`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if createAzureConnectionName == "" || createAzureConnectionType == "" {
-			missing := make([]string, 0, 2)
-			if createAzureConnectionName == "" {
-				missing = append(missing, "--name")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if createAzureConnectionName == "" || createAzureConnectionType == "" {
+				missing := make([]string, 0, 2)
+				if createAzureConnectionName == "" {
+					missing = append(missing, "--name")
+				}
+				if createAzureConnectionType == "" {
+					missing = append(missing, "--type")
+				}
+
+				return fmt.Errorf(
+					"required flag(s) %s not set\nAvailable --type values: federatedIdentityCredential, clientSecret\nExample: dtctl create azure connection --name \"my-conn\" --type federatedIdentityCredential",
+					strings.Join(missing, ", "),
+				)
 			}
-			if createAzureConnectionType == "" {
-				missing = append(missing, "--type")
+
+			switch createAzureConnectionType {
+			case "federatedIdentityCredential", "clientSecret":
+				// valid
+			default:
+				return fmt.Errorf("unsupported --type %q (supported: federatedIdentityCredential, clientSecret)", createAzureConnectionType)
 			}
 
-			return fmt.Errorf(
-				"required flag(s) %s not set\nAvailable --type values: federatedIdentityCredential, clientSecret\nExample: dtctl create azure connection --name \"my-conn\" --type federatedIdentityCredential",
-				strings.Join(missing, ", "),
-			)
-		}
-
-		switch createAzureConnectionType {
-		case "federatedIdentityCredential", "clientSecret":
-			// valid
-		default:
-			return fmt.Errorf("unsupported --type %q (supported: federatedIdentityCredential, clientSecret)", createAzureConnectionType)
-		}
-
-		if createAzureConnectionType == "federatedIdentityCredential" &&
-			(createAzureConnectionDirectoryID != "" || createAzureConnectionApplicationID != "" || createAzureConnectionClientSecret != "") {
-			return fmt.Errorf("--directoryId, --applicationId, and --clientSecret are only supported for --type clientSecret\nFor federatedIdentityCredential, run 'dtctl update azure connection' after setting up federation in Azure")
-		}
-
-		if createAzureConnectionType == "clientSecret" && createAzureConnectionIssuer != "" {
-			return fmt.Errorf("--issuer is only supported for --type federatedIdentityCredential (clientSecret connections do not use a token issuer)")
-		}
-
-		_, c, err := SetupWithSafety(safety.OperationCreate)
-		if err != nil {
-			return err
-		}
-
-		handler := azureconnection.NewHandler(c)
-
-		value := azureconnection.Value{
-			Name: createAzureConnectionName,
-			Type: createAzureConnectionType,
-		}
-
-		switch createAzureConnectionType {
-		case "federatedIdentityCredential":
-			value.FederatedIdentityCredential = &azureconnection.FederatedIdentityCredential{Consumers: []string{"SVC:com.dynatrace.da"}}
-		case "clientSecret":
-			value.ClientSecret = &azureconnection.ClientSecretCredential{
-				DirectoryID:   createAzureConnectionDirectoryID,
-				ApplicationID: createAzureConnectionApplicationID,
-				ClientSecret:  createAzureConnectionClientSecret,
-				Consumers:     []string{"SVC:com.dynatrace.da"},
+			if createAzureConnectionType == "federatedIdentityCredential" &&
+				(createAzureConnectionDirectoryID != "" || createAzureConnectionApplicationID != "" || createAzureConnectionClientSecret != "") {
+				return fmt.Errorf("--directoryId, --applicationId, and --clientSecret are only supported for --type clientSecret\nFor federatedIdentityCredential, run 'dtctl update azure connection' after setting up federation in Azure")
 			}
-		}
 
-		if dryRun {
-			return newDryRunReport(cmd).
-				Linef("Dry run: would create Azure connection").
-				Field("Name", "%s", createAzureConnectionName).
-				Print()
-		}
+			if createAzureConnectionType == "clientSecret" && createAzureConnectionIssuer != "" {
+				return fmt.Errorf("--issuer is only supported for --type federatedIdentityCredential (clientSecret connections do not use a token issuer)")
+			}
 
-		created, err := handler.Create(azureconnection.AzureConnectionCreate{Value: value})
-		if err != nil {
-			return err
-		}
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)
+			if err != nil {
+				return err
+			}
 
-		output.PrintSuccess("Azure connection created: %s", created.ObjectID)
-		if createAzureConnectionType == "federatedIdentityCredential" {
-			printFederatedCreateInstructions(c.BaseURL(), created.ObjectID, createAzureConnectionName, createAzureConnectionIssuer)
-		}
-		return nil
-	},
+			handler := azureconnection.NewHandler(c)
+
+			value := azureconnection.Value{
+				Name: createAzureConnectionName,
+				Type: createAzureConnectionType,
+			}
+
+			switch createAzureConnectionType {
+			case "federatedIdentityCredential":
+				value.FederatedIdentityCredential = &azureconnection.FederatedIdentityCredential{Consumers: []string{"SVC:com.dynatrace.da"}}
+			case "clientSecret":
+				value.ClientSecret = &azureconnection.ClientSecretCredential{
+					DirectoryID:   createAzureConnectionDirectoryID,
+					ApplicationID: createAzureConnectionApplicationID,
+					ClientSecret:  createAzureConnectionClientSecret,
+					Consumers:     []string{"SVC:com.dynatrace.da"},
+				}
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				return newDryRunReport(cmd).
+					Linef("Dry run: would create Azure connection").
+					Field("Name", "%s", createAzureConnectionName).
+					Print()
+			}
+
+			created, err := handler.Create(azureconnection.AzureConnectionCreate{Value: value})
+			if err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Azure connection created: %s", created.ObjectID)
+			if createAzureConnectionType == "federatedIdentityCredential" {
+				printFederatedCreateInstructions(cmdContext(cmd), c.BaseURL(), created.ObjectID, createAzureConnectionName, createAzureConnectionIssuer)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&createAzureConnectionName, "name", "", "Azure connection name (required)")
+	c.Flags().StringVar(&createAzureConnectionType, "type", "", "Azure connection type: federatedIdentityCredential or clientSecret (required)")
+	c.Flags().StringVar(&createAzureConnectionDirectoryID, "directoryId", "", "Directory (tenant) ID — clientSecret type only")
+	c.Flags().StringVar(&createAzureConnectionApplicationID, "applicationId", "", "Application (client) ID — clientSecret type only")
+	c.Flags().StringVar(&createAzureConnectionClientSecret, "clientSecret", "", "Client secret value — clientSecret type only; prefer passing via env var to keep out of shell history (note: expanded value can still be visible in process arguments)")
+	stability.MarkFlag(c, "directoryId", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "applicationId", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "clientSecret", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&createAzureConnectionIssuer, "issuer", "", "Token issuer URL for federatedIdentityCredential (default: auto-detected from tenant host)")
+	stability.MarkStable(c)
+	registerFlagCompletion(c, "type", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{
+			"federatedIdentityCredential\tUse workload identity federation (recommended)",
+			"clientSecret\tUse service principal client secret",
+		}, cobra.ShellCompDirectiveNoFileComp
+	})
+	return c
 }
 
-var createAzureMonitoringConfigCmd = &cobra.Command{
-	Use:     "monitoring",
-	Aliases: []string{"monitoring-config"},
-	Short:   "Create Azure monitoring config from flags",
-	Long: `Create Azure monitoring configuration using command flags.
+var createAzureMonitoringConfigCmd = newCreateAzureMonitoringConfigCmd()
+
+func newCreateAzureMonitoringConfigCmd() *cobra.Command {
+	var createAzureMonitoringConfigCredentials string
+	var createAzureMonitoringConfigFeatureSets string
+	var createAzureMonitoringConfigLocationFiltering string
+	var createAzureMonitoringConfigName string
+	var createAzureMonitoringConfigCentral bool
+	c := &cobra.Command{
+		Use:     "monitoring",
+		Aliases: []string{"monitoring-config"},
+		Short:   "Create Azure monitoring config from flags",
+		Long: `Create Azure monitoring configuration using command flags.
 
 Examples:
   dtctl create azure monitoring --name "siwek" --credentials "siwek" --locationFiltering "eastus,northcentralus" --featureSets "microsoft_apimanagement.service_essential,microsoft_cache.redis_essential"
   dtctl create azure monitoring --name "siwek" --credentials "<connection-id>"`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, err := SetupWithSafety(safety.OperationCreate)
-		if err != nil {
-			return err
-		}
+		RunE: func(cmd *cobra.Command, args []string) error {
 
-		connectionHandler := azureconnection.NewHandler(c)
-		monitoringHandler := azuremonitoringconfig.NewHandler(c)
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)
+			if err != nil {
+				return err
+			}
 
-		credential, err := azuremonitoringconfig.ResolveCredential(createAzureMonitoringConfigCredentials, connectionHandler)
-		if err != nil {
-			return err
-		}
-		credential.Enabled = false // Created in disabled state; use 'dtctl enable azure monitoring' to enable
+			connectionHandler := azureconnection.NewHandler(c)
+			monitoringHandler := azuremonitoringconfig.NewHandler(c)
 
-		locations, err := azuremonitoringconfig.ParseOrDefaultLocations(createAzureMonitoringConfigLocationFiltering, monitoringHandler)
-		if err != nil {
-			return err
-		}
+			credential, err := azuremonitoringconfig.ResolveCredential(createAzureMonitoringConfigCredentials, connectionHandler)
+			if err != nil {
+				return err
+			}
+			credential.Enabled = false // Created in disabled state; use 'dtctl enable azure monitoring' to enable
 
-		featureSets, err := azuremonitoringconfig.ParseOrDefaultFeatureSets(createAzureMonitoringConfigFeatureSets, monitoringHandler)
-		if err != nil {
-			return err
-		}
+			locations, err := azuremonitoringconfig.ParseOrDefaultLocations(createAzureMonitoringConfigLocationFiltering, monitoringHandler)
+			if err != nil {
+				return err
+			}
 
-		version, err := monitoringHandler.GetLatestVersion()
-		if err != nil {
-			return fmt.Errorf("failed to determine extension version: %w", err)
-		}
+			featureSets, err := azuremonitoringconfig.ParseOrDefaultFeatureSets(createAzureMonitoringConfigFeatureSets, monitoringHandler)
+			if err != nil {
+				return err
+			}
 
-		payload := buildAzureMonitoringConfig(
-			createAzureMonitoringConfigName, version, credential, locations, featureSets,
-			centralEnrichmentIntent(cmd, createAzureMonitoringConfigCentral))
+			version, err := monitoringHandler.GetLatestVersion()
+			if err != nil {
+				return fmt.Errorf("failed to determine extension version: %w", err)
+			}
 
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("failed to prepare request payload: %w", err)
-		}
+			payload := buildAzureMonitoringConfig(
+				createAzureMonitoringConfigName, version, credential, locations, featureSets,
+				centralEnrichmentIntent(cmd, createAzureMonitoringConfigCentral))
 
-		if dryRun {
-			return newDryRunReport(cmd).
-				Linef("Dry run: would create Azure monitoring config (disabled)").
-				Field("Name", "%s", createAzureMonitoringConfigName).
-				Field("Version", "%s", version).
-				Field("Locations", "%d", len(locations)).
-				Field("Feature sets", "%d", len(featureSets)).
-				Print()
-		}
+			body, err := json.Marshal(payload)
+			if err != nil {
+				return fmt.Errorf("failed to prepare request payload: %w", err)
+			}
 
-		created, err := monitoringHandler.Create(body)
-		if err != nil {
-			return err
-		}
+			if dryRun(cmdContext(cmd)) {
+				return newDryRunReport(cmd).
+					Linef("Dry run: would create Azure monitoring config (disabled)").
+					Field("Name", "%s", createAzureMonitoringConfigName).
+					Field("Version", "%s", version).
+					Field("Locations", "%d", len(locations)).
+					Field("Feature sets", "%d", len(featureSets)).
+					Print()
+			}
 
-		output.PrintSuccess("Azure monitoring config created (disabled): %s", created.ObjectID)
-		output.PrintInfo("Run 'dtctl enable azure monitoring --name %q' to enable it", createAzureMonitoringConfigName)
-		return nil
-	},
+			created, err := monitoringHandler.Create(body)
+			if err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Azure monitoring config created (disabled): %s", created.ObjectID)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "Run 'dtctl enable azure monitoring --name %q' to enable it", createAzureMonitoringConfigName)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&createAzureMonitoringConfigName, "name", "", "Monitoring config name/description (required)")
+	c.Flags().StringVar(&createAzureMonitoringConfigCredentials, "credentials", "", "Azure connection name or ID (required)")
+	c.Flags().StringVar(&createAzureMonitoringConfigLocationFiltering, "locationFiltering", "", "Comma-separated locations (default: all from schema)")
+	c.Flags().StringVar(&createAzureMonitoringConfigFeatureSets, "featureSets", "", "Comma-separated feature sets (default: all *_essential from schema)")
+	c.Flags().StringVar(&createAzureMonitoringConfigFeatureSets, "featuresets", "", "Alias for --featureSets")
+	stability.MarkFlag(c, "locationFiltering", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "featureSets", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "featuresets", stability.Experimental, pre10Since)
+	addCentralEnrichmentFlag(c, &createAzureMonitoringConfigCentral)
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "name")
+	markFlagRequiredNonEmpty(c, "credentials")
+	return c
 }
 
 func buildAzureMonitoringConfig(name, version string, credential azuremonitoringconfig.Credential,
@@ -213,10 +255,10 @@ func buildAzureMonitoringConfig(name, version string, credential azuremonitoring
 	}
 }
 
-func printFederatedCreateInstructions(baseURL, objectID, connectionName, issuerOverride string) {
+func printFederatedCreateInstructions(ctx context.Context, baseURL, objectID, connectionName, issuerOverride string) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		output.PrintWarning("Could not parse base URL for instructions: %v", err)
+		output.FprintWarning(currentStderr(ctx), "Could not parse base URL for instructions: %v", err)
 		return
 	}
 	host := u.Host
@@ -226,42 +268,42 @@ func printFederatedCreateInstructions(baseURL, objectID, connectionName, issuerO
 		issuer = azureconnection.TokenIssuerForHost(host)
 	}
 
-	fmt.Println("\nTo complete the configuration, additional setup is required in the Azure Portal (Federated Credentials).")
-	fmt.Println("Details for Azure configuration:")
-	fmt.Printf("  Issuer:    %s\n", issuer)
-	fmt.Printf("  Subject:   dt:connection-id/%s\n", objectID)
-	fmt.Printf("  Audiences: %s/svc-id/com.dynatrace.da\n", host)
-	fmt.Println()
-	fmt.Println("Azure CLI commands:")
-	fmt.Println("1. Create Service Principal and capture IDs:")
+	fmt.Fprintln(currentStdout(ctx), "\nTo complete the configuration, additional setup is required in the Azure Portal (Federated Credentials).")
+	fmt.Fprintln(currentStdout(ctx), "Details for Azure configuration:")
+	fmt.Fprintf(currentStdout(ctx), "  Issuer:    %s\n", issuer)
+	fmt.Fprintf(currentStdout(ctx), "  Subject:   dt:connection-id/%s\n", objectID)
+	fmt.Fprintf(currentStdout(ctx), "  Audiences: %s/svc-id/com.dynatrace.da\n", host)
+	fmt.Fprintln(currentStdout(ctx))
+	fmt.Fprintln(currentStdout(ctx), "Azure CLI commands:")
+	fmt.Fprintln(currentStdout(ctx), "1. Create Service Principal and capture IDs:")
 	if runtime.GOOS == "windows" {
-		fmt.Printf("   $CLIENT_ID = az ad sp create-for-rbac --name %q --create-password false --query appId -o tsv\n", connectionName)
-		fmt.Println("   $TENANT_ID = az account show --query tenantId -o tsv")
-		fmt.Println()
-		fmt.Println("2. Assign Reader role on subscription scope:")
-		fmt.Println("   $IAM_SCOPE = \"/subscriptions/00000000-0000-0000-0000-000000000000\"")
-		fmt.Println("   az role assignment create --assignee \"$CLIENT_ID\" --role Reader --scope \"$IAM_SCOPE\"")
-		fmt.Println()
-		fmt.Println("3. Create Federated Credential:")
-		fmt.Printf("   az ad app federated-credential create --id \"$CLIENT_ID\" --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", issuer, objectID, host)
-		fmt.Println()
-		fmt.Println("4. Update connection in Dynatrace (set directoryId + applicationId):")
-		fmt.Printf("   dtctl update azure connection --name %q --directoryId \"$TENANT_ID\" --applicationId \"$CLIENT_ID\"\n", connectionName)
+		fmt.Fprintf(currentStdout(ctx), "   $CLIENT_ID = az ad sp create-for-rbac --name %q --create-password false --query appId -o tsv\n", connectionName)
+		fmt.Fprintln(currentStdout(ctx), "   $TENANT_ID = az account show --query tenantId -o tsv")
+		fmt.Fprintln(currentStdout(ctx))
+		fmt.Fprintln(currentStdout(ctx), "2. Assign Reader role on subscription scope:")
+		fmt.Fprintln(currentStdout(ctx), "   $IAM_SCOPE = \"/subscriptions/00000000-0000-0000-0000-000000000000\"")
+		fmt.Fprintln(currentStdout(ctx), "   az role assignment create --assignee \"$CLIENT_ID\" --role Reader --scope \"$IAM_SCOPE\"")
+		fmt.Fprintln(currentStdout(ctx))
+		fmt.Fprintln(currentStdout(ctx), "3. Create Federated Credential:")
+		fmt.Fprintf(currentStdout(ctx), "   az ad app federated-credential create --id \"$CLIENT_ID\" --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", issuer, objectID, host)
+		fmt.Fprintln(currentStdout(ctx))
+		fmt.Fprintln(currentStdout(ctx), "4. Update connection in Dynatrace (set directoryId + applicationId):")
+		fmt.Fprintf(currentStdout(ctx), "   dtctl update azure connection --name %q --directoryId \"$TENANT_ID\" --applicationId \"$CLIENT_ID\"\n", connectionName)
 	} else {
-		fmt.Printf("   CLIENT_ID=$(az ad sp create-for-rbac --name %q --create-password false --query appId -o tsv)\n", connectionName)
-		fmt.Println("   TENANT_ID=$(az account show --query tenantId -o tsv)")
-		fmt.Println()
-		fmt.Println("2. Assign Reader role on subscription scope:")
-		fmt.Println("   IAM_SCOPE=\"/subscriptions/00000000-0000-0000-0000-000000000000\"")
-		fmt.Println("   az role assignment create --assignee \"$CLIENT_ID\" --role Reader --scope \"$IAM_SCOPE\"")
-		fmt.Println()
-		fmt.Println("3. Create Federated Credential:")
-		fmt.Printf("   az ad app federated-credential create --id \"$CLIENT_ID\" --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", issuer, objectID, host)
-		fmt.Println()
-		fmt.Println("4. Update connection in Dynatrace (set directoryId + applicationId):")
-		fmt.Printf("   dtctl update azure connection --name %q --directoryId \"$TENANT_ID\" --applicationId \"$CLIENT_ID\"\n", connectionName)
+		fmt.Fprintf(currentStdout(ctx), "   CLIENT_ID=$(az ad sp create-for-rbac --name %q --create-password false --query appId -o tsv)\n", connectionName)
+		fmt.Fprintln(currentStdout(ctx), "   TENANT_ID=$(az account show --query tenantId -o tsv)")
+		fmt.Fprintln(currentStdout(ctx))
+		fmt.Fprintln(currentStdout(ctx), "2. Assign Reader role on subscription scope:")
+		fmt.Fprintln(currentStdout(ctx), "   IAM_SCOPE=\"/subscriptions/00000000-0000-0000-0000-000000000000\"")
+		fmt.Fprintln(currentStdout(ctx), "   az role assignment create --assignee \"$CLIENT_ID\" --role Reader --scope \"$IAM_SCOPE\"")
+		fmt.Fprintln(currentStdout(ctx))
+		fmt.Fprintln(currentStdout(ctx), "3. Create Federated Credential:")
+		fmt.Fprintf(currentStdout(ctx), "   az ad app federated-credential create --id \"$CLIENT_ID\" --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", issuer, objectID, host)
+		fmt.Fprintln(currentStdout(ctx))
+		fmt.Fprintln(currentStdout(ctx), "4. Update connection in Dynatrace (set directoryId + applicationId):")
+		fmt.Fprintf(currentStdout(ctx), "   dtctl update azure connection --name %q --directoryId \"$TENANT_ID\" --applicationId \"$CLIENT_ID\"\n", connectionName)
 	}
-	fmt.Println()
+	fmt.Fprintln(currentStdout(ctx))
 }
 
 func init() {
@@ -269,44 +311,9 @@ func init() {
 
 	createAzureProviderCmd.AddCommand(createAzureConnectionCmd)
 	createAzureProviderCmd.AddCommand(createAzureMonitoringConfigCmd)
-
-	createAzureConnectionCmd.Flags().StringVar(&createAzureConnectionName, "name", "", "Azure connection name (required)")
-	createAzureConnectionCmd.Flags().StringVar(&createAzureConnectionType, "type", "", "Azure connection type: federatedIdentityCredential or clientSecret (required)")
-	createAzureConnectionCmd.Flags().StringVar(&createAzureConnectionDirectoryID, "directoryId", "", "Directory (tenant) ID — clientSecret type only")
-	createAzureConnectionCmd.Flags().StringVar(&createAzureConnectionApplicationID, "applicationId", "", "Application (client) ID — clientSecret type only")
-	createAzureConnectionCmd.Flags().StringVar(&createAzureConnectionClientSecret, "clientSecret", "", "Client secret value — clientSecret type only; prefer passing via env var to keep out of shell history (note: expanded value can still be visible in process arguments)")
 	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
 	// the spelling aliases are removed outright.
-	stability.MarkFlag(createAzureConnectionCmd, "directoryId", stability.Experimental, pre10Since)
-	stability.MarkFlag(createAzureConnectionCmd, "applicationId", stability.Experimental, pre10Since)
-	stability.MarkFlag(createAzureConnectionCmd, "clientSecret", stability.Experimental, pre10Since)
-	createAzureConnectionCmd.Flags().StringVar(&createAzureConnectionIssuer, "issuer", "", "Token issuer URL for federatedIdentityCredential (default: auto-detected from tenant host)")
-	_ = createAzureConnectionCmd.RegisterFlagCompletionFunc("type", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		return []string{
-			"federatedIdentityCredential\tUse workload identity federation (recommended)",
-			"clientSecret\tUse service principal client secret",
-		}, cobra.ShellCompDirectiveNoFileComp
-	})
-
-	createAzureMonitoringConfigCmd.Flags().StringVar(&createAzureMonitoringConfigName, "name", "", "Monitoring config name/description (required)")
-	createAzureMonitoringConfigCmd.Flags().StringVar(&createAzureMonitoringConfigCredentials, "credentials", "", "Azure connection name or ID (required)")
-	createAzureMonitoringConfigCmd.Flags().StringVar(&createAzureMonitoringConfigLocationFiltering, "locationFiltering", "", "Comma-separated locations (default: all from schema)")
-	createAzureMonitoringConfigCmd.Flags().StringVar(&createAzureMonitoringConfigFeatureSets, "featureSets", "", "Comma-separated feature sets (default: all *_essential from schema)")
-	createAzureMonitoringConfigCmd.Flags().StringVar(&createAzureMonitoringConfigFeatureSets, "featuresets", "", "Alias for --featureSets")
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
-	stability.MarkFlag(createAzureMonitoringConfigCmd, "locationFiltering", stability.Experimental, pre10Since)
-	stability.MarkFlag(createAzureMonitoringConfigCmd, "featureSets", stability.Experimental, pre10Since)
-	stability.MarkFlag(createAzureMonitoringConfigCmd, "featuresets", stability.Experimental, pre10Since)
-	addCentralEnrichmentFlag(createAzureMonitoringConfigCmd, &createAzureMonitoringConfigCentral)
-	markFlagRequiredNonEmpty(createAzureMonitoringConfigCmd, "name")
-	markFlagRequiredNonEmpty(createAzureMonitoringConfigCmd, "credentials")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(createAzureProviderCmd)
-	stability.MarkStable(createAzureConnectionCmd)
-	stability.MarkStable(createAzureMonitoringConfigCmd)
-}

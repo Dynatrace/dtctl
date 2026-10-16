@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -17,9 +18,9 @@ import (
 // withAgentMode sets agentMode for one test and restores it.
 func withAgentMode(t *testing.T, on bool) {
 	t.Helper()
-	orig := agentMode
-	agentMode = on
-	t.Cleanup(func() { agentMode = orig })
+	orig := agentMode(context.Background())
+	gFlags.agentMode = on
+	t.Cleanup(func() { gFlags.agentMode = orig })
 }
 
 func TestDryRunReport_HumanOutputIsPlainLines(t *testing.T) {

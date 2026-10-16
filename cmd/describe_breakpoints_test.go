@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -155,10 +156,10 @@ func TestDescribeBreakpointCommandArgs(t *testing.T) {
 }
 
 func TestUseBreakpointDescribeTextView(t *testing.T) {
-	originalFormat := outputFormat
-	originalAgentMode := agentMode
-	defer func() { outputFormat = originalFormat }()
-	defer func() { agentMode = originalAgentMode }()
+	originalFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	defer func() { gFlags.outputFormat = originalFormat }()
+	defer func() { gFlags.agentMode = originalAgentMode }()
 
 	tests := []struct {
 		name   string
@@ -175,18 +176,18 @@ func TestUseBreakpointDescribeTextView(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agentMode = false
-			outputFormat = tt.format
-			if got := useBreakpointDescribeTextView(); got != tt.want {
+			gFlags.agentMode = false
+			gFlags.outputFormat = tt.format
+			if got := useBreakpointDescribeTextView(context.Background()); got != tt.want {
 				t.Fatalf("useBreakpointDescribeTextView() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 
 	t.Run("agent mode forces structured view", func(t *testing.T) {
-		agentMode = true
-		outputFormat = "table"
-		if got := useBreakpointDescribeTextView(); got {
+		gFlags.agentMode = true
+		gFlags.outputFormat = "table"
+		if got := useBreakpointDescribeTextView(context.Background()); got {
 			t.Fatalf("useBreakpointDescribeTextView() = %v, want false when agent mode enabled", got)
 		}
 	})
@@ -214,7 +215,7 @@ func TestPrintBreakpointStatusResult(t *testing.T) {
 		}},
 	}
 
-	printBreakpointStatusResult(result)
+	printBreakpointStatusResult(context.Background(), result)
 
 	text := out.String()
 	for _, mustContain := range []string{
@@ -243,7 +244,7 @@ func TestPrintBreakpointRooksSection(t *testing.T) {
 	rootCmd.SetOut(&out)
 
 	rooks := []breakpointRookInfo{{ID: "rook-1", Hostname: "host-a", Executable: "java"}}
-	printBreakpointRooksSection("Active rooks", rooks)
+	printBreakpointRooksSection(context.Background(), "Active rooks", rooks)
 
 	text := out.String()
 	if !strings.Contains(text, "Active rooks:") || !strings.Contains(text, "host-a / java") {
@@ -259,7 +260,7 @@ func TestPrintBreakpointTipsSection(t *testing.T) {
 	rootCmd.SetOut(&out)
 
 	tips := []breakpointTip{{Description: "Trigger the line", DocsLink: "https://docs.example/trigger"}}
-	printBreakpointTipsSection("Active tips", tips)
+	printBreakpointTipsSection(context.Background(), "Active tips", tips)
 
 	text := out.String()
 	if !strings.Contains(text, "Active tips:") || !strings.Contains(text, "Trigger the line") {
@@ -281,7 +282,7 @@ func TestPrintBreakpointIssuesSection(t *testing.T) {
 		Rooks:       []breakpointRookInfo{{ID: "rook-1", Hostname: "host-a", Executable: "java"}},
 		Controllers: []string{"controller-1"},
 	}}
-	printBreakpointIssuesSection("Warnings", issues)
+	printBreakpointIssuesSection(context.Background(), "Warnings", issues)
 
 	text := out.String()
 	for _, mustContain := range []string{"Warnings:", "Source file has changed", "Description:", "Docs:", "Rooks:", "Controllers:"} {
@@ -299,10 +300,10 @@ func TestDescribeCommandRequiresSubcommand(t *testing.T) {
 }
 
 func TestRunDescribeBreakpoint_LoadConfigError(t *testing.T) {
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
 
-	cfgFile = filepath.Join(t.TempDir(), "missing-config.yaml")
+	gFlags.cfgFile = filepath.Join(t.TempDir(), "missing-config.yaml")
 
 	err := runDescribeBreakpoint(describeCmd, "OrderController.java:306")
 	if err == nil {
@@ -311,30 +312,30 @@ func TestRunDescribeBreakpoint_LoadConfigError(t *testing.T) {
 }
 
 func TestRunDescribeBreakpoint_StructuredSuccess(t *testing.T) {
-	originalOutputFormat := outputFormat
-	originalAgentMode := agentMode
-	originalDebugMode := debugMode
-	originalVerbosity := verbosity
+	originalOutputFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	originalDebugMode := debugMode(context.Background())
+	originalVerbosity := verbosity(context.Background())
 	defer func() {
-		outputFormat = originalOutputFormat
-		agentMode = originalAgentMode
-		debugMode = originalDebugMode
-		verbosity = originalVerbosity
+		gFlags.outputFormat = originalOutputFormat
+		gFlags.agentMode = originalAgentMode
+		gFlags.debugMode = originalDebugMode
+		gFlags.verbosity = originalVerbosity
 	}()
 
-	outputFormat = "json"
-	agentMode = false
-	debugMode = false
-	verbosity = 0
+	gFlags.outputFormat = "json"
+	gFlags.agentMode = false
+	gFlags.debugMode = false
+	gFlags.verbosity = 0
 
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -380,26 +381,26 @@ func TestRunDescribeBreakpoint_StructuredSuccess(t *testing.T) {
 }
 
 func TestRunDescribeBreakpoint_DirectIDSuccess(t *testing.T) {
-	originalOutputFormat := outputFormat
-	originalAgentMode := agentMode
+	originalOutputFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
 	defer func() {
-		outputFormat = originalOutputFormat
-		agentMode = originalAgentMode
+		gFlags.outputFormat = originalOutputFormat
+		gFlags.agentMode = originalAgentMode
 	}()
 
-	outputFormat = "json"
+	gFlags.outputFormat = "json"
 	// Pin non-agent mode so the assertion is deterministic regardless of ambient
 	// agent detection (otherwise the output shape — bare object vs envelope —
 	// depends on the environment the tests run in).
-	agentMode = false
+	gFlags.agentMode = false
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -446,13 +447,13 @@ func TestRunDescribeBreakpoint_DirectIDSuccess(t *testing.T) {
 
 func TestRunDescribeBreakpoint_UnknownIdentifierError(t *testing.T) {
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -484,13 +485,13 @@ func TestRunDescribeBreakpoint_UnknownIdentifierError(t *testing.T) {
 
 func TestRunDescribeBreakpoint_StatusBreakdownError(t *testing.T) {
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -517,24 +518,24 @@ func TestRunDescribeBreakpoint_StatusBreakdownError(t *testing.T) {
 }
 
 func TestRunDescribeBreakpoint_WorkspaceResponsePrintError(t *testing.T) {
-	originalDebugMode := debugMode
-	originalVerbosity := verbosity
+	originalDebugMode := debugMode(context.Background())
+	originalVerbosity := verbosity(context.Background())
 	defer func() {
-		debugMode = originalDebugMode
-		verbosity = originalVerbosity
+		gFlags.debugMode = originalDebugMode
+		gFlags.verbosity = originalVerbosity
 	}()
 
-	debugMode = true
-	verbosity = 1
+	gFlags.debugMode = true
+	gFlags.verbosity = 1
 
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"bad": func() {}}, "ws-1", nil
@@ -556,24 +557,24 @@ func TestRunDescribeBreakpoint_WorkspaceResponsePrintError(t *testing.T) {
 }
 
 func TestRunDescribeBreakpoint_WorkspaceRulesResponsePrintError(t *testing.T) {
-	originalDebugMode := debugMode
-	originalVerbosity := verbosity
+	originalDebugMode := debugMode(context.Background())
+	originalVerbosity := verbosity(context.Background())
 	defer func() {
-		debugMode = originalDebugMode
-		verbosity = originalVerbosity
+		gFlags.debugMode = originalDebugMode
+		gFlags.verbosity = originalVerbosity
 	}()
 
-	debugMode = true
-	verbosity = 1
+	gFlags.debugMode = true
+	gFlags.verbosity = 1
 
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil

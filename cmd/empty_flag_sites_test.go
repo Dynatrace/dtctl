@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -141,7 +142,7 @@ func assertEmptyValueRejected(t *testing.T, site flagSite, value string) {
 	if code := exitCodeForError(err); code != client.ExitUsageError {
 		t.Errorf("exit code = %d, want %d", code, client.ExitUsageError)
 	}
-	if detail := errorToDetail(err); detail.Code != "validation_error" {
+	if detail := errorToDetail(context.Background(), err); detail.Code != "validation_error" {
 		t.Errorf("agent code = %q, want validation_error", detail.Code)
 	}
 }

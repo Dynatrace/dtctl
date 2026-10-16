@@ -343,3 +343,18 @@ func TestAgentPrinter_AutoByDefault(t *testing.T) {
 		}
 	})
 }
+
+func TestNewPrinterWithOpts_AutoNoticeGoesToTheNoticeWriter(t *testing.T) {
+	var out, notice bytes.Buffer
+	p := NewPrinterWithOpts(PrinterOptions{Format: "auto", Writer: &out, Notice: &notice})
+
+	if err := p.PrintList([]map[string]interface{}{{"host": "a"}, {"host": "b"}}); err != nil {
+		t.Fatalf("PrintList: %v", err)
+	}
+	if out.String() != "host\na\nb\n" {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if notice.String() != "-o auto: csv (uniform flat rows)\n" {
+		t.Errorf("the format notice must reach PrinterOptions.Notice, got %q", notice.String())
+	}
+}

@@ -71,12 +71,7 @@ func TestCreateAzureConnectionFlagValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createAzureConnectionName = ""
-			createAzureConnectionType = ""
-			createAzureConnectionDirectoryID = ""
-			createAzureConnectionApplicationID = ""
-			createAzureConnectionClientSecret = ""
-			createAzureConnectionIssuer = ""
+			resetCmdFlags(createAzureConnectionCmd)
 
 			rootCmd.SetArgs(tt.args)
 			err := rootCmd.Execute()
@@ -110,10 +105,7 @@ func TestUpdateAzureConnectionFlagValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			updateAzureConnectionName = ""
-			updateAzureConnectionDirectoryID = ""
-			updateAzureConnectionApplicationID = ""
-			updateAzureConnectionClientSecret = ""
+			resetCmdFlags(updateAzureConnectionCmd)
 
 			rootCmd.SetArgs(tt.args)
 			err := rootCmd.Execute()

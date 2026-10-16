@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -41,9 +42,9 @@ func runDoctorWithOAuthStorage(t *testing.T, storage auth.TokenStorage) map[stri
 	t.Cleanup(server.Close)
 
 	configPath := filepath.Join(t.TempDir(), "config")
-	originalCfgFile := cfgFile
-	t.Cleanup(func() { cfgFile = originalCfgFile })
-	cfgFile = configPath
+	originalCfgFile := gFlags.cfgFile
+	t.Cleanup(func() { gFlags.cfgFile = originalCfgFile })
+	gFlags.cfgFile = configPath
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", server.URL, "test-oauth")
@@ -56,7 +57,7 @@ func runDoctorWithOAuthStorage(t *testing.T, storage auth.TokenStorage) map[stri
 	}
 
 	rows := make(map[string]checkResult)
-	for _, r := range runDoctorChecks() {
+	for _, r := range runDoctorChecks(context.Background()) {
 		rows[r.Name] = r
 	}
 	return rows

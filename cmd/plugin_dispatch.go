@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,11 +25,11 @@ import (
 // Returns (exitCode, true) when a plugin handled the invocation. On Unix a
 // successful dispatch never returns (process replacement); the code path
 // returning here means Windows, or an exec failure.
-func tryPluginDispatch(args []string) (int, bool) {
+func tryPluginDispatch(ctx context.Context, args []string) (int, bool) {
 	// Capability gate: on Unix, dispatch REPLACES this process (syscall.Exec).
 	// Embedded callers must never reach it; falling through yields the normal
 	// unknown-command error with suggestions instead.
-	if !caps.PluginDispatch {
+	if !currentCaps(ctx).PluginDispatch {
 		return 0, false
 	}
 	words, rest := splitPluginArgs(args)
@@ -43,15 +44,15 @@ func tryPluginDispatch(args []string) (int, bool) {
 	// the command words on belongs to the plugin and must not be reflected
 	// (a plugin's own --config must not change DTCTL_CONFIG).
 	leading := args[:len(args)-len(words)-len(rest)]
-	code, err := execForward(inv.Path, inv.Args, pluginEnv(leading))
+	code, err := execForward(ctx, inv.Path, inv.Args, pluginEnv(leading))
 	if err != nil {
 		err = fmt.Errorf("plugin %s: %w", inv.Path, err)
 		if pluginAgentMode(leading) {
 			// Mirror the root error path: machine consumers read the
 			// structured envelope from stdout.
-			_ = output.PrintError(os.Stdout, errorToDetail(err))
+			_ = output.PrintError(currentStdout(ctx), errorToDetail(ctx, err))
 		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(currentStderr(ctx), "Error: %v\n", err)
 		}
 		return 1, true
 	}

@@ -642,7 +642,7 @@ func TestShowJSONDiff(t *testing.T) {
 			r, w, _ := os.Pipe()
 			os.Stderr = w
 
-			showJSONDiff([]byte(tt.oldData), []byte(tt.newData), tt.resourceType)
+			(&Applier{}).showJSONDiff([]byte(tt.oldData), []byte(tt.newData), tt.resourceType)
 
 			_ = w.Close()
 			os.Stderr = old
@@ -1151,4 +1151,19 @@ func TestWorkflowManualTriggerRoundTrip(t *testing.T) {
 			t.Errorf("ResourceType = %v, want %v", rt, ResourceWorkflow)
 		}
 	})
+}
+
+func TestApplierWithStderrReceivesNotes(t *testing.T) {
+	var buf bytes.Buffer
+	a := (&Applier{}).WithStderr(&buf)
+
+	var warnings []string
+	a.stderrWarn(&warnings, "dropped %s", "field")
+
+	if got := buf.String(); got != "Note: dropped field\n" {
+		t.Errorf("note = %q, want it on the applier's own stderr", got)
+	}
+	if len(warnings) != 1 || warnings[0] != "dropped field" {
+		t.Errorf("warnings = %v", warnings)
+	}
 }

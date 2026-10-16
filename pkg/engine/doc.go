@@ -29,19 +29,24 @@
 //     surface entirely — hidden from `dtctl commands` and help, and guarded
 //     with the stable agent-mode error code "unsupported_in_service".
 //
-// Concurrency: Execute is safe to call from multiple goroutines, but
-// executions serialize on an internal lock (the command tree is process
+// Concurrency: Execute is safe to call from multiple goroutines, but by
+// default executions serialize on an internal lock (the command tree is process
 // state — see cmd.Run). A service scales by running more engine processes or
-// instances, not more goroutines; the design's WASM phase gives each request
-// its own instance at 20-47ms overhead.
+// instances, or opts in on an Engine built with
+// New(limits, WithConcurrentExecution(n)), which runs up to n invocations at
+// once in this process, each on a command tree and state of its own; see
+// docs/dev/CONCURRENT_EXECUTION.md for what that guarantees and costs. Giving
+// every request a WASM instance instead costs about 55ms of CPU to start each
+// one.
 //
 // Admission and resource limits: ExecuteWithLimits (which Execute calls with
-// DefaultLimits) bounds how many requests may queue for the single execution
-// slot (MaxQueued, ErrTooManyQueued once exceeded), how long a request may
-// occupy it (MaxDuration, applied as a context.WithTimeout threaded into the
-// command tree via RunOptions.Context), and how much stdout/stderr a command
-// may produce (MaxOutputBytes; excess is dropped and Result.Truncated is
-// set). A zero-value Limits field falls back to DefaultLimits.
+// DefaultLimits) bounds how many requests may queue for an execution slot
+// (MaxQueued, ErrTooManyQueued once exceeded), how long a request may occupy
+// it (MaxDuration, applied as a context.WithTimeout threaded into the command
+// tree via RunOptions.Context), and how much stdout/stderr a command may
+// produce (MaxOutputBytes; excess is dropped and Result.Truncated is set). A
+// zero-value Limits field falls back to DefaultLimits. The package-level
+// functions share one slot; an Engine has slots and a queue of its own.
 //
 // Cancellation: the context gates the start of an execution (a request
 // cancelled while queued never runs). Once running, a command that observes

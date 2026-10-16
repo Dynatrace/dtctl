@@ -51,24 +51,63 @@ func SetActive(f FS) FS {
 	return prev
 }
 
-// ReadFile reads a user-supplied path through the active FS.
-func ReadFile(name string) ([]byte, error) { return active.ReadFile(name) }
-
-// WriteFile writes a user-supplied path through the active FS.
-func WriteFile(name string, data []byte, perm fs.FileMode) error {
-	return active.WriteFile(name, data, perm)
+// Env is one invocation's view of the host for user-supplied paths: the
+// filesystem they resolve against and the stream "-" reads from. An embedder
+// that runs invocations concurrently hands each its own Env, because the
+// package-level state below is swapped for the whole process and so can serve
+// only one invocation at a time.
+//
+// The zero value is the process default: the installed FS and os.Stdin, so a
+// caller that never sets one behaves exactly as before.
+type Env struct {
+	FS    FS
+	Stdin io.Reader
 }
 
-// ReadFileOrStdin reads name through the active FS, with "-" meaning the
-// process stdin. It is the shared implementation behind the CLI's
-// file-or-stdin flag convention.
-func ReadFileOrStdin(name string) ([]byte, error) {
+func (e Env) fs() FS {
+	if e.FS != nil {
+		return e.FS
+	}
+	return active
+}
+
+// StdinReader is the stream "-" reads from: e's, else the process's.
+func (e Env) StdinReader() io.Reader {
+	if e.Stdin != nil {
+		return e.Stdin
+	}
+	return os.Stdin
+}
+
+// ReadFile reads a user-supplied path through e's FS.
+func (e Env) ReadFile(name string) ([]byte, error) { return e.fs().ReadFile(name) }
+
+// WriteFile writes a user-supplied path through e's FS.
+func (e Env) WriteFile(name string, data []byte, perm fs.FileMode) error {
+	return e.fs().WriteFile(name, data, perm)
+}
+
+// ReadFileOrStdin reads name through e's FS, with "-" meaning e's stdin.
+func (e Env) ReadFileOrStdin(name string) ([]byte, error) {
 	if name == "-" {
-		content, err := io.ReadAll(os.Stdin)
+		content, err := io.ReadAll(e.StdinReader())
 		if err != nil {
 			return nil, fmt.Errorf("failed to read from stdin: %w", err)
 		}
 		return content, nil
 	}
-	return ReadFile(name)
+	return e.ReadFile(name)
 }
+
+// ReadFile reads a user-supplied path through the active FS.
+func ReadFile(name string) ([]byte, error) { return Env{}.ReadFile(name) }
+
+// WriteFile writes a user-supplied path through the active FS.
+func WriteFile(name string, data []byte, perm fs.FileMode) error {
+	return Env{}.WriteFile(name, data, perm)
+}
+
+// ReadFileOrStdin reads name through the active FS, with "-" meaning the
+// process stdin. It is the shared implementation behind the CLI's
+// file-or-stdin flag convention.
+func ReadFileOrStdin(name string) ([]byte, error) { return Env{}.ReadFileOrStdin(name) }

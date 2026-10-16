@@ -12,10 +12,13 @@ func init() {
 
 // tokenScopesHelpTopicCmd is a help-topic-only command (no Run function).
 // It makes "dtctl help token-scopes" work as advertised in error messages.
-var tokenScopesHelpTopicCmd = &cobra.Command{
-	Use:   "token-scopes",
-	Short: "Required token scopes for each safety level",
-	Long: `Token Scopes Reference
+var tokenScopesHelpTopicCmd = newTokenScopesHelpTopicCmd()
+
+func newTokenScopesHelpTopicCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "token-scopes",
+		Short: "Required token scopes for each safety level",
+		Long: `Token Scopes Reference
 
 Lists the Dynatrace platform token scopes required for each dtctl safety level.
 Copy the scope list for your desired safety level when creating a token in Dynatrace.
@@ -37,10 +40,12 @@ For the full list of scopes per safety level, see:
 
 For creating platform tokens, see:
   https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens`,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(tokenScopesHelpTopicCmd)
 }

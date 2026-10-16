@@ -16,10 +16,13 @@ import (
 // that cannot collide with a real column name.
 const statsAllColumns = "\x00all"
 
-var inspectCmd = &cobra.Command{
-	Use:   "inspect <file>",
-	Short: "Inspect a spilled query-result file locally (row access, schema, stats)",
-	Long: `Inspect a query-result file that 'dtctl query' spilled to disk, without
+var inspectCmd = newInspectCmd()
+
+func newInspectCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "inspect <file>",
+		Short: "Inspect a spilled query-result file locally (row access, schema, stats)",
+		Long: `Inspect a query-result file that 'dtctl query' spilled to disk, without
 re-querying Grail and without pulling the whole result back into context.
 
 The expensive Grail scan happens once (the original query). 'inspect' reads only
@@ -67,7 +70,7 @@ Choose exactly one primitive per call (--jq may add a bounding window and
 dtctl predicate language. For aggregate questions, push the work back into DQL
 and re-query ('… | summarize …'); for complex local analysis, hand the file to
 your preferred local analytics tooling.`,
-	Example: `  # First 20 rows of a spilled result
+		Example: `  # First 20 rows of a spilled result
   dtctl inspect ~/.cache/dtctl/results/prod/q-7f3a9c.jsonl --head 20
 
   # A projected window deep in the result
@@ -90,44 +93,48 @@ your preferred local analytics tooling.`,
 
   # Recover a lost handle: what has been spilled in this context?
   dtctl inspect --list`,
-	// At most one positional <file>. --list takes none; every primitive takes one.
-	// The exact requirement is enforced in RunE so usage errors share the typed
-	// inspect_bad_flags envelope rather than cobra's generic arg error.
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// --list is a directory-scoped enumeration, not a file primitive: it takes
-		// no <file> and stands alone.
-		if cmd.Flags().Changed("list") {
-			return runInspectList(cmd, args)
-		}
+		// At most one positional <file>. --list takes none; every primitive takes one.
+		// The exact requirement is enforced in RunE so usage errors share the typed
+		// inspect_bad_flags envelope rather than cobra's generic arg error.
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// --list is a directory-scoped enumeration, not a file primitive: it takes
+			// no <file> and stands alone.
+			if cmd.Flags().Changed("list") {
+				return runInspectList(cmd, args)
+			}
 
-		if len(args) != 1 {
-			return inspect.BadFlags(
-				"inspect requires exactly one <file> argument",
-				"pass a spilled file (e.g. dtctl inspect q-7f3a9c.jsonl --head 20), or use --list to enumerate spilled files",
-			)
-		}
+			if len(args) != 1 {
+				return inspect.BadFlags(
+					"inspect requires exactly one <file> argument",
+					"pass a spilled file (e.g. dtctl inspect q-7f3a9c.jsonl --head 20), or use --list to enumerate spilled files",
+				)
+			}
 
-		req, err := buildInspectRequest(cmd, args[0])
-		if err != nil {
-			return err
-		}
+			req, err := buildInspectRequest(cmd, args[0])
+			if err != nil {
+				return err
+			}
 
-		// Local-only command: no client, no auth. Load config best-effort purely
-		// to learn the active context/tenant for the cross-context refusal (D9) and
-		// to resolve re-spill settings (IN8). A missing/unusable config is fine.
-		cfg, _ := LoadConfig()
-		if cfg != nil {
-			req.ActiveTenant, req.ActiveContext = spillProvenance(cfg)
-		}
+			// Local-only command: no client, no auth. Load config best-effort purely
+			// to learn the active context/tenant for the cross-context refusal (D9) and
+			// to resolve re-spill settings (IN8). A missing/unusable config is fine.
+			cfg, _ := loadConfig(cmdContext(cmd))
+			if cfg != nil {
+				req.ActiveTenant, req.ActiveContext = spillProvenance(cfg)
+			}
 
-		res, err := inspect.Run(req)
-		if err != nil {
-			return err // typed *inspect.Error → structured envelope via errorToDetail
-		}
+			res, err := inspect.Run(req)
+			if err != nil {
+				return err // typed *inspect.Error → structured envelope via errorToDetail
+			}
 
-		return emitInspectResult(cmd, cfg, req, res)
-	},
+			return emitInspectResult(cmd, cfg, req, res)
+		},
+	}
+	stability.MarkStable(c)
+	addInspectFlags(c)
+	return c
 }
 
 // buildInspectRequest parses and validates the inspect flag surface into a
@@ -164,7 +171,7 @@ func buildInspectRequest(cmd *cobra.Command, path string) (inspect.Request, erro
 	// here before the one-primitive-per-call check below (which counts windows as
 	// primitives). It deliberately does not introduce a dtctl predicate language —
 	// jq is a general post-processor the caller opts into (D16).
-	if jqFilter != "" {
+	if jqFilter(cmdContext(cmd)) != "" {
 		return buildInspectFilterRequest(path, fields, hasSchema, hasStats, hasSample,
 			hasHead, hasTail, hasPage, offsetChanged, limitChanged, cmd)
 	}
@@ -269,7 +276,7 @@ func buildInspectFilterRequest(
 		)
 	}
 
-	req := inspect.Request{Path: path, Fields: fields, Filter: jqFilter}
+	req := inspect.Request{Path: path, Fields: fields, Filter: jqFilter(cmdContext(cmd))}
 	switch {
 	case hasHead:
 		req.Primitive = inspect.PrimHead
@@ -295,7 +302,6 @@ func buildInspectFilterRequest(
 
 func init() {
 	rootCmd.AddCommand(inspectCmd)
-	addInspectFlags(inspectCmd)
 }
 
 // addInspectFlags registers the closed primitive set and the shared spill
@@ -362,6 +368,3 @@ func inspectResourceFromSidecar(sc *output.SidecarManifest) string {
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(inspectCmd)
-}

@@ -90,7 +90,7 @@ fetch logs, from:now()-7d, samplingRatio:1000      -- scan ~1/1000 of the data
 - `scanLimitGBytes:` is a brake, not a filter: exceeding it returns a PARTIAL result, not an error.
 - `samplingRatio:` (power of 10, max 100000) trades exactness for scan volume on wide log/span windows. Extrapolate counts with `sum(dt.system.sampling_ratio)`, not `count()`.
 - Same knobs as dtctl flags when the query text is fixed: `--default-scan-limit-gbytes`, `--default-sampling-ratio`. `--include-contributions --metadata=contributions` reports per-bucket scan contribution — use it to find the heavy buckets, then restrict with `bucket:{"<bucket>"}`. `--default-scan-limit-gbytes -1` is unlimited.
-- Filter on the raw field (`filter loglevel == "ERROR"`), not on a transform of it (`filter lower(loglevel) == "error"`) — the latter defeats index pushdown and scans far more.
+- Filter on the raw field (`filter loglevel == "ERROR"`), not on a transform of it (`filter lower(loglevel) == "error"` or `contains(lower(name), "x")`) — the latter defeats index pushdown and scans far more. For case-insensitive text matching use `contains(f, "x", caseSensitive:false)`, `matchesValue(f, "x*")` (whole value / prefix; case-insensitive by default) or `matchesPhrase(content, "x")` (word/phrase in free text; case-insensitive by default) — never `lower()`/`upper()` on the field.
 - A PARTIAL or sampled result is not a complete answer. When Grail reports one, dtctl names the applicable reduction — a hint on stderr for humans, envelope `warnings`/`suggestions` in `--agent` mode. Act on it rather than reading the rows as final.
 - `limit N | summarize` vs `summarize | limit N` is a **semantic** choice (partial sample vs full aggregate), not a cost anti-pattern. Pick by intent.
 
@@ -228,13 +228,14 @@ fetch logs
 | `contains(str, sub)` | `contains(content, "error")` |
 | `startsWith(str, pre)` | `startsWith(name, "api-")` |
 | `endsWith(str, suf)` | `endsWith(source, ".log")` |
-| `lower(str)` | `lower(loglevel) == "error"` |
+| `contains(str, sub, caseSensitive:false)` | `contains(name, "payment", caseSensitive:false)` |
+| `matchesPhrase(str, phrase)` | `matchesPhrase(content, "connection refused")` |
 | `in(val, arr)` | `in(level, array("A","B"))` |
 | `stringLength(str)` | `stringLength(content)` |
 | `formatTimestamp(ts, format:f)` | `formatTimestamp(timestamp, format:"HH:mm")` |
 | `toTimestamp(str)` | `toTimestamp("2025-01-01T00:00:00Z")` |
 | `isNotNull(field)` | `isNotNull(span.events)` |
-| `matchesValue(str, pattern)` | `matchesValue(name, "*payment*")` |
+| `matchesValue(str, pattern)` | `matchesValue(name, "payment*")` |
 | `countIf(condition)` | `errors = countIf(loglevel == "ERROR")` |
 | `countDistinct(field)` | `unique_hosts = countDistinct(dt.entity.host)` |
 | `percentile(field, pct)` | `p95 = percentile(duration, 95)` |

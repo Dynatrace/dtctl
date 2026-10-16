@@ -12,74 +12,86 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-var deleteAWSConnectionCmd = &cobra.Command{
-	Use:     "connection [ID|NAME]",
-	Short:   "Delete an AWS connection",
-	Aliases: []string{"connections"},
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+var deleteAWSConnectionCmd = newDeleteAWSConnectionCmd()
 
-		_, c, err := SetupWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
+func newDeleteAWSConnectionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "connection [ID|NAME]",
+		Short:   "Delete an AWS connection",
+		Aliases: []string{"connections"},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		handler := awsconnection.NewHandler(c)
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
+			}
 
-		objectID := identifier
-		item, err := handler.FindByName(identifier)
-		if err == nil {
-			objectID = item.ObjectID
-			output.PrintInfo("Resolved name %q to ID %s", identifier, objectID)
-		}
+			handler := awsconnection.NewHandler(c)
 
-		if dryRun {
-			return deleteDryRun(cmd, "AWS connection", identifier, objectID)
-		}
+			objectID := identifier
+			item, err := handler.FindByName(identifier)
+			if err == nil {
+				objectID = item.ObjectID
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Resolved name %q to ID %s", identifier, objectID)
+			}
 
-		if err := handler.Delete(objectID); err != nil {
-			return fmt.Errorf("failed to delete AWS connection %q: %w", objectID, err)
-		}
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "AWS connection", identifier, objectID)
+			}
 
-		output.PrintSuccess("AWS connection %s deleted", objectID)
-		return nil
-	},
+			if err := handler.Delete(objectID); err != nil {
+				return fmt.Errorf("failed to delete AWS connection %q: %w", objectID, err)
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "AWS connection %s deleted", objectID)
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var deleteAWSMonitoringConfigCmd = &cobra.Command{
-	Use:     "monitoring [ID|NAME]",
-	Short:   "Delete an AWS monitoring config",
-	Aliases: []string{"monitoring-config", "monitoring-configs"},
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+var deleteAWSMonitoringConfigCmd = newDeleteAWSMonitoringConfigCmd()
 
-		_, c, err := SetupWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
+func newDeleteAWSMonitoringConfigCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "monitoring [ID|NAME]",
+		Short:   "Delete an AWS monitoring config",
+		Aliases: []string{"monitoring-config", "monitoring-configs"},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		handler := awsmonitoringconfig.NewHandler(c)
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
+			}
 
-		objectID := identifier
-		item, err := handler.FindByName(identifier)
-		if err == nil {
-			objectID = item.ObjectID
-			output.PrintInfo("Resolved name %q to ID %s", identifier, objectID)
-		}
+			handler := awsmonitoringconfig.NewHandler(c)
 
-		if dryRun {
-			return deleteDryRun(cmd, "AWS monitoring config", identifier, objectID)
-		}
+			objectID := identifier
+			item, err := handler.FindByName(identifier)
+			if err == nil {
+				objectID = item.ObjectID
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Resolved name %q to ID %s", identifier, objectID)
+			}
 
-		if err := handler.Delete(objectID); err != nil {
-			return fmt.Errorf("failed to delete AWS monitoring config %q: %w", objectID, err)
-		}
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "AWS monitoring config", identifier, objectID)
+			}
 
-		output.PrintSuccess("AWS monitoring config %s deleted", objectID)
-		return nil
-	},
+			if err := handler.Delete(objectID); err != nil {
+				return fmt.Errorf("failed to delete AWS monitoring config %q: %w", objectID, err)
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "AWS monitoring config %s deleted", objectID)
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -90,6 +102,4 @@ func init() {
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(deleteAWSConnectionCmd)
-	stability.MarkStable(deleteAWSMonitoringConfigCmd)
 }

@@ -103,7 +103,7 @@ func TestAuthLogin_FlagValidation(t *testing.T) {
 			if tt.name == "no flags no config errors helpfully" {
 				// Point to a non-existent config file
 				tmpDir := t.TempDir()
-				cfgFile = filepath.Join(tmpDir, "nonexistent.yaml")
+				gFlags.cfgFile = filepath.Join(tmpDir, "nonexistent.yaml")
 			} else {
 				// Config with no current context set
 				tmpDir := t.TempDir()
@@ -113,7 +113,7 @@ func TestAuthLogin_FlagValidation(t *testing.T) {
 				if err := cfg.SaveTo(configPath); err != nil {
 					t.Fatalf("failed to save config: %v", err)
 				}
-				cfgFile = configPath
+				gFlags.cfgFile = configPath
 			}
 
 			rootCmd.SetArgs(tt.args)
@@ -130,7 +130,7 @@ func TestAuthLogin_FlagValidation(t *testing.T) {
 			}
 
 			// Reset
-			cfgFile = ""
+			gFlags.cfgFile = ""
 		})
 	}
 }
@@ -150,8 +150,8 @@ func TestAuthLogin_CurrentContextFallback(t *testing.T) {
 	)
 
 	configPath := setupAuthTestConfig(t, ctxName, envURL, tokenRef)
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	// Execute with no flags – should pass flag validation and reach the
 	// keyring check (which fails in a test environment).
@@ -192,8 +192,8 @@ func TestAuthLogin_PartialFlags_EnvironmentFromContext(t *testing.T) {
 	)
 
 	configPath := setupAuthTestConfig(t, ctxName, envURL, tokenRef)
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	// --context is the active context, so environment resolution uses its own URL.
 	rootCmd.SetArgs([]string{"auth", "login", "--context", ctxName})
@@ -217,8 +217,8 @@ func TestAuthLogin_KeyringRecovery(t *testing.T) {
 	)
 
 	configPath := setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	// Track whether EnsureKeyringCollection was called.
 	ensureCalled := false
@@ -545,8 +545,8 @@ func TestAuthLogin_ContextOnly_UsesNamedContextURL(t *testing.T) {
 	if err := cfg.SaveTo(configPath); err != nil {
 		t.Fatalf("failed to save config: %v", err)
 	}
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	rootCmd.SetArgs([]string{"auth", "login", "--context", "hardsfm"})
 	err := rootCmd.Execute()
@@ -582,8 +582,8 @@ func TestAuthLogin_NewContext_RequiresEnvironment(t *testing.T) {
 	if err := cfg.SaveTo(configPath); err != nil {
 		t.Fatalf("failed to save config: %v", err)
 	}
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	rootCmd.SetArgs([]string{"auth", "login", "--context", "brand-new-context"})
 	err := rootCmd.Execute()
@@ -608,8 +608,8 @@ func TestAuthLogin_KeyringRecoveryFailure(t *testing.T) {
 	)
 
 	configPath := setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	origCheck := authCheckKeyringFunc
 	origEnsure := authEnsureKeyringFunc
@@ -658,8 +658,8 @@ func TestAuthLogin_FileStorage_PassesKeyringGate(t *testing.T) {
 	)
 
 	configPath := setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	// Override keyring check to always fail (deterministic across OSes)
 	origCheck := authCheckKeyringFunc
@@ -701,8 +701,8 @@ func TestAuthLogin_KeyringRecovery_WithFileStorage(t *testing.T) {
 	)
 
 	configPath := setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 
 	// Override keyring check to always fail (simulates headless Linux)
 	origCheck := authCheckKeyringFunc
@@ -740,8 +740,8 @@ func TestAuthLogout_RemoveContext_DoesNotPersistEnvOverride(t *testing.T) {
 		t.Fatalf("save test config: %v", err)
 	}
 
-	cfgFile = configPath
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = configPath
+	defer func() { gFlags.cfgFile = "" }()
 	t.Setenv("DTCTL_CONTEXT", "other") // session-local override, must never be written
 
 	rootCmd.SetArgs([]string{"auth", "logout", "doomed", "--remove-context"})
@@ -814,8 +814,8 @@ func TestAuthLogin_ClientCredentialsValidation(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-			defer func() { cfgFile = "" }()
+			gFlags.cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
+			defer func() { gFlags.cfgFile = "" }()
 
 			args := append([]string{"auth", "login", "--context", ctxName, "--environment", envURL}, tt.args...)
 			rootCmd.SetArgs(args)
@@ -855,8 +855,8 @@ func TestAuthLogin_ClientCredentials_SkipsBrowserFlow(t *testing.T) {
 		envURL  = "https://abc12345.apps.dynatrace.com"
 	)
 
-	cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
+	defer func() { gFlags.cfgFile = "" }()
 
 	origCheck := authCheckKeyringFunc
 	defer func() { authCheckKeyringFunc = origCheck }()
@@ -975,8 +975,8 @@ func TestAuthLogin_ClientCredentials_ReportsTokenAuthority(t *testing.T) {
 			t.Setenv(envLoginAccountURN, "")
 
 			ctxName := fmt.Sprintf("cc-report-ctx-%d", i)
-			cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-			defer func() { cfgFile = "" }()
+			gFlags.cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
+			defer func() { gFlags.cfgFile = "" }()
 
 			origCheck := authCheckKeyringFunc
 			defer func() { authCheckKeyringFunc = origCheck }()
@@ -1036,8 +1036,8 @@ func TestAuthRefresh_NoRefreshToken_PointsAtLogin(t *testing.T) {
 		tokenName = ctxName + "-oauth"
 	)
 
-	cfgFile = setupAuthTestConfig(t, ctxName, envURL, tokenName)
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = setupAuthTestConfig(t, ctxName, envURL, tokenName)
+	defer func() { gFlags.cfgFile = "" }()
 
 	// Store a token set shaped like one from the client credentials grant:
 	// an access token and no refresh token.
@@ -1153,8 +1153,8 @@ func TestAuthLogin_ClientCredentials_PartialInputDoesNotFallBackToBrowser(t *tes
 				return nil, nil
 			}
 
-			cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
-			defer func() { cfgFile = "" }()
+			gFlags.cfgFile = setupAuthTestConfig(t, ctxName, envURL, ctxName+"-oauth")
+			defer func() { gFlags.cfgFile = "" }()
 
 			args := append([]string{"auth", "login", "--context", ctxName, "--environment", envURL, "--timeout", "1ns"}, tt.args...)
 			rootCmd.SetArgs(args)

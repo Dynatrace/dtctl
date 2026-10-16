@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -81,17 +82,17 @@ func runDescribeExtensionJSON(t *testing.T, srv *httptest.Server, name string, f
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config")
 
-	originalCfgFile := cfgFile
-	origFormat, origAgent := outputFormat, agentMode
+	originalCfgFile := cfgFile(context.Background())
+	origFormat, origAgent := outputFormat(context.Background()), agentMode(context.Background())
 	t.Cleanup(func() {
-		cfgFile = originalCfgFile
-		outputFormat, agentMode = origFormat, origAgent
+		gFlags.cfgFile = originalCfgFile
+		gFlags.outputFormat, gFlags.agentMode = origFormat, origAgent
 		_ = describeExtensionCmd.Flags().Set("feature-set-metrics", "false")
 		_ = describeExtensionCmd.Flags().Set("version", "")
 	})
-	cfgFile = configPath
-	outputFormat = "json"
-	agentMode = false
+	gFlags.cfgFile = configPath
+	gFlags.outputFormat = "json"
+	gFlags.agentMode = false
 
 	cfg := config.NewConfig()
 	cfg.SetContext("test", srv.URL, "test-token")

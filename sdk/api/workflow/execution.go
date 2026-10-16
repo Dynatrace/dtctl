@@ -44,11 +44,11 @@ func NewExecutionHandler(c *httpclient.Client) *ExecutionHandler {
 	return &ExecutionHandler{client: c}
 }
 
-// maxExecutionLimit caps how many executions can be requested in one call.
+// MaxExecutionLimit caps how many executions can be requested in one call.
 // Executions can number in the thousands; unlike workflows (where --chunk-size
 // drives a full-scan loop), here we intentionally fetch only a window of
 // recent results. A hard cap prevents accidental backend overload.
-const maxExecutionLimit = 1000
+const MaxExecutionLimit = 1000
 
 // ExecutionFilters contains filter options for listing executions.
 type ExecutionFilters struct {
@@ -66,8 +66,8 @@ type ExecutionFilters struct {
 // Use --limit (not --chunk-size) because executions are time-series data:
 // callers want a recent window, not an exhaustive scan.
 func (h *ExecutionHandler) List(ctx context.Context, filters ExecutionFilters, limit int64) (*ExecutionList, error) {
-	if limit > maxExecutionLimit {
-		limit = maxExecutionLimit
+	if limit > MaxExecutionLimit {
+		limit = MaxExecutionLimit
 	}
 
 	req := h.client.HTTP().R().SetContext(ctx)

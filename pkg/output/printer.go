@@ -26,6 +26,9 @@ type PrinterOptions struct {
 	// Types carries DQL column type info used by the Parquet printer to build a
 	// faithful schema. Ignored by other formats; nil falls back to inference.
 	Types []ColumnTypeMapping
+	// Notice receives the one-line format notice of the auto printer. nil means
+	// the process's stderr.
+	Notice io.Writer
 }
 
 // NewPrinter creates a new printer based on the format
@@ -88,7 +91,7 @@ func NewPrinterWithOpts(opts PrinterOptions) Printer {
 	case "toon":
 		return &ToonPrinter{writer: writer, jqFilter: opts.JQFilter}
 	case FormatAuto:
-		return &AutoPrinter{writer: writer, jqFilter: opts.JQFilter}
+		return &AutoPrinter{writer: writer, notice: opts.Notice, jqFilter: opts.JQFilter}
 	case "chart":
 		if width > 0 || height > 0 {
 			return NewChartPrinterWithSize(writer, width, height)

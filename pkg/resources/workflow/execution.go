@@ -106,6 +106,9 @@ func NewExecutionHandler(c *client.Client) *ExecutionHandler {
 // Re-export SDK type so callers don't need to import the SDK directly.
 type ExecutionFilters = sdkworkflow.ExecutionFilters
 
+// MaxExecutionLimit is the most executions one listing returns.
+const MaxExecutionLimit = sdkworkflow.MaxExecutionLimit
+
 // List retrieves executions with optional filters.
 func (h *ExecutionHandler) List(filters ExecutionFilters, limit int64) (*ExecutionList, error) {
 	sdkResult, err := h.sdk.List(context.Background(), filters, limit)

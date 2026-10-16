@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -82,10 +83,10 @@ func TestQuerySeriesFlagsAreExperimental(t *testing.T) {
 // in agent mode, so the series defaults must still apply; an explicit -o keeps
 // them off.
 func TestQuerySeriesOptionsUsesEffectiveFormat(t *testing.T) {
-	origFormat, origAgent := outputFormat, agentMode
+	origFormat, origAgent := outputFormat(context.Background()), agentMode(context.Background())
 	flag := rootCmd.PersistentFlags().Lookup("output")
 	origChanged := flag.Changed
-	defer func() { outputFormat, agentMode, flag.Changed = origFormat, origAgent, origChanged }()
+	defer func() { gFlags.outputFormat, gFlags.agentMode, flag.Changed = origFormat, origAgent, origChanged }()
 
 	defaults := seriesOptions{Mode: output.SeriesMode{Kind: output.SeriesSummary}, SeriesDefaulted: true,
 		Precision: exec.AgentDefaultPrecision, PrecisionDefaulted: true}
@@ -103,8 +104,8 @@ func TestQuerySeriesOptionsUsesEffectiveFormat(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agentMode, outputFormat, flag.Changed = true, c.format, c.changed
-			got, err := querySeriesOptions("full", false, 0, false)
+			gFlags.agentMode, gFlags.outputFormat, flag.Changed = true, c.format, c.changed
+			got, err := querySeriesOptions(context.Background(), "full", false, 0, false)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

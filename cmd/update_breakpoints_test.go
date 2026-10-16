@@ -54,8 +54,8 @@ func TestUpdateBreakpointFilters_NoIdentifier_NoPanic(t *testing.T) {
 	viper.Reset()
 
 	tmpDir := t.TempDir()
-	cfgFile = filepath.Join(tmpDir, "missing-config.yaml")
-	defer func() { cfgFile = "" }()
+	gFlags.cfgFile = filepath.Join(tmpDir, "missing-config.yaml")
+	defer func() { gFlags.cfgFile = "" }()
 
 	rootCmd.SetArgs([]string{"update", "breakpoint", "--filters", "k8s.container.name=credit-card-order-service"})
 	err := rootCmd.Execute()

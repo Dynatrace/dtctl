@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -63,12 +64,12 @@ func runGCPMonitoringWrite(t *testing.T, run func() error) map[string]any {
 
 	srv := newWriteCapturingServer(t)
 	setupPlatformCmdTest(t, srv.Server, "json")
-	origDryRun := dryRun
+	origDryRun := dryRun(context.Background())
 	t.Cleanup(func() {
-		dryRun = origDryRun
+		gFlags.dryRun = origDryRun
 		resetCloudFlagVars()
 	})
-	dryRun = false
+	gFlags.dryRun = false
 	resetCloudFlagVars()
 
 	var runErr error
@@ -96,8 +97,8 @@ func gcpLocationFiltering(t *testing.T, body map[string]any) (any, bool) {
 // --locationFiltering the created config must not filter by location at all.
 func TestCreateGCPMonitoringWithoutLocationFilteringDoesNotFilter(t *testing.T) {
 	body := runGCPMonitoringWrite(t, func() error {
-		createGCPMonitoringConfigName = "new-gcp-monitoring"
-		createGCPMonitoringConfigCredentials = mockGCPConnectionName
+		_ = createGCPMonitoringConfigCmd.Flags().Set("name", "new-gcp-monitoring")
+		_ = createGCPMonitoringConfigCmd.Flags().Set("credentials", mockGCPConnectionName)
 		return createGCPMonitoringConfigCmd.RunE(createGCPMonitoringConfigCmd, nil)
 	})
 
@@ -109,9 +110,9 @@ func TestCreateGCPMonitoringWithoutLocationFilteringDoesNotFilter(t *testing.T) 
 
 func TestCreateGCPMonitoringWithLocationFilteringSendsThem(t *testing.T) {
 	body := runGCPMonitoringWrite(t, func() error {
-		createGCPMonitoringConfigName = "new-gcp-monitoring"
-		createGCPMonitoringConfigCredentials = mockGCPConnectionName
-		createGCPMonitoringConfigLocationFiltering = "us-central1, europe-west1"
+		_ = createGCPMonitoringConfigCmd.Flags().Set("name", "new-gcp-monitoring")
+		_ = createGCPMonitoringConfigCmd.Flags().Set("credentials", mockGCPConnectionName)
+		_ = createGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "us-central1, europe-west1")
 		return createGCPMonitoringConfigCmd.RunE(createGCPMonitoringConfigCmd, nil)
 	})
 
@@ -124,8 +125,8 @@ func TestCreateGCPMonitoringWithLocationFilteringSendsThem(t *testing.T) {
 // to be able to take it back to "no filter".
 func TestUpdateGCPMonitoringLocationFilteringAllClearsFilter(t *testing.T) {
 	body := runGCPMonitoringWrite(t, func() error {
-		updateGCPMonitoringConfigName = mockGCPConfigName
-		updateGCPMonitoringConfigLocationFiltering = "all"
+		_ = updateGCPMonitoringConfigCmd.Flags().Set("name", mockGCPConfigName)
+		_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "all")
 		return updateGCPMonitoringConfigCmd.RunE(updateGCPMonitoringConfigCmd, nil)
 	})
 
@@ -139,8 +140,8 @@ func TestUpdateGCPMonitoringLocationFilteringAllCannotBeCombined(t *testing.T) {
 	setupPlatformCmdTest(t, newCloudMockServer(t).Server, "json")
 	t.Cleanup(resetCloudFlagVars)
 	resetCloudFlagVars()
-	updateGCPMonitoringConfigName = mockGCPConfigName
-	updateGCPMonitoringConfigLocationFiltering = "all,us-central1"
+	_ = updateGCPMonitoringConfigCmd.Flags().Set("name", mockGCPConfigName)
+	_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "all,us-central1")
 
 	err := updateGCPMonitoringConfigCmd.RunE(updateGCPMonitoringConfigCmd, nil)
 	require.ErrorContains(t, err, `"all"`)

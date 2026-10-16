@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -49,7 +48,7 @@ func resolveSpillOptions(cmd *cobra.Command, cfg *config.Config) (exec.SpillOpti
 	// — silently when it would only have been automatic, loudly when the command
 	// line asked for it, since silently inlining a result the caller asked to
 	// spill would misreport what happened.
-	if !caps.HostDiskSpill {
+	if !currentCaps(cmdContext(cmd)).HostDiskSpill {
 		if spillExplicitlyRequested(cmd) {
 			return exec.SpillOptions{}, &CapabilityError{Feature: "result spilling to disk"}
 		}
@@ -69,11 +68,11 @@ func resolveSpillOptions(cmd *cobra.Command, cfg *config.Config) (exec.SpillOpti
 	switch {
 	case spillChanged:
 		mode = normalizeMode(spillVal)
-	case os.Getenv("DTCTL_SPILL") != "":
-		mode = normalizeMode(os.Getenv("DTCTL_SPILL"))
+	case getenv(cmdContext(cmd), "DTCTL_SPILL") != "":
+		mode = normalizeMode(getenv(cmdContext(cmd), "DTCTL_SPILL"))
 	case base.Mode != "":
 		mode = normalizeMode(base.Mode)
-	case agentMode:
+	case agentMode(cmdContext(cmd)):
 		mode = string(exec.SpillAuto)
 	default:
 		mode = string(exec.SpillNever)
@@ -95,7 +94,7 @@ func resolveSpillOptions(cmd *cobra.Command, cfg *config.Config) (exec.SpillOpti
 
 	// Dir: env → config (no flag). A user-chosen dir opts out of managed privacy
 	// (handled downstream, D25).
-	if d := os.Getenv("DTCTL_SPILL_DIR"); d != "" {
+	if d := getenv(cmdContext(cmd), "DTCTL_SPILL_DIR"); d != "" {
 		opts.Dir = d
 	} else {
 		opts.Dir = base.Dir
@@ -144,7 +143,7 @@ func resolveSpillOptions(cmd *cobra.Command, cfg *config.Config) (exec.SpillOpti
 
 	// Inert flags under --spill=never are warned, not errored (D25).
 	if opts.Mode == exec.SpillNever && (formatChanged || thresholdChanged) {
-		output.PrintWarning("--spill-format/--spill-threshold are ignored because spilling is disabled (--spill=never)")
+		output.FprintWarning(currentStderr(cmdContext(cmd)), "--spill-format/--spill-threshold are ignored because spilling is disabled (--spill=never)")
 	}
 
 	return opts, nil
@@ -163,14 +162,14 @@ bare --spill = always; --spill=auto spills above --spill-threshold; --spill=neve
 	cmd.Flags().String("spill-format", "", "spill file format when spilling to the default dir: jsonl|json|csv|parquet (default jsonl)")
 	cmd.Flags().String("spill-threshold", "", "serialised output size above which a result spills, e.g. 50KB (default 50KB)")
 
-	_ = cmd.RegisterFlagCompletionFunc("spill", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(cmd, "spill", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{
 			"auto\tspill above the threshold, inline below",
 			"always\talways spill",
 			"never\tnever spill (rows inline)",
 		}, cobra.ShellCompDirectiveNoFileComp
 	})
-	_ = cmd.RegisterFlagCompletionFunc("spill-format", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(cmd, "spill-format", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{"jsonl", "json", "csv", "parquet"}, cobra.ShellCompDirectiveNoFileComp
 	})
 }

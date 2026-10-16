@@ -12,14 +12,14 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/stability"
 )
 
-// forceDelete skips confirmation prompts for delete and restore commands
-var forceDelete bool
-
 // deleteCmd represents the delete command
-var deleteCmd = &cobra.Command{
-	Use:   "delete",
-	Short: "Delete resources",
-	Long: `Delete a resource from the Dynatrace platform by ID or name.
+var deleteCmd = newDeleteCmd()
+
+func newDeleteCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete resources",
+		Long: `Delete a resource from the Dynatrace platform by ID or name.
 
 Accepts either a resource ID or name. When a name is provided, dtctl resolves
 it to an ID automatically. Blocked by safety level if the current context is
@@ -34,7 +34,7 @@ Supported resources:
   apps                    edgeconnect (ec)          notifications
   lookup-tables (lu)      trash                     segments (seg)
   anomaly-detectors (ad)  azure connection          azure monitoring`,
-	Example: `  # Delete a workflow by ID
+		Example: `  # Delete a workflow by ID
   dtctl delete workflow abc-123
 
   # Delete a dashboard by name
@@ -45,103 +45,137 @@ Supported resources:
 
   # Permanently remove a trashed document
   dtctl delete trash <document-id>`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var deleteAzureProviderCmd = &cobra.Command{
-	Use:   "azure",
-	Short: "Delete Azure resources",
-	RunE:  requireSubcommand,
+var deleteAzureProviderCmd = newDeleteAzureProviderCmd()
+
+func newDeleteAzureProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "azure",
+		Short: "Delete Azure resources",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var deleteAWSProviderCmd = &cobra.Command{
-	Use:   "aws",
-	Short: "Delete AWS resources",
-	RunE:  requireSubcommand,
+var deleteAWSProviderCmd = newDeleteAWSProviderCmd()
+
+func newDeleteAWSProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "aws",
+		Short: "Delete AWS resources",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var deleteGCPProviderCmd = &cobra.Command{
-	Use:   "gcp",
-	Short: "Delete GCP resources (Preview)",
-	RunE:  requireSubcommand,
+var deleteGCPProviderCmd = newDeleteGCPProviderCmd()
+
+func newDeleteGCPProviderCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "gcp",
+		Short: "Delete GCP resources (Preview)",
+		RunE:  requireSubcommand,
+	}
+	stability.MarkStable(c)
+	attachPreviewNotice(c, "GCP")
+	return c
 }
 
-var deleteAzureConnectionCmd = &cobra.Command{
-	Use:     "connection [ID|NAME]",
-	Short:   "Delete an Azure connection",
-	Aliases: []string{"connections"},
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+var deleteAzureConnectionCmd = newDeleteAzureConnectionCmd()
 
-		_, client, err := SetupWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
+func newDeleteAzureConnectionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "connection [ID|NAME]",
+		Short:   "Delete an Azure connection",
+		Aliases: []string{"connections"},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		handler := azureconnection.NewHandler(client)
+			_, client, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
+			}
 
-		objectID := identifier
+			handler := azureconnection.NewHandler(client)
 
-		// Try to find by name first to resolve ID if it's a name
-		item, err := handler.FindByName(identifier)
-		if err == nil {
-			// Found by name
-			objectID = item.ObjectID
-			output.PrintInfo("Resolved name %q to ID %s", identifier, objectID)
-		}
-		// If not found by name, assume identifier is an ID
+			objectID := identifier
 
-		if dryRun {
-			return deleteDryRun(cmd, "Azure connection", identifier, objectID)
-		}
+			// Try to find by name first to resolve ID if it's a name
+			item, err := handler.FindByName(identifier)
+			if err == nil {
+				// Found by name
+				objectID = item.ObjectID
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Resolved name %q to ID %s", identifier, objectID)
+			}
+			// If not found by name, assume identifier is an ID
 
-		if err := handler.Delete(objectID); err != nil {
-			return fmt.Errorf("failed to delete Azure connection %q: %w", objectID, err)
-		}
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "Azure connection", identifier, objectID)
+			}
 
-		output.PrintSuccess("Azure connection %s deleted", objectID)
-		return nil
-	},
+			if err := handler.Delete(objectID); err != nil {
+				return fmt.Errorf("failed to delete Azure connection %q: %w", objectID, err)
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Azure connection %s deleted", objectID)
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var deleteAzureMonitoringConfigCmd = &cobra.Command{
-	Use:     "monitoring [ID|NAME]",
-	Short:   "Delete an Azure monitoring config",
-	Aliases: []string{"monitoring-config", "monitoring-configs"},
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+var deleteAzureMonitoringConfigCmd = newDeleteAzureMonitoringConfigCmd()
 
-		_, client, err := SetupWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
+func newDeleteAzureMonitoringConfigCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "monitoring [ID|NAME]",
+		Short:   "Delete an Azure monitoring config",
+		Aliases: []string{"monitoring-config", "monitoring-configs"},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		handler := azuremonitoringconfig.NewHandler(client)
+			_, client, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
+			}
 
-		objectID := identifier
+			handler := azuremonitoringconfig.NewHandler(client)
 
-		// Try to find by description first to resolve ID if it's a name
-		item, err := handler.FindByName(identifier)
-		if err == nil {
-			// Found by name
-			objectID = item.ObjectID
-			output.PrintInfo("Resolved name %q to ID %s", identifier, objectID)
-		}
-		// If not found by name, assume identifier is an ID
+			objectID := identifier
 
-		if dryRun {
-			return deleteDryRun(cmd, "Azure monitoring config", identifier, objectID)
-		}
+			// Try to find by description first to resolve ID if it's a name
+			item, err := handler.FindByName(identifier)
+			if err == nil {
+				// Found by name
+				objectID = item.ObjectID
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Resolved name %q to ID %s", identifier, objectID)
+			}
+			// If not found by name, assume identifier is an ID
 
-		if err := handler.Delete(objectID); err != nil {
-			return fmt.Errorf("failed to delete Azure monitoring config %q: %w", objectID, err)
-		}
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "Azure monitoring config", identifier, objectID)
+			}
 
-		output.PrintSuccess("Azure monitoring config %s deleted", objectID)
-		return nil
-	},
+			if err := handler.Delete(objectID); err != nil {
+				return fmt.Errorf("failed to delete Azure monitoring config %q: %w", objectID, err)
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Azure monitoring config %s deleted", objectID)
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -168,7 +202,6 @@ func init() {
 	deleteCmd.AddCommand(deleteAzureProviderCmd)
 	deleteCmd.AddCommand(deleteAWSProviderCmd)
 	deleteCmd.AddCommand(deleteGCPProviderCmd)
-	attachPreviewNotice(deleteGCPProviderCmd, "GCP")
 
 	deleteAzureProviderCmd.AddCommand(deleteAzureConnectionCmd)
 	deleteAzureProviderCmd.AddCommand(deleteAzureMonitoringConfigCmd)
@@ -176,11 +209,3 @@ func init() {
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(deleteCmd)
-	stability.MarkStable(deleteAWSProviderCmd)
-	stability.MarkStable(deleteAzureProviderCmd)
-	stability.MarkStable(deleteAzureConnectionCmd)
-	stability.MarkStable(deleteAzureMonitoringConfigCmd)
-	stability.MarkStable(deleteGCPProviderCmd)
-}

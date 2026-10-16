@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -29,10 +30,13 @@ type checkResult struct {
 var checkKeyringFunc = config.CheckKeyring
 
 // doctorCmd runs health checks on the dtctl configuration and connectivity
-var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Check configuration, connectivity, and authentication health",
-	Long: `Run a series of diagnostic checks to verify that dtctl is properly configured
+var doctorCmd = newDoctorCmd()
+
+func newDoctorCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "doctor",
+		Short: "Check configuration, connectivity, and authentication health",
+		Long: `Run a series of diagnostic checks to verify that dtctl is properly configured
 and can communicate with the Dynatrace environment.
 
 Checks performed:
@@ -44,30 +48,33 @@ Checks performed:
   6. Token is retrievable (keyring or config)
   7. Environment URL is reachable (HTTP connectivity)
   8. API authentication works (user identity)`,
-	Example: `  # Run all checks
+		Example: `  # Run all checks
   dtctl doctor
 
   # Run checks for a specific context
   dtctl doctor --context production`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		results := runDoctorChecks()
-		printDoctorResults(results)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			results := runDoctorChecks(cmdContext(cmd))
+			printDoctorResults(cmdContext(cmd), results)
 
-		// Return error if any check failed
-		for _, r := range results {
-			if r.Status == "fail" {
-				return fmt.Errorf("one or more checks failed")
+			// Return error if any check failed
+			for _, r := range results {
+				if r.Status == "fail" {
+					return fmt.Errorf("one or more checks failed")
+				}
 			}
-		}
-		return nil
-	},
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-func runDoctorChecks() []checkResult {
-	return runDoctorChecksWithClient(&http.Client{Timeout: 10 * time.Second})
+func runDoctorChecks(ctx context.Context) []checkResult {
+	return runDoctorChecksWithClient(ctx, &http.Client{Timeout: 10 * time.Second})
 }
 
-func runDoctorChecksWithClient(httpClient *http.Client) []checkResult {
+func runDoctorChecksWithClient(ictx context.Context, httpClient *http.Client) []checkResult {
 	var results []checkResult
 
 	// 1. Version
@@ -78,7 +85,7 @@ func runDoctorChecksWithClient(httpClient *http.Client) []checkResult {
 	})
 
 	// 2. Configuration file
-	cfg, cfgErr := LoadConfig()
+	cfg, cfgErr := loadConfig(ictx)
 	if cfgErr != nil {
 		results = append(results, checkResult{
 			Name:   "Configuration",
@@ -155,6 +162,10 @@ func runDoctorChecksWithClient(httpClient *http.Client) []checkResult {
 		// Explicit file storage bypasses the keyring for OAuth tokens, so a
 		// reachable keyring is not where they go.
 		detail := fmt.Sprintf("file-based (%s=file)", config.EnvTokenStorage)
+		if getenv(ictx, config.EnvTokenStorage) == "" {
+			detail = fmt.Sprintf("file-based (chosen once; undo: delete %s or set %s=keyring)",
+				config.FileTokenStorageConsentPath(), config.EnvTokenStorage)
+		}
 		if keyringErr != nil {
 			detail += fmt.Sprintf("; keyring unavailable: %v", keyringErr)
 		}
@@ -168,7 +179,11 @@ func runDoctorChecksWithClient(httpClient *http.Client) []checkResult {
 		if strings.Contains(keyringErr.Error(), config.ErrMsgCollectionUnlock) {
 			detail += " (run 'dtctl auth login' to create the collection automatically)"
 		}
-		detail += fmt.Sprintf(" (set %s=file to use file-based token storage)", config.EnvTokenStorage)
+		if config.IsKeyringAbsent(keyringErr) {
+			detail += fmt.Sprintf(" (no keyring here: 'dtctl auth login' offers file-based token storage, or set %s=file)", config.EnvTokenStorage)
+		} else {
+			detail += fmt.Sprintf(" (set %s=file to use file-based token storage)", config.EnvTokenStorage)
+		}
 		results = append(results, checkResult{
 			Name:   "Token storage",
 			Status: "warn",
@@ -279,7 +294,7 @@ func runDoctorChecksWithClient(httpClient *http.Client) []checkResult {
 	}
 
 	// 7. API authentication
-	c, clientErr := NewClientFromConfig(cfg)
+	c, clientErr := newClientFromConfig(ictx, cfg)
 	if clientErr != nil {
 		results = append(results, checkResult{
 			Name:   "Authentication",
@@ -332,7 +347,7 @@ func runDoctorChecksWithClient(httpClient *http.Client) []checkResult {
 	return results
 }
 
-func printDoctorResults(results []checkResult) {
+func printDoctorResults(ctx context.Context, results []checkResult) {
 	for _, r := range results {
 		var icon string
 		switch r.Status {
@@ -343,7 +358,7 @@ func printDoctorResults(results []checkResult) {
 		case "fail":
 			icon = output.DoctorFail()
 		}
-		fmt.Printf("%s %-16s %s\n", icon, r.Name, r.Detail)
+		fmt.Fprintf(currentStdout(ctx), "%s %-16s %s\n", icon, r.Name, r.Detail)
 	}
 }
 
@@ -385,5 +400,4 @@ func init() {
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(doctorCmd)
 }

@@ -258,7 +258,9 @@ Pass `-o json` to get the previous native-JSON rows back; any other explicit
 `-o` also wins over the default. Other commands keep native JSON unless you pass
 `-o auto` yourself. When the default returns CSV or YAML, `context.suggestions`
 carries one entry naming the `-o json` opt-out; when it returns native JSON
-(empty or scalar results), nothing is added.
+(empty or scalar results), nothing is added. With `--jq` and no `-o`, the
+filter's output is JSON: a program that addresses `.records` reads its answer
+as JSON, so the default does not re-encode it as CSV.
 
 The envelope names the choice in `context.format`, so branch on it before parsing:
 
@@ -281,6 +283,30 @@ For `dtctl query`, `-o auto` keeps the `kind: "records"` envelope below the
 spill threshold (unlike an explicit `-o csv`/`-o yaml`, which print raw bytes)
 and the threshold is measured in the chosen encoding. A spilled result is a
 `result-file` manifest as usual and carries no `context.format`.
+
+### Query window: `context.window`
+
+`dtctl query` reports the window the query searched, as the response's own
+metadata states it, with its length in `span`. A query that names no window
+(no `from:`/`to:`/`timeframe:`, no `--default-timeframe-start`/`-end`) reads the default last 2h,
+and `note` says so, because a count over 2h reads exactly like a count over
+24h:
+
+```json
+"window": {"from": "2026-01-01T08:00:00Z", "to": "2026-01-01T10:00:00Z", "span": "2h",
+           "note": "the query names no window, so it read the default last 2h; widen it with fetch ..., from: now()-24h"}
+```
+
+### Result notes: samples and durations
+
+Two suggestions describe what a non-empty result is *not*:
+
+- an unsorted `| limit N` that returned exactly N rows: these are the first
+  records read, not a representative sample, so they cannot show how often
+  something occurs or that it never does;
+- columns Grail types as `duration`: their values are nanoseconds, and when
+  the query does not aggregate, one record's duration is not a typical one
+  (`percentile(<col>, 50)` is).
 
 ### Empty query results: `context.empty_reason`
 

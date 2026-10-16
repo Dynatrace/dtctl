@@ -15,10 +15,13 @@ import (
 )
 
 // createWorkflowCmd creates a workflow from a file
-var createWorkflowCmd = &cobra.Command{
-	Use:   "workflow -f <file>",
-	Short: "Create a workflow from a file",
-	Long: `Create a new workflow from a YAML or JSON file.
+var createWorkflowCmd = newCreateWorkflowCmd()
+
+func newCreateWorkflowCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "workflow -f <file>",
+		Short: "Create a workflow from a file",
+		Long: `Create a new workflow from a YAML or JSON file.
 
 Examples:
   # Create a workflow from YAML
@@ -30,76 +33,72 @@ Examples:
   # Dry run to preview
   dtctl create workflow -f workflow.yaml --dry-run
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		file, _ := cmd.Flags().GetString("file")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			file, _ := cmd.Flags().GetString("file")
 
-		setFlags, _ := cmd.Flags().GetStringArray("set")
+			setFlags, _ := cmd.Flags().GetStringArray("set")
 
-		// Read the file
-		fileData, err := readFileFlag("file", file)
-		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
-		}
-
-		// Convert to JSON if needed
-		jsonData, err := format.ValidateAndConvert(fileData)
-		if err != nil {
-			return fmt.Errorf("invalid file format: %w", err)
-		}
-
-		// Apply template rendering if variables provided
-		if len(setFlags) > 0 {
-			templateVars, err := template.ParseSetFlags(setFlags)
+			// Read the file
+			fileData, err := readFileFlag(cmdContext(cmd), "file", file)
 			if err != nil {
-				return fmt.Errorf("invalid --set flag: %w", err)
+				return fmt.Errorf("failed to read file: %w", err)
 			}
-			rendered, err := template.RenderTemplate(string(jsonData), templateVars)
+
+			// Convert to JSON if needed
+			jsonData, err := format.ValidateAndConvert(fileData)
 			if err != nil {
-				return fmt.Errorf("template rendering failed: %w", err)
+				return fmt.Errorf("invalid file format: %w", err)
 			}
-			jsonData = []byte(rendered)
-		}
 
-		// Handle dry-run
-		if dryRun {
-			return newDryRunReport(cmd).
-				Linef("Dry run: would create workflow").
-				Linef("---").
-				Linef("%s", string(jsonData)).
-				Linef("---").
-				Payload(jsonData).
-				Print()
-		}
+			// Apply template rendering if variables provided
+			if len(setFlags) > 0 {
+				templateVars, err := template.ParseSetFlags(setFlags)
+				if err != nil {
+					return fmt.Errorf("invalid --set flag: %w", err)
+				}
+				rendered, err := template.RenderTemplate(string(jsonData), templateVars)
+				if err != nil {
+					return fmt.Errorf("template rendering failed: %w", err)
+				}
+				jsonData = []byte(rendered)
+			}
 
-		_, c, err := SetupWithSafety(safety.OperationCreate)
-		if err != nil {
-			return err
-		}
+			// Handle dry-run
+			if dryRun(cmdContext(cmd)) {
+				return newDryRunReport(cmd).
+					Linef("Dry run: would create workflow").
+					Linef("---").
+					Linef("%s", string(jsonData)).
+					Linef("---").
+					Payload(jsonData).
+					Print()
+			}
 
-		handler := workflow.NewHandler(c)
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)
+			if err != nil {
+				return err
+			}
 
-		result, err := handler.Create(jsonData)
-		if err != nil {
-			return fmt.Errorf("failed to create workflow: %w", err)
-		}
+			handler := workflow.NewHandler(c)
 
-		output.PrintSuccess("Workflow %q created", result.Title)
-		output.PrintInfo("  ID:   %s", result.ID)
-		output.PrintInfo("  Name: %s", result.Title)
-		output.PrintInfo("  URL:  %s/ui/apps/dynatrace.automations/workflows/%s", c.BaseURL(), result.ID)
-		return nil
-	},
-}
+			result, err := handler.Create(jsonData)
+			if err != nil {
+				return fmt.Errorf("failed to create workflow: %w", err)
+			}
 
-func init() {
-	// Workflow flags
-	createWorkflowCmd.Flags().StringP("file", "f", "", "file containing workflow definition, or - for stdin (required)")
-	createWorkflowCmd.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	markFlagRequiredNonEmpty(createWorkflowCmd, "file")
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Workflow %q created", result.Title)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "  ID:   %s", result.ID)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "  Name: %s", result.Title)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "  URL:  %s/ui/apps/dynatrace.automations/workflows/%s", c.BaseURL(), result.ID)
+			return nil
+		},
+	}
+	c.Flags().StringP("file", "f", "", "file containing workflow definition, or - for stdin (required)")
+	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "file")
+	return c
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(createWorkflowCmd)
-}

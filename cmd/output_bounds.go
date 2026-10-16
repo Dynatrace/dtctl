@@ -67,7 +67,7 @@ func resolveOutputBounds(cmd *cobra.Command) (outputBounds, error) {
 		budget = int64(tokens) * bytesPerToken
 	}
 
-	if !agentMode {
+	if !agentMode(cmdContext(cmd)) {
 		if f.Changed("max-field-chars") || f.Changed("max-output-bytes") || f.Changed("max-output-tokens") {
 			b.Warnings = append(b.Warnings, "--max-field-chars/--max-output-bytes/--max-output-tokens apply in agent mode only (--agent); the output is unchanged")
 		}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strings"
@@ -23,17 +24,17 @@ const smartscapeReadScope = "storage:smartscape:read"
 // a lower bound; the granted scopes must be introspectable (an OAuth token —
 // platform and API tokens are opaque, so they always proceed and a denial comes
 // back from Grail as usual). Every other doubt resolves to "run the query".
-func dqlScopePrecheck(query string) error {
+func dqlScopePrecheck(ctx context.Context, query string) error {
 	// An embedded invocation carries its own credentials; reading the host's
 	// token store on its behalf would compare against the wrong token.
-	if runSession != nil {
+	if currentSession(ctx) != nil {
 		return nil
 	}
 	needs := exec.RequiredStorageScopes(query)
 	if len(needs) == 0 {
 		return nil
 	}
-	granted, known := grantedScopesFunc()
+	granted, known := grantedScopesFunc(ctx)
 	if !known {
 		return nil
 	}

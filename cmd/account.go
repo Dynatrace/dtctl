@@ -9,11 +9,16 @@ import (
 // `dtctl config set development.account on` or DTCTL_DEVELOPMENT=account.
 const accountDevelopmentFeature = "account"
 
-var accountCmd = &cobra.Command{
-	Use:   "account",
-	Short: "Platform account administration",
-	Long:  "Commands for managing Dynatrace platform account resources.",
-	RunE:  requireSubcommand,
+var accountCmd = newAccountCmd()
+
+func newAccountCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "account",
+		Short: "Platform account administration",
+		Long:  "Commands for managing Dynatrace platform account resources.",
+		RunE:  requireSubcommand,
+	}
+	return c
 }
 
 func init() {

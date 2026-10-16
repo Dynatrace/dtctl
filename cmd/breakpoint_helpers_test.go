@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -422,7 +423,7 @@ func TestPrintGraphQLResponse(t *testing.T) {
 		"data": map[string]interface{}{"ok": true},
 	}
 
-	if err := printGraphQLResponse("getWorkspaceRules", payload); err != nil {
+	if err := printGraphQLResponse(context.Background(), "getWorkspaceRules", payload); err != nil {
 		t.Fatalf("printGraphQLResponse returned error: %v", err)
 	}
 
@@ -436,7 +437,7 @@ func TestPrintGraphQLResponse(t *testing.T) {
 }
 
 func TestPrintGraphQLResponse_NilPayload(t *testing.T) {
-	if err := printGraphQLResponse("noop", nil); err != nil {
+	if err := printGraphQLResponse(context.Background(), "noop", nil); err != nil {
 		t.Fatalf("expected nil payload to return nil error, got: %v", err)
 	}
 }
@@ -459,36 +460,36 @@ func TestCurrentProjectPath(t *testing.T) {
 }
 
 func TestIsDebugVerbose(t *testing.T) {
-	originalDebugMode := debugMode
-	originalVerbosity := verbosity
+	originalDebugMode := debugMode(context.Background())
+	originalVerbosity := verbosity(context.Background())
 	defer func() {
-		debugMode = originalDebugMode
-		verbosity = originalVerbosity
+		gFlags.debugMode = originalDebugMode
+		gFlags.verbosity = originalVerbosity
 	}()
 
-	debugMode = false
-	verbosity = 0
-	if isDebugVerbose() {
-		t.Fatalf("expected false when debugMode and verbosity are disabled")
+	gFlags.debugMode = false
+	gFlags.verbosity = 0
+	if isDebugVerbose(context.Background()) {
+		t.Fatalf("expected false when debugMode() and verbosity() are disabled")
 	}
 
-	verbosity = 1
-	if !isDebugVerbose() {
-		t.Fatalf("expected true when verbosity > 0")
+	gFlags.verbosity = 1
+	if !isDebugVerbose(context.Background()) {
+		t.Fatalf("expected true when verbosity() > 0")
 	}
 
-	verbosity = 0
-	debugMode = true
-	if !isDebugVerbose() {
-		t.Fatalf("expected true when debugMode is enabled")
+	gFlags.verbosity = 0
+	gFlags.debugMode = true
+	if !isDebugVerbose(context.Background()) {
+		t.Fatalf("expected true when debugMode() is enabled")
 	}
 }
 
 func TestRunGetBreakpoints_LoadConfigError(t *testing.T) {
-	originalCfgFile := cfgFile
-	defer func() { cfgFile = originalCfgFile }()
+	originalCfgFile := cfgFile(context.Background())
+	defer func() { gFlags.cfgFile = originalCfgFile }()
 
-	cfgFile = filepath.Join(t.TempDir(), "missing-config.yaml")
+	gFlags.cfgFile = filepath.Join(t.TempDir(), "missing-config.yaml")
 
 	err := runGetBreakpoints(nil, nil)
 	if err == nil {
@@ -497,32 +498,32 @@ func TestRunGetBreakpoints_LoadConfigError(t *testing.T) {
 }
 
 func TestRunGetBreakpoints_TableView(t *testing.T) {
-	originalOutputFormat := outputFormat
-	originalAgentMode := agentMode
-	originalDebugMode := debugMode
-	originalVerbosity := verbosity
+	originalOutputFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	originalDebugMode := debugMode(context.Background())
+	originalVerbosity := verbosity(context.Background())
 	originalOut := rootCmd.OutOrStdout()
 	defer func() {
-		outputFormat = originalOutputFormat
-		agentMode = originalAgentMode
-		debugMode = originalDebugMode
-		verbosity = originalVerbosity
+		gFlags.outputFormat = originalOutputFormat
+		gFlags.agentMode = originalAgentMode
+		gFlags.debugMode = originalDebugMode
+		gFlags.verbosity = originalVerbosity
 		rootCmd.SetOut(originalOut)
 	}()
 
-	outputFormat = ""
-	agentMode = false
-	debugMode = false
-	verbosity = 0
+	gFlags.outputFormat = ""
+	gFlags.agentMode = false
+	gFlags.debugMode = false
+	gFlags.verbosity = 0
 
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -561,32 +562,32 @@ func TestRunGetBreakpoints_TableView(t *testing.T) {
 }
 
 func TestRunGetBreakpoints_StructuredView(t *testing.T) {
-	originalOutputFormat := outputFormat
-	originalAgentMode := agentMode
-	originalDebugMode := debugMode
-	originalVerbosity := verbosity
+	originalOutputFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	originalDebugMode := debugMode(context.Background())
+	originalVerbosity := verbosity(context.Background())
 	originalOut := rootCmd.OutOrStdout()
 	defer func() {
-		outputFormat = originalOutputFormat
-		agentMode = originalAgentMode
-		debugMode = originalDebugMode
-		verbosity = originalVerbosity
+		gFlags.outputFormat = originalOutputFormat
+		gFlags.agentMode = originalAgentMode
+		gFlags.debugMode = originalDebugMode
+		gFlags.verbosity = originalVerbosity
 		rootCmd.SetOut(originalOut)
 	}()
 
-	outputFormat = "json"
-	agentMode = false
-	debugMode = false
-	verbosity = 0
+	gFlags.outputFormat = "json"
+	gFlags.agentMode = false
+	gFlags.debugMode = false
+	gFlags.verbosity = 0
 
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -629,32 +630,32 @@ func TestRunGetBreakpoints_StructuredView(t *testing.T) {
 }
 
 func TestRunGetBreakpoints_AgentEnvelope(t *testing.T) {
-	originalOutputFormat := outputFormat
-	originalAgentMode := agentMode
-	originalDebugMode := debugMode
-	originalVerbosity := verbosity
+	originalOutputFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	originalDebugMode := debugMode(context.Background())
+	originalVerbosity := verbosity(context.Background())
 	originalOut := rootCmd.OutOrStdout()
 	defer func() {
-		outputFormat = originalOutputFormat
-		agentMode = originalAgentMode
-		debugMode = originalDebugMode
-		verbosity = originalVerbosity
+		gFlags.outputFormat = originalOutputFormat
+		gFlags.agentMode = originalAgentMode
+		gFlags.debugMode = originalDebugMode
+		gFlags.verbosity = originalVerbosity
 		rootCmd.SetOut(originalOut)
 	}()
 
-	outputFormat = ""
-	agentMode = true
-	debugMode = false
-	verbosity = 0
+	gFlags.outputFormat = ""
+	gFlags.agentMode = true
+	gFlags.debugMode = false
+	gFlags.verbosity = 0
 
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil
@@ -695,13 +696,13 @@ func TestRunGetBreakpoints_AgentEnvelope(t *testing.T) {
 
 func TestRunGetBreakpoints_GetWorkspaceRulesError(t *testing.T) {
 	deps := liveDebuggerDeps{}
-	deps.loadConfig = func() (*config.Config, error) {
+	deps.loadConfig = func(context.Context) (*config.Config, error) {
 		cfg := config.NewConfig()
 		cfg.SetContext("test", "https://example.invalid", "token")
 		cfg.CurrentContext = "test"
 		return cfg, nil
 	}
-	deps.newClient = func(cfg *config.Config) (*client.Client, error) { return nil, nil }
+	deps.newClient = func(_ context.Context, cfg *config.Config) (*client.Client, error) { return nil, nil }
 	deps.newHandler = func(c *client.Client, environment string) (*livedebugger.Handler, error) { return nil, nil }
 	deps.getOrCreateWorkspace = func(handler *livedebugger.Handler, projectPath string) (map[string]interface{}, string, error) {
 		return map[string]interface{}{"data": map[string]interface{}{}}, "ws-1", nil

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -31,21 +32,21 @@ func captureStdout(t *testing.T, run func()) string {
 }
 
 func TestPrintBreakpointMessage_Table(t *testing.T) {
-	originalOutputFormat := outputFormat
-	originalAgentMode := agentMode
-	originalPlainMode := plainMode
+	originalOutputFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	originalPlainMode := plainMode(context.Background())
 	defer func() {
-		outputFormat = originalOutputFormat
-		agentMode = originalAgentMode
-		plainMode = originalPlainMode
+		gFlags.outputFormat = originalOutputFormat
+		gFlags.agentMode = originalAgentMode
+		gFlags.plainMode = originalPlainMode
 	}()
 
-	outputFormat = "table"
-	agentMode = false
-	plainMode = true
+	gFlags.outputFormat = "table"
+	gFlags.agentMode = false
+	gFlags.plainMode = true
 
 	output := captureStdout(t, func() {
-		if err := printBreakpointMessage("create", "Created breakpoint at A.java:10"); err != nil {
+		if err := printBreakpointMessage(context.Background(), "create", "Created breakpoint at A.java:10"); err != nil {
 			t.Fatalf("printBreakpointMessage returned error: %v", err)
 		}
 	})
@@ -56,21 +57,21 @@ func TestPrintBreakpointMessage_Table(t *testing.T) {
 }
 
 func TestPrintBreakpointMessage_Agent(t *testing.T) {
-	originalOutputFormat := outputFormat
-	originalAgentMode := agentMode
-	originalPlainMode := plainMode
+	originalOutputFormat := outputFormat(context.Background())
+	originalAgentMode := agentMode(context.Background())
+	originalPlainMode := plainMode(context.Background())
 	defer func() {
-		outputFormat = originalOutputFormat
-		agentMode = originalAgentMode
-		plainMode = originalPlainMode
+		gFlags.outputFormat = originalOutputFormat
+		gFlags.agentMode = originalAgentMode
+		gFlags.plainMode = originalPlainMode
 	}()
 
-	outputFormat = ""
-	agentMode = true
-	plainMode = true
+	gFlags.outputFormat = ""
+	gFlags.agentMode = true
+	gFlags.plainMode = true
 
 	output := captureStdout(t, func() {
-		if err := printBreakpointMessage("delete", "Deletion cancelled"); err != nil {
+		if err := printBreakpointMessage(context.Background(), "delete", "Deletion cancelled"); err != nil {
 			t.Fatalf("printBreakpointMessage returned error: %v", err)
 		}
 	})

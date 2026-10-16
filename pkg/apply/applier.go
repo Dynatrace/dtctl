@@ -18,15 +18,16 @@ import (
 	"github.com/dynatrace-oss/dtctl/pkg/safety"
 	"github.com/dynatrace-oss/dtctl/pkg/util/format"
 	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 // uuidRegex matches UUID-formatted strings (the Documents API rejects these for ID during creation)
 var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // stderrWarn writes a note to stderr and appends it to the warnings slice.
-func stderrWarn(warnings *[]string, format string, args ...interface{}) {
+func (a *Applier) stderrWarn(warnings *[]string, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(os.Stderr, "Note: %s\n", msg)
+	fmt.Fprintf(a.stderrW(), "Note: %s\n", msg)
 	if warnings != nil {
 		*warnings = append(*warnings, msg)
 	}
@@ -48,6 +49,8 @@ type Applier struct {
 	sourceFile    string    // original filename for hook context
 	hookStdout    io.Writer // where hook stdout is forwarded (nil = os.Stdout)
 	hookStderr    io.Writer // where hook stderr is forwarded (nil = os.Stderr)
+	stderr        io.Writer // where notes, diffs and instructions go (nil = os.Stderr)
+	vfsEnv        vfs.Env   // file access for the id write-back (zero value = the process's)
 }
 
 // NewApplier creates a new applier
@@ -58,6 +61,28 @@ func NewApplier(c *client.Client) *Applier {
 		baseURL:       c.BaseURL(),
 		currentUserID: currentUserID,
 	}
+}
+
+// WithStderr sets where the applier writes its notes, diffs and setup
+// instructions. nil keeps os.Stderr.
+func (a *Applier) WithStderr(w io.Writer) *Applier {
+	a.stderr = w
+	return a
+}
+
+// WithVFS sets the filesystem and stdin the applier's id write-back uses. The
+// zero Env keeps the process's.
+func (a *Applier) WithVFS(env vfs.Env) *Applier {
+	a.vfsEnv = env
+	return a
+}
+
+// stderrW returns the writer for notes, diffs and instructions.
+func (a *Applier) stderrW() io.Writer {
+	if a.stderr == nil {
+		return os.Stderr
+	}
+	return a.stderr
 }
 
 // WithSafetyChecker sets the safety checker for the applier

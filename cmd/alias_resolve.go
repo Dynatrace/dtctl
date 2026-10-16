@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +15,7 @@ import (
 // resolveAlias checks if the first argument is an alias and expands it.
 // Returns (expanded args, isShellAlias, error).
 // If no alias matches, returns (nil, false, nil).
-func resolveAlias(args []string, cfg *config.Config) ([]string, bool, error) {
+func resolveAlias(ctx context.Context, args []string, cfg *config.Config) ([]string, bool, error) {
 	if len(args) == 0 || cfg == nil {
 		return nil, false, nil
 	}
@@ -45,7 +46,7 @@ func resolveAlias(args []string, cfg *config.Config) ([]string, bool, error) {
 	// command always wins regardless of where the alias came from. We warn and
 	// fall through to normal command dispatch rather than erroring out.
 	if isBuiltinCommand(name) {
-		fmt.Fprintf(os.Stderr,
+		fmt.Fprintf(currentStderr(ctx),
 			"warning: ignoring alias %q because it shadows the built-in %q command\n",
 			name, name)
 		return nil, false, nil
@@ -137,10 +138,10 @@ func splitCommand(s string) []string {
 }
 
 // execShellAlias runs a shell alias via sh -c.
-func execShellAlias(shellCmd string) error {
+func execShellAlias(ctx context.Context, shellCmd string) error {
 	cmd := exec.Command("sh", "-c", shellCmd)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = currentStdout(ctx)
+	cmd.Stderr = currentStderr(ctx)
 	return cmd.Run()
 }

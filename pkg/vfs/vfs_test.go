@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -95,4 +96,57 @@ func TestMapFSDoesNotRetainInputMap(t *testing.T) {
 	require.Equal(t, []byte("one"), data)
 	_, err = m.ReadFile("b")
 	require.Error(t, err)
+}
+
+func TestEnvResolvesPathsThroughItsOwnFilesystem(t *testing.T) {
+	prev := SetActive(NewMapFS(map[string][]byte{"a.yaml": []byte("active")}))
+	t.Cleanup(func() { SetActive(prev) })
+
+	own := NewMapFS(map[string][]byte{"a.yaml": []byte("own")})
+	data, err := Env{FS: own}.ReadFile("a.yaml")
+	require.NoError(t, err)
+	require.Equal(t, []byte("own"), data, "an Env with a filesystem of its own must not read the installed one")
+
+	data, err = Env{}.ReadFile("a.yaml")
+	require.NoError(t, err)
+	require.Equal(t, []byte("active"), data, "the zero Env is the process default")
+
+	require.NoError(t, Env{FS: own}.WriteFile("out.yaml", []byte("written"), 0o644))
+	require.Equal(t, []byte("written"), own.Files()["out.yaml"])
+	_, err = ReadFile("out.yaml")
+	require.Error(t, err, "a write through an Env must not reach the installed filesystem")
+}
+
+func TestEnvReadsDashFromItsOwnStdin(t *testing.T) {
+	data, err := Env{Stdin: strings.NewReader("piped")}.ReadFileOrStdin("-")
+	require.NoError(t, err)
+	require.Equal(t, []byte("piped"), data)
+
+	own := NewMapFS(map[string][]byte{"f.yaml": []byte("file")})
+	data, err = Env{FS: own, Stdin: strings.NewReader("ignored")}.ReadFileOrStdin("f.yaml")
+	require.NoError(t, err)
+	require.Equal(t, []byte("file"), data, "a path is read from the filesystem, never from stdin")
+}
+
+func TestEnvStdinReaderDefaultsToTheProcessStdin(t *testing.T) {
+	if got := (Env{}).StdinReader(); got != os.Stdin {
+		t.Errorf("the zero Env's stdin = %v, want os.Stdin", got)
+	}
+	own := strings.NewReader("own")
+	if got := (Env{Stdin: own}).StdinReader(); got != own {
+		t.Errorf("an Env with its own stdin returned %v", got)
+	}
+}
+
+func TestPackageLevelFunctionsUseTheInstalledFilesystem(t *testing.T) {
+	m := NewMapFS(map[string][]byte{"in.yaml": []byte("input")})
+	prev := SetActive(m)
+	t.Cleanup(func() { SetActive(prev) })
+
+	require.NoError(t, WriteFile("out.yaml", []byte("written"), 0o644))
+	require.Equal(t, []byte("written"), m.Files()["out.yaml"])
+
+	data, err := ReadFileOrStdin("in.yaml")
+	require.NoError(t, err)
+	require.Equal(t, []byte("input"), data)
 }

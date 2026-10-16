@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -442,7 +443,7 @@ func TestMeasureInline_NonAgentJSONLMatchesPrintedBytes(t *testing.T) {
 		})
 		inline := newInlineRows(records, compactionFor(records, opts), opts.MaxFieldChars)
 		inline.types = []interface{}{map[string]interface{}{"mappings": map[string]interface{}{}}}
-		got, _ := measureInline(inline, "jsonl", inlineLayout(opts, "jsonl"))
+		got, _ := measureInline(inline, "jsonl", inlineLayout(io.Discard, opts, "jsonl"))
 		if got != int64(len(printed)) {
 			t.Errorf("%d rows: measured %d bytes, -o jsonl printed %d: %q", n, got, len(printed), printed)
 		}

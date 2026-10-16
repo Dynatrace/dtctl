@@ -11,68 +11,73 @@ import (
 )
 
 // describeAppCmd shows detailed info about an app
-var describeAppCmd = &cobra.Command{
-	Use:     "app <app-id>",
-	Aliases: []string{"apps"},
-	Short:   "Show details of an App Engine app",
-	Long: `Show detailed information about an App Engine app.
+var describeAppCmd = newDescribeAppCmd()
+
+func newDescribeAppCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "app <app-id>",
+		Aliases: []string{"apps"},
+		Short:   "Show details of an App Engine app",
+		Long: `Show detailed information about an App Engine app.
 
 Examples:
   # Describe an app
   dtctl describe app my.custom-app
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		appID := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			appID := args[0]
 
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := appengine.NewHandler(c)
-
-		app, err := handler.GetApp(appID)
-		if err != nil {
-			return err
-		}
-
-		// For table output, show detailed human-readable information
-		if outputFormat == "table" {
-			const w = 13
-			output.DescribeKV("ID:", w, "%s", app.ID)
-			output.DescribeKV("Name:", w, "%s", app.Name)
-			output.DescribeKV("Version:", w, "%s", app.Version)
-			output.DescribeKV("Description:", w, "%s", app.Description)
-			output.DescribeKV("Builtin:", w, "%v", app.IsBuiltin)
-
-			if app.ResourceStatus != nil {
-				output.DescribeKV("Status:", w, "%s", app.ResourceStatus.Status)
-				if len(app.ResourceStatus.SubResourceTypes) > 0 {
-					output.DescribeKV("Resources:", w, "%s", strings.Join(app.ResourceStatus.SubResourceTypes, ", "))
-				}
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
 
-			if app.ModificationInfo != nil {
-				if app.ModificationInfo.CreatedAt != "" {
-					output.DescribeKV("Created:", w, "%s (by %s)", app.ModificationInfo.CreatedAt, app.ModificationInfo.CreatedBy)
-				}
-				if app.ModificationInfo.LastModifiedAt != "" {
-					output.DescribeKV("Modified:", w, "%s (by %s)", app.ModificationInfo.LastModifiedAt, app.ModificationInfo.LastModifiedBy)
-				}
+			handler := appengine.NewHandler(c)
+
+			app, err := handler.GetApp(appID)
+			if err != nil {
+				return err
 			}
 
-			return nil
-		}
+			// For table output, show detailed human-readable information
+			if outputFormat(cmdContext(cmd)) == "table" {
+				const w = 13
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "ID:", w, "%s", app.ID)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Name:", w, "%s", app.Name)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Version:", w, "%s", app.Version)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Description:", w, "%s", app.Description)
+				output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Builtin:", w, "%v", app.IsBuiltin)
 
-		// For other formats, use standard printer
-		enrichAgent(printer, "describe", "app")
-		return printer.Print(app)
-	},
+				if app.ResourceStatus != nil {
+					output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Status:", w, "%s", app.ResourceStatus.Status)
+					if len(app.ResourceStatus.SubResourceTypes) > 0 {
+						output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Resources:", w, "%s", strings.Join(app.ResourceStatus.SubResourceTypes, ", "))
+					}
+				}
+
+				if app.ModificationInfo != nil {
+					if app.ModificationInfo.CreatedAt != "" {
+						output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Created:", w, "%s (by %s)", app.ModificationInfo.CreatedAt, app.ModificationInfo.CreatedBy)
+					}
+					if app.ModificationInfo.LastModifiedAt != "" {
+						output.FprintDescribeKV(currentStdout(cmdContext(cmd)), "Modified:", w, "%s (by %s)", app.ModificationInfo.LastModifiedAt, app.ModificationInfo.LastModifiedBy)
+					}
+				}
+
+				return nil
+			}
+
+			// For other formats, use standard printer
+			enrichAgent(printer, "describe", "app")
+			return printer.Print(app)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(describeAppCmd)
 }

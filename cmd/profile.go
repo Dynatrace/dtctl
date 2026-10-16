@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -157,14 +158,14 @@ func extractContextOverride(args []string) string {
 // --context (which context's binding to use) overrides. It returns (nil, nil)
 // for the full command tree, and a non-nil error only when a referenced profile
 // name does not exist.
-func resolveActiveProfile(args []string) (*config.Profile, error) {
+func resolveActiveProfile(ctx context.Context, args []string) (*config.Profile, error) {
 	// No usable config → full command tree. The real command will surface any
 	// config error later with proper context. Session-backed invocations
 	// resolve against the synthetic config: no user-defined profiles and no
 	// context binding, but DTCTL_PROFILE (set per request via RunOptions.Env)
 	// still selects a built-in preset. See configForArgs in stability.go, which
 	// the stability floor shares.
-	cfg := configForArgs(args)
+	cfg := configForArgs(ctx, args)
 	if cfg == nil {
 		return nil, nil
 	}

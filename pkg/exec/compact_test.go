@@ -572,3 +572,14 @@ func TestBuildSpillResponse_AgentDefaultsCompose(t *testing.T) {
 		t.Errorf("opt-out: records=%q constant=%v suggestions=%q, want %q", enc.Records, enc.Constant, resp.Context.Suggestions, want)
 	}
 }
+
+// TestCompactRowsSuggestionNamesConstantKeys pins that the note names the columns moved to result.constant.
+func TestCompactRowsSuggestionNamesConstantKeys(t *testing.T) {
+	s := compactRowsSuggestion(&output.Compaction{Constant: map[string]interface{}{"total": 3, "share": 0.5}})
+	if !strings.HasPrefix(s, compactRowsPrefix) || !strings.Contains(s, "result.constant: share, total;") {
+		t.Errorf("suggestion = %q, want the sorted constant keys", s)
+	}
+	if s := compactRowsSuggestion(nil); !strings.HasPrefix(s, compactRowsPrefix) || strings.Contains(s, "listed once") {
+		t.Errorf("suggestion without constants = %q", s)
+	}
+}

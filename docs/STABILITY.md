@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 17 experimental, 14 development
+- commands: 269 stable, 19 experimental, 14 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 943
+- entries below (commands + flags): 951
 
 ## Surface
 
@@ -273,7 +273,6 @@ apply                                stable
   --label                            stable
   --no-hooks                         stable
   --set                              stable
-  --share-access                     experimental  since 0.42.0  (declared)
   --share-environment                stable
   --show-diff                        stable
   --snapshot-description             stable
@@ -335,6 +334,7 @@ config set-context                   stable
   --safety-level                     stable
   --stability-exception              stable
   --token-ref                        stable
+  --usage-tracking                   experimental  since 0.43.0  (declared)
 config set-credentials               stable
   --global                           stable
   --token                            stable
@@ -480,6 +480,7 @@ ctx set                              stable
   --safety-level                     stable
   --stability-exception              stable
   --token-ref                        stable
+  --usage-tracking                   experimental  since 0.43.0  (declared)
 ctx token                            stable
 delete                               stable
 delete anomaly-detector              stable
@@ -684,7 +685,9 @@ exec                                 stable
 exec analyzer                        stable
   --file                             stable
   --input                            stable
+  --precision                        experimental  since 0.42.0  (declared)
   --query                            stable
+  --series                           experimental  since 0.42.0  (declared)
   --timeout                          experimental  since 0.39.0  (declared)
   --validate                         stable
   --wait                             experimental  since 0.39.0  (declared)
@@ -987,21 +990,21 @@ share                                stable
 share dashboard                      stable
   --access                           stable
   --dry-run                          stable
-  --environment                      experimental  since 0.42.0  (declared)
+  --environment                      experimental  since 0.44.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
 share document                       stable
   --access                           stable
   --dry-run                          stable
-  --environment                      experimental  since 0.42.0  (declared)
+  --environment                      experimental  since 0.44.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
 share notebook                       stable
   --access                           stable
   --dry-run                          stable
-  --environment                      experimental  since 0.42.0  (declared)
+  --environment                      experimental  since 0.44.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
@@ -1030,21 +1033,21 @@ unshare dashboard                    stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
-  --environment                      experimental  since 0.42.0  (declared)
+  --environment                      experimental  since 0.44.0  (declared)
   --group                            stable
   --user                             stable
 unshare document                     stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
-  --environment                      experimental  since 0.42.0  (declared)
+  --environment                      experimental  since 0.44.0  (declared)
   --group                            stable
   --user                             stable
 unshare notebook                     stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
-  --environment                      experimental  since 0.42.0  (declared)
+  --environment                      experimental  since 0.44.0  (declared)
   --group                            stable
   --user                             stable
 update                               stable
@@ -1116,6 +1119,11 @@ update gcp monitoring                experimental  since 0.39.0
   --locationFiltering                experimental  since 0.39.0  (declared)
   --name                             experimental
 update settings                      stable
+usage                                experimental  since 0.43.0
+  --all-contexts                     experimental
+usage reset                          experimental  since 0.43.0
+  --all-contexts                     experimental
+  --yes                              experimental
 verify                               stable
 verify analyzer                      stable
   --file                             stable

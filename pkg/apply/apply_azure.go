@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/dynatrace-oss/dtctl/pkg/output"
@@ -94,7 +93,7 @@ func (a *Applier) applyAzureConnection(data []byte) ([]ApplyResult, error) {
 			}
 			if existing != nil {
 				objectID = existing.ObjectID
-				stderrWarn(&resultWarnings, "Found existing Federated Credential connection %q (ID: %s), switching to update mode", value.Name, objectID)
+				a.stderrWarn(&resultWarnings, "Found existing Federated Credential connection %q (ID: %s), switching to update mode", value.Name, objectID)
 			}
 		}
 
@@ -116,7 +115,7 @@ func (a *Applier) applyAzureConnection(data []byte) ([]ApplyResult, error) {
 
 			// Check for federated identity to print instructions
 			if value.Type == "federatedIdentityCredential" {
-				printFederatedInstructions(a.baseURL, res.ObjectID, issuerOverride, &resultWarnings)
+				a.printFederatedInstructions(a.baseURL, res.ObjectID, issuerOverride, &resultWarnings)
 			}
 
 			results = append(results, &ConnectionApplyResult{
@@ -142,7 +141,7 @@ func (a *Applier) applyAzureConnection(data []byte) ([]ApplyResult, error) {
 					if value.Type == "federatedIdentityCredential" {
 						fedCred := value.FederatedIdentityCredential
 						if fedCred == nil || fedCred.ApplicationID == "" || fedCred.DirectoryID == "" {
-							printFederatedCompleteInstructions(a.baseURL, objectID, value.Name, issuerOverride)
+							a.printFederatedCompleteInstructions(a.baseURL, objectID, value.Name, issuerOverride)
 							return nil, fmt.Errorf("azure connection requires additional configuration: %w", err)
 						}
 					}
@@ -151,7 +150,7 @@ func (a *Applier) applyAzureConnection(data []byte) ([]ApplyResult, error) {
 				// Check for Federated Identity error (AADSTS70025 or AADSTS700213)
 				if strings.Contains(errMsg, "AADSTS70025") || strings.Contains(errMsg, "AADSTS700213") {
 					if value.FederatedIdentityCredential != nil && value.FederatedIdentityCredential.ApplicationID != "" {
-						printFederatedErrorSnippet(a.baseURL, objectID, value.FederatedIdentityCredential.ApplicationID, issuerOverride)
+						a.printFederatedErrorSnippet(a.baseURL, objectID, value.FederatedIdentityCredential.ApplicationID, issuerOverride)
 						return nil, fmt.Errorf("azure connection requires federation setup on Azure side: %w", err)
 					}
 				}
@@ -206,7 +205,7 @@ func (a *Applier) applyAzureMonitoringConfig(data []byte) (ApplyResult, error) {
 			return nil, nameLookupError("Azure monitoring config", config.Value.Description, err)
 		}
 		if existing != nil {
-			stderrWarn(&warnings, "Found existing Azure monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
+			a.stderrWarn(&warnings, "Found existing Azure monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
 			objectID = existing.ObjectID
 			config.ObjectID = objectID // Set ID for update
 		}
@@ -220,7 +219,7 @@ func (a *Applier) applyAzureMonitoringConfig(data []byte) (ApplyResult, error) {
 			}
 			config.Value.Version = latestVersion
 			config.Version = latestVersion
-			stderrWarn(&warnings, "Using latest extension version: %s", latestVersion)
+			a.stderrWarn(&warnings, "Using latest extension version: %s", latestVersion)
 		}
 
 		// New creation
@@ -253,7 +252,7 @@ func (a *Applier) applyAzureMonitoringConfig(data []byte) (ApplyResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch existing config to preserve version: %w", err)
 		} else {
-			stderrWarn(&warnings, "Preserving existing version: %s", existing.Value.Version)
+			a.stderrWarn(&warnings, "Preserving existing version: %s", existing.Value.Version)
 			config.Value.Version = existing.Value.Version
 			config.Version = existing.Value.Version
 		}
@@ -281,11 +280,11 @@ func (a *Applier) applyAzureMonitoringConfig(data []byte) (ApplyResult, error) {
 }
 
 // printFederatedInstructions prints configuration instructions for Federated Identity Credential to stderr
-func printFederatedInstructions(baseURL, objectID, issuerOverride string, warnings *[]string) {
+func (a *Applier) printFederatedInstructions(baseURL, objectID, issuerOverride string, warnings *[]string) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		// Should not happen if client is initialized correctly, but fail gracefully
-		output.PrintWarning("Could not parse base URL for instructions: %v", err)
+		output.FprintWarning(a.stderrW(), "Could not parse base URL for instructions: %v", err)
 		return
 	}
 	host := u.Host
@@ -295,10 +294,10 @@ func printFederatedInstructions(baseURL, objectID, issuerOverride string, warnin
 		issuer = azureconnection.TokenIssuerForHost(host)
 	}
 
-	fmt.Fprintf(os.Stderr, "\nFurther configuration required in Azure Portal (Federated Credentials):\n")
-	fmt.Fprintf(os.Stderr, "  Issuer:    %s\n", issuer)
-	fmt.Fprintf(os.Stderr, "  Subject:   dt:connection-id/%s\n", objectID)
-	fmt.Fprintf(os.Stderr, "  Audiences: %s/svc-id/com.dynatrace.da\n", host)
+	fmt.Fprintf(a.stderrW(), "\nFurther configuration required in Azure Portal (Federated Credentials):\n")
+	fmt.Fprintf(a.stderrW(), "  Issuer:    %s\n", issuer)
+	fmt.Fprintf(a.stderrW(), "  Subject:   dt:connection-id/%s\n", objectID)
+	fmt.Fprintf(a.stderrW(), "  Audiences: %s/svc-id/com.dynatrace.da\n", host)
 
 	if warnings != nil {
 		*warnings = append(*warnings, "Azure federated credential requires additional portal setup")
@@ -306,10 +305,10 @@ func printFederatedInstructions(baseURL, objectID, issuerOverride string, warnin
 }
 
 // printFederatedCompleteInstructions prints full configuration instructions for Federated Identity Credential to stderr
-func printFederatedCompleteInstructions(baseURL, objectID, connectionName, issuerOverride string) {
+func (a *Applier) printFederatedCompleteInstructions(baseURL, objectID, connectionName, issuerOverride string) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		output.PrintWarning("Could not parse base URL for instructions: %v", err)
+		output.FprintWarning(a.stderrW(), "Could not parse base URL for instructions: %v", err)
 		return
 	}
 	host := u.Host
@@ -319,23 +318,23 @@ func printFederatedCompleteInstructions(baseURL, objectID, connectionName, issue
 		issuer = azureconnection.TokenIssuerForHost(host)
 	}
 
-	fmt.Fprintf(os.Stderr, "\nTo complete the configuration, additional setup is required in the Azure Portal (Federated Credentials).\n")
-	fmt.Fprintf(os.Stderr, "Details for Azure configuration:\n")
-	fmt.Fprintf(os.Stderr, "  Issuer:    %s\n", issuer)
-	fmt.Fprintf(os.Stderr, "  Subject:   dt:connection-id/%s\n", objectID)
-	fmt.Fprintf(os.Stderr, "  Audiences: %s/svc-id/com.dynatrace.da\n", host)
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "Azure CLI commands:\n")
-	fmt.Fprintf(os.Stderr, "1. Create Service Principal (if not created yet):\n")
-	fmt.Fprintf(os.Stderr, "   az ad sp create-for-rbac --name %q --create-password false --query \"{CLIENT_ID:appId, TENANT_ID:tenant}\" --output table", connectionName)
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "2. Create Federated Credential:\n")
-	fmt.Fprintf(os.Stderr, "   az ad app federated-credential create --id \"<CLIENT_ID>\" --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", issuer, objectID, host)
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(a.stderrW(), "\nTo complete the configuration, additional setup is required in the Azure Portal (Federated Credentials).\n")
+	fmt.Fprintf(a.stderrW(), "Details for Azure configuration:\n")
+	fmt.Fprintf(a.stderrW(), "  Issuer:    %s\n", issuer)
+	fmt.Fprintf(a.stderrW(), "  Subject:   dt:connection-id/%s\n", objectID)
+	fmt.Fprintf(a.stderrW(), "  Audiences: %s/svc-id/com.dynatrace.da\n", host)
+	fmt.Fprintln(a.stderrW())
+	fmt.Fprintf(a.stderrW(), "Azure CLI commands:\n")
+	fmt.Fprintf(a.stderrW(), "1. Create Service Principal (if not created yet):\n")
+	fmt.Fprintf(a.stderrW(), "   az ad sp create-for-rbac --name %q --create-password false --query \"{CLIENT_ID:appId, TENANT_ID:tenant}\" --output table", connectionName)
+	fmt.Fprintln(a.stderrW())
+	fmt.Fprintf(a.stderrW(), "2. Create Federated Credential:\n")
+	fmt.Fprintf(a.stderrW(), "   az ad app federated-credential create --id \"<CLIENT_ID>\" --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", issuer, objectID, host)
+	fmt.Fprintln(a.stderrW())
 }
 
 // printFederatedErrorSnippet prints az cli snippet for AADSTS70025 error to stderr
-func printFederatedErrorSnippet(baseURL, objectID, clientID, issuerOverride string) {
+func (a *Applier) printFederatedErrorSnippet(baseURL, objectID, clientID, issuerOverride string) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return
@@ -347,10 +346,10 @@ func printFederatedErrorSnippet(baseURL, objectID, clientID, issuerOverride stri
 		issuer = azureconnection.TokenIssuerForHost(host)
 	}
 
-	fmt.Fprintf(os.Stderr, "\nTo fix the Federated Identity error, run the following command:\n")
+	fmt.Fprintf(a.stderrW(), "\nTo fix the Federated Identity error, run the following command:\n")
 	// Use format validated by user: "{'key': 'value'}"
-	fmt.Fprintf(os.Stderr, "az ad app federated-credential create --id %q --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", clientID, issuer, objectID, host)
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(a.stderrW(), "az ad app federated-credential create --id %q --parameters \"{'name': 'fd-Federated-Credential', 'issuer': '%s', 'subject': 'dt:connection-id/%s', 'audiences': ['%s/svc-id/com.dynatrace.da']}\"\n", clientID, issuer, objectID, host)
+	fmt.Fprintln(a.stderrW())
 }
 
 // dryRunAzureConnection reports what an apply would do to an Azure connection.
@@ -373,7 +372,7 @@ func (a *Applier) dryRunAzureConnection(item map[string]interface{}) (ApplyResul
 			return nil, nameLookupError("Azure connection", parsed.value.Name, err)
 		}
 		if existing != nil {
-			stderrWarn(&warnings, "Found existing Federated Credential connection %q (ID: %s), switching to update mode", parsed.value.Name, existing.ObjectID)
+			a.stderrWarn(&warnings, "Found existing Federated Credential connection %q (ID: %s), switching to update mode", parsed.value.Name, existing.ObjectID)
 			objectID = existing.ObjectID
 		}
 	}
@@ -414,7 +413,7 @@ func (a *Applier) dryRunAzureMonitoringConfig(data []byte) (ApplyResult, error) 
 			return nil, nameLookupError("Azure monitoring config", config.Value.Description, err)
 		}
 		if existing != nil {
-			stderrWarn(&warnings, "Found existing Azure monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
+			a.stderrWarn(&warnings, "Found existing Azure monitoring config %q with ID: %s", config.Value.Description, existing.ObjectID)
 			objectID = existing.ObjectID
 		}
 	}

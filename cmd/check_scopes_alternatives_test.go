@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func TestComputeScopeVerdict_Alternatives(t *testing.T) {
 
 	t.Run("only an alternative held is sufficient", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"platform-management:environments:read"}, true)
-		r := computeScopeVerdict("get", "license", required, alternatives, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "get", "license", required, alternatives, scopeRequirementKnown)
 		require.Equal(t, scopeStatusOK, r.Status)
 		require.Empty(t, r.MissingScopes)
 		require.Equal(t, []string{"platform-management:environments:read"}, r.SatisfiedBy)
@@ -30,14 +31,14 @@ func TestComputeScopeVerdict_Alternatives(t *testing.T) {
 
 	t.Run("the listed scope held needs no alternative", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"app-engine:apps:run"}, true)
-		r := computeScopeVerdict("get", "license", required, alternatives, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "get", "license", required, alternatives, scopeRequirementKnown)
 		require.Equal(t, scopeStatusOK, r.Status)
 		require.Empty(t, r.SatisfiedBy)
 	})
 
 	t.Run("none held is insufficient", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"automation:workflows:read"}, true)
-		r := computeScopeVerdict("get", "license", required, alternatives, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "get", "license", required, alternatives, scopeRequirementKnown)
 		require.Equal(t, scopeStatusInsufficient, r.Status)
 		require.Equal(t, required, r.MissingScopes)
 		require.Empty(t, r.SatisfiedBy)
@@ -47,13 +48,13 @@ func TestComputeScopeVerdict_Alternatives(t *testing.T) {
 
 	t.Run("an alternative is all-of", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"b"}, true)
-		r := computeScopeVerdict("get", "x", []string{"a"}, [][]string{{"b", "c"}}, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "get", "x", []string{"a"}, [][]string{{"b", "c"}}, scopeRequirementKnown)
 		require.Equal(t, scopeStatusInsufficient, r.Status, "a partially held alternative satisfies nothing")
 	})
 
 	t.Run("opaque token names the alternatives", func(t *testing.T) {
 		withScopeState(t, true, false, "json", nil, false)
-		r := computeScopeVerdict("get", "license", required, alternatives, scopeRequirementKnown)
+		r := computeScopeVerdict(context.Background(), "get", "license", required, alternatives, scopeRequirementKnown)
 		require.Equal(t, scopeStatusUnknown, r.Status)
 		require.Contains(t, strings.Join(r.Suggestions, "\n"), "app-engine:functions:run")
 	})
@@ -103,7 +104,7 @@ func TestScopePreflight_CheckScopes_AcceptsAlternativeScope(t *testing.T) {
 				var scopeErr *ScopeError
 				require.ErrorAs(t, preErr, &scopeErr)
 
-				detail := errorToDetail(preErr)
+				detail := errorToDetail(context.Background(), preErr)
 				require.Equal(t, "insufficient_scope", detail.Code)
 				require.Equal(t, []string{"app-engine:apps:run"}, detail.MissingScopes)
 				require.Equal(t,
@@ -128,12 +129,12 @@ func TestScopePreflight_CheckScopes_AcceptsAlternativeScope(t *testing.T) {
 // not grow the field.
 func TestScopeErrorEnvelopeCarriesAlternatives(t *testing.T) {
 	alts := [][]string{{"b"}, {"c", "d"}}
-	detail := errorToDetail(&ScopeError{Verb: "delete", Resource: "x", Required: []string{"a"},
+	detail := errorToDetail(context.Background(), &ScopeError{Verb: "delete", Resource: "x", Required: []string{"a"},
 		Missing: []string{"a"}, Alternatives: alts, Advice: insufficientScopeAdvice([]string{"a"}, alts)})
 	require.Equal(t, alts, detail.AlternativeScopes)
 	require.Contains(t, strings.Join(detail.Suggestions, "\n"), "b | c + d")
 
-	plain := errorToDetail(&ScopeError{Verb: "delete", Resource: "x", Required: []string{"a"}, Missing: []string{"a"}})
+	plain := errorToDetail(context.Background(), &ScopeError{Verb: "delete", Resource: "x", Required: []string{"a"}, Missing: []string{"a"}})
 	require.Nil(t, plain.AlternativeScopes)
 }
 

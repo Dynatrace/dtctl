@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -18,11 +17,14 @@ import (
 )
 
 // getDashboardsCmd retrieves dashboards
-var getDashboardsCmd = &cobra.Command{
-	Use:     "dashboards [id]",
-	Aliases: []string{"dashboard", "dash", "db"},
-	Short:   "Get dashboards",
-	Long: `Get one or more dashboards.
+var getDashboardsCmd = newGetDashboardsCmd()
+
+func newGetDashboardsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "dashboards [id]",
+		Aliases: []string{"dashboard", "dash", "db"},
+		Short:   "Get dashboards",
+		Long: `Get one or more dashboards.
 
 Examples:
   # List all dashboards
@@ -41,57 +43,65 @@ Examples:
   # List only my dashboards
   dtctl get dashboards --mine
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := document.NewHandler(c)
-
-		// Get specific dashboard if ID provided
-		if len(args) > 0 {
-			doc, err := handler.Get(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(doc)
-		}
 
-		// List all dashboards
-		filters, err := buildDocumentFilters(cmd, c, "dashboard")
-		if err != nil {
-			return err
-		}
+			handler := document.NewHandler(c)
 
-		// Check if watch mode is enabled
-		watchMode, _ := cmd.Flags().GetBool("watch")
-		if watchMode {
-			fetcher := func() (interface{}, error) {
-				list, err := listDocuments(handler, filters, cfg)
+			// Get specific dashboard if ID provided
+			if len(args) > 0 {
+				doc, err := handler.Get(args[0])
 				if err != nil {
-					return nil, err
+					return err
 				}
-				return document.ConvertToDocuments(list), nil
+				return printer.Print(doc)
 			}
-			return executeWithWatch(cmd, fetcher, printer)
-		}
 
-		list, err := listDocuments(handler, filters, cfg)
-		if err != nil {
-			return err
-		}
+			// List all dashboards
+			filters, err := buildDocumentFilters(cmd, c, "dashboard")
+			if err != nil {
+				return err
+			}
 
-		return printer.PrintList(document.ConvertToDocuments(list))
-	},
+			// Check if watch mode is enabled
+			watchMode, _ := cmd.Flags().GetBool("watch")
+			if watchMode {
+				fetcher := func() (interface{}, error) {
+					list, err := listDocuments(handler, filters, cfg)
+					if err != nil {
+						return nil, err
+					}
+					return document.ConvertToDocuments(list), nil
+				}
+				return executeWithWatch(cmd, fetcher, printer)
+			}
+
+			list, err := listDocuments(handler, filters, cfg)
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(document.ConvertToDocuments(list))
+		},
+	}
+	stability.MarkStable(c)
+	addWatchFlags(c)
+	addDocumentListFlags(c, false)
+	return c
 }
 
 // getNotebooksCmd retrieves notebooks
-var getNotebooksCmd = &cobra.Command{
-	Use:     "notebooks [id]",
-	Aliases: []string{"notebook", "nb"},
-	Short:   "Get notebooks",
-	Long: `Get one or more notebooks.
+var getNotebooksCmd = newGetNotebooksCmd()
+
+func newGetNotebooksCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "notebooks [id]",
+		Aliases: []string{"notebook", "nb"},
+		Short:   "Get notebooks",
+		Long: `Get one or more notebooks.
 
 Examples:
   # List all notebooks
@@ -110,57 +120,65 @@ Examples:
   # List only my notebooks
   dtctl get notebooks --mine
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := document.NewHandler(c)
-
-		// Get specific notebook if ID provided
-		if len(args) > 0 {
-			doc, err := handler.Get(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(doc)
-		}
 
-		// List all notebooks
-		filters, err := buildDocumentFilters(cmd, c, "notebook")
-		if err != nil {
-			return err
-		}
+			handler := document.NewHandler(c)
 
-		// Check if watch mode is enabled
-		watchMode, _ := cmd.Flags().GetBool("watch")
-		if watchMode {
-			fetcher := func() (interface{}, error) {
-				list, err := listDocuments(handler, filters, cfg)
+			// Get specific notebook if ID provided
+			if len(args) > 0 {
+				doc, err := handler.Get(args[0])
 				if err != nil {
-					return nil, err
+					return err
 				}
-				return document.ConvertToDocuments(list), nil
+				return printer.Print(doc)
 			}
-			return executeWithWatch(cmd, fetcher, printer)
-		}
 
-		list, err := listDocuments(handler, filters, cfg)
-		if err != nil {
-			return err
-		}
+			// List all notebooks
+			filters, err := buildDocumentFilters(cmd, c, "notebook")
+			if err != nil {
+				return err
+			}
 
-		return printer.PrintList(document.ConvertToDocuments(list))
-	},
+			// Check if watch mode is enabled
+			watchMode, _ := cmd.Flags().GetBool("watch")
+			if watchMode {
+				fetcher := func() (interface{}, error) {
+					list, err := listDocuments(handler, filters, cfg)
+					if err != nil {
+						return nil, err
+					}
+					return document.ConvertToDocuments(list), nil
+				}
+				return executeWithWatch(cmd, fetcher, printer)
+			}
+
+			list, err := listDocuments(handler, filters, cfg)
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(document.ConvertToDocuments(list))
+		},
+	}
+	stability.MarkStable(c)
+	addWatchFlags(c)
+	addDocumentListFlags(c, false)
+	return c
 }
 
 // getTrashCmd retrieves trashed documents
-var getTrashCmd = &cobra.Command{
-	Use:     "trash",
-	Aliases: []string{"deleted"},
-	Short:   "Get trashed documents",
-	Long: `List or get trashed documents (dashboards and notebooks).
+var getTrashCmd = newGetTrashCmd()
+
+func newGetTrashCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "trash",
+		Aliases: []string{"deleted"},
+		Short:   "Get trashed documents",
+		Long: `List or get trashed documents (dashboards and notebooks).
 
 Documents are soft-deleted and kept in trash for 30 days before permanent deletion.
 
@@ -184,67 +202,79 @@ Examples:
   # Output as JSON
   dtctl get trash -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := document.NewTrashHandler(c)
-
-		// Build filter options from flags
-		typeFilter, _ := cmd.Flags().GetString("type")
-		deletedBy, _ := cmd.Flags().GetString("deleted-by")
-		deletedAfter, _ := cmd.Flags().GetString("deleted-after")
-		deletedBefore, _ := cmd.Flags().GetString("deleted-before")
-
-		opts := document.TrashListOptions{
-			Type:      typeFilter,
-			DeletedBy: deletedBy,
-			ChunkSize: GetChunkSize(),
-		}
-
-		// Parse date filters if provided
-		if deletedAfter != "" {
-			t, err := time.Parse("2006-01-02", deletedAfter)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
-				return fmt.Errorf("invalid deleted-after date format (use YYYY-MM-DD): %w", err)
+				return err
 			}
-			opts.DeletedAfter = t
-		}
-		if deletedBefore != "" {
-			t, err := time.Parse("2006-01-02", deletedBefore)
+
+			handler := document.NewTrashHandler(c)
+
+			// Build filter options from flags
+			typeFilter, _ := cmd.Flags().GetString("type")
+			deletedBy, _ := cmd.Flags().GetString("deleted-by")
+			deletedAfter, _ := cmd.Flags().GetString("deleted-after")
+			deletedBefore, _ := cmd.Flags().GetString("deleted-before")
+
+			opts := document.TrashListOptions{
+				Type:      typeFilter,
+				DeletedBy: deletedBy,
+				ChunkSize: getChunkSize(cmdContext(cmd)),
+			}
+
+			// Parse date filters if provided
+			if deletedAfter != "" {
+				t, err := time.Parse("2006-01-02", deletedAfter)
+				if err != nil {
+					return fmt.Errorf("invalid deleted-after date format (use YYYY-MM-DD): %w", err)
+				}
+				opts.DeletedAfter = t
+			}
+			if deletedBefore != "" {
+				t, err := time.Parse("2006-01-02", deletedBefore)
+				if err != nil {
+					return fmt.Errorf("invalid deleted-before date format (use YYYY-MM-DD): %w", err)
+				}
+				opts.DeletedBefore = t
+			}
+
+			// Check if watch mode is enabled
+			watchMode, _ := cmd.Flags().GetBool("watch")
+			if watchMode {
+				fetcher := func() (interface{}, error) {
+					return handler.List(opts)
+				}
+				return executeWithWatch(cmd, fetcher, printer)
+			}
+
+			// List trash
+			docs, err := handler.List(opts)
 			if err != nil {
-				return fmt.Errorf("invalid deleted-before date format (use YYYY-MM-DD): %w", err)
+				return err
 			}
-			opts.DeletedBefore = t
-		}
 
-		// Check if watch mode is enabled
-		watchMode, _ := cmd.Flags().GetBool("watch")
-		if watchMode {
-			fetcher := func() (interface{}, error) {
-				return handler.List(opts)
-			}
-			return executeWithWatch(cmd, fetcher, printer)
-		}
-
-		// List trash
-		docs, err := handler.List(opts)
-		if err != nil {
-			return err
-		}
-
-		return printer.PrintList(docs)
-	},
+			return printer.PrintList(docs)
+		},
+	}
+	c.Flags().String("type", "", "Filter by type: dashboard, notebook")
+	c.Flags().String("deleted-by", "", "Filter by who deleted it")
+	c.Flags().String("deleted-after", "", "Show documents deleted after date (YYYY-MM-DD)")
+	c.Flags().String("deleted-before", "", "Show documents deleted before date (YYYY-MM-DD)")
+	stability.MarkStable(c)
+	addWatchFlags(c)
+	return c
 }
 
 // deleteDashboardCmd deletes a dashboard
-var deleteDashboardCmd = &cobra.Command{
-	Use:     "dashboard <dashboard-id-or-name>",
-	Aliases: []string{"dashboards", "dash", "db"},
-	Short:   "Delete a dashboard",
-	Long: `Delete a dashboard by ID or name.
+var deleteDashboardCmd = newDeleteDashboardCmd()
+
+func newDeleteDashboardCmd() *cobra.Command {
+	var forceDelete bool
+	c := &cobra.Command{
+		Use:     "dashboard <dashboard-id-or-name>",
+		Aliases: []string{"dashboards", "dash", "db"},
+		Short:   "Delete a dashboard",
+		Long: `Delete a dashboard by ID or name.
 
 Examples:
   # Delete by ID
@@ -256,67 +286,75 @@ Examples:
   # Delete without confirmation
   dtctl delete dashboard "Production Dashboard" -y
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		cfg, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
-
-		// Resolve name to ID
-		res := resolver.NewResolver(c)
-		dashboardID, err := res.ResolveID(resolver.TypeDashboard, identifier)
-		if err != nil {
-			return err
-		}
-
-		handler := document.NewHandler(c)
-
-		// Get current version for optimistic locking and details for confirmation
-		metadata, err := handler.GetMetadata(dashboardID)
-		if err != nil {
-			return err
-		}
-		if err := requireDocumentType(metadata, "dashboard", dashboardID); err != nil {
-			return err
-		}
-
-		// Safety check with actual ownership
-		currentUserID, _ := c.CurrentUserID()
-		ownership := safety.DetermineOwnership(metadata.Owner, currentUserID)
-		if err := CheckSafety(cfg, safety.OperationDelete, ownership); err != nil {
-			return err
-		}
-
-		if dryRun {
-			return deleteDryRun(cmd, "dashboard", metadata.Name, dashboardID)
-		}
-
-		// Confirm deletion unless --force or --plain
-		if !forceDelete && !plainMode {
-			if !prompt.ConfirmDeletion("dashboard", metadata.Name, dashboardID) {
-				fmt.Println("Deletion cancelled")
-				return nil
+			cfg, c, err := setupClient(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
-		}
 
-		if err := handler.Delete(dashboardID, metadata.Version); err != nil {
-			return err
-		}
+			// Resolve name to ID
+			res := resolver.NewResolver(c)
+			dashboardID, err := res.ResolveID(resolver.TypeDashboard, identifier)
+			if err != nil {
+				return err
+			}
 
-		output.PrintSuccess("Dashboard %q deleted (moved to trash)", metadata.Name)
-		return nil
-	},
+			handler := document.NewHandler(c)
+
+			// Get current version for optimistic locking and details for confirmation
+			metadata, err := handler.GetMetadata(dashboardID)
+			if err != nil {
+				return err
+			}
+
+			if err := requireDocumentType(metadata, "dashboard", dashboardID); err != nil {
+				return err
+			}
+			// Safety check with actual ownership
+			currentUserID, _ := c.CurrentUserID()
+			ownership := safety.DetermineOwnership(metadata.Owner, currentUserID)
+			if err := checkSafety(cmdContext(cmd), cfg, safety.OperationDelete, ownership); err != nil {
+				return err
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "dashboard", metadata.Name, dashboardID)
+			}
+
+			// Confirm deletion unless --force or --plain
+			if !forceDelete && !plainMode(cmdContext(cmd)) {
+				if !prompt.ConfirmDeletionWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), "dashboard", metadata.Name, dashboardID) {
+					fmt.Fprintln(currentStdout(cmdContext(cmd)), "Deletion cancelled")
+					return nil
+				}
+			}
+
+			if err := handler.Delete(dashboardID, metadata.Version); err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Dashboard %q deleted (moved to trash)", metadata.Name)
+			return nil
+		},
+	}
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	stability.MarkStable(c)
+	return c
 }
 
 // deleteNotebookCmd deletes a notebook
-var deleteNotebookCmd = &cobra.Command{
-	Use:     "notebook <notebook-id-or-name>",
-	Aliases: []string{"notebooks", "nb"},
-	Short:   "Delete a notebook",
-	Long: `Delete a notebook by ID or name.
+var deleteNotebookCmd = newDeleteNotebookCmd()
+
+func newDeleteNotebookCmd() *cobra.Command {
+	var forceDelete bool
+	c := &cobra.Command{
+		Use:     "notebook <notebook-id-or-name>",
+		Aliases: []string{"notebooks", "nb"},
+		Short:   "Delete a notebook",
+		Long: `Delete a notebook by ID or name.
 
 Examples:
   # Delete by ID
@@ -328,67 +366,75 @@ Examples:
   # Delete without confirmation
   dtctl delete notebook "Analysis Notebook" -y
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		cfg, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
-
-		// Resolve name to ID
-		res := resolver.NewResolver(c)
-		notebookID, err := res.ResolveID(resolver.TypeNotebook, identifier)
-		if err != nil {
-			return err
-		}
-
-		handler := document.NewHandler(c)
-
-		// Get current version for optimistic locking and details for confirmation
-		metadata, err := handler.GetMetadata(notebookID)
-		if err != nil {
-			return err
-		}
-		if err := requireDocumentType(metadata, "notebook", notebookID); err != nil {
-			return err
-		}
-
-		// Safety check with actual ownership
-		currentUserID, _ := c.CurrentUserID()
-		ownership := safety.DetermineOwnership(metadata.Owner, currentUserID)
-		if err := CheckSafety(cfg, safety.OperationDelete, ownership); err != nil {
-			return err
-		}
-
-		if dryRun {
-			return deleteDryRun(cmd, "notebook", metadata.Name, notebookID)
-		}
-
-		// Confirm deletion unless --force or --plain
-		if !forceDelete && !plainMode {
-			if !prompt.ConfirmDeletion("notebook", metadata.Name, notebookID) {
-				fmt.Println("Deletion cancelled")
-				return nil
+			cfg, c, err := setupClient(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
-		}
 
-		if err := handler.Delete(notebookID, metadata.Version); err != nil {
-			return err
-		}
+			// Resolve name to ID
+			res := resolver.NewResolver(c)
+			notebookID, err := res.ResolveID(resolver.TypeNotebook, identifier)
+			if err != nil {
+				return err
+			}
 
-		output.PrintSuccess("Notebook %q deleted (moved to trash)", metadata.Name)
-		return nil
-	},
+			handler := document.NewHandler(c)
+
+			// Get current version for optimistic locking and details for confirmation
+			metadata, err := handler.GetMetadata(notebookID)
+			if err != nil {
+				return err
+			}
+
+			if err := requireDocumentType(metadata, "notebook", notebookID); err != nil {
+				return err
+			}
+			// Safety check with actual ownership
+			currentUserID, _ := c.CurrentUserID()
+			ownership := safety.DetermineOwnership(metadata.Owner, currentUserID)
+			if err := checkSafety(cmdContext(cmd), cfg, safety.OperationDelete, ownership); err != nil {
+				return err
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, "notebook", metadata.Name, notebookID)
+			}
+
+			// Confirm deletion unless --force or --plain
+			if !forceDelete && !plainMode(cmdContext(cmd)) {
+				if !prompt.ConfirmDeletionWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), "notebook", metadata.Name, notebookID) {
+					fmt.Fprintln(currentStdout(cmdContext(cmd)), "Deletion cancelled")
+					return nil
+				}
+			}
+
+			if err := handler.Delete(notebookID, metadata.Version); err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Notebook %q deleted (moved to trash)", metadata.Name)
+			return nil
+		},
+	}
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	stability.MarkStable(c)
+	return c
 }
 
 // deleteTrashCmd permanently deletes documents from trash
-var deleteTrashCmd = &cobra.Command{
-	Use:     "trash <document-id> [document-id...]",
-	Aliases: []string{"deleted"},
-	Short:   "Permanently delete document(s) from trash",
-	Long: `Permanently delete one or more documents from trash.
+var deleteTrashCmd = newDeleteTrashCmd()
+
+func newDeleteTrashCmd() *cobra.Command {
+	var forceDelete bool
+	c := &cobra.Command{
+		Use:     "trash <document-id> [document-id...]",
+		Aliases: []string{"deleted"},
+		Short:   "Permanently delete document(s) from trash",
+		Long: `Permanently delete one or more documents from trash.
 
 WARNING: This operation cannot be undone. Documents will be permanently deleted
 and cannot be recovered.
@@ -402,71 +448,76 @@ Examples:
   # Permanently delete multiple documents
   dtctl delete trash <id1> <id2> <id3> --permanent -y
 `,
-	Args: cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Check for --permanent flag before setup (no API call needed)
-		permanent, _ := cmd.Flags().GetBool("permanent")
-		if !permanent {
-			return fmt.Errorf("--permanent flag is required to delete from trash")
-		}
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check for --permanent flag before setup (no API call needed)
+			permanent, _ := cmd.Flags().GetBool("permanent")
+			if !permanent {
+				return fmt.Errorf("--permanent flag is required to delete from trash")
+			}
 
-		_, c, err := SetupWithSafety(safety.OperationDelete)
-		if err != nil {
-			return err
-		}
+			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			if err != nil {
+				return err
+			}
 
-		handler := document.NewTrashHandler(c)
+			handler := document.NewTrashHandler(c)
 
-		if dryRun {
-			return newDryRunReport(cmd).
-				Linef("Dry run: would permanently delete %d document(s) from trash: %s", len(args), strings.Join(args, ", ")).
-				Detail("ids", "%s", strings.Join(args, ",")).
-				Print()
-		}
+			if dryRun(cmdContext(cmd)) {
+				return newDryRunReport(cmd).
+					Linef("Dry run: would permanently delete %d document(s) from trash: %s", len(args), strings.Join(args, ", ")).
+					Detail("ids", "%s", strings.Join(args, ",")).
+					Print()
+			}
 
-		// Confirm deletion unless --force or --plain or deleting multiple
-		if !forceDelete && !plainMode {
-			var docNames []string
-			for _, docID := range args {
-				doc, err := handler.Get(docID)
-				if err != nil {
-					output.PrintWarning("Could not get document %s: %v", docID, err)
-					docNames = append(docNames, docID)
-				} else {
-					docNames = append(docNames, fmt.Sprintf("%s %q", doc.Type, doc.Name))
+			// Confirm deletion unless --force or --plain or deleting multiple
+			if !forceDelete && !plainMode(cmdContext(cmd)) {
+				var docNames []string
+				for _, docID := range args {
+					doc, err := handler.Get(docID)
+					if err != nil {
+						output.FprintWarning(currentStderr(cmdContext(cmd)), "Could not get document %s: %v", docID, err)
+						docNames = append(docNames, docID)
+					} else {
+						docNames = append(docNames, fmt.Sprintf("%s %q", doc.Type, doc.Name))
+					}
+				}
+
+				confirmMsg := fmt.Sprintf("PERMANENTLY DELETE %d document(s) from trash? This cannot be undone.", len(args))
+				if !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), confirmMsg) {
+					fmt.Fprintln(currentStdout(cmdContext(cmd)), "Deletion cancelled")
+					return nil
 				}
 			}
 
-			confirmMsg := fmt.Sprintf("PERMANENTLY DELETE %d document(s) from trash? This cannot be undone.", len(args))
-			if !prompt.Confirm(confirmMsg) {
-				fmt.Println("Deletion cancelled")
-				return nil
-			}
-		}
+			// Delete each document
+			successCount := 0
+			for _, docID := range args {
+				err := handler.Delete(docID)
+				if err != nil {
+					fmt.Fprintf(currentStderr(cmdContext(cmd)), "Failed to delete document %s: %v\n", docID, err)
+					continue
+				}
 
-		// Delete each document
-		successCount := 0
-		for _, docID := range args {
-			err := handler.Delete(docID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to delete document %s: %v\n", docID, err)
-				continue
+				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Permanently deleted document %s", docID)
+				successCount++
 			}
 
-			output.PrintSuccess("Permanently deleted document %s", docID)
-			successCount++
-		}
+			if successCount == 0 && len(args) > 0 {
+				return fmt.Errorf("failed to delete any documents")
+			}
 
-		if successCount == 0 && len(args) > 0 {
-			return fmt.Errorf("failed to delete any documents")
-		}
+			if len(args) > 1 {
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "\nDeleted %d of %d documents", successCount, len(args))
+			}
 
-		if len(args) > 1 {
-			output.PrintInfo("\nDeleted %d of %d documents", successCount, len(args))
-		}
-
-		return nil
-	},
+			return nil
+		},
+	}
+	c.Flags().Bool("permanent", false, "Permanently delete (required)")
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	stability.MarkStable(c)
+	return c
 }
 
 // DocumentTypeCount holds a count per document type (for --types flag)
@@ -476,11 +527,14 @@ type DocumentTypeCount struct {
 }
 
 // getDocumentsCmd retrieves generic documents (any type)
-var getDocumentsCmd = &cobra.Command{
-	Use:     "documents [id]",
-	Aliases: []string{"document", "doc"},
-	Short:   "Get documents (any type)",
-	Long: `Get one or more documents of any type.
+var getDocumentsCmd = newGetDocumentsCmd()
+
+func newGetDocumentsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "documents [id]",
+		Aliases: []string{"document", "doc"},
+		Short:   "Get documents (any type)",
+		Long: `Get one or more documents of any type.
 
 Unlike 'dtctl get dashboards' or 'dtctl get notebooks' which filter by a
 specific type, this command lists ALL document types by default.
@@ -512,81 +566,91 @@ Examples:
   # Output as JSON
   dtctl get documents -o json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, c, printer, err := Setup()
-		if err != nil {
-			return err
-		}
-
-		handler := document.NewHandler(c)
-
-		// Get specific document if ID provided
-		if len(args) > 0 {
-			doc, err := handler.Get(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-			return printer.Print(doc)
-		}
 
-		// Check for --types flag (type discovery)
-		typesMode, _ := cmd.Flags().GetBool("types")
-		typeFilter, _ := cmd.Flags().GetString("type")
+			handler := document.NewHandler(c)
 
-		filters, err := buildDocumentFilters(cmd, c, typeFilter)
-		if err != nil {
-			return err
-		}
-
-		if typesMode {
-			// Fetch all documents (no type filter) and count by type
-			allFilters := document.DocumentFilters{
-				Owner:     filters.Owner,
-				ChunkSize: GetChunkSize(),
-			}
-			list, err := handler.List(allFilters)
-			if err != nil {
-				return err
-			}
-			typeCounts := map[string]int{}
-			for _, doc := range list.Documents {
-				typeCounts[doc.Type]++
-			}
-			var counts []DocumentTypeCount
-			for t, n := range typeCounts {
-				counts = append(counts, DocumentTypeCount{Type: t, Count: n})
-			}
-			return printer.PrintList(counts)
-		}
-
-		// Check if watch mode is enabled
-		watchMode, _ := cmd.Flags().GetBool("watch")
-		if watchMode {
-			fetcher := func() (interface{}, error) {
-				list, err := listDocuments(handler, filters, cfg)
+			// Get specific document if ID provided
+			if len(args) > 0 {
+				doc, err := handler.Get(args[0])
 				if err != nil {
-					return nil, err
+					return err
 				}
-				return document.ConvertToDocuments(list), nil
+				return printer.Print(doc)
 			}
-			return executeWithWatch(cmd, fetcher, printer)
-		}
 
-		list, err := listDocuments(handler, filters, cfg)
-		if err != nil {
-			return err
-		}
+			// Check for --types flag (type discovery)
+			typesMode, _ := cmd.Flags().GetBool("types")
+			typeFilter, _ := cmd.Flags().GetString("type")
 
-		return printer.PrintList(document.ConvertToDocuments(list))
-	},
+			filters, err := buildDocumentFilters(cmd, c, typeFilter)
+			if err != nil {
+				return err
+			}
+
+			if typesMode {
+				// Fetch all documents (no type filter) and count by type
+				allFilters := document.DocumentFilters{
+					Owner:     filters.Owner,
+					ChunkSize: getChunkSize(cmdContext(cmd)),
+				}
+				list, err := handler.List(allFilters)
+				if err != nil {
+					return err
+				}
+				typeCounts := map[string]int{}
+				for _, doc := range list.Documents {
+					typeCounts[doc.Type]++
+				}
+				var counts []DocumentTypeCount
+				for t, n := range typeCounts {
+					counts = append(counts, DocumentTypeCount{Type: t, Count: n})
+				}
+				return printer.PrintList(counts)
+			}
+
+			// Check if watch mode is enabled
+			watchMode, _ := cmd.Flags().GetBool("watch")
+			if watchMode {
+				fetcher := func() (interface{}, error) {
+					list, err := listDocuments(handler, filters, cfg)
+					if err != nil {
+						return nil, err
+					}
+					return document.ConvertToDocuments(list), nil
+				}
+				return executeWithWatch(cmd, fetcher, printer)
+			}
+
+			list, err := listDocuments(handler, filters, cfg)
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintList(document.ConvertToDocuments(list))
+		},
+	}
+	c.Flags().Bool("types", false, "List distinct document types and counts")
+	stability.MarkStable(c)
+	addWatchFlags(c)
+	addDocumentListFlags(c, true)
+	return c
 }
 
 // deleteDocumentCmd deletes a generic document (any type)
-var deleteDocumentCmd = &cobra.Command{
-	Use:     "document <document-id-or-name>",
-	Aliases: []string{"documents", "doc"},
-	Short:   "Delete a document",
-	Long: `Delete a document by ID or name.
+var deleteDocumentCmd = newDeleteDocumentCmd()
+
+func newDeleteDocumentCmd() *cobra.Command {
+	var forceDelete bool
+	c := &cobra.Command{
+		Use:     "document <document-id-or-name>",
+		Aliases: []string{"documents", "doc"},
+		Short:   "Delete a document",
+		Long: `Delete a document by ID or name.
 
 Works for any document type (dashboard, notebook, launchpad, custom app documents, etc.).
 An argument that is an existing document's ID, including a custom non-UUID ID,
@@ -605,56 +669,60 @@ Examples:
   # Delete without confirmation
   dtctl delete document "My Launchpad" -y
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		identifier := args[0]
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identifier := args[0]
 
-		cfg, c, err := SetupClient()
-		if err != nil {
-			return err
-		}
-
-		// Resolve name to ID (searches across all document types)
-		res := resolver.NewResolver(c)
-		documentID, err := res.ResolveID(resolver.TypeDocument, identifier)
-		if err != nil {
-			return err
-		}
-
-		handler := document.NewHandler(c)
-
-		// Get current version for optimistic locking and details for confirmation
-		metadata, err := handler.GetMetadata(documentID)
-		if err != nil {
-			return err
-		}
-
-		// Safety check with actual ownership
-		currentUserID, _ := c.CurrentUserID()
-		ownership := safety.DetermineOwnership(metadata.Owner, currentUserID)
-		if err := CheckSafety(cfg, safety.OperationDelete, ownership); err != nil {
-			return err
-		}
-
-		if dryRun {
-			return deleteDryRun(cmd, metadata.Type, metadata.Name, documentID)
-		}
-
-		// Confirm deletion unless --force or --plain
-		if !forceDelete && !plainMode {
-			if !prompt.ConfirmDeletion(metadata.Type, metadata.Name, documentID) {
-				fmt.Println("Deletion cancelled")
-				return nil
+			cfg, c, err := setupClient(cmdContext(cmd))
+			if err != nil {
+				return err
 			}
-		}
 
-		if err := handler.Delete(documentID, metadata.Version); err != nil {
-			return err
-		}
+			// Resolve name to ID (searches across all document types)
+			res := resolver.NewResolver(c)
+			documentID, err := res.ResolveID(resolver.TypeDocument, identifier)
+			if err != nil {
+				return err
+			}
 
-		output.PrintSuccess("Document %q (%s) deleted (moved to trash)", metadata.Name, metadata.Type)
-		return nil
-	},
+			handler := document.NewHandler(c)
+
+			// Get current version for optimistic locking and details for confirmation
+			metadata, err := handler.GetMetadata(documentID)
+			if err != nil {
+				return err
+			}
+
+			// Safety check with actual ownership
+			currentUserID, _ := c.CurrentUserID()
+			ownership := safety.DetermineOwnership(metadata.Owner, currentUserID)
+			if err := checkSafety(cmdContext(cmd), cfg, safety.OperationDelete, ownership); err != nil {
+				return err
+			}
+
+			if dryRun(cmdContext(cmd)) {
+				return deleteDryRun(cmd, metadata.Type, metadata.Name, documentID)
+			}
+
+			// Confirm deletion unless --force or --plain
+			if !forceDelete && !plainMode(cmdContext(cmd)) {
+				if !prompt.ConfirmDeletionWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), metadata.Type, metadata.Name, documentID) {
+					fmt.Fprintln(currentStdout(cmdContext(cmd)), "Deletion cancelled")
+					return nil
+				}
+			}
+
+			if err := handler.Delete(documentID, metadata.Version); err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Document %q (%s) deleted (moved to trash)", metadata.Name, metadata.Type)
+			return nil
+		},
+	}
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	stability.MarkStable(c)
+	return c
 }
 
 // buildDocumentFilters reads the listing flags from cmd. implicitType is the
@@ -668,7 +736,7 @@ func buildDocumentFilters(cmd *cobra.Command, c *client.Client, implicitType str
 	adminAccess, _ := cmd.Flags().GetBool("admin-access")
 
 	filters := document.DocumentFilters{
-		ChunkSize:   GetChunkSize(),
+		ChunkSize:   getChunkSize(cmdContext(cmd)),
 		Sort:        sortOrder,
 		AddFields:   addFields,
 		AdminAccess: adminAccess,
@@ -676,7 +744,7 @@ func buildDocumentFilters(cmd *cobra.Command, c *client.Client, implicitType str
 
 	if rawFilter != "" {
 		if nameFilter != "" || mineOnly {
-			fmt.Fprintln(os.Stderr, "warning: --filter overrides --name/--mine; the raw filter is sent verbatim to the API")
+			fmt.Fprintln(currentStderr(cmdContext(cmd)), "warning: --filter overrides --name/--mine; the raw filter is sent verbatim to the API")
 		}
 		// For type-scoped commands (dashboards, notebooks), enforce the implicit
 		// type even when --filter is provided, so dtctl get dashboards --filter "..."
@@ -714,46 +782,5 @@ func addDocumentListFlags(cmd *cobra.Command, includeType bool) {
 	cmd.Flags().Bool("admin-access", false, "List documents as effective owner; requires document:documents:admin permission")
 }
 
-func init() {
-	// Watch flags
-	addWatchFlags(getDashboardsCmd)
-	addWatchFlags(getNotebooksCmd)
-	addWatchFlags(getTrashCmd)
-	addWatchFlags(getDocumentsCmd)
-
-	// Dashboard flags
-	addDocumentListFlags(getDashboardsCmd, false)
-
-	// Notebook flags
-	addDocumentListFlags(getNotebooksCmd, false)
-
-	// Generic document flags
-	addDocumentListFlags(getDocumentsCmd, true)
-	getDocumentsCmd.Flags().Bool("types", false, "List distinct document types and counts")
-
-	// Trash flags
-	getTrashCmd.Flags().String("type", "", "Filter by type: dashboard, notebook")
-	getTrashCmd.Flags().String("deleted-by", "", "Filter by who deleted it")
-	getTrashCmd.Flags().String("deleted-after", "", "Show documents deleted after date (YYYY-MM-DD)")
-	getTrashCmd.Flags().String("deleted-before", "", "Show documents deleted before date (YYYY-MM-DD)")
-
-	// Delete confirmation flags
-	deleteDashboardCmd.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
-	deleteNotebookCmd.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
-	deleteDocumentCmd.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
-	deleteTrashCmd.Flags().Bool("permanent", false, "Permanently delete (required)")
-	deleteTrashCmd.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
-}
-
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(deleteDashboardCmd)
-	stability.MarkStable(deleteDocumentCmd)
-	stability.MarkStable(deleteNotebookCmd)
-	stability.MarkStable(deleteTrashCmd)
-	stability.MarkStable(getDashboardsCmd)
-	stability.MarkStable(getDocumentsCmd)
-	stability.MarkStable(getNotebooksCmd)
-	stability.MarkStable(getTrashCmd)
-}

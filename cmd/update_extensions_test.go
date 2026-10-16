@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -153,7 +154,7 @@ func TestResolveAndActivate_UpgradeMigratesConfigsAfterActivation(t *testing.T) 
 	rec := &activationRecorder{activeVersion: "1.0.0"}
 	h := newRecorderHandler(t, rec.server(t))
 
-	got, err := resolveAndActivate(h, recorderExtension, "2.0.0", false, false, true)
+	got, err := resolveAndActivate(context.Background(), h, recorderExtension, "2.0.0", false, false, true)
 	if err != nil {
 		t.Fatalf("resolveAndActivate: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestResolveAndActivate_DowngradeMigratesConfigsOnceBeforeActivation(t *test
 	rec := &activationRecorder{activeVersion: "2.0.0"}
 	h := newRecorderHandler(t, rec.server(t))
 
-	if _, err := resolveAndActivate(h, recorderExtension, "1.0.0", false, false, true); err != nil {
+	if _, err := resolveAndActivate(context.Background(), h, recorderExtension, "1.0.0", false, false, true); err != nil {
 		t.Fatalf("resolveAndActivate: %v", err)
 	}
 
@@ -216,7 +217,7 @@ func TestResolveAndActivate_ActiveVersionLookupFailureStillMigratesConfigs(t *te
 	rec := &activationRecorder{activeVersionStatus: http.StatusForbidden, stickyStatus: true}
 	h := newRecorderHandler(t, rec.server(t))
 
-	if _, err := resolveAndActivate(h, recorderExtension, "2.0.0", false, false, true); err != nil {
+	if _, err := resolveAndActivate(context.Background(), h, recorderExtension, "2.0.0", false, false, true); err != nil {
 		t.Fatalf("resolveAndActivate: %v", err)
 	}
 
@@ -237,7 +238,7 @@ func TestResolveAndActivate_FirstActivationSucceeds(t *testing.T) {
 	rec := &activationRecorder{activeVersionStatus: http.StatusNotFound}
 	h := newRecorderHandler(t, rec.server(t))
 
-	if _, err := resolveAndActivate(h, recorderExtension, "1.0.0", false, false, true); err != nil {
+	if _, err := resolveAndActivate(context.Background(), h, recorderExtension, "1.0.0", false, false, true); err != nil {
 		t.Fatalf("first activation failed: %v", err)
 	}
 
@@ -259,7 +260,7 @@ func TestResolveAndActivate_WithoutFlagLeavesConfigsAlone(t *testing.T) {
 	rec := &activationRecorder{activeVersion: "1.0.0"}
 	h := newRecorderHandler(t, rec.server(t))
 
-	if _, err := resolveAndActivate(h, recorderExtension, "2.0.0", false, false, false); err != nil {
+	if _, err := resolveAndActivate(context.Background(), h, recorderExtension, "2.0.0", false, false, false); err != nil {
 		t.Fatalf("resolveAndActivate: %v", err)
 	}
 	if n := rec.countCalls("PUT config/"); n != 0 {
@@ -285,7 +286,7 @@ func TestResolveAndActivate_ActivationErrorIsReturned(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	_, err := resolveAndActivate(newRecorderHandler(t, srv), recorderExtension, "9.9.9", false, false, false)
+	_, err := resolveAndActivate(context.Background(), newRecorderHandler(t, srv), recorderExtension, "9.9.9", false, false, false)
 	if err == nil {
 		t.Fatal("expected an error when activation is rejected, got nil")
 	}
@@ -331,9 +332,9 @@ func TestUpdateExtensions_FlagValidation(t *testing.T) {
 		},
 	}
 
-	origDryRun := dryRun
+	origDryRun := dryRun(context.Background())
 	t.Cleanup(func() {
-		dryRun = origDryRun
+		gFlags.dryRun = origDryRun
 		_ = updateExtensionsCmd.Flags().Set("all", "false")
 		_ = updateExtensionsCmd.Flags().Set("latest", "false")
 		_ = updateExtensionsCmd.Flags().Set("hub-latest", "false")
@@ -341,7 +342,7 @@ func TestUpdateExtensions_FlagValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dryRun = tt.dry
+			gFlags.dryRun = tt.dry
 			for flag, val := range map[string]bool{"all": tt.all, "latest": tt.latest, "hub-latest": tt.hubLatest} {
 				if err := updateExtensionsCmd.Flags().Set(flag, fmt.Sprintf("%t", val)); err != nil {
 					t.Fatalf("set --%s: %v", flag, err)
@@ -375,16 +376,16 @@ func TestUpdateExtension_FlagValidation(t *testing.T) {
 		{name: "all three", version: "1.0.0", latest: true, hubLatest: true, wantErr: "mutually exclusive"},
 	}
 
-	origDryRun := dryRun
+	origDryRun := dryRun(context.Background())
 	t.Cleanup(func() {
-		dryRun = origDryRun
+		gFlags.dryRun = origDryRun
 		clearFlag(updateExtensionCmd, "version")
 		_ = updateExtensionCmd.Flags().Set("latest", "false")
 		_ = updateExtensionCmd.Flags().Set("hub-latest", "false")
 	})
 	// Dry-run so a valid combination would not reach the network; the cases
 	// here must all fail validation before that matters.
-	dryRun = true
+	gFlags.dryRun = true
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -25,10 +25,13 @@ func isBuiltinCommand(name string) bool {
 	return false
 }
 
-var aliasCmd = &cobra.Command{
-	Use:   "alias",
-	Short: "Manage command aliases",
-	Long: `Create, list, and delete shorthand names for dtctl commands.
+var aliasCmd = newAliasCmd()
+
+func newAliasCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "alias",
+		Short: "Manage command aliases",
+		Long: `Create, list, and delete shorthand names for dtctl commands.
 
 Aliases expand before command parsing, so they work exactly like typing
 the full command. Use positional parameters ($1, $2, ...) for reusable
@@ -46,131 +49,169 @@ Examples:
   # Shell alias (pipes, jq, etc.)
   dtctl alias set wf-count '!dtctl get workflows -o json | jq length'
   dtctl wf-count`,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var aliasSetCmd = &cobra.Command{
-	Use:   "set <name> <expansion>",
-	Short: "Create or update an alias",
-	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name, expansion := args[0], args[1]
+var aliasSetCmd = newAliasSetCmd()
 
-		cfg, err := loadConfigRaw()
-		if err != nil {
-			return err
-		}
+func newAliasSetCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "set <name> <expansion>",
+		Short: "Create or update an alias",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, expansion := args[0], args[1]
 
-		if err := cfg.SetAlias(name, expansion, isBuiltinCommand); err != nil {
-			return err
-		}
-
-		if err := saveConfig(cfg); err != nil {
-			return err
-		}
-
-		output.PrintSuccess("Alias %q set to %q", name, expansion)
-		return nil
-	},
-}
-
-var aliasListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "List all aliases",
-	Aliases: []string{"ls"},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadConfigRaw()
-		if err != nil {
-			return err
-		}
-
-		entries := cfg.ListAliases()
-		if len(entries) == 0 {
-			fmt.Println("No aliases configured.")
-			fmt.Println("Use 'dtctl alias set <name> <command>' to create one.")
-			return nil
-		}
-
-		printer := NewPrinter()
-		return printer.PrintList(entries)
-	},
-}
-
-var aliasDeleteCmd = &cobra.Command{
-	Use:     "delete <name> [name...]",
-	Short:   "Delete one or more aliases",
-	Aliases: []string{"rm"},
-	Args:    cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadConfigRaw()
-		if err != nil {
-			return err
-		}
-
-		for _, name := range args {
-			if err := cfg.DeleteAlias(name); err != nil {
+			cfg, err := loadConfigRaw(cmdContext(cmd))
+			if err != nil {
 				return err
 			}
-			output.PrintSuccess("Alias %q deleted", name)
-		}
 
-		return saveConfig(cfg)
-	},
+			if err := cfg.SetAlias(name, expansion, isBuiltinCommand); err != nil {
+				return err
+			}
+
+			if err := saveConfig(cmdContext(cmd), cfg); err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Alias %q set to %q", name, expansion)
+			return nil
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var aliasExportCmd = &cobra.Command{
-	Use:   "export",
-	Short: "Export aliases to a YAML file",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		file, _ := cmd.Flags().GetString("file")
+var aliasListCmd = newAliasListCmd()
 
-		cfg, err := loadConfigRaw()
-		if err != nil {
-			return err
-		}
+func newAliasListCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "list",
+		Short:   "List all aliases",
+		Aliases: []string{"ls"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfigRaw(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		if len(cfg.Aliases) == 0 {
-			return fmt.Errorf("no aliases to export")
-		}
+			entries := cfg.ListAliases()
+			if len(entries) == 0 {
+				fmt.Fprintln(currentStdout(cmdContext(cmd)), "No aliases configured.")
+				fmt.Fprintln(currentStdout(cmdContext(cmd)), "Use 'dtctl alias set <name> <command>' to create one.")
+				return nil
+			}
 
-		if err := cfg.ExportAliases(file); err != nil {
-			return err
-		}
-
-		output.PrintSuccess("Exported %d alias(es) to %s", len(cfg.Aliases), file)
-		return nil
-	},
+			printer := newPrinterCtx(cmdContext(cmd))
+			return printer.PrintList(entries)
+		},
+	}
+	stability.MarkStable(c)
+	return c
 }
 
-var aliasImportCmd = &cobra.Command{
-	Use:   "import",
-	Short: "Import aliases from a YAML file",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		file, _ := cmd.Flags().GetString("file")
-		overwrite, _ := cmd.Flags().GetBool("overwrite")
+var aliasDeleteCmd = newAliasDeleteCmd()
 
-		cfg, err := loadConfigRaw()
-		if err != nil {
-			return err
-		}
+func newAliasDeleteCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:     "delete <name> [name...]",
+		Short:   "Delete one or more aliases",
+		Aliases: []string{"rm"},
+		Args:    cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfigRaw(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
 
-		conflicts, err := cfg.ImportAliases(file, overwrite, isBuiltinCommand)
-		if err != nil {
-			return err
-		}
+			for _, name := range args {
+				if err := cfg.DeleteAlias(name); err != nil {
+					return err
+				}
+				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Alias %q deleted", name)
+			}
 
-		if len(conflicts) > 0 && !overwrite {
-			output.PrintWarning("Skipped %d existing alias(es): %s",
-				len(conflicts), strings.Join(conflicts, ", "))
-			output.PrintInfo("Use --overwrite to replace existing aliases.")
-		}
+			return saveConfig(cmdContext(cmd), cfg)
+		},
+	}
+	stability.MarkStable(c)
+	return c
+}
 
-		if err := saveConfig(cfg); err != nil {
-			return err
-		}
+var aliasExportCmd = newAliasExportCmd()
 
-		output.PrintSuccess("Aliases imported successfully.")
-		return nil
-	},
+func newAliasExportCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "export",
+		Short: "Export aliases to a YAML file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			file, _ := cmd.Flags().GetString("file")
+
+			cfg, err := loadConfigRaw(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+
+			if len(cfg.Aliases) == 0 {
+				return fmt.Errorf("no aliases to export")
+			}
+
+			if err := cfg.ExportAliases(file); err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Exported %d alias(es) to %s", len(cfg.Aliases), file)
+			return nil
+		},
+	}
+	c.Flags().StringP("file", "f", "", "output file path")
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "file")
+	return c
+}
+
+var aliasImportCmd = newAliasImportCmd()
+
+func newAliasImportCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "import",
+		Short: "Import aliases from a YAML file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			file, _ := cmd.Flags().GetString("file")
+			overwrite, _ := cmd.Flags().GetBool("overwrite")
+
+			cfg, err := loadConfigRaw(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+
+			conflicts, err := cfg.ImportAliases(file, overwrite, isBuiltinCommand)
+			if err != nil {
+				return err
+			}
+
+			if len(conflicts) > 0 && !overwrite {
+				output.FprintWarning(currentStderr(cmdContext(cmd)), "Skipped %d existing alias(es): %s",
+					len(conflicts), strings.Join(conflicts, ", "))
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Use --overwrite to replace existing aliases.")
+			}
+
+			if err := saveConfig(cmdContext(cmd), cfg); err != nil {
+				return err
+			}
+
+			output.FprintSuccess(currentStderr(cmdContext(cmd)), "Aliases imported successfully.")
+			return nil
+		},
+	}
+	c.Flags().StringP("file", "f", "", "input file path")
+	c.Flags().Bool("overwrite", false, "overwrite existing aliases")
+	stability.MarkStable(c)
+	markFlagRequiredNonEmpty(c, "file")
+	return c
 }
 
 func init() {
@@ -181,21 +222,9 @@ func init() {
 	aliasCmd.AddCommand(aliasDeleteCmd)
 	aliasCmd.AddCommand(aliasExportCmd)
 	aliasCmd.AddCommand(aliasImportCmd)
-
-	aliasExportCmd.Flags().StringP("file", "f", "", "output file path")
-	aliasImportCmd.Flags().StringP("file", "f", "", "input file path")
-	aliasImportCmd.Flags().Bool("overwrite", false, "overwrite existing aliases")
-	markFlagRequiredNonEmpty(aliasExportCmd, "file")
-	markFlagRequiredNonEmpty(aliasImportCmd, "file")
 }
 
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
-	stability.MarkStable(aliasCmd)
-	stability.MarkStable(aliasDeleteCmd)
-	stability.MarkStable(aliasExportCmd)
-	stability.MarkStable(aliasImportCmd)
-	stability.MarkStable(aliasListCmd)
-	stability.MarkStable(aliasSetCmd)
 }

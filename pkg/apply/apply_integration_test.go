@@ -487,7 +487,7 @@ func TestApply_SettingsCreate(t *testing.T) {
 
 func TestStderrWarn_AppendsToSlice(t *testing.T) {
 	var warnings []string
-	stderrWarn(&warnings, "test warning %d", 42)
+	(&Applier{}).stderrWarn(&warnings, "test warning %d", 42)
 	if len(warnings) != 1 || warnings[0] != "test warning 42" {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
@@ -495,7 +495,7 @@ func TestStderrWarn_AppendsToSlice(t *testing.T) {
 
 func TestStderrWarn_NilSlice(t *testing.T) {
 	// Should not panic with nil slice
-	stderrWarn(nil, "no-op warning")
+	(&Applier{}).stderrWarn(nil, "no-op warning")
 }
 
 // --- Apply: template vars ---

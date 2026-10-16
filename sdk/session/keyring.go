@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -194,9 +195,103 @@ func KeyringBackend() string {
 }
 
 // IsFileTokenStorage reports whether the user has explicitly opted into
-// file-based OAuth token storage via DTCTL_TOKEN_STORAGE=file.
+// file-based OAuth token storage, either per shell via DTCTL_TOKEN_STORAGE=file
+// or once per machine by consenting to it (see PersistFileTokenStorage).
+//
+// The environment variable always wins: any other non-empty value, such as
+// "keyring", overrides a persisted consent.
+//
+// A persisted consent answers "what should I do on a machine with no keyring?",
+// so it applies only while the keyring is definitively absent (see
+// IsKeyringAbsent). If the keyring is later installed, it is used again; if it
+// is merely locked or broken, the failure surfaces instead of tokens quietly
+// landing in plaintext. Consent is also ignored while the keyring is disabled
+// (DTCTL_DISABLE_KEYRING), which is how embedded sessions keep away from host
+// credential stores.
 func IsFileTokenStorage() bool {
-	return strings.EqualFold(os.Getenv(EnvTokenStorage), "file")
+	if v := os.Getenv(EnvTokenStorage); v != "" {
+		return strings.EqualFold(v, "file")
+	}
+	if isKeyringDisabled() || !hasFileStorageConsent() {
+		return false
+	}
+	return IsKeyringAbsent(checkKeyring())
+}
+
+// checkKeyring is CheckKeyring behind a seam so tests can model a keyring that
+// is absent, locked or present without a real D-Bus.
+var checkKeyring = CheckKeyring
+
+// fileStorageConsentPath is the marker recording that the user agreed to keep
+// OAuth tokens in files on this machine. It lives beside the token files
+// because it is a fact about that store, not a user preference.
+func fileStorageConsentPath() string {
+	return filepath.Join(DataDir(), "token-storage")
+}
+
+func hasFileStorageConsent() bool {
+	data, err := os.ReadFile(fileStorageConsentPath())
+	return err == nil && strings.EqualFold(strings.TrimSpace(string(data)), "file")
+}
+
+// PersistFileTokenStorage records the user's consent to file-based OAuth token
+// storage so later invocations use it without DTCTL_TOKEN_STORAGE=file. Callers
+// must only invoke it after an explicit user decision.
+func PersistFileTokenStorage() error {
+	path := fileStorageConsentPath()
+	if err := os.MkdirAll(filepath.Dir(path), oauthTokenDirMode); err != nil {
+		return fmt.Errorf("failed to create %s: %w", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte("file\n"), oauthTokenFileMode); err != nil {
+		return fmt.Errorf("failed to record token storage choice: %w", err)
+	}
+	// WriteFile applies the mode only when it creates the file; tighten a marker
+	// that already existed with looser permissions.
+	if err := os.Chmod(path, oauthTokenFileMode); err != nil && runtime.GOOS != "windows" {
+		return fmt.Errorf("failed to restrict %s: %w", path, err)
+	}
+	return nil
+}
+
+// FileTokenStorageConsentPath returns the marker PersistFileTokenStorage writes,
+// for messages that tell the user how to undo the choice.
+func FileTokenStorageConsentPath() string { return fileStorageConsentPath() }
+
+// keyringAbsentMarkers are substrings of the errors the Secret Service backend
+// returns when no provider exists at all: nothing owns org.freedesktop.secrets,
+// or there is no D-Bus session to ask. They are deliberately narrow; a keyring
+// that exists but is locked, slow or misbehaving must stay an error rather than
+// look like a machine that simply has none.
+var keyringAbsentMarkers = []string{
+	"was not provided by any .service files",
+	"org.freedesktop.dbus.error.serviceunknown",
+	"couldn't determine address of session bus",
+	"dbus-launch",
+}
+
+// IsKeyringAbsent reports whether a CheckKeyring error means the machine has no
+// keyring provider (typical for headless Linux, containers and fresh VMs), as
+// opposed to a keyring that is present but unusable.
+func IsKeyringAbsent(err error) bool {
+	if err == nil || isKeyringDisabledErr(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, strings.ToLower(ErrMsgCollectionUnlock)) {
+		return false
+	}
+	for _, m := range keyringAbsentMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// isKeyringDisabledErr reports the CheckKeyring error for an intentionally
+// disabled keyring, which is a choice rather than an absence.
+func isKeyringDisabledErr(err error) bool {
+	return strings.Contains(err.Error(), EnvDisableKeyring)
 }
 
 // IsOAuthStorageAvailable reports whether OAuth tokens can be stored

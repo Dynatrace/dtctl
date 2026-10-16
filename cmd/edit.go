@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,8 +16,8 @@ import (
 // config preference, then vim. It is the single subprocess gateway for every
 // edit command and enforces the Editor capability, so embedded callers (which
 // grant no capabilities) can never spawn an editor.
-func launchEditor(preferredEditor, path string) error {
-	if !caps.Editor {
+func launchEditor(ctx context.Context, preferredEditor, path string) error {
+	if !currentCaps(ctx).Editor {
 		return &CapabilityError{Feature: "interactive editing (edit)"}
 	}
 	editor := os.Getenv("EDITOR")
@@ -32,8 +33,8 @@ func launchEditor(preferredEditor, path string) error {
 	}
 	editorCmd := exec.Command(parts[0], append(parts[1:], path)...)
 	editorCmd.Stdin = os.Stdin
-	editorCmd.Stdout = os.Stdout
-	editorCmd.Stderr = os.Stderr
+	editorCmd.Stdout = currentStdout(ctx)
+	editorCmd.Stderr = currentStderr(ctx)
 	if err := editorCmd.Run(); err != nil {
 		return fmt.Errorf("editor failed: %w", err)
 	}
@@ -41,10 +42,13 @@ func launchEditor(preferredEditor, path string) error {
 }
 
 // editCmd represents the edit command
-var editCmd = &cobra.Command{
-	Use:   "edit",
-	Short: "Edit a resource",
-	Long: `Edit a resource interactively using your default editor ($EDITOR).
+var editCmd = newEditCmd()
+
+func newEditCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "edit",
+		Short: "Edit a resource",
+		Long: `Edit a resource interactively using your default editor ($EDITOR).
 
 Fetches the current resource definition, opens it in your editor as YAML, and
 applies the changes when the file is saved and closed. If the editor exits
@@ -57,7 +61,7 @@ Supported resources:
   workflows (wf)          dashboards (dash, db)     notebooks (nb)
   settings                aws monitoring             azure monitoring
   gcp monitoring`,
-	Example: `  # Edit a workflow in your default editor
+		Example: `  # Edit a workflow in your default editor
   dtctl edit workflow my-workflow
 
   # Edit a dashboard by name
@@ -71,7 +75,10 @@ Supported resources:
 
   # Edit an Azure monitoring configuration by ID
   dtctl edit azure monitoring <id>`,
-	RunE: requireSubcommand,
+		RunE: requireSubcommand,
+	}
+	stability.MarkStable(c)
+	return c
 }
 
 func init() {
@@ -93,11 +100,7 @@ func init() {
 
 	editCmd.AddCommand(editGCPProviderCmd)
 	editGCPProviderCmd.AddCommand(editGCPMonitoringCmd)
-	attachPreviewNotice(editGCPProviderCmd, "GCP")
 }
 
 // Declared stable: the invocation and output contract of this command is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-	stability.MarkStable(editCmd)
-}

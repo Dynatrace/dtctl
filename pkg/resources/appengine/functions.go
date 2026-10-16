@@ -49,7 +49,12 @@ func fromSDKVersion(s *sdkae.SDKVersion) SDKVersion {
 // embedded invocations resolve virtual request files) or stdin.
 // This is a CLI-layer helper and intentionally not part of the SDK.
 func ReadFileOrStdin(filename string) (string, error) {
-	content, err := vfs.ReadFileOrStdin(filename)
+	return ReadFileOrStdinWith(vfs.Env{}, filename)
+}
+
+// ReadFileOrStdinWith is ReadFileOrStdin through the given invocation Env.
+func ReadFileOrStdinWith(env vfs.Env, filename string) (string, error) {
+	content, err := env.ReadFileOrStdin(filename)
 	if err != nil {
 		return "", fmt.Errorf("failed to read content: %w", err)
 	}

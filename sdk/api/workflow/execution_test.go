@@ -65,8 +65,8 @@ func TestExecutionList_LimitCappedAtMax(t *testing.T) {
 	if _, err := h.List(context.Background(), ExecutionFilters{}, 2000); err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	if gotLimit != fmt.Sprint(maxExecutionLimit) {
-		t.Errorf("limit query param = %q, want %d (capped)", gotLimit, maxExecutionLimit)
+	if gotLimit != fmt.Sprint(MaxExecutionLimit) {
+		t.Errorf("limit query param = %q, want %d (capped)", gotLimit, MaxExecutionLimit)
 	}
 }
 

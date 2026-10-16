@@ -37,7 +37,7 @@ func (a *Applier) applyAnomalyDetector(data []byte) (ApplyResult, error) {
 			}
 			if existing != nil {
 				objectID = existing.ObjectID
-				stderrWarn(nil, "Found existing anomaly detector %q (ID: %s), switching to update mode", title, objectID)
+				a.stderrWarn(nil, "Found existing anomaly detector %q (ID: %s), switching to update mode", title, objectID)
 			}
 		}
 	}

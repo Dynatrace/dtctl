@@ -29,7 +29,7 @@ var accountListServiceUserCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		printer := NewPrinter()
+		printer := newPrinterCtx(cmdContext(cmd))
 		enrichAgent(printer, "list", "service-user")
 		return printer.PrintList(users)
 	},
@@ -46,9 +46,9 @@ var accountCreateServiceUserCmd = &cobra.Command{
 
 		req := serviceuser.ServiceUserCreate{Name: name, Description: description}
 
-		if dryRun {
-			if agentMode {
-				printer := NewPrinter()
+		if dryRun(cmdContext(cmd)) {
+			if agentMode(cmdContext(cmd)) {
+				printer := newPrinterCtx(cmdContext(cmd))
 				enrichAgent(printer, "create", "service-user")
 				return printer.Print(map[string]interface{}{
 					"dryRun":      true,
@@ -56,10 +56,10 @@ var accountCreateServiceUserCmd = &cobra.Command{
 					"description": req.Description,
 				})
 			}
-			output.PrintInfo("Dry run: would create service user")
-			output.PrintInfo("Name: %s", req.Name)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "Dry run: would create service user")
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "Name: %s", req.Name)
 			if req.Description != "" {
-				output.PrintInfo("Description: %s", req.Description)
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "Description: %s", req.Description)
 			}
 			return nil
 		}
@@ -74,8 +74,8 @@ var accountCreateServiceUserCmd = &cobra.Command{
 			return err
 		}
 
-		output.PrintSuccess("Service user %q created", result.Name)
-		printer := NewPrinter()
+		output.FprintSuccess(currentStderr(cmdContext(cmd)), "Service user %q created", result.Name)
+		printer := newPrinterCtx(cmdContext(cmd))
 		enrichAgent(printer, "create", "service-user")
 		return printer.Print(result)
 	},
@@ -88,16 +88,16 @@ var accountDeleteServiceUserCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		userUUID := args[0]
-		if dryRun {
-			if agentMode {
-				printer := NewPrinter()
+		if dryRun(cmdContext(cmd)) {
+			if agentMode(cmdContext(cmd)) {
+				printer := newPrinterCtx(cmdContext(cmd))
 				enrichAgent(printer, "delete", "service-user")
 				return printer.Print(map[string]interface{}{
 					"dryRun": true,
 					"uid":    userUUID,
 				})
 			}
-			output.PrintInfo("Dry run: would delete service user %q", userUUID)
+			output.FprintInfo(currentStderr(cmdContext(cmd)), "Dry run: would delete service user %q", userUUID)
 			return nil
 		}
 
@@ -110,15 +110,15 @@ var accountDeleteServiceUserCmd = &cobra.Command{
 			return err
 		}
 
-		if agentMode {
-			printer := NewPrinter()
+		if agentMode(cmdContext(cmd)) {
+			printer := newPrinterCtx(cmdContext(cmd))
 			enrichAgent(printer, "delete", "service-user")
 			return printer.Print(map[string]interface{}{
 				"deleted": true,
 				"uid":     userUUID,
 			})
 		}
-		output.PrintSuccess("Service user %q deleted", userUUID)
+		output.FprintSuccess(currentStderr(cmdContext(cmd)), "Service user %q deleted", userUUID)
 		return nil
 	},
 }

@@ -25,12 +25,20 @@ type PreviewResult struct {
 
 // Handler previews OpenPipeline processor definitions against sample records.
 type Handler struct {
-	sdk *sdkpreview.Handler
+	sdk    *sdkpreview.Handler
+	vfsEnv vfs.Env
 }
 
 // NewHandler creates a new preview processor handler.
 func NewHandler(c *client.Client) *Handler {
 	return &Handler{sdk: sdkpreview.NewHandler(httpclient.Wrap(c.HTTP()))}
+}
+
+// WithVFS sets the filesystem and stdin Preview reads the definition from. The
+// zero Env keeps the process's.
+func (h *Handler) WithVFS(env vfs.Env) *Handler {
+	h.vfsEnv = env
+	return h
 }
 
 // Preview reads a processor definition body from the given file path ("-" for
@@ -42,7 +50,7 @@ func NewHandler(c *client.Client) *Handler {
 // not the transport envelope. dtctl builds {"processor":<body>,"configId":...}
 // around it, so callers never hand-write the wrapper.
 func (h *Handler) Preview(filename, configID string) ([]PreviewResult, error) {
-	body, err := readFileOrStdin(filename)
+	body, err := readFileOrStdin(h.vfsEnv, filename)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +104,8 @@ func buildEnvelope(processor json.RawMessage, configID string) (json.RawMessage,
 // readFileOrStdin reads a file (through the vfs seam, so embedded invocations
 // resolve virtual request files; "-" means stdin) and returns the content as
 // json.RawMessage after a basic JSON validity check.
-func readFileOrStdin(filename string) (json.RawMessage, error) {
-	data, err := vfs.ReadFileOrStdin(filename)
+func readFileOrStdin(env vfs.Env, filename string) (json.RawMessage, error) {
+	data, err := env.ReadFileOrStdin(filename)
 	if err != nil {
 		return nil, fmt.Errorf("read processor definition: %w", err)
 	}

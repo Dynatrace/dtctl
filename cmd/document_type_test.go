@@ -73,7 +73,7 @@ func TestTypedDocumentCommandsRefuseOtherType(t *testing.T) {
 			var writes []string
 			srv := typedDocumentServer(t, &writes)
 			setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
-			forceDelete, plainMode = true, true
+			gFlags.plainMode = true
 
 			var err error
 			captureDocStderr(t, func() {
@@ -95,7 +95,7 @@ func TestDeleteNotebookByUUIDStillWorks(t *testing.T) {
 	var writes []string
 	srv := typedDocumentServer(t, &writes)
 	setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
-	forceDelete, plainMode = true, true
+	gFlags.plainMode = true
 
 	captureDocStderr(t, func() {
 		if err := deleteNotebookCmd.RunE(deleteNotebookCmd, []string{typedNotebookUUID}); err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -713,6 +714,16 @@ type Minimal struct {
 	StabilityExceptions []string                `json:"stability_exceptions,omitempty" yaml:"stability_exceptions,omitempty"`
 	Verbs               map[string]*MinimalVerb `json:"verbs" yaml:"verbs"`
 	Aliases             map[string]string       `json:"resource_aliases,omitempty" yaml:"resource_aliases,omitempty"`
+	// Examples are runnable starting points, listed only when their command is in the catalog.
+	Examples []string `json:"examples,omitempty" yaml:"examples,omitempty"`
+}
+
+// minimalExamples are read-only, environment-independent starting points.
+var minimalExamples = []string{
+	`dtctl query 'fetch logs, from:now()-24h | filter loglevel == "ERROR" | summarize count(), by:{dt.service.name} | sort ` + "`count()`" + ` desc | limit 10'`,
+	`dtctl get workflow-executions --started-since 7d`,
+	`dtctl get slos  # definitions; dtctl exec slo <id> evaluates one`,
+	`dtctl describe <resource> <id>`,
 }
 
 // MinimalVerb is a verb reduced to its resources and nested subcommands.
@@ -747,7 +758,32 @@ func NewMinimal(l *Listing) *Minimal {
 	for name, v := range l.Verbs {
 		m.Verbs[name] = newMinimalVerb(name, v)
 	}
+	for _, ex := range minimalExamples {
+		if exampleAvailable(ex, m.Verbs) {
+			m.Examples = append(m.Examples, ex)
+		}
+	}
 	return m
+}
+
+// exampleAvailable reports whether an example's command is in the catalog.
+func exampleAvailable(ex string, verbs map[string]*MinimalVerb) bool {
+	f := strings.Fields(ex)
+	if len(f) < 2 {
+		return false
+	}
+	v, ok := verbs[f[1]]
+	if !ok {
+		return false
+	}
+	if len(v.Resources) == 0 || len(f) < 3 || strings.HasPrefix(f[2], "<") {
+		return true
+	}
+	if slices.Contains(v.Resources, f[2]) {
+		return true
+	}
+	_, sub := v.Subcommands[f[2]]
+	return sub
 }
 
 // newMinimalVerb strips a verb down to its resources and nested subcommands.
@@ -1079,7 +1115,7 @@ func WriteValue(w io.Writer, v any, format string) error {
 		if err := json.Unmarshal(b, &generic); err != nil {
 			return err
 		}
-		data, err := toon.Marshal(generic, toon.WithLengthMarkers(true))
+		data, err := toon.Marshal(generic)
 		if err != nil {
 			return err
 		}

@@ -3,6 +3,8 @@ package diff
 import (
 	"fmt"
 	"testing"
+
+	"github.com/dynatrace-oss/dtctl/pkg/vfs"
 )
 
 func TestDiffer_Compare(t *testing.T) {
@@ -357,5 +359,24 @@ func TestDiffer_Compare_AllFormats(t *testing.T) {
 				t.Errorf("Compare() with format %s should generate patch", format)
 			}
 		})
+	}
+}
+
+func TestDiffer_WithVFSComparesFilesFromItsOwnEnv(t *testing.T) {
+	env := vfs.Env{FS: vfs.NewMapFS(map[string][]byte{
+		"left.json":  []byte(`{"key": "old"}`),
+		"right.json": []byte(`{"key": "new"}`),
+	})}
+
+	result, err := NewDiffer(DiffOptions{}).WithVFS(env).CompareFiles("left.json", "right.json")
+	if err != nil {
+		t.Fatalf("CompareFiles: %v", err)
+	}
+	if !result.HasChanges {
+		t.Error("the two files differ, but no change was reported")
+	}
+
+	if _, err := NewDiffer(DiffOptions{}).WithVFS(env).CompareFiles("left.json", "missing.json"); err == nil {
+		t.Error("a path outside the Env's filesystem must not resolve")
 	}
 }

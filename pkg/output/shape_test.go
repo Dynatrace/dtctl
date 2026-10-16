@@ -153,7 +153,7 @@ func TestShapingPrinter_FieldsTOONIsTabularWithDottedColumns(t *testing.T) {
 	if err := p.PrintList(shapeTestDocs()[:2]); err != nil {
 		t.Fatal(err)
 	}
-	want := "[#2]{id,name,modificationInfo.lastModifiedTime}:\n" +
+	want := "[2]{id,name,modificationInfo.lastModifiedTime}:\n" +
 		"  d-1,Checkout,\"2026-01-01T00:00:00Z\"\n" +
 		"  d-2,Payments,\"2026-01-02T00:00:00Z\"\n"
 	if got.String() != want {
@@ -317,7 +317,7 @@ func TestShapingPrinter_AgentTOONIsTabular(t *testing.T) {
 	if err := json.Unmarshal(got.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if want := "[#2]{name,id}:\n  Checkout,d-1\n  Payments,d-2"; resp.Result != want {
+	if want := "[2]{name,id}:\n  Checkout,d-1\n  Payments,d-2"; resp.Result != want {
 		t.Errorf("got %q, want %q", resp.Result, want)
 	}
 }

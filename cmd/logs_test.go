@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -69,7 +70,7 @@ func newRecoveringTaskLogEnv(t *testing.T, step2Status int, runningPolls, step2F
 func runLogs(t *testing.T, srv *httptest.Server, argv ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	clearAgentEnvVars(t)
-	t.Cleanup(restorePristineTree)
+	t.Cleanup(func() { restorePristineTree(context.Background()) })
 	var errBuf bytes.Buffer
 	code, stdout = captureRun(t, argv, RunOptions{
 		Session: &Session{EnvironmentURL: srv.URL, Token: "t", MinStability: "experimental"},
