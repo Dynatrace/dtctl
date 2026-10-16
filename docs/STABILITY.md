@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 19 experimental, 14 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 945
+- entries below (commands + flags): 956
 
 ## Surface
 
@@ -266,6 +266,7 @@ alias import                         stable
 alias list                           stable
 alias set                            stable
 apply                                stable
+  --admin-access                     experimental  since 0.44.0  (declared)
   --create-snapshot                  stable
   --dry-run                          stable
   --file                             stable
@@ -548,6 +549,7 @@ delete trash                         stable
   --permanent                        stable
   --yes                              stable
 delete workflow                      stable
+  --admin-access                     experimental  since 0.44.0  (declared)
   --dry-run                          stable
   --yes                              stable
 describe                             stable
@@ -602,7 +604,9 @@ describe slo                         stable
 describe trash                       stable
 describe user                        stable
 describe workflow                    stable
+  --admin-access                     experimental  since 0.44.0  (declared)
 describe workflow-execution          stable
+  --admin-access                     experimental  since 0.44.0  (declared)
 diff                                 stable
   --color                            stable
   --context                          experimental  since 0.39.0  (declared)
@@ -663,6 +667,7 @@ edit setting                         stable
   --format                           stable
   --validate-only                    stable
 edit workflow                        stable
+  --admin-access                     experimental  since 0.44.0  (declared)
   --format                           stable
 enable                               stable
 enable aws                           stable
@@ -851,8 +856,10 @@ get trash                            stable
 get users                            stable
   --filter                           stable
 get wfe-task-result                  stable
+  --admin-access                     experimental  since 0.44.0  (declared)
   --task                             stable
 get workflow-executions              stable
+  --admin-access                     experimental  since 0.44.0  (declared)
   --limit                            stable
   --started-since                    stable
   --started-until                    stable
@@ -860,6 +867,7 @@ get workflow-executions              stable
   --trigger                          stable
   --workflow                         stable
 get workflows                        stable
+  --admin-access                     experimental  since 0.44.0  (declared)
   --filter                           stable
   --interval                         stable
   --limit                            stable
@@ -873,6 +881,7 @@ history dashboard                    stable
 history document                     stable
 history notebook                     stable
 history workflow                     stable
+  --admin-access                     experimental  since 0.44.0  (declared)
 inspect                              stable
   --fields                           stable
   --head                             stable
@@ -908,6 +917,7 @@ inventory arrivals                   experimental
   --stale-after                      experimental
 logs                                 stable
 logs workflow-execution              experimental  since 0.39.0
+  --admin-access                     experimental  since 0.44.0  (declared)
   --all                              experimental
   --follow                           experimental  since 0.39.0  (declared)
   --task                             experimental
@@ -975,6 +985,7 @@ restore trash                        stable
   --force                            stable
   --new-name                         stable
 restore workflow                     stable
+  --admin-access                     experimental  since 0.44.0  (declared)
   --dry-run                          stable
   --force                            experimental  since 0.39.0  (declared)
 serve                                development  (opt-in key: serve)

@@ -364,11 +364,31 @@ func TestScopesForInvocation_FlagOffAddsNothing(t *testing.T) {
 	require.Equal(t, base, got)
 }
 
-func TestScopesForInvocation_UnlistedCommandIsUnchanged(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"delete", "workflow"})
+// TestScopesForInvocation_WorkflowAdminAccess pins #700: the workflow
+// commands' --admin-access sends adminAccess=true, which the Automation API
+// refuses with 403 "Only admins can request admin access." unless the token
+// carries automation:workflows:admin.
+func TestScopesForInvocation_WorkflowAdminAccess(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"edit", "workflow"})
 	require.NoError(t, err)
-	got, req := scopesForInvocation(cmd, "delete", "workflow")
-	want, wantReq := requiredScopesFor("delete", "workflow")
+
+	base, req := scopesForInvocation(cmd, "edit", "workflow")
+	require.Equal(t, scopeRequirementKnown, req)
+	require.NotContains(t, base, auth.WorkflowAdminScope,
+		"a plain edit workflow does not use admin access")
+
+	withFlagSet(t, cmd, "admin-access", "true")
+	got, req := scopesForInvocation(cmd, "edit", "workflow")
+	require.Equal(t, scopeRequirementKnown, req)
+	require.Contains(t, got, auth.WorkflowAdminScope)
+	require.Subset(t, got, base, "flag scopes are additive, not a replacement")
+}
+
+func TestScopesForInvocation_UnlistedCommandIsUnchanged(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"delete", "slo"})
+	require.NoError(t, err)
+	got, req := scopesForInvocation(cmd, "delete", "slo")
+	want, wantReq := requiredScopesFor("delete", "slo")
 	require.Equal(t, want, got)
 	require.Equal(t, wantReq, req)
 }

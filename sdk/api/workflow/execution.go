@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-resty/resty/v2"
+
 	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
 )
 
@@ -36,12 +38,26 @@ type ExecutionList struct {
 
 // ExecutionHandler handles execution resources.
 type ExecutionHandler struct {
-	client *httpclient.Client
+	client      *httpclient.Client
+	adminAccess bool
 }
 
 // NewExecutionHandler creates a new execution handler.
 func NewExecutionHandler(c *httpclient.Client) *ExecutionHandler {
 	return &ExecutionHandler{client: c}
+}
+
+// WithAdminAccess returns a copy of h whose requests send adminAccess=true,
+// reaching the executions of every workflow in the environment. It requires
+// AdminAccessScope.
+func (h *ExecutionHandler) WithAdminAccess(on bool) *ExecutionHandler {
+	c := *h
+	c.adminAccess = on
+	return &c
+}
+
+func (h *ExecutionHandler) request(ctx context.Context) *resty.Request {
+	return newRequest(ctx, h.client, h.adminAccess)
 }
 
 // MaxExecutionLimit caps how many executions can be requested in one call.
@@ -70,7 +86,7 @@ func (h *ExecutionHandler) List(ctx context.Context, filters ExecutionFilters, l
 		limit = MaxExecutionLimit
 	}
 
-	req := h.client.HTTP().R().SetContext(ctx)
+	req := h.request(ctx)
 
 	if filters.WorkflowID != "" {
 		req.SetQueryParam("workflow", filters.WorkflowID)
@@ -112,7 +128,7 @@ func (h *ExecutionHandler) List(ctx context.Context, filters ExecutionFilters, l
 
 // Get retrieves a specific execution.
 func (h *ExecutionHandler) Get(ctx context.Context, id string) (*Execution, error) {
-	resp, err := h.client.HTTP().R().SetContext(ctx).
+	resp, err := h.request(ctx).
 		Get(fmt.Sprintf("/platform/automation/v1/executions/%s", httpclient.PathSegment(id)))
 	if err != nil {
 		return nil, fmt.Errorf("get execution: %w", err)
@@ -132,7 +148,7 @@ func (h *ExecutionHandler) Get(ctx context.Context, id string) (*Execution, erro
 
 // Cancel cancels an active execution.
 func (h *ExecutionHandler) Cancel(ctx context.Context, id string) error {
-	resp, err := h.client.HTTP().R().SetContext(ctx).
+	resp, err := h.request(ctx).
 		Post(fmt.Sprintf("/platform/automation/v1/executions/%s/cancel", httpclient.PathSegment(id)))
 	if err != nil {
 		return fmt.Errorf("cancel execution: %w", err)
@@ -163,7 +179,7 @@ type TaskExecutionMap map[string]TaskExecution
 
 // ListTasks retrieves all task executions for a workflow execution.
 func (h *ExecutionHandler) ListTasks(ctx context.Context, executionID string) ([]TaskExecution, error) {
-	resp, err := h.client.HTTP().R().SetContext(ctx).
+	resp, err := h.request(ctx).
 		Get(fmt.Sprintf("/platform/automation/v1/executions/%s/tasks", httpclient.PathSegment(executionID)))
 	if err != nil {
 		return nil, fmt.Errorf("list task executions: %w", err)
@@ -189,7 +205,7 @@ func (h *ExecutionHandler) ListTasks(ctx context.Context, executionID string) ([
 
 // GetTaskLog retrieves the log output of a specific task execution.
 func (h *ExecutionHandler) GetTaskLog(ctx context.Context, executionID, taskName string) (string, error) {
-	resp, err := h.client.HTTP().R().SetContext(ctx).
+	resp, err := h.request(ctx).
 		Get(fmt.Sprintf("/platform/automation/v1/executions/%s/tasks/%s/log", httpclient.PathSegment(executionID), httpclient.PathSegment(taskName)))
 	if err != nil {
 		return "", fmt.Errorf("get task log: %w", err)
@@ -205,7 +221,7 @@ func (h *ExecutionHandler) GetTaskLog(ctx context.Context, executionID, taskName
 
 // GetTaskResult retrieves the structured return value of a specific task execution.
 func (h *ExecutionHandler) GetTaskResult(ctx context.Context, executionID, taskName string) (any, error) {
-	resp, err := h.client.HTTP().R().SetContext(ctx).
+	resp, err := h.request(ctx).
 		Get(fmt.Sprintf("/platform/automation/v1/executions/%s/tasks/%s/result", httpclient.PathSegment(executionID), httpclient.PathSegment(taskName)))
 	if err != nil {
 		return nil, fmt.Errorf("get task result: %w", err)
@@ -225,7 +241,7 @@ func (h *ExecutionHandler) GetTaskResult(ctx context.Context, executionID, taskN
 
 // GetExecutionLog retrieves the combined log output of all tasks in an execution.
 func (h *ExecutionHandler) GetExecutionLog(ctx context.Context, executionID string) (string, error) {
-	resp, err := h.client.HTTP().R().SetContext(ctx).
+	resp, err := h.request(ctx).
 		Get(fmt.Sprintf("/platform/automation/v1/executions/%s/log", httpclient.PathSegment(executionID)))
 	if err != nil {
 		return "", fmt.Errorf("get execution log: %w", err)

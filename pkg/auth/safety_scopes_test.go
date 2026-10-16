@@ -40,6 +40,8 @@ func TestGetScopesForSafetyLevel(t *testing.T) {
 				// --admin-access (#375) reaches other users' documents; readonly
 				// does not request it.
 				"document:documents:admin",
+				// ...nor, for the workflow --admin-access, other users' workflows.
+				"automation:workflows:admin",
 			},
 			minScopeCount: 36, // readonly has many read scopes
 		},
@@ -69,8 +71,10 @@ func TestGetScopesForSafetyLevel(t *testing.T) {
 				"storage:bucket-definitions:truncate",
 				"storage:records:delete",
 				// readwrite-mine exists to keep other users' resources out of
-				// reach, so it does not request the document admin scope.
+				// reach, so it does not request the document or workflow admin
+				// scope.
 				"document:documents:admin",
+				"automation:workflows:admin",
 			},
 			minScopeCount: 46,
 		},
@@ -99,6 +103,8 @@ func TestGetScopesForSafetyLevel(t *testing.T) {
 				"iam:service-users:use",
 				// get documents|dashboards|notebooks --admin-access (#375)
 				"document:documents:admin",
+				// the workflow commands' --admin-access (#700)
+				"automation:workflows:admin",
 			},
 			mustNotInclude: []string{
 				"storage:bucket-definitions:delete",
@@ -131,6 +137,7 @@ func TestGetScopesForSafetyLevel(t *testing.T) {
 				"extensions:definitions:write",
 				"iam:service-users:use",
 				"document:documents:admin",
+				"automation:workflows:admin",
 			},
 			mustNotInclude: []string{},
 			minScopeCount:  73,

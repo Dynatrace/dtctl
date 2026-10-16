@@ -336,6 +336,15 @@ func IsLocalResource(name string) bool {
 // of other people's documents is exactly what those levels exist to rule out.
 const DocumentAdminScope = "document:documents:admin"
 
+// WorkflowAdminScope is the Automation API's counterpart of DocumentAdminScope:
+// the workflow commands' --admin-access sends adminAccess=true, which reaches
+// every workflow and execution in the environment rather than only the
+// caller's own, and the API refuses it with 403 "Only admins can request admin
+// access." unless the token carries this scope *and* the tenant's IAM policy
+// grants the permission of the same name. Login requests it at the same levels
+// as DocumentAdminScope, for the same reasons.
+const WorkflowAdminScope = "automation:workflows:admin"
+
 // DashboardMigrationScope lets a request convert a classic dashboard into 3rd
 // gen dashboard content. No built-in command uses it yet; requesting it at login
 // is what lets `exec api` reach the conversion. Every level requests it: the
@@ -447,7 +456,7 @@ func (s *scopeSet) addMineWrites() {
 // generation, and app/EdgeConnect lifecycle.
 func (s *scopeSet) addAllExtras() {
 	s.add("document:environment-shares:read", "document:environment-shares:write")
-	s.add(DocumentAdminScope)
+	s.add(DocumentAdminScope, WorkflowAdminScope)
 	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write")
 	s.addResource("bucket", AccessWrite)
 	s.add("davis-copilot:nl2dql:execute", "davis-copilot:dql2nl:execute", "davis-copilot:document-search:execute")
@@ -493,7 +502,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("dashboard", AccessWrite, AccessDelete)
 	s.add("document:environment-shares:write")
 	s.addResource("environment-share", AccessClaim)
-	s.add(DocumentAdminScope)
+	s.add(DocumentAdminScope, WorkflowAdminScope)
 	s.add("document:trash.documents:restore", "document:trash.documents:delete")
 	s.addResource("workflow", AccessWrite, AccessRun)
 	s.addResource("scheduling-rule", AccessWrite)

@@ -148,6 +148,7 @@ document:trash.documents:restore,
 automation:workflows:read,
 automation:workflows:write,
 automation:workflows:run,
+automation:workflows:admin,
 dev-obs:breakpoints:set,
 slo:slos:read,
 slo:slos:write,
@@ -229,6 +230,7 @@ document:trash.documents:delete,
 automation:workflows:read,
 automation:workflows:write,
 automation:workflows:run,
+automation:workflows:admin,
 dev-obs:breakpoints:set,
 slo:slos:read,
 slo:slos:write,
@@ -313,11 +315,14 @@ A few flags reach a second API, so they need a scope the resource itself does no
 | Command | Flag | Extra scope |
 | --- | --- | --- |
 | `dtctl get documents` / `dashboards` / `notebooks` | `--admin-access` | `document:documents:admin` |
+| `dtctl get` / `describe` / `edit` / `delete` / `history` / `restore workflow`, `dtctl get` / `describe` / `logs workflow-execution`, `dtctl get wfe-task-result`, `dtctl apply` (workflows) | `--admin-access` | `automation:workflows:admin` |
 | `dtctl update extension` / `extensions` | `--with-configurations` | `extensions:configurations:read`, `extensions:configurations:write` |
 
 Without the extra scope the flag fails with `403 Insufficient permissions`, while the same command without it succeeds — which is why the scope is not declared on the resource.
 
 `dtctl auth login` requests `document:documents:admin` at the `readwrite-all` and `dangerously-unrestricted` safety levels (not at `readonly` or `readwrite-mine`, which exist to keep other users' documents out of reach). The scope alone is not enough: the tenant's IAM policy must also grant the `document:documents:admin` permission — a user without it can still log in, the API just keeps refusing `--admin-access`. OAuth sessions created before dtctl requested the scope do not carry it; run `dtctl auth login` again to pick it up.
+
+The workflow commands' `--admin-access` (Workflow admin mode in the Workflows app) works the same way with `automation:workflows:admin`: login requests it at the same two levels, the tenant's IAM policy must grant the permission of the same name, and without either the Automation API answers `403 Only admins can request admin access.` The safety level does not substitute for it: even `dangerously-unrestricted` only decides what dtctl will attempt, so a workflow you neither own nor were shared stays a `403 Only workflow owner can perform this action` until you pass `--admin-access`.
 
 ### Endpoints that accept one of several scopes
 

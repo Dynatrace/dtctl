@@ -84,7 +84,7 @@ Examples:
 				return err
 			}
 
-			handler := workflow.NewExecutionHandler(c)
+			handler := workflow.NewExecutionHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 
 			if followLogs {
 				if !currentCaps(cmdContext(cmd)).LongRunningStreams {
@@ -141,6 +141,7 @@ Examples:
 	stability.MarkFlag(c, "follow", stability.Experimental, pre10Since)
 	c.Flags().BoolVarP(&allTaskLogs, "all", "a", false, "Get all logs (workflow execution log + all task logs)")
 	c.Flags().BoolVar(&tasksOnlyLogs, "tasks", false, "Get task logs only (all tasks with headers)")
+	addWorkflowAdminAccessFlag(c)
 	stability.Mark(c, stability.Experimental, pre10Since)
 	rejectEmptyFlag(c, "task")
 	return c

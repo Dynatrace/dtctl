@@ -50,13 +50,13 @@ Examples:
 			}
 
 			// Resolve name to ID
-			res := resolver.NewResolver(c)
+			res := resolver.NewResolver(c).WithWorkflowAdminAccess(workflowAdminAccess(cmd))
 			workflowID, err := res.ResolveID(resolver.TypeWorkflow, identifier)
 			if err != nil {
 				return err
 			}
 
-			handler := workflow.NewHandler(c)
+			handler := workflow.NewHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 
 			// Get workflow to check ownership
 			wf, err := handler.Get(workflowID)
@@ -158,6 +158,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("format", "", "yaml", "edit format (yaml|json)")
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	return c
 }

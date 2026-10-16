@@ -133,6 +133,17 @@ dtctl delete workflow workflow-123
 
 ## Notes
 
+### Act on workflows you don't own
+
+The Automation API only lets you change a workflow you own or that was shared with you, whatever dtctl's safety level. An administrator can use Workflow admin mode, as in the Workflows app, by passing `--admin-access`. It works with `get`, `describe`, `edit`, `delete`, `history` and `restore workflow`, the workflow-execution commands, and `apply`:
+
+```bash
+dtctl get workflow <workflow-id> --admin-access
+dtctl apply -f workflow.yaml --admin-access
+```
+
+The token needs the `automation:workflows:admin` scope, and the tenant's IAM policy needs the `automation:workflows:admin` permission. `dtctl auth login` requests the scope at the `readwrite-all` and `dangerously-unrestricted` safety levels; log in again if your session predates it.
+
 ### Example workflow definition
 
 A workflow file combines a schedule trigger with one or more tasks. This example runs a script every morning and posts the result to Slack:

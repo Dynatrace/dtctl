@@ -107,7 +107,7 @@ func installScopePreflight(cmd *cobra.Command) {
 		if skip {
 			return nil
 		}
-		return orig(c, args)
+		return adminAccessError(c, orig(c, args))
 	}
 }
 
@@ -279,6 +279,21 @@ var flagScopeRequirements = map[string]map[string][]string{
 	"get documents":  {"admin-access": {auth.DocumentAdminScope}},
 	"get dashboards": {"admin-access": {auth.DocumentAdminScope}},
 	"get notebooks":  {"admin-access": {auth.DocumentAdminScope}},
+
+	// The workflow commands' --admin-access sends adminAccess=true on every
+	// Automation API call, which the API refuses without
+	// automation:workflows:admin (#700). `apply` declares the flag too, but its
+	// scopes depend on the file, so the catalog has none to add it to.
+	"get workflows":               {"admin-access": {auth.WorkflowAdminScope}},
+	"describe workflow":           {"admin-access": {auth.WorkflowAdminScope}},
+	"edit workflow":               {"admin-access": {auth.WorkflowAdminScope}},
+	"delete workflow":             {"admin-access": {auth.WorkflowAdminScope}},
+	"history workflow":            {"admin-access": {auth.WorkflowAdminScope}},
+	"restore workflow":            {"admin-access": {auth.WorkflowAdminScope}},
+	"get workflow-executions":     {"admin-access": {auth.WorkflowAdminScope}},
+	"describe workflow-execution": {"admin-access": {auth.WorkflowAdminScope}},
+	"logs workflow-execution":     {"admin-access": {auth.WorkflowAdminScope}},
+	"get wfe-task-result":         {"admin-access": {auth.WorkflowAdminScope}},
 
 	// Activating a version touches extension *definitions*;
 	// --with-configurations additionally reads every monitoring configuration of

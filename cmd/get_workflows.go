@@ -68,7 +68,7 @@ Examples:
 				return err
 			}
 
-			handler := workflow.NewHandler(c)
+			handler := workflow.NewHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 			ap := enrichAgent(printer, "get", "workflow")
 
 			// Get specific workflow if ID provided
@@ -166,6 +166,7 @@ Examples:
 	c.Flags().String("trigger", "", "Filter by trigger type: Manual, Schedule, Event")
 	stability.MarkFlag(c, "trigger", stability.Experimental, pre10Since)
 	c.Flags().Int64("limit", 0, "Maximum number of workflows to return (0 = unlimited)")
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	addWatchFlags(c)
 	return c
@@ -203,7 +204,7 @@ Examples:
 				return err
 			}
 
-			handler := workflow.NewExecutionHandler(c)
+			handler := workflow.NewExecutionHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 			ap := enrichAgent(printer, "get", "workflow-execution")
 
 			// Get specific execution if ID provided
@@ -273,6 +274,7 @@ Examples:
 	c.Flags().String("trigger", "", "Filter by trigger type: Manual, Schedule, Event, Workflow")
 	c.Flags().String("started-since", "", "Show executions started at or after this time (a duration ago such as 7d, YYYY-MM-DD or ISO 8601)")
 	c.Flags().String("started-until", "", "Show executions started at or before this time (YYYY-MM-DD = end of day 23:59:59, or ISO 8601)")
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	return c
 }
@@ -313,13 +315,13 @@ Examples:
 			}
 
 			// Resolve name to ID
-			res := resolver.NewResolver(c)
+			res := resolver.NewResolver(c).WithWorkflowAdminAccess(workflowAdminAccess(cmd))
 			workflowID, err := res.ResolveID(resolver.TypeWorkflow, identifier)
 			if err != nil {
 				return err
 			}
 
-			handler := workflow.NewHandler(c)
+			handler := workflow.NewHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 
 			// Get workflow details for confirmation and ownership check
 			wf, err := handler.Get(workflowID)
@@ -371,6 +373,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	return c
 }

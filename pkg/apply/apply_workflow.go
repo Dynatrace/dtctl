@@ -16,7 +16,9 @@ func (a *Applier) applyWorkflow(data []byte, opts ApplyOptions) (ApplyResult, er
 		return nil, fmt.Errorf("failed to parse workflow JSON: %w", err)
 	}
 
-	handler := workflow.NewHandler(a.client)
+	// The existence check must carry admin access too: without it, another
+	// user's workflow is a 403 (or reads as missing), never an update.
+	handler := workflow.NewHandler(a.client).WithAdminAccess(opts.AdminAccess)
 
 	id, hasID := wf["id"].(string)
 	if !hasID || id == "" {
