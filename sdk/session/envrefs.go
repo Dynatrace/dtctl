@@ -55,7 +55,12 @@ func isElementSegment(seg string) bool { return strings.HasPrefix(seg, elementMa
 // Sequence elements that are mappings with a "name" key (contexts, tokens) are
 // addressed by that name, so membership changes do not shift other entries;
 // other elements are addressed by index.
-func walkScalars(n *yaml.Node, segs []string, fn func(segs []string, n *yaml.Node)) {
+//
+// Paths identify entries by their resolved identity, the one the struct and
+// every marshal of it carry. Walking the file as written, resolve expands keys
+// and names, so an entry named ${CTX} still pairs with its loaded self; on a
+// marshaled document resolve is nil.
+func walkScalars(n *yaml.Node, segs []string, resolve func(string) string, fn func(segs []string, n *yaml.Node)) {
 	switch n.Kind {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
@@ -63,23 +68,30 @@ func walkScalars(n *yaml.Node, segs []string, fn func(segs []string, n *yaml.Nod
 			if key.Kind != yaml.ScalarNode {
 				continue
 			}
-			walkScalars(val, append(segs[:len(segs):len(segs)], key.Value), fn)
+			walkScalars(val, append(segs[:len(segs):len(segs)], resolveIdentity(resolve, key.Value)), resolve, fn)
 		}
 	case yaml.SequenceNode:
 		for i, el := range n.Content {
-			walkScalars(el, append(segs[:len(segs):len(segs)], elementSegment(el, i)), fn)
+			walkScalars(el, append(segs[:len(segs):len(segs)], elementSegment(el, i, resolve)), resolve, fn)
 		}
 	case yaml.ScalarNode:
 		fn(segs, n)
 	}
 }
 
+func resolveIdentity(resolve func(string) string, s string) string {
+	if resolve == nil {
+		return s
+	}
+	return resolve(s)
+}
+
 // elementSegment addresses a sequence element: by name for a named mapping,
 // by index otherwise.
-func elementSegment(el *yaml.Node, i int) string {
+func elementSegment(el *yaml.Node, i int, resolve func(string) string) string {
 	if el.Kind == yaml.MappingNode {
 		if name := findMapValue(el, "name"); name != nil && name.Kind == yaml.ScalarNode {
-			return namedElement(name.Value)
+			return namedElement(resolveIdentity(resolve, name.Value))
 		}
 	}
 	return indexedElement(i)
@@ -129,7 +141,7 @@ func insertAbsent(m *yaml.Node, segs []string, value string) bool {
 
 func findElement(seq *yaml.Node, seg string) *yaml.Node {
 	for i, el := range seq.Content {
-		if elementSegment(el, i) == seg {
+		if elementSegment(el, i, nil) == seg {
 			return el
 		}
 	}
@@ -154,7 +166,7 @@ func collectEnvRefs(raw []byte, loaded *Config) map[string]envRef {
 
 	refs := map[string]envRef{}
 	seen := map[string]int{}
-	walkScalars(rawRoot, nil, func(segs []string, n *yaml.Node) {
+	walkScalars(rawRoot, nil, expandEnvPreservingShellParams, func(segs []string, n *yaml.Node) {
 		path := envRefPath(segs...)
 		seen[path]++
 		if strings.ContainsRune(n.Value, '$') {
@@ -181,7 +193,7 @@ func collectEnvRefs(raw []byte, loaded *Config) map[string]envRef {
 		return nil
 	}
 	if root := mappingRoot(&loadedDoc); root != nil {
-		walkScalars(root, nil, func(segs []string, n *yaml.Node) {
+		walkScalars(root, nil, nil, func(segs []string, n *yaml.Node) {
 			path := envRefPath(segs...)
 			if ref, ok := refs[path]; ok {
 				ref.loaded, ref.present = n.Value, true
@@ -210,7 +222,7 @@ func (c *Config) restoreEnvRefs(fresh []byte) []byte {
 	}
 
 	changed := false
-	walkScalars(root, nil, func(segs []string, n *yaml.Node) {
+	walkScalars(root, nil, nil, func(segs []string, n *yaml.Node) {
 		ref, ok := c.envRefs[envRefPath(segs...)]
 		if !ok || !ref.present || n.Value != ref.loaded || n.Value == ref.raw {
 			return

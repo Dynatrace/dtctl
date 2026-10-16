@@ -163,9 +163,41 @@ func TestSaveToEnvRefDeletedEntryStaysDeleted(t *testing.T) {
 	}
 }
 
+// TestSaveToEnvRefInEntryName: an entry whose name is itself a reference is
+// matched by its resolved name, so its token is restored like any other.
+func TestSaveToEnvRefInEntryName(t *testing.T) {
+	t.Setenv("DT_TEST_TOKEN_NAME", "resolved-name")
+	t.Setenv("DT_TEST_SECRET", envRefSecret)
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(`apiVersion: v1
+current-context: a
+tokens:
+    - name: ${DT_TEST_TOKEN_NAME}
+      token: ${DT_TEST_SECRET}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.CurrentContext = "b"
+
+	got := saveAndRead(t, cfg, path)
+	if strings.Contains(got, envRefSecret) {
+		t.Errorf("resolved secret written to the config file:\n%s", got)
+	}
+	for _, ref := range []string{"name: ${DT_TEST_TOKEN_NAME}", "token: ${DT_TEST_SECRET}"} {
+		if !strings.Contains(got, ref) {
+			t.Errorf("missing %q after save:\n%s", ref, got)
+		}
+	}
+}
+
 // TestSetTokenEnvRefBypassesKeyring: the keyring never expands what it holds,
 // so a reference stored there would authenticate with the literal "${VAR}".
-// It stays inline, and an older keyring entry that would shadow it is removed.
+// It stays inline, and an older keyring entry that would shadow it is removed
+// once the reference is saved.
 func TestSetTokenEnvRefBypassesKeyring(t *testing.T) {
 	kr := newMockKeyring()
 	kr.data["t"] = "dt0s16.OLD"
@@ -173,11 +205,17 @@ func TestSetTokenEnvRefBypassesKeyring(t *testing.T) {
 	if err := cfg.setTokenWithKeyring("t", "${DT_API_TOKEN}", kr, NewOAuthFileStoreWithDir(t.TempDir())); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := kr.data["t"]; ok {
-		t.Errorf("keyring still holds an entry for t: %q", kr.data["t"])
-	}
 	if len(cfg.Tokens) != 1 || cfg.Tokens[0].Token != "${DT_API_TOKEN}" {
 		t.Errorf("tokens = %+v, want the reference kept inline", cfg.Tokens)
+	}
+	if kr.data["t"] != "dt0s16.OLD" {
+		t.Errorf("keyring entry removed before the reference was saved")
+	}
+	if err := cfg.SaveTo(filepath.Join(t.TempDir(), "config")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := kr.data["t"]; ok {
+		t.Errorf("keyring still holds an entry for t after save: %q", kr.data["t"])
 	}
 
 	// A literal token still goes to the keyring.
@@ -186,6 +224,24 @@ func TestSetTokenEnvRefBypassesKeyring(t *testing.T) {
 	}
 	if kr.data["t"] != "dt0s16.NEW" || cfg.Tokens[0].Token != "" {
 		t.Errorf("literal token not stored in keyring: keyring=%q inline=%q", kr.data["t"], cfg.Tokens[0].Token)
+	}
+}
+
+// TestSetTokenEnvRefFailedSaveKeepsKeyring: when the reference cannot be
+// written, the keyring entry is still the credential and must survive.
+func TestSetTokenEnvRefFailedSaveKeepsKeyring(t *testing.T) {
+	kr := newMockKeyring()
+	kr.data["t"] = "dt0s16.OLD"
+	cfg := NewConfig()
+	if err := cfg.setTokenWithKeyring("t", "${DT_API_TOKEN}", kr, NewOAuthFileStoreWithDir(t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the file should be makes the write fail.
+	if err := cfg.SaveTo(t.TempDir()); err == nil {
+		t.Fatal("SaveTo onto a directory succeeded")
+	}
+	if kr.data["t"] != "dt0s16.OLD" {
+		t.Errorf("keyring entry removed although the save failed")
 	}
 }
 

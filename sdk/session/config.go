@@ -78,6 +78,10 @@ type Config struct {
 	// since load, so a load-modify-save cycle never persists a resolved secret.
 	// See envrefs.go.
 	envRefs map[string]envRef
+	// afterSave holds cleanups that may only run once the file is written, so a
+	// failed save never leaves the config pointing at something already gone.
+	// SaveTo runs and clears them.
+	afterSave []func() error
 	// inlineOnly is set by SealInlineCredentials to restrict token resolution to
 	// the inline Tokens list. When true, GetToken never consults the keyring,
 	// file store, or OAuth machinery — only the values carried in the struct.
@@ -872,6 +876,13 @@ func (c *Config) SaveTo(path string) error {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
+	pending := c.afterSave
+	c.afterSave = nil
+	for _, cleanup := range pending {
+		if err := cleanup(); err != nil {
+			return fmt.Errorf("config saved, but %w", err)
+		}
+	}
 	return nil
 }
 
@@ -1433,10 +1444,14 @@ func (c *Config) setTokenWithKeyring(name, token string, kr keyringBackend, file
 	keyringAvailable := kr.Available()
 	if keyringAvailable && IsEnvReference(token) {
 		// Kept inline. A keyring entry left from an earlier value would win
-		// over it in GetToken, so it goes.
-		if err := kr.Delete(name); err != nil {
-			return fmt.Errorf("failed to remove previous token from keyring: %w", err)
-		}
+		// over it in GetToken, so it goes — but only after SaveTo has written
+		// the reference: until then the keyring entry is the credential.
+		c.afterSave = append(c.afterSave, func() error {
+			if err := kr.Delete(name); err != nil {
+				return fmt.Errorf("failed to remove previous token %q from keyring: %w", name, err)
+			}
+			return nil
+		})
 	} else if keyringAvailable {
 		if err := kr.Set(name, token); err != nil {
 			return fmt.Errorf("failed to store token in keyring: %w", err)
