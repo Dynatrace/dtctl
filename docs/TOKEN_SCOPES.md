@@ -66,6 +66,7 @@ davis:analyzers:read,
 app-engine:apps:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `readwrite-mine`
@@ -122,7 +123,8 @@ app-engine:apps:run,
 app-engine:functions:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `readwrite-all`
@@ -201,7 +203,8 @@ app-engine:functions:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `dangerously-unrestricted`
@@ -293,7 +296,8 @@ app-engine:edge-connects:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
 app-engine:edge-connects:delete,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ---

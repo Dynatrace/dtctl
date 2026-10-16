@@ -336,6 +336,13 @@ func IsLocalResource(name string) bool {
 // of other people's documents is exactly what those levels exist to rule out.
 const DocumentAdminScope = "document:documents:admin"
 
+// DashboardMigrationScope lets a request convert a classic dashboard into 3rd
+// gen dashboard content. No built-in command uses it yet; requesting it at login
+// is what lets `exec api` reach the conversion. Every level requests it: the
+// conversion only returns the content and saves nothing, so storing the result
+// still takes the document write scopes.
+const DashboardMigrationScope = "environment-api:dashboard-3rdgen-migration:execute"
+
 // grailExtendedReadScopes are additional Grail read scopes granted at the
 // readonly, readwrite-all and dangerously-unrestricted levels. readwrite-mine
 // intentionally omits them (it focuses on write access to one's own resources).
@@ -411,6 +418,7 @@ func (s *scopeSet) addReadTier(extended bool) {
 	s.addResource("openpipeline-matcher", AccessRead)
 	s.addResource("openpipeline-dql-processor", AccessRead)
 	s.addResource("preview-processor", AccessRead)
+	s.add(DashboardMigrationScope)
 }
 
 // addMineWrites adds the write/run scopes granted from readwrite-mine upward:
@@ -480,6 +488,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("openpipeline-matcher", AccessRead)
 	s.addResource("openpipeline-dql-processor", AccessRead)
 	s.addResource("preview-processor", AccessRead)
+	s.add(DashboardMigrationScope)
 	// writes / destructive
 	s.addResource("dashboard", AccessWrite, AccessDelete)
 	s.add("document:environment-shares:write")
