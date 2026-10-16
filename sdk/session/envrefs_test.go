@@ -313,6 +313,26 @@ func TestGetTokenPrefersInlineEnvRef(t *testing.T) {
 	}
 }
 
+// TestGetTokenResolvesReferenceSetInProcess: a reference stored by SetToken on
+// this Config is resolved, never skipped in favour of a keyring entry a failed
+// cleanup left behind.
+func TestGetTokenResolvesReferenceSetInProcess(t *testing.T) {
+	t.Setenv("DT_API_TOKEN", envRefSecret)
+	kr := &flakyDeleteKeyring{mockKeyring: newMockKeyring()}
+	kr.data["t"] = "dt0s16.STALE"
+	cfg := NewConfig()
+	if err := cfg.setTokenWithKeyring("t", "${DT_API_TOKEN}", kr, NewOAuthFileStoreWithDir(t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(filepath.Join(t.TempDir(), "config")); err == nil {
+		t.Fatal("SaveTo succeeded although the keyring refused the cleanup")
+	}
+	got, err := cfg.GetToken("t")
+	if err != nil || got != envRefSecret {
+		t.Errorf("GetToken = %q, %v; want the resolved reference", got, err)
+	}
+}
+
 // TestTokensAsStored: displaying a config shows the reference, not the secret,
 // and leaves the resolved value in place for requests.
 func TestTokensAsStored(t *testing.T) {

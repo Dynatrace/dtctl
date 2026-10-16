@@ -987,11 +987,21 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 
 	// A token the config names as a ${VAR} reference wins over any stored
 	// credential: the file says where the secret comes from, and a stale
-	// keyring entry for the same name must not shadow it.
+	// keyring entry for the same name must not shadow it. A reference set by
+	// SetToken on this Config is still the literal; resolve it the way loading
+	// the saved file would. (Local configs never get here with an inline
+	// token: they are refused above.)
 	if c.tokenFromEnvRef(tokenRef) {
 		for _, nt := range c.Tokens {
-			if nt.Name == tokenRef && nt.Token != "" && !IsEnvReference(nt.Token) {
-				return nt.Token, nil
+			if nt.Name != tokenRef {
+				continue
+			}
+			value := nt.Token
+			if IsEnvReference(value) {
+				value = expandEnvPreservingShellParams(value)
+			}
+			if value != "" {
+				return value, nil
 			}
 		}
 	}
