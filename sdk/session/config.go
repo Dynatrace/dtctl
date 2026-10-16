@@ -72,6 +72,12 @@ type Config struct {
 	// tell an unadopted reference from a literal URL. See
 	// resolveLocalEnvironments, restoreRawEnvironments.
 	rawEnvironments map[string]string
+	// envRefs records, by config path, every value the file wrote as an
+	// environment-variable reference and what it resolved to when LoadFrom
+	// expanded it. SaveTo writes the reference back for each value unchanged
+	// since load, so a load-modify-save cycle never persists a resolved secret.
+	// See envrefs.go.
+	envRefs map[string]envRef
 	// inlineOnly is set by SealInlineCredentials to restrict token resolution to
 	// the inline Tokens list. When true, GetToken never consults the keyring,
 	// file store, or OAuth machinery — only the values carried in the struct.
@@ -655,6 +661,7 @@ func loadFrom(path string, expandEnv bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
+	raw := data
 	if expandEnv {
 		// Expand environment variables in the config file.
 		//
@@ -673,6 +680,10 @@ func loadFrom(path string, expandEnv bool) (*Config, error) {
 
 	if !isSupportedAPIVersion(cfg.APIVersion) {
 		return nil, fmt.Errorf("config file %s has schema version %q; this build understands %q — upgrade the tool reading it to a build that does", path, cfg.APIVersion, CurrentAPIVersion)
+	}
+
+	if expandEnv {
+		cfg.envRefs = collectEnvRefs(raw, &cfg)
 	}
 
 	return &cfg, nil
@@ -836,9 +847,11 @@ func (c *Config) Save() error {
 
 // SaveTo saves the configuration to a specific path.
 //
-// Contract rule (docs/dev/CONFIG_CONTRACT.md): fields unknown to this build —
-// written by a newer dtctl or another schema-v1 writer — are grafted back
-// from the file being overwritten, so an older writer never destroys them.
+// Contract rules (docs/dev/CONFIG_CONTRACT.md): values loaded from a ${VAR}
+// reference and unchanged since are written back as the reference, never as
+// what it resolved to; and fields unknown to this build — written by a newer
+// dtctl or another schema-v1 writer — are grafted back from the file being
+// overwritten, so an older writer never destroys them.
 func (c *Config) SaveTo(path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -849,6 +862,7 @@ func (c *Config) SaveTo(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
+	data = c.restoreEnvRefs(data)
 
 	if existing, err := os.ReadFile(path); err == nil {
 		data = preserveUnknownFields(existing, data)
@@ -1393,7 +1407,10 @@ func (c *Config) PruneEmptyEnvironments(keepContext string, placeholderNames map
 
 // SetToken creates or updates a token.
 // If keyring is available, the token is stored securely in the OS keyring
-// and only a reference is kept in the config file.
+// and only a reference is kept in the config file. A token that is itself an
+// environment-variable reference (see IsEnvReference) always stays in the
+// config file as written: the keyring would store the literal, which nothing
+// ever expands.
 // Any cached OAuth tokens for this credential name are invalidated so that
 // a rotated platform token does not keep using a stale refresh token.
 func (c *Config) SetToken(name, token string) error {
@@ -1410,8 +1427,17 @@ func (c *Config) setTokenWithKeyring(name, token string, kr keyringBackend, file
 		fileStore = NewOAuthFileStore()
 	}
 
+	// An explicit value replaces whatever reference the entry was loaded from.
+	delete(c.envRefs, tokenValuePath(name))
+
 	keyringAvailable := kr.Available()
-	if keyringAvailable {
+	if keyringAvailable && IsEnvReference(token) {
+		// Kept inline. A keyring entry left from an earlier value would win
+		// over it in GetToken, so it goes.
+		if err := kr.Delete(name); err != nil {
+			return fmt.Errorf("failed to remove previous token from keyring: %w", err)
+		}
+	} else if keyringAvailable {
 		if err := kr.Set(name, token); err != nil {
 			return fmt.Errorf("failed to store token in keyring: %w", err)
 		}
