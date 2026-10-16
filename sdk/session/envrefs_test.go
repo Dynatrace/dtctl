@@ -245,6 +245,74 @@ func TestSetTokenEnvRefFailedSaveKeepsKeyring(t *testing.T) {
 	}
 }
 
+// TestSetTokenLiteralCancelsPendingDelete: a literal stored after a reference,
+// before the save, must not be wiped by the cleanup the reference queued.
+func TestSetTokenLiteralCancelsPendingDelete(t *testing.T) {
+	kr := newMockKeyring()
+	kr.data["t"] = "dt0s16.OLD"
+	cfg := NewConfig()
+	fs := NewOAuthFileStoreWithDir(t.TempDir())
+	if err := cfg.setTokenWithKeyring("t", "${DT_API_TOKEN}", kr, fs); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.setTokenWithKeyring("t", "dt0s16.NEW", kr, fs); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(filepath.Join(t.TempDir(), "config")); err != nil {
+		t.Fatal(err)
+	}
+	if kr.data["t"] != "dt0s16.NEW" {
+		t.Errorf("keyring = %q, want the literal stored last", kr.data["t"])
+	}
+}
+
+// flakyDeleteKeyring refuses Delete until allowed.
+type flakyDeleteKeyring struct {
+	*mockKeyring
+	allow bool
+}
+
+func (k *flakyDeleteKeyring) Delete(n string) error {
+	if !k.allow {
+		return os.ErrPermission
+	}
+	return k.mockKeyring.Delete(n)
+}
+
+// TestPendingKeyringDeleteRetriedAfterFailure: a cleanup that fails after the
+// file was written is reported and retried on the next save, not dropped.
+func TestPendingKeyringDeleteRetriedAfterFailure(t *testing.T) {
+	kr := &flakyDeleteKeyring{mockKeyring: newMockKeyring()}
+	kr.data["t"] = "dt0s16.OLD"
+	cfg := NewConfig()
+	if err := cfg.setTokenWithKeyring("t", "${DT_API_TOKEN}", kr, NewOAuthFileStoreWithDir(t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config")
+	if err := cfg.SaveTo(path); err == nil || !strings.Contains(err.Error(), "config saved, but") {
+		t.Fatalf("SaveTo error = %v, want the failed cleanup reported", err)
+	}
+
+	kr.allow = true
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatalf("retry SaveTo: %v", err)
+	}
+	if _, ok := kr.data["t"]; ok {
+		t.Error("failed cleanup was not retried on the next save")
+	}
+}
+
+// TestGetTokenPrefersInlineEnvRef: while a stale keyring entry for the name
+// may still exist, the reference the config names is the credential used.
+func TestGetTokenPrefersInlineEnvRef(t *testing.T) {
+	t.Setenv("DT_TEST_SECRET", envRefSecret)
+	cfg, _ := loadEnvRefConfig(t)
+	got, err := cfg.GetToken("templated-token")
+	if err != nil || got != envRefSecret {
+		t.Errorf("GetToken = %q, %v; want the resolved reference", got, err)
+	}
+}
+
 // TestTokensAsStored: displaying a config shows the reference, not the secret,
 // and leaves the resolved value in place for requests.
 func TestTokensAsStored(t *testing.T) {

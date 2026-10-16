@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/adrg/xdg"
@@ -78,10 +79,13 @@ type Config struct {
 	// since load, so a load-modify-save cycle never persists a resolved secret.
 	// See envrefs.go.
 	envRefs map[string]envRef
-	// afterSave holds cleanups that may only run once the file is written, so a
-	// failed save never leaves the config pointing at something already gone.
-	// SaveTo runs and clears them.
-	afterSave []func() error
+	// pendingKeyringDeletes maps credential names to the keyring holding an
+	// entry SaveTo must remove once the file is written: an older value that a
+	// ${VAR} reference now replaces. Deleting before the write would lose the
+	// working credential if the write failed. A later SetToken for the same
+	// name cancels the delete, and one that fails stays queued for the next
+	// save.
+	pendingKeyringDeletes map[string]keyringBackend
 	// inlineOnly is set by SealInlineCredentials to restrict token resolution to
 	// the inline Tokens list. When true, GetToken never consults the keyring,
 	// file store, or OAuth machinery — only the values carried in the struct.
@@ -876,12 +880,29 @@ func (c *Config) SaveTo(path string) error {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
-	pending := c.afterSave
-	c.afterSave = nil
-	for _, cleanup := range pending {
-		if err := cleanup(); err != nil {
-			return fmt.Errorf("config saved, but %w", err)
+	return c.runPendingKeyringDeletes()
+}
+
+// runPendingKeyringDeletes removes the keyring entries SetToken queued. A
+// delete that fails stays queued, so the next save retries it; GetToken
+// prefers an inline reference over the keyring meanwhile, so the stale entry
+// cannot shadow it.
+func (c *Config) runPendingKeyringDeletes() error {
+	names := make([]string, 0, len(c.pendingKeyringDeletes))
+	for name := range c.pendingKeyringDeletes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var errs []error
+	for _, name := range names {
+		if err := c.pendingKeyringDeletes[name].Delete(name); err != nil {
+			errs = append(errs, fmt.Errorf("failed to remove previous token %q from keyring: %w", name, err))
+			continue
 		}
+		delete(c.pendingKeyringDeletes, name)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("config saved, but %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -960,6 +981,17 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 				return "", fmt.Errorf(
 					"local config %q uses token-ref %q which is not bound to any environment in the global config — use --config or DTCTL_CONFIG",
 					c.localPath, tokenRef)
+			}
+		}
+	}
+
+	// A token the config names as a ${VAR} reference wins over any stored
+	// credential: the file says where the secret comes from, and a stale
+	// keyring entry for the same name must not shadow it.
+	if c.tokenFromEnvRef(tokenRef) {
+		for _, nt := range c.Tokens {
+			if nt.Name == tokenRef && nt.Token != "" && !IsEnvReference(nt.Token) {
+				return nt.Token, nil
 			}
 		}
 	}
@@ -1438,20 +1470,20 @@ func (c *Config) setTokenWithKeyring(name, token string, kr keyringBackend, file
 		fileStore = NewOAuthFileStore()
 	}
 
-	// An explicit value replaces whatever reference the entry was loaded from.
+	// An explicit value replaces whatever reference the entry was loaded from,
+	// and whatever keyring cleanup an earlier SetToken queued for it.
 	delete(c.envRefs, tokenValuePath(name))
+	delete(c.pendingKeyringDeletes, name)
 
 	keyringAvailable := kr.Available()
 	if keyringAvailable && IsEnvReference(token) {
-		// Kept inline. A keyring entry left from an earlier value would win
-		// over it in GetToken, so it goes — but only after SaveTo has written
-		// the reference: until then the keyring entry is the credential.
-		c.afterSave = append(c.afterSave, func() error {
-			if err := kr.Delete(name); err != nil {
-				return fmt.Errorf("failed to remove previous token %q from keyring: %w", name, err)
-			}
-			return nil
-		})
+		// Kept inline. A keyring entry left from an earlier value goes, but
+		// only after SaveTo has written the reference: until then the keyring
+		// entry is the credential.
+		if c.pendingKeyringDeletes == nil {
+			c.pendingKeyringDeletes = make(map[string]keyringBackend)
+		}
+		c.pendingKeyringDeletes[name] = kr
 	} else if keyringAvailable {
 		if err := kr.Set(name, token); err != nil {
 			return fmt.Errorf("failed to store token in keyring: %w", err)
