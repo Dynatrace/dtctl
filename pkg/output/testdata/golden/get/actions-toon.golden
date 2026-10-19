@@ -1,0 +1,17 @@
+[3]:
+  - actionName: send-thing
+    appId: example.app
+    description: Sends a thing
+    fullName: "example.app:send-thing"
+    stateful: true
+    title: Send thing
+  - actionName: list-things
+    appId: example.app
+    description: Lists the things
+    fullName: "example.app:list-things"
+    title: List things
+  - actionName: create-thing
+    appId: example.connector
+    description: Creates a thing
+    fullName: "example.connector:create-thing"
+    title: Create thing

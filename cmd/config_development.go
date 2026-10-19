@@ -127,13 +127,12 @@ Enable one for a single process:
 			}
 			w := tabwriter.NewWriter(currentStdout(cmdContext(cmd)), 0, 8, 2, ' ', 0)
 			fmt.Fprintln(w, "FEATURE\tCOMMAND\tENABLED")
-			for _, f := range features {
-				path, _ := stability.DefaultRegistry().Path(f)
+			for _, row := range developmentRows(features, enabled) {
 				state := "no"
-				if stability.Enabled(f, enabled) {
+				if row.Enabled {
 					state = "yes"
 				}
-				fmt.Fprintf(w, "%s\tdtctl %s\t%s\n", f, path, state)
+				fmt.Fprintf(w, "%s\t%s\t%s\n", row.Feature, row.Command, state)
 			}
 			return w.Flush()
 		},
@@ -149,17 +148,19 @@ type developmentRow struct {
 	Enabled bool   `json:"enabled" yaml:"enabled"`
 }
 
-// developmentRows builds the machine-readable listing, in the same order as the
-// table.
+// developmentRows builds the listing for the table and the machine-readable
+// formats: one row per command path, so a feature that gates several commands
+// lists each of them.
 func developmentRows(features []string, enabled map[string]bool) []developmentRow {
 	rows := make([]developmentRow, 0, len(features))
 	for _, f := range features {
-		path, _ := stability.DefaultRegistry().Path(f)
-		rows = append(rows, developmentRow{
-			Feature: f,
-			Command: "dtctl " + path,
-			Enabled: stability.Enabled(f, enabled),
-		})
+		for _, path := range stability.DefaultRegistry().Paths(f) {
+			rows = append(rows, developmentRow{
+				Feature: f,
+				Command: "dtctl " + path,
+				Enabled: stability.Enabled(f, enabled),
+			})
+		}
 	}
 	return rows
 }
