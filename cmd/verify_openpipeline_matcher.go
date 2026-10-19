@@ -123,6 +123,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", `read the matcher from a file ("-" for stdin)`)
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("context", "", `stage context, e.g. "processing" or "ROUTING_RULE"`)
 	stability.MarkFlag(c, "context", stability.Experimental, pre10Since)
 	c.Flags().String("config-id", "", `configuration scope, e.g. "logs"`)

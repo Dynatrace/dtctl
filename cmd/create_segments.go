@@ -88,6 +88,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing segment definition (YAML or JSON), or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")
 	return c

@@ -306,7 +306,7 @@ on every flag underneath it.
 
 1. **SDK layer** (`sdk/api/<name>/`): Create typed API wrapper with CRUD functions using `httpclient.Client`. No file I/O, no display logic.
 2. **CLI layer** (`pkg/resources/<name>/`): Create resource handler that delegates to SDK. Handle file reading, display fields, name resolution here. Read user-supplied paths through `pkg/vfs`, never `os` directly (see [Embedding Invariants](#-critical-embedding-invariants-)).
-3. **Commands**: Add to `cmd/get.go`, `cmd/describe.go`, etc. Mutating verbs need a safety check; `-f`/`--file` flags go through `vfs`; no `os.Exit`, no ungated subprocess. Build each command in a `newXCmd()` constructor (flags bound to variables local to it, stability tier declared inside), attach it in `init()` as usual **and** list it in `newCommandTree` in `cmd/root_factory.go`; read the run's state through `cmdContext(cmd)` (see [Embedding Invariants](#-critical-embedding-invariants-) rule 7).
+3. **Commands**: Add to `cmd/get.go`, `cmd/describe.go`, etc. Mutating verbs need a safety check; `-f`/`--file` flags go through `vfs` and are declared with `markFileFlag` (rule 1); no `os.Exit`, no ungated subprocess. Build each command in a `newXCmd()` constructor (flags bound to variables local to it, stability tier declared inside), attach it in `init()` as usual **and** list it in `newCommandTree` in `cmd/root_factory.go`; read the run's state through `cmdContext(cmd)` (see [Embedding Invariants](#-critical-embedding-invariants-) rule 7).
 4. Register in resolver
 5. Add tests: `sdk/api/<name>/*_test.go` (SDK unit tests) + `test/e2e/<name>_test.go` (E2E)
 5b. **Declare the stability tier** — every command, stable ones included; the
@@ -518,6 +518,18 @@ named `<stdin>` wherever the path would be shown. Stdin can be read once: a
 command that could read two inputs from it (`diff -f - -f -`) refuses the
 combination.
 *Guard*: `go test ./cmd/ -run TestFileFlagsReadThroughReadFileFlag`
+
+A flag that names a file is also **declared**, in its constructor, so
+`engine.Parse` can tell a caller what a command line reads and writes without
+running it: `markFileFlag(c, "file", fileValuePath)` (`fileValueAtPath` for a
+`-d @path` style value), `markWritesTo` for a flag that writes back to a file
+flag's paths (`apply --write-id`), `markInputWithoutArgs` for a command that
+reads stdin when it has no argument (`query`), and `markArgumentFlag` for a
+flag that stands in for that argument (`query --dql`, `query --file`). The
+guards run every command with each string flag set to a path on a recording
+filesystem, so a file flag without the declaration fails them, naming the line
+to add.
+*Guard*: `go test ./cmd/ -run 'TestFileFlagsAreDeclared|TestFileFlagAnnotationsAreValid|TestInputWithoutArgsIsDeclared|TestVFSEnvCallSitesAreKnown'`
 
 The test is **whose file is it**: a path the *user named* (`-f`, `--file`,
 `--data-file`, a query file, a file to `diff`, an `apply --write-id` writeback)

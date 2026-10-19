@@ -66,6 +66,12 @@ type Session struct {
 	// passes any floor, it merely has a removal date. Off by default, because
 	// a host that has not asked to be broken early should not be.
 	NoDeprecated bool
+
+	// parseOnly marks the session Parse runs under: it has no environment and
+	// no token, and newClientFromConfig refuses it, so a command line analysed
+	// without running can never reach the platform or fall back to the host's
+	// credentials. The request-shape checks still apply.
+	parseOnly bool
 }
 
 // SessionDefaultMinStability is the floor a session-backed invocation gets
@@ -92,10 +98,10 @@ func newSessionTokenRef() string {
 }
 
 func (s *Session) validate() error {
-	if s.EnvironmentURL == "" {
+	if s.EnvironmentURL == "" && !s.parseOnly {
 		return fmt.Errorf("session: EnvironmentURL is required")
 	}
-	if s.Token == "" {
+	if s.Token == "" && !s.parseOnly {
 		return fmt.Errorf("session: Token is required")
 	}
 	if s.SafetyLevel != "" {

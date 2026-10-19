@@ -116,6 +116,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", `read the DQL script from a file ("-" for stdin)`)
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("config-id", "", `configuration scope, e.g. "logs"`)
 	stability.MarkStable(c)
 	rejectEmptyFlag(c, "file")
