@@ -461,13 +461,15 @@ func unionScopes(lists ...[]string) []string {
 	return out
 }
 
-// scopeCatalog is the commands catalog the scope lookups read. It is built once
-// per process, because commands.Build is deterministic for a binary and
-// rebuilding it was a cost every preflight paid. It is built from a fresh tree
-// rather than from the one an invocation runs: a run masks its tree (profile,
-// stability floor), and the catalog leaves masked commands out.
-var scopeCatalog = sync.OnceValue(func() *commands.Listing {
-	return commands.Build(newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root)
+// scopeCatalog is the commands catalog's verbs, which the scope lookups read.
+// It is built once per process, because the catalog is deterministic for a
+// binary and rebuilding it was a cost every preflight paid. It is built from a
+// fresh tree rather than from the one an invocation runs: a run masks its tree
+// (profile, stability floor), and the catalog leaves masked commands out. It
+// holds the verbs alone, not a full commands.Build: plugin discovery reads the
+// directories on PATH, and Parse promises no I/O.
+var scopeCatalog = sync.OnceValue(func() map[string]*commands.Verb {
+	return commands.BuildVerbs(newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root)
 })
 
 // requiredScopesFor looks up a command's required scopes from the catalog (the
@@ -484,9 +486,9 @@ func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, sco
 	if perCallScopeCommands[verb+" "+resource] {
 		return nil, scopeRequirementPerCall
 	}
-	v, ok := scopeCatalog().Verbs[verb]
+	v, ok := scopeCatalog()[verb]
 	if !ok && root != nil && attachedDevelopmentVerb(root, verb) {
-		v, ok = commands.Build(root).Verbs[verb]
+		v, ok = commands.BuildVerbs(root)[verb]
 	}
 	if !ok {
 		return nil, scopeRequirementNone
