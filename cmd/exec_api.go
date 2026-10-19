@@ -89,6 +89,7 @@ Examples:
 	c.Flags().StringP("method", "X", http.MethodGet, "HTTP method")
 	c.Flags().StringP("data", "d", "",
 		"request body: inline, @file, or @- for stdin (requires an explicit -X)")
+	markFileFlag(c, "data", fileValueAtPath)
 	c.Flags().StringArrayP("header", "H", nil,
 		"extra request header, 'Name: value' (repeatable)")
 	stability.MarkStable(c)

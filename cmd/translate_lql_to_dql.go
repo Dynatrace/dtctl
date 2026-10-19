@@ -100,6 +100,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", `Read the LQL expression from a file ("-" for stdin)`)
+	markFileFlag(c, "file", fileValuePath)
 	stability.MarkStable(c)
 	return c
 }

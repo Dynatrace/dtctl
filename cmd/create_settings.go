@@ -124,6 +124,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing settings value, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("schema", "", "schema ID (required)")
 	c.Flags().String("scope", "", "scope for the settings object (required)")
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")

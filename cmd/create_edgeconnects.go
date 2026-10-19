@@ -112,6 +112,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing EdgeConnect definition, or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("name", "", "EdgeConnect name (RFC 1123 compliant, max 50 chars)")
 	c.Flags().String("host-patterns", "", "comma-separated list of host patterns")
 	stability.MarkStable(c)
