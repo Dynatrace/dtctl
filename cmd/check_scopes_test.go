@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dynatrace-oss/dtctl/pkg/auth"
@@ -179,6 +180,74 @@ func TestComputeScopeVerdict(t *testing.T) {
 		require.NotEmpty(t, r.Suggestions, "an unknown verdict must say how to find the answer")
 		require.Contains(t, strings.Join(r.Suggestions, "\n"), "describe api")
 	})
+
+	// apply reads its resource kinds from the file, so a verdict on the command
+	// line has nothing to check. Before the requirement existed, apply resolved
+	// to the verb alone and was told "no platform scopes required".
+	t.Run("input-dependent requirement is unknown, never ok", func(t *testing.T) {
+		withScopeState(t, true, false, "json", []string{"automation:workflows:write"}, true)
+		r := computeScopeVerdict(context.Background(), "apply", "", nil, nil, scopeRequirementInputDependent)
+		require.Equal(t, scopeStatusUnknown, r.Status,
+			"a check that did not happen must not report ok")
+		require.Empty(t, r.RequiredScopes)
+		require.Contains(t, strings.Join(r.Suggestions, "\n"), "input file")
+	})
+}
+
+// TestRequiredScopesIn_DevelopmentVerbs: a development-tier verb is not in
+// the shared catalog, which is built from a fresh tree, so its scopes come from
+// the catalog of the tree it is attached to, as they did before the shared
+// catalog existed.
+func TestRequiredScopesIn_DevelopmentVerbs(t *testing.T) {
+	applyDevelopmentRegistration(map[string]bool{config.DevelopmentAll: true})
+	t.Cleanup(func() { applyDevelopmentRegistration(nil) })
+
+	listing := commands.Build(rootCmd)
+	seen := 0
+	for _, dc := range developmentCommands {
+		if dc.cmd.Parent() != rootCmd {
+			continue
+		}
+		verb := dc.cmd.Name()
+		v, ok := listing.Verbs[verb]
+		require.True(t, ok, "%s is attached but not in the singleton's catalog", verb)
+		seen++
+		for resource, want := range v.RequiredScopesByResource {
+			got, _ := requiredScopesIn(rootCmd, verb, resource)
+			assert.Equal(t, want, got, "%s %s", verb, resource)
+		}
+		got, _ := requiredScopesIn(rootCmd, verb, "")
+		if len(v.RequiredScopes) > 0 {
+			assert.Equal(t, v.RequiredScopes, got, verb)
+		}
+	}
+	require.NotZero(t, seen, "no development-tier verb attached; the test checks nothing")
+}
+
+// TestScopesForInvocation_InputDependentCommands holds the commands whose
+// resource kind comes from their input file to the input-dependent
+// requirement, end to end through --check-scopes.
+func TestScopesForInvocation_InputDependentCommands(t *testing.T) {
+	for _, argv := range [][]string{
+		{"apply", "-f", "dashboard.yaml"},
+		{"diff", "-f", "dashboard.yaml"},
+	} {
+		t.Run(argv[0], func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run(append(argv, "--check-scopes", "--agent"), RunOptions{
+				Concurrent: true,
+				Session:    &Session{EnvironmentURL: "https://env.example.test", Token: "dt0c01.T.T"},
+				Stdout:     &stdout,
+				Stderr:     &stderr,
+			})
+			require.Equal(t, 0, code, "stderr: %s", stderr.String())
+			var envelope struct {
+				Result ScopeCheckResult `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(stdout.Bytes(), &envelope), "stdout: %s", stdout.String())
+			require.Equal(t, scopeStatusUnknown, envelope.Result.Status)
+		})
+	}
 }
 
 func TestScopePreflight_CheckScopes_OKSkipsAndPrints(t *testing.T) {

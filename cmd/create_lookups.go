@@ -201,6 +201,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "path to data file or manifest, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("path", "", "lookup file path (e.g., /lookups/grail/pm/error_codes)")
 	c.Flags().String("lookup-field", "", "name of the lookup key field")
 	c.Flags().String("display-name", "", "display name for the lookup table")

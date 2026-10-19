@@ -114,6 +114,43 @@ runs either one serialized invocation or any number of concurrent ones, never a
 mix. It is off unless a host asks for it; what it guarantees, what it costs and
 what it does not cover are in [CONCURRENT_EXECUTION.md](CONCURRENT_EXECUTION.md).
 
+### Analysing a command line without running it (`Parse`)
+
+`engine.Parse` reports what a command line means without running it: its verb
+and resource, the files it reads and writes (as `Request.Files` names them),
+whether it reads `Request.Stdin`, and its required scopes with how certain they
+are (`none`, `known`, `per_call` for `exec api`, `input_dependent` for `apply`
+and `diff`). A host uses it as a preflight: to attach the files a command needs,
+or to tell a caller which scopes it will need, before it runs anything.
+
+It runs Execute's pipeline and stops where the command body would start. It
+builds a fresh tree, applies the same surface masks (`applySurface`: profile,
+blocked commands, stability floor, deprecation), lets cobra parse and validate
+the command line and run the pre-run hooks, and replaces every command body with
+a hook that records what cobra resolved. A command line Execute would refuse
+returns a `*UsageError` with the error Execute prints; validation inside a
+command body is the one thing Parse cannot see.
+
+It needs no token, reads no file and calls no platform API. It runs under a
+parse-only session, which has no environment or token and which
+`newClientFromConfig` refuses, so a command that tried to reach the platform
+would fail rather than fall back to the host's credentials. It takes no
+execution slot and takes `runMu` shared, like a concurrent invocation, so it
+never waits for concurrent executions but does wait for a serialized one (the
+context bounds the wait). One call
+costs about 1.4 ms and 1.1 MiB allocated, almost all of it building the tree
+(`BenchmarkParse`).
+
+What a command reads is declared next to its flags (`markFileFlag`,
+`markWritesTo`, `markInputWithoutArgs`, `markArgumentFlag`), and the guards in
+`cmd/file_flags_test.go` run every command on a recording filesystem, so a file
+flag without a declaration fails a test. `TestParseAgreesWithExecute` runs the
+same command lines through both and holds Parse to every file Execute reads.
+
+`Scopes: none` means the catalog names no scopes for the command. For the local
+commands that is the answer; for a command the catalog is still missing scopes
+for, it under-reports.
+
 ### Upstream connections are pooled across requests
 
 Every request builds its own client, but all of them send through one
@@ -384,7 +421,8 @@ both tags exist.
 ## Maturity
 
 `pkg/engine` is the stable half: a Go caller opts into it at compile time, and
-the isolation rules above are enforced by guard tests.
+the isolation rules above are enforced by guard tests. `Parse` and its types are
+the exception: experimental until a second host uses them.
 
 `dtctl serve` is **development-tier** (see [STABILITY.md](../STABILITY.md)) and
 registered only when opted into — `dtctl config set development.serve on` or

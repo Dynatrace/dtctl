@@ -220,60 +220,10 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 	}
 	// --- End alias resolution ---
 
-	// --- Command profile filter ---
-	// Resolve the active profile (DTCTL_PROFILE > context binding > full) and
-	// mask out-of-profile commands before Cobra dispatches, so help, the
-	// `commands` catalog, and completion all reflect the reduced surface. A
-	// nil profile is the full tree (backward compatible). An unknown profile
-	// name is a hard error rather than a silent surface expansion.
-	prof, profErr := resolveActiveProfile(cmdContext(root), spanArgs)
-	if profErr != nil {
-		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", profErr)
-		return exitCodeForError(profErr)
+	if code, err := applySurface(root, spanArgs, devEnabled); err != nil {
+		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", err)
+		return code
 	}
-	applyProfile(root, prof)
-	// --- End command profile filter ---
-
-	// --- Blocked-command filter (embedded callers) ---
-	// Mask commands the embedding caller declared unsupported in its
-	// environment (RunOptions.BlockedCommands) — e.g. the service engine
-	// removes host-oriented commands like config/ctx/auth. Applied after the
-	// profile filter so both masks compose; a nil set is the full surface.
-	applyBlockedCommands(root, currentBlocked(cmdContext(root)))
-	// --- End blocked-command filter ---
-
-	// --- Stage 3: stability floor ---
-	// Mask every command and flag whose contract is weaker than the floor this
-	// context accepts, unless an exception names it. Runs after the profile and
-	// blocked-command masks so all three compose and none can widen what an
-	// earlier one narrowed. A misspelled exception is a hard error rather than
-	// a silent skip: it would otherwise tighten the surface and produce a
-	// confusing block much later.
-	policy, stabErr := resolveStabilityPolicy(cmdContext(root), spanArgs, devEnabled)
-	if stabErr != nil {
-		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", stabErr)
-		return client.ExitUsageError
-	}
-	applyStabilityFloor(root, policy)
-	// Badge what survived, so a caller reading help is told the guarantee
-	// rather than left to infer it from the tier's name.
-	applyStabilityBadges(root)
-	// --- End stability floor ---
-
-	// --- Stage 5: deprecated surface ---
-	// Show the caller the world as it will be after the removal release, so a
-	// pipeline can find out it still depends on something scheduled to go
-	// while that is a build failure rather than an outage. Orthogonal to the
-	// floor -- a deprecated command is stable in shape, merely dated -- but
-	// implemented as another narrowing stage so it composes without any
-	// precedence rule. Last, because it is the only stage the caller turns on
-	// to *find* problems rather than to avoid them.
-	// surfaceConfig, not LoadConfig: this is a surface decision like the four
-	// stages above it, and must not depend on credentials resolving.
-	if surfaceConfig(cmdContext(root), spanArgs).NoDeprecated() {
-		applyNoDeprecated(root)
-	}
-	// --- End deprecated surface ---
 
 	// Initialise OpenTelemetry tracing. Done after alias resolution so that
 	// the span name reflects the actual command (not a pre-alias invocation).
@@ -319,37 +269,16 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 			return silent.code
 		}
 
-		errStr := err.Error()
-
 		// Unknown top-level commands get one shot at plugin dispatch before
 		// the suggestion enhancer: `dtctl foo` execs dtctl-foo from PATH if
 		// present (kubectl semantics; built-ins always win because they never
 		// reach this error path). See docs/dev/PLUGIN_CONVENTIONS.md.
-		if strings.Contains(errStr, "unknown command") {
+		if strings.Contains(err.Error(), "unknown command") {
 			if code, handled := tryPluginDispatch(cmdContext(root), spanArgs); handled {
 				return code
 			}
-			// A disabled development feature explains itself only to a caller
-			// who has already demonstrated knowledge of the mechanism, and
-			// never in agent mode. Everyone else gets the ordinary unknown
-			// command answer — see developmentSignposting.
-			if devErr := developmentHint(errStr, devSignpost); devErr != nil {
-				err = devErr
-			} else {
-				err = enhanceCommandError(root, err)
-			}
 		}
-
-		// Enhance unknown flag errors with suggestions. A flag error the
-		// command's own FlagErrorFunc already typed is left alone: its message
-		// no longer matches cobra's raw wording, so re-running the enhancer
-		// would flatten *suggest.FlagError back to a plain error and cost the
-		// invocation its usage exit code.
-		var typedFlagErr *suggest.FlagError
-		if !errors.As(err, &typedFlagErr) &&
-			(strings.Contains(errStr, "unknown flag") || strings.Contains(errStr, "unknown shorthand flag")) {
-			err = enhanceFlagError(root, err)
-		}
+		err = classifyCommandLineError(root, err, devSignpost)
 
 		// Check for URL-related hints (e.g., wrong domain like live.dynatrace.com)
 		urlHints := getURLHintsForError(cmdContext(root), err)
@@ -515,6 +444,91 @@ var verbSynonyms = map[string]struct{ verb, hint string }{
 	"smartscapeEdges": {"query", `smartscapeEdges is a DQL command — run it through query: dtctl query 'smartscapeEdges "runs_on" | limit 10'`},
 	"fetch":           {"query", "fetch is DQL — run it through query: dtctl query 'fetch logs | limit 10'"},
 	"timeseries":      {"query", "timeseries is DQL — run it through query: dtctl query 'timeseries avg(dt.host.cpu.usage), from:now()-1h'"},
+}
+
+// applySurface masks root to the surface this invocation may reach: the
+// command profile, the blocked commands, the stability floor and the
+// deprecated surface. Execute and Parse share it, so both see the same tree. A
+// non-nil error is reported with the returned exit code, and the command does
+// not run.
+func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool) (int, error) {
+	// --- Command profile filter ---
+	// Resolve the active profile (DTCTL_PROFILE > context binding > full) and
+	// mask out-of-profile commands before Cobra dispatches, so help, the
+	// `commands` catalog, and completion all reflect the reduced surface. A
+	// nil profile is the full tree (backward compatible). An unknown profile
+	// name is a hard error rather than a silent surface expansion.
+	prof, profErr := resolveActiveProfile(cmdContext(root), args)
+	if profErr != nil {
+		return exitCodeForError(profErr), profErr
+	}
+	applyProfile(root, prof)
+
+	// --- Blocked-command filter (embedded callers) ---
+	// Mask commands the embedding caller declared unsupported in its
+	// environment (RunOptions.BlockedCommands) — e.g. the service engine
+	// removes host-oriented commands like config/ctx/auth. Applied after the
+	// profile filter so both masks compose; a nil set is the full surface.
+	applyBlockedCommands(root, currentBlocked(cmdContext(root)))
+
+	// --- Stage 3: stability floor ---
+	// Mask every command and flag whose contract is weaker than the floor this
+	// context accepts, unless an exception names it. Runs after the profile and
+	// blocked-command masks so all three compose and none can widen what an
+	// earlier one narrowed. A misspelled exception is a hard error rather than
+	// a silent skip: it would otherwise tighten the surface and produce a
+	// confusing block much later.
+	policy, stabErr := resolveStabilityPolicy(cmdContext(root), args, devEnabled)
+	if stabErr != nil {
+		return client.ExitUsageError, stabErr
+	}
+	applyStabilityFloor(root, policy)
+	// Badge what survived, so a caller reading help is told the guarantee
+	// rather than left to infer it from the tier's name.
+	applyStabilityBadges(root)
+
+	// --- Stage 5: deprecated surface ---
+	// Show the caller the world as it will be after the removal release, so a
+	// pipeline can find out it still depends on something scheduled to go
+	// while that is a build failure rather than an outage. Orthogonal to the
+	// floor -- a deprecated command is stable in shape, merely dated -- but
+	// implemented as another narrowing stage so it composes without any
+	// precedence rule. Last, because it is the only stage the caller turns on
+	// to *find* problems rather than to avoid them.
+	// surfaceConfig, not LoadConfig: this is a surface decision like the
+	// stages above it, and must not depend on credentials resolving.
+	if surfaceConfig(cmdContext(root), args).NoDeprecated() {
+		applyNoDeprecated(root)
+	}
+	return 0, nil
+}
+
+// classifyCommandLineError turns the errors cobra raises about a command line
+// into dtctl's typed ones, so they carry suggestions and the usage exit code.
+// Execute and Parse share it, so both report a command line the same way.
+func classifyCommandLineError(root *cobra.Command, err error, devSignpost bool) error {
+	errStr := err.Error()
+	if strings.Contains(errStr, "unknown command") {
+		// A disabled development feature explains itself only to a caller who
+		// has already demonstrated knowledge of the mechanism, and never in
+		// agent mode. Everyone else gets the ordinary unknown command answer —
+		// see developmentSignposting.
+		if devErr := developmentHint(errStr, devSignpost); devErr != nil {
+			return devErr
+		}
+		return enhanceCommandError(root, err)
+	}
+	// Enhance unknown flag errors with suggestions. A flag error the command's
+	// own FlagErrorFunc already typed is left alone: its message no longer
+	// matches cobra's raw wording, so re-running the enhancer would flatten
+	// *suggest.FlagError back to a plain error and cost the invocation its
+	// usage exit code.
+	var typedFlagErr *suggest.FlagError
+	if !errors.As(err, &typedFlagErr) &&
+		(strings.Contains(errStr, "unknown flag") || strings.Contains(errStr, "unknown shorthand flag")) {
+		return enhanceFlagError(root, err)
+	}
+	return err
 }
 
 // enhanceCommandError adds suggestions to unknown command errors
@@ -1682,6 +1696,9 @@ func NewClientFromConfig(cfg *config.Config) (*client.Client, error) {
 
 // NewClientFromConfig creates a new client from config with verbose mode configured
 func newClientFromConfig(ctx context.Context, cfg *config.Config) (*client.Client, error) {
+	if s := currentSession(ctx); s != nil && s.parseOnly {
+		return nil, errParseOnlySession
+	}
 	c, err := client.NewFromConfig(cfg)
 	if err != nil {
 		return nil, err

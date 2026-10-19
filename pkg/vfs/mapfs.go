@@ -24,19 +24,22 @@ type MapFS struct {
 func NewMapFS(files map[string][]byte) *MapFS {
 	m := &MapFS{files: make(map[string][]byte, len(files))}
 	for name, data := range files {
-		m.files[normalizePath(name)] = append([]byte(nil), data...)
+		m.files[Key(name)] = append([]byte(nil), data...)
 	}
 	return m
 }
 
-func normalizePath(name string) string {
+// Key is the name a MapFS keeps a file under: "x.yaml", "./x.yaml" and
+// "/x.yaml" are one file. A caller matching paths against the files it hands a
+// MapFS uses it instead of a rule of its own.
+func Key(name string) string {
 	return strings.TrimPrefix(path.Clean("/"+name), "/")
 }
 
 func (m *MapFS) ReadFile(name string) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	data, ok := m.files[normalizePath(name)]
+	data, ok := m.files[Key(name)]
 	if !ok {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 	}
@@ -46,7 +49,7 @@ func (m *MapFS) ReadFile(name string) ([]byte, error) {
 func (m *MapFS) WriteFile(name string, data []byte, _ fs.FileMode) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.files[normalizePath(name)] = append([]byte(nil), data...)
+	m.files[Key(name)] = append([]byte(nil), data...)
 	return nil
 }
 

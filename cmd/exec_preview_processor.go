@@ -84,6 +84,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", `read the processor definition body from a file ("-" for stdin); required`)
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("config-id", "", `configuration scope, e.g. "logs"`)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")
