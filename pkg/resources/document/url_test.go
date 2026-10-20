@@ -35,3 +35,19 @@ func TestUIURL_TrailingSlashOnBase(t *testing.T) {
 		}
 	}
 }
+
+// TestShareURL: the link share --environment link prints is one that claim
+// environment-share reads back to the same share ID and host.
+func TestShareURL(t *testing.T) {
+	link := ShareURL("https://abc12345.apps.dynatrace.com", "018f1234-abcd-7000-8000-000000000000")
+	if want := "https://abc12345.apps.dynatrace.com/ui/document/v0/#share=018f1234-abcd-7000-8000-000000000000"; link != want {
+		t.Fatalf("ShareURL = %q, want %q", link, want)
+	}
+	id, host, err := ParseShareRef(link)
+	if err != nil || id != "018f1234-abcd-7000-8000-000000000000" || host != "abc12345.apps.dynatrace.com" {
+		t.Errorf("ParseShareRef(%q) = %q, %q, %v", link, id, host, err)
+	}
+	if got := ShareURL("https://abc12345.apps.dynatrace.com/", "s-1"); got != "https://abc12345.apps.dynatrace.com/ui/document/v0/#share=s-1" {
+		t.Errorf("ShareURL with a trailing slash on the base = %q", got)
+	}
+}

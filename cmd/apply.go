@@ -331,6 +331,11 @@ resources in sync with their file definitions.
 	c.Flags().String("snapshot-description", "", "description for the snapshot created by --create-snapshot (max 128 characters)")
 	c.Flags().String("share-environment", "", "share the applied notebook/dashboard with everyone in the environment (values: 'read' or 'read-write'; bare --share-environment defaults to 'read')")
 	c.Flags().Lookup("share-environment").NoOptDefVal = "read"
+	// It bundles two things the Document API keeps apart, neither of them part
+	// of the document apply writes: an environment share link (a grant to other
+	// users) and isPrivate=false (a property of the document). `share document
+	// --environment link|public` does each on its own.
+	_ = c.Flags().MarkDeprecated("share-environment", shareEnvironmentDeprecation)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")
 	return c
@@ -339,6 +344,11 @@ resources in sync with their file definitions.
 func init() {
 	rootCmd.AddCommand(applyCmd)
 }
+
+// shareEnvironmentDeprecation is apply --share-environment's deprecation
+// note. pflag prints it after "Flag --share-environment has been deprecated, ".
+const shareEnvironmentDeprecation = "in 0.44.0, removal planned in 0.46.0: " +
+	"apply the file, then use `dtctl share document <id> --environment link,public [--access read-write]`"
 
 // validateShareEnvironmentValue rejects any --share-environment value outside
 // the empty string, "read", or "read-write".
@@ -351,8 +361,11 @@ func validateShareEnvironmentValue(v string) error {
 	}
 }
 
-// ensureEnvironmentShareForResults walks apply results and creates an environment share for every notebook/dashboard.
-// Other resource types are silently skipped — environment shares only apply to documents.
+// ensureEnvironmentShareForResults walks apply results and opens every notebook/dashboard to
+// the environment the way `share document --environment link,public` does: an environment
+// share link at the access level, and isPrivate=false. A link at another level is left
+// alone; a document can have one per level. Other resource types are silently skipped —
+// environment shares only apply to documents.
 //
 // Per-document failures do not abort the walk: we attempt a share for every eligible
 // result and return a combined error at the end so multi-document applies are partially
@@ -371,7 +384,7 @@ func ensureEnvironmentShareForResults(ctx context.Context, c *client.Client, res
 		if base.ID == "" {
 			continue
 		}
-		if _, err := handler.EnsureEnvironmentShare(base.ID, access); err != nil {
+		if err := shareAppliedDocument(handler, base.ID, access); err != nil {
 			output.FprintWarning(currentStderr(ctx), "failed to share %s %q with environment: %v", base.ResourceType, base.ID, err)
 			errs = append(errs, fmt.Errorf("document %q: %w", base.ID, err))
 			continue
@@ -389,6 +402,19 @@ func ensureEnvironmentShareForResults(ctx context.Context, c *client.Client, res
 		ids = append(ids, e.Error())
 	}
 	return fmt.Errorf("%d documents failed to share: %s", len(errs), strings.Join(ids, "; "))
+}
+
+// shareAppliedDocument ensures the document's environment share link at the
+// access level, then makes it public: the link first, so a failure to make it
+// public leaves the narrower of the two in place.
+func shareAppliedDocument(handler *document.Handler, id, access string) error {
+	if _, err := handler.EnsureEnvironmentLink(id, access); err != nil {
+		return err
+	}
+	if err := handler.SetPrivate(id, false); err != nil {
+		return fmt.Errorf("environment share created, but making the document public failed: %w", err)
+	}
+	return nil
 }
 
 // Declared stable: the invocation and output contract of this command is

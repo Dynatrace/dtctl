@@ -16,6 +16,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - `sdk/api/query` — `ExecuteRequest.PollingPromiseSeconds` field maps to the new `pollingPromiseSeconds` body parameter on `query:execute`, instructing the backend to auto-cancel a running query if the client does not poll within the specified number of seconds. `Handler.ExecuteAndPoll` defaults the field to 5 seconds when the caller leaves it unset; a caller-supplied non-zero value is preserved.
 
+- `sdk/api/document` — `Handler.MakeDocumentPublic` and `Handler.MakeDocumentPrivate` set a document's visibility through the Document API's `:makePublic` / `:makePrivate` actions, which take no locking version and are a no-op when the document is already in that state.
+
+### Deprecated
+
+- `sdk/api/document` — `Handler.SetDocumentPublic`: use `MakeDocumentPublic`. It now calls `:makePublic` and ignores its version argument, instead of sending the deprecated `isPrivate` field of `PATCH /documents/{id}`, so it no longer returns `ErrVersionConflict`.
+
 ## [0.2.0] - 2026-05-16
 
 ### Added

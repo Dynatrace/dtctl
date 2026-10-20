@@ -446,7 +446,8 @@ func (s *scopeSet) addMineWrites() {
 // readwrite-mine: environment sharing, Grail writes, bucket writes, CoPilot
 // generation, and app/EdgeConnect lifecycle.
 func (s *scopeSet) addAllExtras() {
-	s.add("document:environment-shares:read", "document:environment-shares:write")
+	// :delete is what `unshare --environment` needs to remove the share again.
+	s.add("document:environment-shares:read", "document:environment-shares:write", "document:environment-shares:delete")
 	s.add(DocumentAdminScope)
 	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write")
 	s.addResource("bucket", AccessWrite)
@@ -491,7 +492,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.add(DashboardMigrationScope)
 	// writes / destructive
 	s.addResource("dashboard", AccessWrite, AccessDelete)
-	s.add("document:environment-shares:write")
+	s.add("document:environment-shares:write", "document:environment-shares:delete")
 	s.addResource("environment-share", AccessClaim)
 	s.add(DocumentAdminScope)
 	s.add("document:trash.documents:restore", "document:trash.documents:delete")

@@ -20,7 +20,7 @@ Dashboards and notebooks (see [Dashboards & Notebooks](dashboards-notebooks.md))
 | get | documents | `dtctl get documents` | Display one or many resources | no | read |
 | history | document | `dtctl history document` | Show version history of resources | no | read |
 | restore | document | `dtctl restore document` | Restore resources to a previous version | yes | write |
-| share | document | `dtctl share document` | Share documents with users or groups | yes | write |
+| share | document | `dtctl share document` | Share documents with users, groups, or the environment | yes | write |
 | unshare | document | `dtctl unshare document` | Remove sharing from documents | yes | write |
 | update | document | `dtctl update document` | Update resources | yes | write |
 | delete | trash | `dtctl delete trash` | Delete resources | yes | delete |
@@ -98,6 +98,23 @@ dtctl update document -f doc.yaml --label team-a --label env:prod
 dtctl get documents --add-fields labels
 dtctl get document acme-config -o yaml   # labels appear at the top level
 ```
+
+Share a document of any type with users, groups, or everyone in the environment. `--environment` takes one or both of two independent modes (`--environment link,public` for both), and each `unshare` mode undoes only its own (`--all` removes user and group shares only):
+
+- `link` creates an environment share at the `--access` level and prints its claim link (`https://<environment>/ui/document/v0/#share=<id>`; `shareId` and `url` in agent mode). Anyone in the environment who opens the link gets that access. A document has at most one link per access level: re-running reuses it, and a read and a read-write link can exist side by side. `unshare --environment link` deletes the link(s), optionally only the one at exactly `--access`.
+- `public` marks the document public (`isPrivate=false`): everyone in the environment can find and read it. `unshare --environment public` marks it private again.
+
+```bash
+dtctl share document my-launchpad --user user-sso-id --access read-write
+dtctl share document my-launchpad --environment link
+dtctl share document my-launchpad --environment link --access read-write
+dtctl share document my-launchpad --environment public
+dtctl unshare document my-launchpad --environment link
+dtctl unshare document my-launchpad --environment public
+dtctl unshare document my-launchpad --environment link,public   # undo both
+```
+
+`apply --share-environment[=read|read-write]` still does both halves for applied notebooks and dashboards, but is deprecated (removal planned in 0.46.0): apply the file, then run `share document <id> --environment link,public` on the IDs `apply -o json` returns.
 
 Version history and deletion (same commands work for `document` or `trash`):
 

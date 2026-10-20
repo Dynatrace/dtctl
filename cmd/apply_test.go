@@ -11,11 +11,12 @@ import (
 
 	"github.com/dynatrace-oss/dtctl/pkg/apply"
 	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/dynatrace-oss/dtctl/pkg/config"
 	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
 )
 
 // newEnvShareMock builds an httptest server that mocks the minimal Document
-// Service endpoints required by EnsureEnvironmentShare. It returns deterministic
+// Service endpoints `apply --share-environment` touches. It returns deterministic
 // behaviour per documentID so tests can drive success/failure paths without a
 // real API. `fail` is the set of document IDs whose POST should return a 500.
 func newEnvShareMock(t *testing.T, fail map[string]bool) (*httptest.Server, map[string]*int64) {
@@ -48,18 +49,22 @@ func newEnvShareMock(t *testing.T, fail map[string]bool) (*httptest.Server, map[
 		}
 	})
 
-	// Metadata + isPrivate PATCH (needed by EnsureEnvironmentShare when a share is created).
+	// :makePublic, counted under "public:<id>". Anything else on a document
+	// (a metadata read, a PATCH) is a call the flag must no longer make.
 	mux.HandleFunc("/platform/document/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/metadata") {
-			w.Header().Set("Content-Type", "application/json")
-			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/platform/document/v1/documents/"), "/metadata")
-			_ = json.NewEncoder(w).Encode(document.DocumentMetadata{ID: id, Name: "doc", Type: "notebook", Version: 1, IsPrivate: true})
+		id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/platform/document/v1/documents/"), ":makePublic")
+		if !ok || r.Method != http.MethodPost {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		if r.Method == http.MethodPatch {
-			w.WriteHeader(http.StatusOK)
-			return
+		key := "public:" + id
+		if _, ok := counts[key]; !ok {
+			var n int64
+			counts[key] = &n
 		}
+		atomic.AddInt64(counts[key], 1)
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	return httptest.NewServer(mux), counts
@@ -199,5 +204,65 @@ func TestApplyCmd_ShareEnvironmentFlagValidation(t *testing.T) {
 				t.Fatalf("validateShareEnvironmentValue(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestEnsureEnvironmentShareForResults_DoesBothHalves: the deprecated flag
+// still does what it always did — a link at the access level and
+// isPrivate=false — through :makePublic, with no metadata read or PATCH (the
+// mock fails on either).
+func TestEnsureEnvironmentShareForResults_DoesBothHalves(t *testing.T) {
+	srv, counts := newEnvShareMock(t, nil)
+	defer srv.Close()
+	c := newEnvShareClient(t, srv)
+
+	results := []apply.ApplyResult{
+		&apply.NotebookApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "nb-1", ResourceType: "notebook"}},
+	}
+	if err := ensureEnvironmentShareForResults(context.Background(), c, results, "read-write"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, key := range []string{"nb-1", "public:nb-1"} {
+		if got := counts[key]; got == nil || atomic.LoadInt64(got) != 1 {
+			t.Errorf("expected %s once, counts=%v", key, counts)
+		}
+	}
+}
+
+// TestEnsureEnvironmentShareForResults_KeepsOtherLevel: a link at another
+// level stays. A document can have one per level, so there is nothing to
+// replace, and replacing it used to break every link already handed out.
+func TestEnsureEnvironmentShareForResults_KeepsOtherLevel(t *testing.T) {
+	s, srv := newEnvShareServer(t) // lp-1 has a read share
+	setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+	c := newEnvShareClient(t, srv)
+
+	results := []apply.ApplyResult{
+		&apply.NotebookApplyResult{ApplyResultBase: apply.ApplyResultBase{ID: "lp-1", ResourceType: "notebook"}},
+	}
+	if err := ensureEnvironmentShareForResults(context.Background(), c, results, "read-write"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertCalls(t, s, "POST environment-share lp-1 read-write\nPOST makePublic")
+}
+
+// TestApplyCmd_ShareEnvironmentDeprecated: the flag keeps its shape from
+// before (a string whose bare form means "read") and is deprecated with a
+// removal version and the replacement, so DTCTL_NO_DEPRECATED masks it.
+func TestApplyCmd_ShareEnvironmentDeprecated(t *testing.T) {
+	f := applyCmd.Flags().Lookup("share-environment")
+	if f == nil {
+		t.Fatal("--share-environment flag not registered")
+	}
+	if f.Value.Type() != "string" || f.NoOptDefVal != "read" {
+		t.Errorf("flag type %q, NoOptDefVal %q; want string and \"read\"", f.Value.Type(), f.NoOptDefVal)
+	}
+	for _, want := range []string{"in 0.44.0", "removal planned in 0.46.0", "share document <id> --environment link,public"} {
+		if !strings.Contains(f.Deprecated, want) {
+			t.Errorf("deprecation %q does not mention %q", f.Deprecated, want)
+		}
+	}
+	if applyCmd.Flags().Lookup("share-access") != nil {
+		t.Error("--share-access must not exist on apply")
 	}
 }

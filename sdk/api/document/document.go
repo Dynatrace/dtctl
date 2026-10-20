@@ -1021,27 +1021,42 @@ func (h *Handler) ClaimEnvironmentShare(ctx context.Context, shareID string) (*E
 	return &result, nil
 }
 
-// SetDocumentPublic flips a document's isPrivate flag to false, making it discoverable
-// to everyone in the environment via the Notebooks/Dashboards app's listing. Requires
-// the current document version for optimistic-locking. Uses the documents PATCH endpoint
-// with a multipart form body (the same shape content updates use).
+// MakeDocumentPublic makes a document public (isPrivate=false): everyone in
+// the environment can find and read it, with no share object involved. It is
+// the half of the "Share with environment" UI action that an environment share
+// does not cover — a share is a link users have to claim. Only the owner (or
+// an admin, for ready-made documents) may call it; on a document that is
+// already public it is a no-op.
+func (h *Handler) MakeDocumentPublic(ctx context.Context, id string) error {
+	return h.setVisibility(ctx, id, "makePublic")
+}
+
+// MakeDocumentPrivate makes a document private again (isPrivate=true),
+// revoking the read access everyone in the environment had through it being
+// public. The owner, direct-share recipients and environment-share claimers
+// keep theirs. Owner-only like MakeDocumentPublic; a no-op on a private
+// document.
+func (h *Handler) MakeDocumentPrivate(ctx context.Context, id string) error {
+	return h.setVisibility(ctx, id, "makePrivate")
+}
+
+// SetDocumentPublic makes a document public.
 //
-// This is the half of the "Share with environment" UI action that the environment-share
-// API does not cover: the env-share creates a claimable grant, but isPrivate=false is a
-// separate owner-settable metadata flag.
+// Deprecated: use MakeDocumentPublic. The version is ignored: the Document
+// API's :makePublic action takes none, and the isPrivate field of PATCH
+// /documents/{id} this used to send is deprecated.
 func (h *Handler) SetDocumentPublic(ctx context.Context, id string, version int) error {
+	return h.MakeDocumentPublic(ctx, id)
+}
+
+// setVisibility calls the document's :makePublic or :makePrivate action.
+func (h *Handler) setVisibility(ctx context.Context, id, action string) error {
 	resp, err := h.client.HTTP().R().SetContext(ctx).
-		SetQueryParam("optimistic-locking-version", fmt.Sprintf("%d", version)).
-		SetMultipartFormData(map[string]string{"isPrivate": "false"}).
-		Patch(fmt.Sprintf("/platform/document/v1/documents/%s", httpclient.PathSegment(id)))
+		Post(fmt.Sprintf("/platform/document/v1/documents/%s:%s", httpclient.PathSegment(id), httpclient.PathSegment(action)))
 	if err != nil {
 		return fmt.Errorf("failed to update document visibility: %w", err)
 	}
 	if err := httpclient.CheckResponse(resp); err != nil {
-		var apiErr *httpclient.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 409 {
-			return fmt.Errorf("document was modified concurrently: %w", ErrVersionConflict)
-		}
 		return fmt.Errorf("failed to update document visibility for %q: %w", id, err)
 	}
 	return nil

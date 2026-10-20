@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dynatrace-oss/dtctl/pkg/auth"
@@ -325,6 +326,18 @@ func withFlagSet(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
 	f := cmd.Flags().Lookup(name)
 	require.NotNil(t, f, "flag %q is not registered on %q", name, cmd.CommandPath())
+	// A list flag's Set appends, and its String() does not parse back, so it
+	// is replaced and restored as a list.
+	if sv, ok := f.Value.(pflag.SliceValue); ok {
+		orig, origChanged := sv.GetSlice(), f.Changed
+		require.NoError(t, sv.Replace(strings.Split(value, ",")))
+		f.Changed = true
+		t.Cleanup(func() {
+			require.NoError(t, sv.Replace(orig))
+			f.Changed = origChanged
+		})
+		return
+	}
 	origValue, origChanged := f.Value.String(), f.Changed
 	require.NoError(t, cmd.Flags().Set(name, value))
 	t.Cleanup(func() {
@@ -362,6 +375,30 @@ func TestScopesForInvocation_FlagOffAddsNothing(t *testing.T) {
 	withFlagSet(t, cmd, "admin-access", "false")
 	got, _ := scopesForInvocation(cmd, "get", "dashboards")
 	require.Equal(t, base, got)
+}
+
+// TestScopesForInvocation_FlagValueSelectsScopes: a `<flag>=<value>` entry
+// applies only to that value. `share --environment link` works on environment
+// shares; `--environment public` only sets isPrivate, so demanding the
+// environment-share scopes there would block a call that does not need them.
+func TestScopesForInvocation_FlagValueSelectsScopes(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"share", "document"})
+	require.NoError(t, err)
+	base, _ := scopesForInvocation(cmd, "share", "document")
+
+	withFlagSet(t, cmd, "environment", "public")
+	got, _ := scopesForInvocation(cmd, "share", "document")
+	require.Equal(t, base, got)
+
+	withFlagSet(t, cmd, "environment", "link")
+	got, _ = scopesForInvocation(cmd, "share", "document")
+	require.Contains(t, got, "document:environment-shares:write")
+	require.Subset(t, got, base)
+
+	// --environment is a list: link counts wherever it appears in it.
+	withFlagSet(t, cmd, "environment", "public,link")
+	got, _ = scopesForInvocation(cmd, "share", "document")
+	require.Contains(t, got, "document:environment-shares:write")
 }
 
 func TestScopesForInvocation_UnlistedCommandIsUnchanged(t *testing.T) {
@@ -410,7 +447,8 @@ func TestFlagScopeRequirementsAreWellFormed(t *testing.T) {
 		require.Equal(t, scopeRequirementKnown, req,
 			"%q has no catalog scopes, so a flag scope on it would never be reported", key)
 
-		for name, scopes := range byFlag {
+		for flagKey, scopes := range byFlag {
+			name, _, _ := strings.Cut(flagKey, "=")
 			require.NotNil(t, cmd.Flags().Lookup(name),
 				"%q has no flag %q — the flag was renamed or removed", key, name)
 			require.NotEmpty(t, scopes, "%q flag %q lists no scopes", key, name)
