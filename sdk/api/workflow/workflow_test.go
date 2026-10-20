@@ -576,3 +576,78 @@ func TestGet_ServerError(t *testing.T) {
 		t.Fatal("Get() expected error for 500")
 	}
 }
+
+// TestWithAdminAccess pins #700: a handler built WithAdminAccess(true) sends
+// adminAccess=true on every call — the existence check apply makes before an
+// update included, or another user's workflow is a 403 before the PUT is ever
+// sent — and the handler it was copied from keeps sending nothing.
+func TestWithAdminAccess(t *testing.T) {
+	seen := map[string]string{}
+	mux := http.NewServeMux()
+	record := func(w http.ResponseWriter, r *http.Request) {
+		key := r.Method + " " + r.URL.Path
+		if v, ok := r.URL.Query()["adminAccess"]; ok {
+			seen[key] = v[0]
+		} else {
+			seen[key] = "<absent>"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/platform/automation/v1/workflows" && r.Method == http.MethodGet:
+			fmt.Fprint(w, `{"count":0,"results":[]}`)
+		case r.URL.Path == "/platform/automation/v1/executions":
+			fmt.Fprint(w, `{"count":0,"results":[]}`)
+		default:
+			fmt.Fprint(w, `{"id":"wf-1","title":"Alert"}`)
+		}
+	}
+	mux.HandleFunc("/platform/automation/v1/workflows", record)
+	mux.HandleFunc("/platform/automation/v1/workflows/wf-1", record)
+	mux.HandleFunc("/platform/automation/v1/executions", record)
+	mux.HandleFunc("/platform/automation/v1/executions/ex-1", record)
+
+	c := newTestClient(t, mux)
+	plain := NewHandler(c)
+	admin := plain.WithAdminAccess(true)
+	ctx := context.Background()
+
+	if _, err := admin.Get(ctx, "wf-1"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if _, err := admin.Update(ctx, "wf-1", []byte(`{"title":"Alert"}`)); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if _, err := admin.Create(ctx, []byte(`{"title":"Alert"}`)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := admin.List(ctx, WorkflowFilters{}, 0, 0); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	execAdmin := NewExecutionHandler(c).WithAdminAccess(true)
+	if _, err := execAdmin.Get(ctx, "ex-1"); err != nil {
+		t.Fatalf("execution Get: %v", err)
+	}
+	if _, err := execAdmin.List(ctx, ExecutionFilters{}, 10); err != nil {
+		t.Fatalf("execution List: %v", err)
+	}
+	for _, key := range []string{
+		"GET /platform/automation/v1/workflows/wf-1",
+		"PUT /platform/automation/v1/workflows/wf-1",
+		"POST /platform/automation/v1/workflows",
+		"GET /platform/automation/v1/workflows",
+		"GET /platform/automation/v1/executions/ex-1",
+		"GET /platform/automation/v1/executions",
+	} {
+		if seen[key] != "true" {
+			t.Errorf("%s: adminAccess = %q, want \"true\"", key, seen[key])
+		}
+	}
+
+	// The original handler is untouched by the copy.
+	if _, err := plain.Get(ctx, "wf-1"); err != nil {
+		t.Fatalf("plain Get: %v", err)
+	}
+	if got := seen["GET /platform/automation/v1/workflows/wf-1"]; got != "<absent>" {
+		t.Errorf("plain handler sent adminAccess=%q, want it absent", got)
+	}
+}

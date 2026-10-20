@@ -57,13 +57,13 @@ Examples:
 			}
 
 			// Resolve name to ID
-			res := resolver.NewResolver(c)
+			res := resolver.NewResolver(c).WithWorkflowAdminAccess(workflowAdminAccess(cmd))
 			workflowID, err := res.ResolveID(resolver.TypeWorkflow, identifier)
 			if err != nil {
 				return err
 			}
 
-			handler := workflow.NewHandler(c)
+			handler := workflow.NewHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 
 			history, err := handler.ListHistory(workflowID)
 			if err != nil {
@@ -78,6 +78,7 @@ Examples:
 			return printer.PrintList(history.Results)
 		},
 	}
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	return c
 }

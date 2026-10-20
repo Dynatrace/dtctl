@@ -67,13 +67,13 @@ Examples:
 			}
 
 			// Resolve name to ID
-			res := resolver.NewResolver(c)
+			res := resolver.NewResolver(c).WithWorkflowAdminAccess(workflowAdminAccess(cmd))
 			workflowID, err := res.ResolveID(resolver.TypeWorkflow, identifier)
 			if err != nil {
 				return err
 			}
 
-			handler := workflow.NewHandler(c)
+			handler := workflow.NewHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 
 			// Get workflow for confirmation and ownership check
 			wf, err := handler.Get(workflowID)
@@ -112,6 +112,7 @@ Examples:
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	return c
 }

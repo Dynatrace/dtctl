@@ -103,6 +103,12 @@ func NewExecutionHandler(c *client.Client) *ExecutionHandler {
 	}
 }
 
+// WithAdminAccess returns a copy of h that reaches the executions of every
+// workflow in the environment (adminAccess=true).
+func (h *ExecutionHandler) WithAdminAccess(on bool) *ExecutionHandler {
+	return &ExecutionHandler{sdk: h.sdk.WithAdminAccess(on)}
+}
+
 // Re-export SDK type so callers don't need to import the SDK directly.
 type ExecutionFilters = sdkworkflow.ExecutionFilters
 

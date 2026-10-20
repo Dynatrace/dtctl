@@ -14,12 +14,22 @@ import (
 
 // Resolver resolves resource names to IDs
 type Resolver struct {
-	client *client.Client
+	client              *client.Client
+	workflowAdminAccess bool
 }
 
 // NewResolver creates a new resolver
 func NewResolver(c *client.Client) *Resolver {
 	return &Resolver{client: c}
+}
+
+// WithWorkflowAdminAccess makes workflow name lookups search every workflow in
+// the environment (adminAccess=true), so a name resolves to a workflow the
+// caller does not own when the command itself runs with --admin-access.
+func (r *Resolver) WithWorkflowAdminAccess(on bool) *Resolver {
+	c := *r
+	c.workflowAdminAccess = on
+	return &c
 }
 
 // ResourceType represents the type of resource to resolve
@@ -154,7 +164,7 @@ func (r *Resolver) searchByName(resourceType ResourceType, name string) ([]Resou
 
 // searchWorkflows searches for workflows by name
 func (r *Resolver) searchWorkflows(name string) ([]Resource, error) {
-	handler := workflow.NewHandler(r.client)
+	handler := workflow.NewHandler(r.client).WithAdminAccess(r.workflowAdminAccess)
 	list, err := handler.List(workflow.WorkflowFilters{}, 500, 0)
 	if err != nil {
 		return nil, err

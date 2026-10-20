@@ -37,8 +37,8 @@ Examples:
 				return err
 			}
 
-			handler := workflow.NewHandler(c)
-			execHandler := workflow.NewExecutionHandler(c)
+			handler := workflow.NewHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
+			execHandler := workflow.NewExecutionHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 
 			// Get workflow details
 			wf, err := handler.Get(workflowID)
@@ -62,6 +62,7 @@ Examples:
 			return printer.Print(wf)
 		},
 	}
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	return c
 }
@@ -216,7 +217,7 @@ Examples:
 				return err
 			}
 
-			handler := workflow.NewExecutionHandler(c)
+			handler := workflow.NewExecutionHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 
 			// Get execution details
 			exec, err := handler.Get(executionID)
@@ -278,6 +279,7 @@ Examples:
 			return printer.Print(exec)
 		},
 	}
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	return c
 }

@@ -132,6 +132,9 @@ Examples:
   # Edit rum-settings.yaml (modify values for specific applications)...
   dtctl apply -f rum-settings.yaml  # Updates all settings in the file
 
+  # Update a workflow you do not own (Workflow admin mode; workflows only)
+  dtctl apply -f workflow.yaml --admin-access
+
   # Apply with template variables
   dtctl apply -f dashboard.yaml --set environment=prod --set owner=team-a
 
@@ -254,6 +257,7 @@ resources in sync with their file definitions.
 				Labels:              labels,
 				CreateSnapshot:      createSnapshot,
 				SnapshotDescription: snapshotDescription,
+				AdminAccess:         workflowAdminAccess(cmd),
 			}
 
 			results, applyErr := applier.Apply(fileData, opts)
@@ -331,6 +335,7 @@ resources in sync with their file definitions.
 	c.Flags().String("snapshot-description", "", "description for the snapshot created by --create-snapshot (max 128 characters)")
 	c.Flags().String("share-environment", "", "share the applied notebook/dashboard with everyone in the environment (values: 'read' or 'read-write'; bare --share-environment defaults to 'read')")
 	c.Flags().Lookup("share-environment").NoOptDefVal = "read"
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")
 	return c

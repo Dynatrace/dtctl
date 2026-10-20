@@ -111,6 +111,12 @@ func NewHandler(c *client.Client) *Handler {
 	}
 }
 
+// WithAdminAccess returns a copy of h that acts on every workflow in the
+// environment, not only the caller's own (adminAccess=true).
+func (h *Handler) WithAdminAccess(on bool) *Handler {
+	return &Handler{sdk: h.sdk.WithAdminAccess(on)}
+}
+
 // listFields is the field projection used for workflow listing: it omits heavy
 // fields (tasks, input, result, guide) not shown in list output. This is a CLI
 // display concern, so it lives here rather than in the SDK.

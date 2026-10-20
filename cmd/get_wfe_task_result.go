@@ -35,7 +35,7 @@ task (e.g. the object from a JavaScript task's default export function).`,
 				return err
 			}
 
-			handler := workflow.NewExecutionHandler(c)
+			handler := workflow.NewExecutionHandler(c).WithAdminAccess(workflowAdminAccess(cmd))
 			result, err := handler.GetTaskResult(executionID, taskName)
 			if err != nil {
 				return err
@@ -52,6 +52,7 @@ task (e.g. the object from a JavaScript task's default export function).`,
 		},
 	}
 	c.Flags().StringP("task", "t", "", "Task name to retrieve the result for (required)")
+	addWorkflowAdminAccessFlag(c)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "task")
 	return c

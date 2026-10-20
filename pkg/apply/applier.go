@@ -177,6 +177,11 @@ type ApplyOptions struct {
 	// SnapshotDescription describes the snapshot created by CreateSnapshot
 	// (from --snapshot-description); ignored without CreateSnapshot.
 	SnapshotDescription string
+
+	// AdminAccess sends adminAccess=true on every Automation API call a
+	// workflow apply makes (from --admin-access), so it can look up and update
+	// a workflow the caller does not own. Workflows only.
+	AdminAccess bool
 }
 
 // ResourceType represents the type of resource
@@ -351,8 +356,22 @@ func (a *Applier) runPostApplyHook(resourceType ResourceType, results []ApplyRes
 	}
 }
 
+// checkAdminAccess refuses --admin-access for anything but a workflow. Only the
+// Automation API has the parameter; silently applying a dashboard without it
+// would leave the caller believing they had acted as an administrator.
+func checkAdminAccess(resourceType ResourceType, opts ApplyOptions) error {
+	if opts.AdminAccess && resourceType != ResourceWorkflow {
+		return fmt.Errorf("--admin-access applies to workflows only, not %s", resourceType)
+	}
+	return nil
+}
+
 // applySingle applies a single resource object and returns the result.
 func (a *Applier) applySingle(resourceType ResourceType, jsonData []byte, opts ApplyOptions) ([]ApplyResult, error) {
+	if err := checkAdminAccess(resourceType, opts); err != nil {
+		return nil, err
+	}
+
 	var result ApplyResult
 	var err error
 
@@ -739,6 +758,9 @@ func detectResourceType(data []byte) (ResourceType, bool, error) {
 // dryRun validates what would be applied without actually applying.
 // Returns a DryRunResult with structured information about the planned operation.
 func (a *Applier) dryRun(resourceType ResourceType, data []byte, opts ApplyOptions) (ApplyResult, error) {
+	if err := checkAdminAccess(resourceType, opts); err != nil {
+		return nil, err
+	}
 	var doc map[string]interface{}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
