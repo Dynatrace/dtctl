@@ -333,6 +333,25 @@ func TestGetTokenResolvesReferenceSetInProcess(t *testing.T) {
 	}
 }
 
+// TestGetTokenWithFallbackPrefersInlineEnvRef: the exported fallback helper
+// must not return a stale keyring entry ahead of the reference either.
+func TestGetTokenWithFallbackPrefersInlineEnvRef(t *testing.T) {
+	t.Setenv("DT_TEST_SECRET", envRefSecret)
+	cfg, _ := loadEnvRefConfig(t)
+	kr := newMockKeyring()
+	kr.data["templated-token"] = "dt0s16.STALE"
+	kr.data["plain-token"] = "from-keyring"
+
+	got, err := getTokenWithFallback(cfg, "templated-token", kr)
+	if err != nil || got != envRefSecret {
+		t.Errorf("reference: got %q, %v; want the resolved reference", got, err)
+	}
+	got, err = getTokenWithFallback(cfg, "plain-token", kr)
+	if err != nil || got != "from-keyring" {
+		t.Errorf("literal: got %q, %v; want the keyring value first", got, err)
+	}
+}
+
 // TestGetTokenUnsetReferenceErrors: a reference whose variable is unset is an
 // error naming the variable, not a silent fallback to a stale keyring value.
 func TestGetTokenUnsetReferenceErrors(t *testing.T) {

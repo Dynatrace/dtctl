@@ -174,10 +174,15 @@ func MigrateTokensToKeyring(cfg *Config) (int, error) {
 
 // GetTokenWithFallback tries to get a token from keyring first, then falls back to config
 func GetTokenWithFallback(cfg *Config, tokenRef string) (string, error) {
-	// Try keyring first
-	if IsKeyringAvailable() {
-		ts := NewTokenStore()
-		token, err := ts.GetToken(tokenRef)
+	return getTokenWithFallback(cfg, tokenRef, newOSKeyring())
+}
+
+func getTokenWithFallback(cfg *Config, tokenRef string, kr keyringBackend) (string, error) {
+	// Try keyring first, except for a ${VAR} reference: a keyring entry of
+	// that name can only be a stale value, so it resolves through the config
+	// (see Config.GetToken).
+	if kr.Available() && !cfg.tokenFromEnvRef(tokenRef) {
+		token, err := kr.Get(tokenRef)
 		if err == nil && token != "" {
 			return token, nil
 		}
