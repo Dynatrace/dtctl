@@ -150,7 +150,7 @@ Repair the entry with dtctl, never with OS keychain tooling — see
 ```bash
 # Verbose output
 dtctl <command> -v     # Details
-dtctl <command> -vv    # Full debug including auth headers
+dtctl <command> -vv    # Full HTTP debug (auth headers redacted)
 ```
 
 ## Platform Notes
