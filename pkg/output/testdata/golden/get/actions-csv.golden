@@ -1,0 +1,4 @@
+APP_ID,ACTION,TITLE,DESCRIPTION,STATEFUL,FULL_NAME
+example.app,send-thing,Send thing,Sends a thing,true,example.app:send-thing
+example.app,list-things,List things,Lists the things,false,example.app:list-things
+example.connector,create-thing,Create thing,Creates a thing,false,example.connector:create-thing

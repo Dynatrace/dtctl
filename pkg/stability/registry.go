@@ -1,6 +1,7 @@
 package stability
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -15,18 +16,20 @@ import (
 // still be named — Cobra cannot attach an error to a command that was never
 // added to the tree, so the unknown-command path consults this instead.
 //
-// It holds strings only: a feature key and the command path it gates. No
+// It holds strings only: a feature key and the command paths it gates. A
+// feature is one opt-in however many commands it spans (`actions` gates both
+// `get actions` and `describe action`). No
 // command tree, no config access. Enablement is decided by the caller and
 // passed in, which keeps the package free of config imports and trivially
 // testable.
 type Registry struct {
 	mu       sync.RWMutex
-	features map[string]string // feature key → command path
+	features map[string][]string // feature key → command paths, in declaration order
 }
 
 // defaultRegistry is the process-wide registry. Development-tier features
 // register into it from their package's init or wiring code.
-var defaultRegistry = &Registry{features: map[string]string{}}
+var defaultRegistry = &Registry{features: map[string][]string{}}
 
 // DefaultRegistry returns the process-wide development-feature registry.
 func DefaultRegistry() *Registry { return defaultRegistry }
@@ -35,7 +38,8 @@ func DefaultRegistry() *Registry { return defaultRegistry }
 // relative to root — e.g. "account" or "serve"). Declaring is independent of
 // registering the command: a feature must be declared even when it is
 // disabled, because that is the only way a disabled command can be named in a
-// block message.
+// block message. Declaring a second path adds it to the feature; declaring a
+// path again is a no-op.
 func (r *Registry) Declare(feature, path string) {
 	feature = normalizeKey(feature)
 	if feature == "" {
@@ -43,7 +47,9 @@ func (r *Registry) Declare(feature, path string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.features[feature] = path
+	if !slices.Contains(r.features[feature], path) {
+		r.features[feature] = append(r.features[feature], path)
+	}
 }
 
 // Features returns the registered feature keys in sorted order.
@@ -58,13 +64,22 @@ func (r *Registry) Features() []string {
 	return keys
 }
 
-// Path returns the command path a feature gates, and false when the feature is
-// not registered.
+// Path returns the first command path a feature gates, and false when the
+// feature is not registered. Use Paths for all of them.
 func (r *Registry) Path(feature string) (string, bool) {
+	paths := r.Paths(feature)
+	if len(paths) == 0 {
+		return "", false
+	}
+	return paths[0], true
+}
+
+// Paths returns every command path a feature gates, in declaration order, or
+// nil when the feature is not registered.
+func (r *Registry) Paths(feature string) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	path, ok := r.features[normalizeKey(feature)]
-	return path, ok
+	return slices.Clone(r.features[normalizeKey(feature)])
 }
 
 // FeatureForCommand returns the feature key gating the given command path (or
@@ -77,24 +92,26 @@ func (r *Registry) FeatureForCommand(path string) (string, bool) {
 	// Longest match wins, so a feature gating a subtree does not shadow a more
 	// specific one nested inside it.
 	best, bestLen := "", -1
-	for feature, gated := range r.features {
-		if segmentPrefix(gated, path) && len(gated) > bestLen {
-			best, bestLen = feature, len(gated)
+	for feature, paths := range r.features {
+		for _, gated := range paths {
+			if segmentPrefix(gated, path) && len(gated) > bestLen {
+				best, bestLen = feature, len(gated)
+			}
 		}
 	}
 	return best, bestLen >= 0
 }
 
-// EnabledPaths returns the command paths of every enabled feature, sorted. The
+// EnabledPaths returns every command path of every enabled feature, sorted. The
 // stability floor uses them as implicit exceptions, so a feature the operator
 // switched on is not blocked a moment later by the default floor.
 func (r *Registry) EnabledPaths(enabledKeys map[string]bool) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var paths []string
-	for feature, path := range r.features {
+	for feature, gated := range r.features {
 		if enabledKeys[session.DevelopmentAll] || enabledKeys[normalizeKey(feature)] {
-			paths = append(paths, path)
+			paths = append(paths, gated...)
 		}
 	}
 	sort.Strings(paths)

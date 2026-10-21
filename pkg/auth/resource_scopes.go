@@ -153,6 +153,9 @@ var ResourceScopes = map[string]AccessScopes{
 	// intents are listed/launched via the App Engine app registry
 	// (/platform/app-engine/registry/v1/apps).
 	"intent": {Read: []string{"app-engine:apps:run"}},
+	// actions are declared in an app's manifest and served flat by the same
+	// registry (/platform/app-engine/registry/v1/actions).
+	"action": {Read: []string{"app-engine:apps:run"}},
 	// runtime SDK metadata from the function executor
 	// (/platform/app-engine/function-executor/v1/sdk-versions).
 	"sdk-version": {Read: []string{"app-engine:apps:run"}},
