@@ -81,6 +81,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Patch releases are cut from a release/* branch, not main.
+          target-branch: ${{ github.ref_name }}
 
   tag-sdk:
     name: Tag SDK Module
