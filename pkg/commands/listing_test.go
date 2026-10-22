@@ -83,6 +83,11 @@ func TestBuild_SchemaVersion(t *testing.T) {
 	require.Equal(t, "verb-noun", listing.CommandModel)
 }
 
+func TestBuildVerbs_MatchesBuild(t *testing.T) {
+	root := newTestRoot()
+	require.Equal(t, Build(root).Verbs, BuildVerbs(root))
+}
+
 func TestBuild_RequiredScopes(t *testing.T) {
 	root := newTestRoot()
 	listing := Build(root)

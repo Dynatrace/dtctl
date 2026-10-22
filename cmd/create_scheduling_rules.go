@@ -107,6 +107,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing scheduling rule definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")

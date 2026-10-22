@@ -270,6 +270,13 @@ var defaultTimeFormats = &TimeFormats{
 	Unix:     "Unix timestamp (e.g., 1705312800)",
 }
 
+// BuildVerbs walks the Cobra command tree rooted at root and returns the
+// Listing's verbs alone. Unlike Build it does no I/O: Build also discovers
+// plugins, which reads the directories on PATH.
+func BuildVerbs(root *cobra.Command) map[string]*Verb {
+	return buildVerbs(root)
+}
+
 // Build walks the Cobra command tree rooted at root and returns a Listing.
 func Build(root *cobra.Command) *Listing {
 	verbs := buildVerbs(root)

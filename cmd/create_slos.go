@@ -93,6 +93,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing SLO definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")

@@ -170,6 +170,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing the monitoring configuration (scope + value), or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("scope", "", "scope for the monitoring configuration (e.g. HOST-1234, only for create)")
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	stability.MarkStable(c)

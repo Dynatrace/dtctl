@@ -127,8 +127,8 @@ type Request struct {
 // to what the dtctl CLI would print for the same command line, credentials,
 // and files — including --agent envelopes, table layouts, and error messages.
 type Result struct {
-	// ExitCode is the CLI process exit code (0 success; sysexits-style codes
-	// for errors, e.g. 64 usage, 77 permission).
+	// ExitCode is the CLI process exit code: 0 success, 1 error, 2 usage,
+	// 3 not authenticated, 4 not found, 5 permission (pkg/client/errors.go).
 	ExitCode int
 	Stdout   []byte
 	Stderr   []byte
@@ -356,14 +356,18 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 
 // argv resolves the request's argument vector: Argv verbatim when set,
 // otherwise Command split with POSIX shell rules.
-func (r *Request) argv() ([]string, error) {
-	if len(r.Argv) > 0 {
-		return r.Argv, nil
+func (r *Request) argv() ([]string, error) { return commandArgv(r.Command, r.Argv) }
+
+// commandArgv is a request's argument vector: argv verbatim when set,
+// otherwise command split with POSIX shell rules.
+func commandArgv(command string, argv []string) ([]string, error) {
+	if len(argv) > 0 {
+		return argv, nil
 	}
-	if r.Command == "" {
+	if command == "" {
 		return nil, errors.New("engine: request has no command (set Command or Argv)")
 	}
-	argv, err := shlex.Split(r.Command)
+	argv, err := shlex.Split(command)
 	if err != nil {
 		return nil, fmt.Errorf("engine: parse command: %w", err)
 	}
@@ -384,30 +388,36 @@ func (r *Request) validate() error {
 	if r.Token == "" {
 		return errors.New("engine: Token is required")
 	}
-	if r.SafetyLevel != "" {
+	return validateSurface(r.SafetyLevel, r.MinStability, r.StabilityExceptions)
+}
+
+// validateSurface checks the fields that decide a request's surface, which
+// Request and ParseRequest share.
+func validateSurface(safetyLevel, minStability string, exceptions []string) error {
+	if safetyLevel != "" {
 		valid := false
 		for _, l := range config.ValidSafetyLevels() {
-			if config.SafetyLevel(r.SafetyLevel) == l {
+			if config.SafetyLevel(safetyLevel) == l {
 				valid = true
 				break
 			}
 		}
 		if !valid {
-			return fmt.Errorf("engine: invalid safety level %q", r.SafetyLevel)
+			return fmt.Errorf("engine: invalid safety level %q", safetyLevel)
 		}
 	}
-	if r.MinStability != "" {
-		level, err := config.ParseStabilityLevel(r.MinStability)
+	if minStability != "" {
+		level, err := config.ParseStabilityLevel(minStability)
 		if err != nil || level == config.StabilityDevelopment {
 			return fmt.Errorf("engine: invalid minimum stability %q; valid levels are "+
 				"experimental, stable (development surface is not reachable from a request)",
-				r.MinStability)
+				minStability)
 		}
 	}
 	// Rejected, not ignored: an exception the engine silently dropped would
 	// look like the command is simply gone, and the host would have no way to
 	// tell a typo from a tier it misjudged.
-	if _, err := stability.ParseExceptions(r.StabilityExceptions); err != nil {
+	if _, err := stability.ParseExceptions(exceptions); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
 	return nil

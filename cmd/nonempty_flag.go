@@ -66,12 +66,7 @@ func (v *nonEmptySliceValue) Reset() {
 // error. It is the whole fix for a flag that is optional, or required only in
 // some modes: an absent flag keeps whatever the command does without it.
 func rejectEmptyFlag(cmd *cobra.Command, name string) {
-	flag := cmd.Flags().Lookup(name)
-	if flag == nil {
-		// Persistent flags only join cmd.Flags() once cobra parses, so a
-		// global flag has to be looked up where it was declared.
-		flag = cmd.PersistentFlags().Lookup(name)
-	}
+	flag := lookupOwnFlag(cmd, name)
 	if flag == nil {
 		panic(fmt.Sprintf("rejectEmptyFlag: %s has no --%s flag", cmd.Name(), name))
 	}
