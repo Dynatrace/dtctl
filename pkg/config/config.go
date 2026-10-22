@@ -70,6 +70,10 @@ func LoadFromWithoutExpansion(p string) (*Config, error) { return session.LoadFr
 func LoadWithoutExpansion() (*Config, error)             { return session.LoadWithoutExpansion() }
 func NewConfig() *Config                                 { return session.NewConfig() }
 
+// IsEnvReference reports whether a config value names an environment variable
+// that is resolved at load — see sdk/session.IsEnvReference.
+func IsEnvReference(s string) bool { return session.IsEnvReference(s) }
+
 // Alias name validation (alias data lives in the shared schema; alias
 // execution stays in cmd/).
 func ValidateAliasName(name string) error { return session.ValidateAliasName(name) }
