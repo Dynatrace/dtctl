@@ -26,6 +26,15 @@ builds:
       - -X github.com/dynatrace-oss/dtctl/pkg/version.Version={{.Version}}
       - -X github.com/dynatrace-oss/dtctl/pkg/version.Commit={{.ShortCommit}}
       - -X github.com/dynatrace-oss/dtctl/pkg/version.Date={{.Date}}
+    hooks:
+      post:
+        # Release pipeline only: with SIGNED_WINDOWS_DIR set, replace the freshly
+        # built dtctl.exe with the Authenticode-signed one from the sign jobs before
+        # it is archived. A missing signed file fails the release rather than
+        # shipping an unsigned binary. A no-op for local and snapshot builds.
+        - cmd: >-
+            sh -c 'if [ "{{ .Os }}" = "windows" ] && [ -n "{{ index .Env "SIGNED_WINDOWS_DIR" }}" ]; then
+            cp "{{ index .Env "SIGNED_WINDOWS_DIR" }}/{{ .Arch }}/dtctl.exe" "{{ .Path }}"; fi'
 
 archives:
   - formats:

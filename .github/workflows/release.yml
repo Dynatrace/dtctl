@@ -10,9 +10,20 @@ name: Release
 #      the manifest + pkg/version/version.go, plus generated notes). Review it.
 #   2. After you merge that release PR → run this workflow AGAIN; release-please
 #      detects the merged release PR, creates the git tag and GitHub Release, and
-#      the gated GoReleaser job below builds, signs, and publishes the artifacts.
+#      the gated build, sign and GoReleaser jobs below build, sign, and publish the
+#      artifacts.
 #
 # So a full release is: dispatch → merge the release PR → dispatch again.
+#
+# WINDOWS SIGNING: dtctl.exe is Authenticode-signed by the Dynatrace cloud signing
+# service before anything is packaged. Build compiles the release and hands both
+# Windows executables to the reusable Dynatrace/dt-sign-service-actions workflow;
+# GoReleaser then runs the full release again, and a build post-hook in
+# .goreleaser.yaml swaps the signed executables in before archiving. The zips,
+# their SBOMs, checksums.txt and its cosign bundle are therefore all produced over
+# the signed binaries. (GoReleaser OSS cannot package a prebuilt dist/, hence the
+# second run.) The signing service only trusts OIDC tokens issued for
+# refs/heads/main, so always dispatch from main — a republish included.
 #
 # Note: release-please creates the tag with GITHUB_TOKEN, which would not trigger
 # `on: push: tags` workflows anyway — that is why GoReleaser runs as a gated job
@@ -167,16 +178,17 @@ jobs:
           go build ./...
           echo "pkg/engine is importable from an external module at $TAG"
 
-  goreleaser:
-    name: GoReleaser
+  # The release is split in three so dtctl.exe can be Authenticode-signed before it
+  # is packaged — see WINDOWS SIGNING at the top of this file.
+  build:
+    name: Build
     needs: release-please
     # !cancelled(): with republish_tag set, release-please is skipped, and a job
     # whose need was skipped is skipped too unless its condition says otherwise.
     if: ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' || inputs.republish_tag != '') }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write # Required for cosign keyless signing
+      contents: read
     steps:
       # A hand-typed tag is validated before anything is checked out.
       - name: Validate the republish tag
@@ -222,6 +234,129 @@ jobs:
         with:
           go-version: '1.26.10'
 
+      - name: Build with GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: latest
+          args: build --clean ${{ steps.config.outputs.args }}
+        env:
+          # The release commit also carries sdk/vX.Y.Z (tag-sdk), which is not a
+          # semver tag; pin GoReleaser to the release tag so it never picks that one.
+          GORELEASER_CURRENT_TAG: ${{ inputs.republish_tag || needs.release-please.outputs.tag_name }}
+
+      # The sign workflow signs a file at the root of its input artifact, so the
+      # executables are staged out of GoReleaser's dtctl_windows_<arch>_<variant>/
+      # directories first; a wildcard in upload-artifact's path would keep them.
+      - name: Stage unsigned Windows executables
+        run: |
+          set -euo pipefail
+          mkdir -p unsigned/amd64 unsigned/arm64
+          cp dist/dtctl_windows_amd64*/dtctl.exe unsigned/amd64/dtctl.exe
+          cp dist/dtctl_windows_arm64*/dtctl.exe unsigned/arm64/dtctl.exe
+
+      - name: Upload unsigned Windows amd64 executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-amd64
+          path: unsigned/amd64/dtctl.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload unsigned Windows arm64 executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-arm64
+          path: unsigned/arm64/dtctl.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-windows-amd64:
+    name: Sign Windows amd64
+    needs: build
+    permissions:
+      contents: read
+      id-token: write # Federates into the cloud signing service
+    uses: Dynatrace/dt-sign-service-actions/.github/workflows/sign-windows.yml@v1
+    with:
+      unsigned-artifact-name: unsigned-windows-amd64
+      file-to-sign: dtctl.exe
+      signed-artifact-name: signed-windows-amd64
+    # The sync pushes the Authenticode key and certificate under _AUTHENTICODE
+    # names; the sign workflow takes them under its generic input names.
+    secrets:
+      SIGNING_GCP_PROJECT_ID: ${{ secrets.SIGNING_GCP_PROJECT_ID }}
+      SIGNING_GCP_KMS_LOCATION: ${{ secrets.SIGNING_GCP_KMS_LOCATION }}
+      SIGNING_GCP_KMS_KEYRING: ${{ secrets.SIGNING_GCP_KMS_KEYRING }}
+      SIGNING_GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.SIGNING_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      SIGNING_GCP_SERVICE_ACCOUNT: ${{ secrets.SIGNING_GCP_SERVICE_ACCOUNT }}
+      SIGNING_GCP_KMS_KEY: ${{ secrets.SIGNING_GCP_KMS_KEY_AUTHENTICODE }}
+      SIGNING_CODE_SIGNING_CERT: ${{ secrets.SIGNING_CODE_SIGNING_CERT_AUTHENTICODE }}
+
+  sign-windows-arm64:
+    name: Sign Windows arm64
+    needs: build
+    permissions:
+      contents: read
+      id-token: write # Federates into the cloud signing service
+    uses: Dynatrace/dt-sign-service-actions/.github/workflows/sign-windows.yml@v1
+    with:
+      unsigned-artifact-name: unsigned-windows-arm64
+      file-to-sign: dtctl.exe
+      signed-artifact-name: signed-windows-arm64
+    secrets:
+      SIGNING_GCP_PROJECT_ID: ${{ secrets.SIGNING_GCP_PROJECT_ID }}
+      SIGNING_GCP_KMS_LOCATION: ${{ secrets.SIGNING_GCP_KMS_LOCATION }}
+      SIGNING_GCP_KMS_KEYRING: ${{ secrets.SIGNING_GCP_KMS_KEYRING }}
+      SIGNING_GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.SIGNING_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      SIGNING_GCP_SERVICE_ACCOUNT: ${{ secrets.SIGNING_GCP_SERVICE_ACCOUNT }}
+      SIGNING_GCP_KMS_KEY: ${{ secrets.SIGNING_GCP_KMS_KEY_AUTHENTICODE }}
+      SIGNING_CODE_SIGNING_CERT: ${{ secrets.SIGNING_CODE_SIGNING_CERT_AUTHENTICODE }}
+
+  goreleaser:
+    name: GoReleaser
+    needs: [release-please, sign-windows-amd64, sign-windows-arm64]
+    # release-please is skipped for a republish (see build), so its result cannot
+    # gate this job; both signatures must have succeeded either way.
+    if: ${{ !cancelled() && needs.sign-windows-amd64.result == 'success' && needs.sign-windows-arm64.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Required for cosign keyless signing
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Same ref as the build job; republish_tag was validated there.
+          ref: ${{ inputs.republish_tag != '' && format('refs/tags/{0}', inputs.republish_tag) || needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+
+      - name: Use the dispatched ref's GoReleaser config for a republish
+        id: config
+        if: ${{ inputs.republish_tag != '' }}
+        env:
+          CONFIG_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git show "$CONFIG_REF:.goreleaser.yaml" > "$RUNNER_TEMP/goreleaser.yaml"
+          echo "args=--config $RUNNER_TEMP/goreleaser.yaml" >> "$GITHUB_OUTPUT"
+
+      - name: Download signed Windows amd64 executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-windows-amd64
+          path: ${{ runner.temp }}/signed/amd64
+
+      - name: Download signed Windows arm64 executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-windows-arm64
+          path: ${{ runner.temp }}/signed/arm64
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.6'
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
@@ -237,6 +372,9 @@ jobs:
           owner: dynatrace-oss
           repositories: homebrew-tap
 
+      # SIGNED_WINDOWS_DIR switches on the build post-hook in .goreleaser.yaml that
+      # replaces each freshly built dtctl.exe with its signed counterpart before
+      # archiving, so every asset derived from the zips covers the signed binary.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
@@ -245,3 +383,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          # By now tag-sdk has created sdk/vX.Y.Z on the same commit; see build.
+          GORELEASER_CURRENT_TAG: ${{ inputs.republish_tag || needs.release-please.outputs.tag_name }}
+          SIGNED_WINDOWS_DIR: ${{ runner.temp }}/signed
