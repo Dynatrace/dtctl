@@ -28,8 +28,9 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 
 | Safety level | Scopes |
 | --- | --- |
-| read | `storage:buckets:read` |
-| write | `storage:buckets:write` |
+| delete | `storage:bucket-definitions:delete` |
+| read | `storage:bucket-definitions:read` |
+| write | `storage:bucket-definitions:write` |
 <!-- GENERATED:grail-buckets:end -->
 
 ## Output

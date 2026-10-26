@@ -135,6 +135,28 @@ func TestRequiredScopesFor(t *testing.T) {
 	require.Equal(t, scopeRequirementPerCall, req)
 }
 
+// TestBucketCommandsRequireBucketDefinitionScopes holds the bucket commands to
+// the scopes their endpoints declare: /platform/storage/management/v1/
+// bucket-definitions takes storage:bucket-definitions:*, not the
+// storage:buckets:* scopes a query or an ingest needs for a bucket's data.
+func TestBucketCommandsRequireBucketDefinitionScopes(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"get", "buckets"}, []string{"storage:bucket-definitions:read"}},
+		{[]string{"describe", "bucket"}, []string{"storage:bucket-definitions:read"}},
+		{[]string{"create", "bucket"}, []string{"storage:bucket-definitions:write"}},
+		{[]string{"delete", "bucket"}, []string{"storage:bucket-definitions:delete"}},
+	} {
+		cmd, _, err := rootCmd.Find(c.args)
+		require.NoError(t, err, "find %v", c.args)
+		got, req := requiredScopesFor(verbResource(cmd))
+		require.Equal(t, scopeRequirementKnown, req, "%v", c.args)
+		require.Equal(t, c.want, got, "%v", c.args)
+	}
+}
+
 func TestComputeScopeVerdict(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"automation:workflows:write", "x"}, true)
