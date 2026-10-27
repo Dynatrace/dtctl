@@ -296,6 +296,9 @@ var flagScopeRequirements = map[string]map[string][]string{
 // requirement of the command line in front of us, not of the command in general.
 func scopesForInvocation(c *cobra.Command, verb, resource string) ([]string, scopeRequirement) {
 	required, req := requiredScopesIn(c.Root(), verb, resource)
+	if req == scopeRequirementNone {
+		required, req = nestedScopesIn(c, verb)
+	}
 	extra := flagContributedScopes(c, verb, resource)
 	if len(extra) == 0 || req != scopeRequirementKnown {
 		// Augmenting anything but a known requirement would invent one: a per-call
@@ -451,6 +454,28 @@ func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, sco
 	}
 	if len(v.RequiredScopes) > 0 { // DQL verbs (query/verify/wait)
 		return v.RequiredScopes, scopeRequirementKnown
+	}
+	return nil, scopeRequirementNone
+}
+
+// nestedScopesIn looks c up in the catalog by its whole path below the verb,
+// for a command nested below a resource (exec copilot nl2dql), which the
+// verb's resources do not list. It reports the scopes of c's own node only:
+// an ancestor's entry is not c's requirement.
+func nestedScopesIn(c *cobra.Command, verb string) ([]string, scopeRequirement) {
+	var path []string
+	for n := c; n.HasParent() && n.Parent().HasParent(); n = n.Parent() {
+		path = append([]string{n.Name()}, path...)
+	}
+	node, ok := commands.Build(c.Root()).Verbs[verb]
+	for _, name := range path {
+		if !ok {
+			return nil, scopeRequirementNone
+		}
+		node, ok = node.Subcommands[name]
+	}
+	if ok && len(path) > 1 && len(node.RequiredScopes) > 0 {
+		return node.RequiredScopes, scopeRequirementKnown
 	}
 	return nil, scopeRequirementNone
 }

@@ -44,6 +44,8 @@
 | delete-credentials |
 | describe |
 | describe-context |
+| document-search |
+| dql2nl |
 | environment-share |
 | export |
 | get-contexts |
@@ -56,6 +58,7 @@
 | logout |
 | lql-to-dql |
 | migrate-tokens |
+| nl2dql |
 | openpipeline-dql-processor |
 | openpipeline-matcher |
 | preview-processor |

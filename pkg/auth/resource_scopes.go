@@ -165,6 +165,12 @@ var ResourceScopes = map[string]AccessScopes{
 	"copilot":  {Run: []string{"davis-copilot:conversations:execute"}},
 	// lists Davis CoPilot skills (/platform/davis/copilot/v1/skills)
 	"copilot-skill": {Read: []string{"davis-copilot:conversations:execute"}},
+	// The CoPilot skills under exec copilot. Each operation declares a scope
+	// of its own (nl2dql:generate, dql2nl:explain, document-search:execute),
+	// not the conversation scope of their parent.
+	"nl2dql":          {Run: []string{"davis-copilot:nl2dql:execute"}},
+	"dql2nl":          {Run: []string{"davis-copilot:dql2nl:execute"}},
+	"document-search": {Run: []string{"davis-copilot:document-search:execute"}},
 
 	// Notifications (/platform/notification/v2/...)
 	"notification": {Read: []string{"notification:notifications:read"}, Write: []string{"notification:notifications:write"}},
