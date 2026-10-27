@@ -139,7 +139,9 @@ var ResourceScopes = map[string]AccessScopes{
 	"settings-schema": {Read: []string{"settings:schemas:read"}},
 
 	// SLOs
-	"slo":          {Read: []string{"slo:slos:read", "slo:objective-templates:read"}, Write: []string{"slo:slos:write"}},
+	// Evaluating an SLO (exec slo: evaluation:start and evaluation:poll)
+	// declares slo:slos:read; it reads no objective template.
+	"slo":          {Read: []string{"slo:slos:read", "slo:objective-templates:read"}, Write: []string{"slo:slos:write"}, Run: []string{"slo:slos:read"}},
 	"slo-template": {Read: []string{"slo:objective-templates:read"}},
 
 	// Extensions
