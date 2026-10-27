@@ -231,6 +231,61 @@ var ResourceScopes = map[string]AccessScopes{
 	"license-settings": platformManagementRead,
 }
 
+// CommandScope is the scopes of one command whose calls differ from its
+// resource's at the verb's access level.
+type CommandScope struct {
+	// Required replaces the resource's scopes as the command's requirement.
+	Required []string
+}
+
+// sharing reads the document's metadata for the ownership check, then works
+// on its direct shares (/platform/document/v1/direct-shares), whose
+// operations declare the document:direct-shares:* scopes. It does not write
+// the document.
+var (
+	shareScopes = CommandScope{Required: []string{"document:documents:read", "document:direct-shares:read", "document:direct-shares:write"}}
+	// removing some recipients writes the share, removing all deletes it
+	unshareScopes = CommandScope{Required: []string{
+		"document:documents:read", "document:direct-shares:read", "document:direct-shares:write", "document:direct-shares:delete",
+	}}
+)
+
+// CommandScopes are the commands whose scopes ResourceScopes cannot express,
+// because the verb calls other endpoints than its resource's at its access
+// level. Keys are "<verb> <resource>" with the resource's singular name.
+// ScopesForCommand reads them in place of ResourceScopes.
+var CommandScopes = map[string]CommandScope{
+	// :validate declares davis:analyzers:execute, although verify is a read:
+	// it validates an execution's input without executing the analyzer.
+	"verify analyzer": {Required: []string{"davis:analyzers:execute"}},
+
+	"share document":    shareScopes,
+	"share dashboard":   shareScopes,
+	"share notebook":    shareScopes,
+	"unshare document":  unshareScopes,
+	"unshare dashboard": unshareScopes,
+	"unshare notebook":  unshareScopes,
+}
+
+// lookupCommandScopes finds the entry of verb on resource, by the resource's
+// singular or plural name.
+func lookupCommandScopes(verb, resource string) (CommandScope, bool) {
+	if cs, ok := CommandScopes[verb+" "+resource]; ok {
+		return cs, true
+	}
+	cs, ok := CommandScopes[verb+" "+singularize(resource)]
+	return cs, ok
+}
+
+// ScopesForCommand returns the scopes verb requires on resource: its
+// CommandScopes entry, or else ScopesForResource at access.
+func ScopesForCommand(verb, resource string, access Access) []string {
+	if cs, ok := lookupCommandScopes(verb, resource); ok {
+		return cs.Required
+	}
+	return ScopesForResource(resource, access)
+}
+
 // localResources are catalog subcommands that operate entirely on the local
 // machine (config, contexts, credentials, skills, aliases) and therefore
 // require no platform scopes. They are excluded from the scope catalog and the

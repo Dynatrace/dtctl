@@ -466,9 +466,9 @@ _mutating | access: write | safety: OperationUpdate_
 
 | Resource | Required scopes |
 | --- | --- |
-| dashboard | `document:documents:write` |
-| document | `document:documents:write` |
-| notebook | `document:documents:write` |
+| dashboard | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
+| document | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
+| notebook | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
 
 
 ## skills
@@ -504,9 +504,9 @@ _mutating | access: write | safety: OperationUpdate_
 
 | Resource | Required scopes |
 | --- | --- |
-| dashboard | `document:documents:write` |
-| document | `document:documents:write` |
-| notebook | `document:documents:write` |
+| dashboard | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write`, `document:direct-shares:delete` |
+| document | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write`, `document:direct-shares:delete` |
+| notebook | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write`, `document:direct-shares:delete` |
 
 
 ## update
@@ -550,7 +550,7 @@ _read-only | access: read_
 
 | Resource | Required scopes |
 | --- | --- |
-| analyzer | `davis:analyzers:read` |
+| analyzer | `davis:analyzers:execute` |
 | openpipeline-dql-processor | `openpipeline:configurations:read` |
 | openpipeline-matcher | `openpipeline:configurations:read` |
 | query | _(none declared)_ |
