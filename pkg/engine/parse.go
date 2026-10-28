@@ -63,6 +63,23 @@ type Parsed struct {
 	// name the command whose help it is, and a host building policy from them
 	// should not read them as a command to run.
 	Help bool
+
+	// Flags are the flags the command line set, by long name (-o is
+	// "output"), sorted by name. A repeatable flag has one entry per value, in
+	// the order given; a flag left at its default is not listed. Args are the
+	// positional arguments the command receives, in order. Both are never nil,
+	// and empty for Help.
+	Flags []ParsedFlag
+	Args  []string
+}
+
+// ParsedFlag is one flag value a command line set, as the command reads it: a
+// boolean is "true" or "false", a count its number.
+//
+// Experimental, as Parse.
+type ParsedFlag struct {
+	Name  string // the long name, without dashes
+	Value string
 }
 
 // ScopeRequirement says how certain Parsed.RequiredScopes is.
@@ -155,7 +172,17 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 		RequiredScopes: res.RequiredScopes,
 		Scopes:         scopes,
 		Help:           res.Help,
+		Flags:          parsedFlagsOf(res.Flags),
+		Args:           res.Args,
 	}, nil
+}
+
+func parsedFlagsOf(flags []cmd.ParsedFlag) []ParsedFlag {
+	out := make([]ParsedFlag, 0, len(flags))
+	for _, f := range flags {
+		out = append(out, ParsedFlag{Name: f.Name, Value: f.Value})
+	}
+	return out
 }
 
 // scopeRequirementOf maps cmd's name for a requirement to its constant. A
