@@ -158,6 +158,8 @@ func TestFileFlagAnnotationsAreValid(t *testing.T) {
 		annotationInputWithoutArgs: true,
 		annotationScopes:           true,
 		annotationArgumentFlag:     true,
+		annotationPrompts:          true,
+		annotationRefusalOnly:      true,
 	}
 	for _, k := range stabilityAnnotationKeys {
 		known[k] = true
@@ -170,6 +172,16 @@ func TestFileFlagAnnotationsAreValid(t *testing.T) {
 			}
 			if k == annotationInputWithoutArgs && v != "true" {
 				t.Errorf("%s: %s = %q, want \"true\"", c.CommandPath(), k, v)
+			}
+			if k == annotationRefusalOnly && v != "true" {
+				t.Errorf("%s: %s = %q, want \"true\"", c.CommandPath(), k, v)
+			}
+			if k == annotationPrompts {
+				for _, name := range strings.Split(v, ",") {
+					if lookupOwnFlag(c, name) == nil {
+						t.Errorf("%s: %s names --%s, which is not a flag of the command", c.CommandPath(), k, name)
+					}
+				}
 			}
 			if k == annotationScopes && v != scopesInputDependent {
 				t.Errorf("%s: %s = %q, want %q", c.CommandPath(), k, v, scopesInputDependent)

@@ -44,11 +44,18 @@ type ParseResult struct {
 	Resource string // "" when the verb takes none (apply)
 
 	// InputFiles and OutputFiles are the files the command reads and writes,
-	// as vfs.Key names, sorted and de-duplicated. "-" is never one.
+	// as vfs.Key names, sorted and de-duplicated. The stdin values ("-",
+	// "@-") are never one; a path that only resolves to the key "-" (./-) is a
+	// file, as it is at run time.
 	InputFiles  []string
 	OutputFiles []string
-	// RequiresInput is true when the command reads stdin: a "-" file value,
-	// "-d @-", or a command such as query given no argument and no file.
+	// RequiresInput is true when the command may read stdin: a "-" file value,
+	// "-d @-", a command such as query given no argument and no file, or a
+	// command that asks for confirmation (delete, restore) and was given
+	// neither its skip flag (--yes, --force) nor --plain, --agent or --dry-run.
+	// "May": some commands ask only in one case (restore trash for a single
+	// document), and a refused or missing answer cancels the command with exit
+	// 0.
 	RequiresInput bool
 
 	// RequiredScopes are the token scopes the catalog names for the command,
@@ -58,11 +65,22 @@ type ParseResult struct {
 	// "input_dependent" (decided by the input file's content, apply).
 	RequiredScopes []string
 	Scopes         string
+
+	// Help is true when the command line asks for help text (--help) or names
+	// a group that only prints its usage: nothing would run, and Verb and
+	// Resource name the command whose help it is, not a command to run. Scopes
+	// is "none" because nothing is called.
+	Help bool
 }
 
 // ParseError is a command line that Execute would refuse before running the
-// command body. Code, Message and Suggestions are the error of the --agent
-// envelope Execute prints for it, and ExitCode is the exit code it returns.
+// command body. ExitCode is the exit code Execute returns for it. Code,
+// Message and Suggestions classify the refusal the way the --agent envelope
+// does, and are what Execute prints there for an error in the command line
+// itself (an unknown flag, a missing argument). A refusal of the surface (the
+// profile, the stability floor, a blocked command) is printed by Execute as
+// plain text even under --agent, so for those Code is Parse's classification
+// and not text Execute outputs.
 type ParseError struct {
 	Code        string
 	Message     string
@@ -177,19 +195,20 @@ func parseTree(root *cobra.Command, argv []string) (*ParseResult, error) {
 			executed = root
 		}
 		verb, resource := verbResource(executed)
-		return &ParseResult{Verb: verb, Resource: resource, Scopes: scopeRequirementNone.String()}, nil
+		return &ParseResult{Verb: verb, Resource: resource, Scopes: scopeRequirementNone.String(), Help: true}, nil
 	}
 	return newParseResult(ran, ranArgs), nil
 }
 
 // installParseHook replaces the body of every runnable command with record.
-// A group command's requireSubcommand stays: it is the check that refuses a
-// missing or unknown resource (`get`, `get bogus`), and it runs nothing.
+// A group command's refusal stays (requireSubcommand, or a RunE declared with
+// markRefusalOnly): it is the check that refuses a missing or unknown resource
+// (`get`, `get bogus`), and it runs nothing.
 func installParseHook(cmd *cobra.Command, record func(*cobra.Command, []string)) {
 	for _, sub := range cmd.Commands() {
 		installParseHook(sub, record)
 	}
-	if cmd.RunE != nil && !isRequireSubcommand(cmd.RunE) {
+	if cmd.RunE != nil && !isRefusal(cmd) {
 		cmd.RunE = func(c *cobra.Command, args []string) error {
 			record(c, args)
 			return nil
@@ -200,9 +219,11 @@ func installParseHook(cmd *cobra.Command, record func(*cobra.Command, []string))
 	}
 }
 
-// isRequireSubcommand reports whether run is requireSubcommand itself.
-func isRequireSubcommand(run func(*cobra.Command, []string) error) bool {
-	return reflect.ValueOf(run).Pointer() == reflect.ValueOf(requireSubcommand).Pointer()
+// isRefusal reports whether cmd's RunE only refuses a missing or unknown
+// subcommand: requireSubcommand itself, or a RunE its constructor declared.
+func isRefusal(cmd *cobra.Command) bool {
+	return reflect.ValueOf(cmd.RunE).Pointer() == reflect.ValueOf(requireSubcommand).Pointer() ||
+		cmd.Annotations[annotationRefusalOnly] == "true"
 }
 
 func newParseError(ctx context.Context, err error, code int) *ParseError {
@@ -261,6 +282,9 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 			}
 		}
 	})
+	if promptsFor(c) {
+		res.RequiresInput = true
+	}
 	// Only a flag standing in for the argument replaces stdin: query
 	// --segments-file names a file, but the query still comes from stdin.
 	if c.Annotations[annotationInputWithoutArgs] == "true" && len(args) == 0 && !argumentGiven {
@@ -274,11 +298,34 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 	return res
 }
 
+// promptsFor reports whether c, as invoked, would ask for confirmation on
+// stdin: it is declared with markPrompts and nothing the run was given keeps
+// it from asking. It reads the state the pre-run hooks left, so --agent (which
+// implies plain mode) and --dry-run count as Execute sees them.
+func promptsFor(c *cobra.Command) bool {
+	skips := c.Annotations[annotationPrompts]
+	if skips == "" {
+		return false
+	}
+	ctx := cmdContext(c)
+	if plainMode(ctx) || dryRun(ctx) {
+		return false
+	}
+	for _, name := range strings.Split(skips, ",") {
+		// A bool flag skips when true, a string flag (--confirm) when set.
+		if f := c.Flags().Lookup(name); f != nil && f.Changed && f.Value.String() != "" && f.Value.String() != "false" {
+			return false
+		}
+	}
+	return true
+}
+
 // addFileKey adds the file a value names to set. A value that names no file
-// ("", ".", "@" with nothing after it) or names "-" adds nothing: "-" is
-// never reported as a path.
+// ("", ".", "@" with nothing after it) adds nothing. The stdin values are
+// handled by the caller before this: a path that merely resolves to the key
+// "-" (./-, /-) is a file named "-", as it is at run time.
 func addFileKey(set map[string]bool, value string) {
-	if key := vfs.Key(value); key != "" && key != "-" {
+	if key := vfs.Key(value); key != "" {
 		set[key] = true
 	}
 }

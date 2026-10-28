@@ -38,18 +38,28 @@ type Parsed struct {
 
 	// InputFiles and OutputFiles are the files the command reads and writes,
 	// named the way Request.Files and Result.Files name them (vfs.Key), sorted
-	// and de-duplicated. "-" is never a path.
+	// and de-duplicated. The stdin values ("-", "@-") are never a path, but
+	// ./- is a file named "-" and is reported as one.
 	InputFiles  []string
 	OutputFiles []string
-	// RequiresInput is true when the command reads Request.Stdin: a "-" file
-	// argument, "-d @-", or a command such as query given no argument and no
-	// file.
+	// RequiresInput is true when the command may read Request.Stdin: a "-"
+	// file argument, "-d @-", a command such as query given no argument and no
+	// file, or a command that asks for confirmation (delete, restore) and was
+	// given neither its skip flag (--yes, --force) nor --plain, --agent or
+	// --dry-run. Without an answer on Stdin that command cancels itself and
+	// exits 0, so a host that cannot supply one should pass the skip flag.
 	RequiresInput bool
 
 	// RequiredScopes are the token scopes the command needs, complete when
 	// Scopes is ScopesKnown.
 	RequiredScopes []string
 	Scopes         ScopeRequirement
+
+	// Help is true when the command line asks for help text (--help) or names
+	// a group that only prints its usage. Nothing would run: Verb and Resource
+	// name the command whose help it is, and a host building policy from them
+	// should not read them as a command to run.
+	Help bool
 }
 
 // ScopeRequirement says how certain Parsed.RequiredScopes is.
@@ -71,9 +81,13 @@ const (
 )
 
 // UsageError is a command line that Execute would refuse before running the
-// command. Code, Message and Suggestions are the error of the --agent envelope
-// Execute prints for it, and ExitCode is the exit code it returns (2 for a
-// usage error).
+// command. ExitCode is the exit code Execute returns for it (2 for a usage
+// error). Code, Message and Suggestions classify the refusal the way the
+// --agent envelope does, and are what Execute prints there for an error in the
+// command line itself (an unknown flag, a missing argument). A refusal of the
+// surface (profile, stability floor, blocked command) is printed by Execute as
+// plain text even under --agent, so for those Code is Parse's classification
+// and not text Execute outputs.
 type UsageError struct {
 	Code        string
 	Message     string
@@ -108,13 +122,7 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 	if err := validateSurface(req.SafetyLevel, req.MinStability, req.StabilityExceptions); err != nil {
 		return nil, err
 	}
-	env := make(map[string]string, len(req.Env)+1)
-	for k, v := range req.Env {
-		env[k] = v
-	}
-	if req.Profile != "" {
-		env[config.ProfileEnvVar] = req.Profile
-	}
+	env := requestEnv(req.Env, req.Profile)
 	res, err := cmd.Parse(argv, cmd.ParseOptions{
 		SafetyLevel:         config.SafetyLevel(req.SafetyLevel),
 		MinStability:        config.StabilityLevel(req.MinStability),
@@ -143,6 +151,7 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 		RequiresInput:  res.RequiresInput,
 		RequiredScopes: res.RequiredScopes,
 		Scopes:         scopes,
+		Help:           res.Help,
 	}, nil
 }
 

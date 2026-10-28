@@ -153,6 +153,7 @@ configured; to stop recording, run:
 	}
 	c.Flags().BoolVar(&allContexts, "all-contexts", false, "clear every context's tally (deletes the usage file)")
 	c.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
+	markPrompts(c, "yes")
 	stability.Mark(c, stability.Experimental, "0.43.0")
 	return c
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -31,6 +32,15 @@ const (
 	// setting it keeps an annotationInputWithoutArgs command from reading
 	// stdin. Its value is "true".
 	annotationArgumentFlag = "dtctl.io/argument"
+	// annotationPrompts marks a command that asks for confirmation on stdin
+	// unless one of the flags it lists is set, or the run is plain, agent or a
+	// dry run. Its value is the flag names, comma-separated.
+	annotationPrompts = "dtctl.io/prompts"
+	// annotationRefusalOnly marks a group command whose own RunE only refuses
+	// a missing or unknown subcommand and does nothing else, so Parse keeps it
+	// to report the refusal Execute gives. Its value is "true". requireSubcommand
+	// itself needs no mark; a group with a RunE of its own does.
+	annotationRefusalOnly = "dtctl.io/refusal-only"
 )
 
 // Values of annotationFile.
@@ -74,6 +84,34 @@ func markInputWithoutArgs(cmd *cobra.Command) {
 // stdin.
 func markArgumentFlag(cmd *cobra.Command, name string) {
 	setFlagAnnotation(cmd, name, annotationArgumentFlag, "true")
+}
+
+// markPrompts declares that cmd may ask for confirmation on stdin, and that
+// setting any of skipFlags (--yes, --force, --confirm) keeps it from asking. A
+// run that is plain (--plain, or implied by --agent) or a dry run never asks,
+// whatever the flags, so those are not listed.
+//
+// "May": some commands ask only in a particular case (restore trash with one
+// document, breakpoint commands when existing breakpoints are affected), and
+// the declaration covers the command, not the case. It panics when cmd has no
+// such flag, as markFileFlag does.
+func markPrompts(cmd *cobra.Command, skipFlags ...string) {
+	if len(skipFlags) == 0 {
+		panic(fmt.Sprintf("cmd: %s declares a prompt with no flag that skips it", cmd.Name()))
+	}
+	for _, name := range skipFlags {
+		if lookupOwnFlag(cmd, name) == nil {
+			panic(fmt.Sprintf("cmd: %s has no flag --%s to skip its prompt", cmd.Name(), name))
+		}
+	}
+	setCommandAnnotation(cmd, annotationPrompts, strings.Join(skipFlags, ","))
+}
+
+// markRefusalOnly declares that cmd's RunE only refuses a missing or unknown
+// subcommand (as requireSkillsSubcommand does), so Parse keeps it in place of
+// recording a run.
+func markRefusalOnly(cmd *cobra.Command) {
+	setCommandAnnotation(cmd, annotationRefusalOnly, "true")
 }
 
 // lookupOwnFlag finds a flag cmd itself declares, local or persistent.

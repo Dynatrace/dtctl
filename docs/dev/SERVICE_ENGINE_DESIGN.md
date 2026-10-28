@@ -118,7 +118,8 @@ what it does not cover are in [CONCURRENT_EXECUTION.md](CONCURRENT_EXECUTION.md)
 
 `engine.Parse` reports what a command line means without running it: its verb
 and resource, the files it reads and writes (as `Request.Files` names them),
-whether it reads `Request.Stdin`, and its required scopes with how certain they
+whether it reads `Request.Stdin` (as data, or to answer a confirmation prompt
+the command line does not skip), and its required scopes with how certain they
 are (`none`, `known`, `per_call` for `exec api`, `input_dependent` for `apply`
 and `diff`). A host uses it as a preflight: to attach the files a command needs,
 or to tell a caller which scopes it will need, before it runs anything.
@@ -129,7 +130,12 @@ blocked commands, stability floor, deprecation), lets cobra parse and validate
 the command line and run the pre-run hooks, and replaces every command body with
 a hook that records what cobra resolved. A command line Execute would refuse
 returns a `*UsageError` with the error Execute prints; validation inside a
-command body is the one thing Parse cannot see.
+command body is the one thing Parse cannot see. A refusal of the surface
+(profile, floor, blocked command) is printed by Execute as plain text even under
+`--agent`, so for those the `Code` is Parse's classification only. A command
+line that asks for help (`--help`, or a group that only prints its usage) runs
+nothing: Parse sets `Help`, and `Verb`/`Resource` name the command whose help it
+is, not a command to run.
 
 It needs no token, reads no file and calls no platform API. It runs under a
 parse-only session, which has no environment or token and which
@@ -142,10 +148,13 @@ costs about 1.4 ms and 1.1 MiB allocated, almost all of it building the tree
 (`BenchmarkParse`).
 
 What a command reads is declared next to its flags (`markFileFlag`,
-`markWritesTo`, `markInputWithoutArgs`, `markArgumentFlag`), and the guards in
+`markWritesTo`, `markInputWithoutArgs`, `markArgumentFlag`, and `markPrompts`
+for a confirmation prompt), and the guards in
 `cmd/file_flags_test.go` run every command on a recording filesystem, so a file
 flag without a declaration fails a test. `TestParseAgreesWithExecute` runs the
 same command lines through both and holds Parse to every file Execute reads.
+Only the literal `-` (and `@-`) means stdin: `./-` and `/-` name a file called
+`-`, which Execute opens through the filesystem, so Parse reports it as one.
 
 `Scopes: none` means the catalog names no scopes for the command. For the local
 commands that is the answer; for a command the catalog is still missing scopes
