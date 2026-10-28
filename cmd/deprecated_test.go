@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // newDeprecatedTree builds a tree with one deprecated command, one stable

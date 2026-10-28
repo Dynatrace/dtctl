@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // The Live Debugger surface is classified experimental, which makes it the

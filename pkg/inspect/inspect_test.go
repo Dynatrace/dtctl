@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // writeSpill writes records to a managed-style spill file in dir using the given

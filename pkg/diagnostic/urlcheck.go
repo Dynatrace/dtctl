@@ -3,7 +3,7 @@ package diagnostic
 import (
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/sdk/urls"
+	"github.com/Dynatrace/dtctl/sdk/urls"
 )
 
 // URLProblem describes a detected issue with an environment URL.

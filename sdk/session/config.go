@@ -12,7 +12,7 @@ import (
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/sdk/urls"
+	"github.com/Dynatrace/dtctl/sdk/urls"
 )
 
 // Config represents the dtctl configuration

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	sdkpt "github.com/dynatrace-oss/dtctl/sdk/api/platformtoken"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	sdkpt "github.com/Dynatrace/dtctl/sdk/api/platformtoken"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Re-export SDK create type for use in cmd layer.

@@ -12,10 +12,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/commands"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/commands"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // withScopeState overrides grantedScopesFunc and the relevant global flags for a

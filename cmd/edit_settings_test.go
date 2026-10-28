@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
 )
 
 // makeEditorScript creates a temporary script that overwrites its first

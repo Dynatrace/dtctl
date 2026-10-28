@@ -12,7 +12,7 @@ DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Minimum test coverage percentage. Raise as coverage improves: 60 -> 70 -> 80 -> 85.
 COVERAGE_THRESHOLD ?= 60
 
-LDFLAGS = -ldflags "-X github.com/dynatrace-oss/dtctl/pkg/version.Version=$(VERSION) -X github.com/dynatrace-oss/dtctl/pkg/version.Commit=$(COMMIT) -X github.com/dynatrace-oss/dtctl/pkg/version.Date=$(DATE) -s -w"
+LDFLAGS = -ldflags "-X github.com/Dynatrace/dtctl/pkg/version.Version=$(VERSION) -X github.com/Dynatrace/dtctl/pkg/version.Commit=$(COMMIT) -X github.com/Dynatrace/dtctl/pkg/version.Date=$(DATE) -s -w"
 INSTALL_BIN_DIR ?= $(if $(GOBIN),$(GOBIN),$(shell go env GOPATH)/bin)
 
 MD_LINT_CLI_IMAGE := "ghcr.io/igorshubovych/markdownlint-cli:v0.31.1"
@@ -241,9 +241,9 @@ sdk-check-deps:
 # Check that the SDK does not import from the CLI module
 sdk-check-imports:
 	@echo "Checking SDK imports..."
-	@cd sdk && ! grep -rE '"github.com/dynatrace-oss/dtctl[^/]' --include='*.go' . || \
+	@cd sdk && ! grep -rE '"github.com/Dynatrace/dtctl[^/]' --include='*.go' . || \
 	  (echo "FORBIDDEN: sdk/ imports from CLI module" && exit 1)
-	@cd sdk && ! grep -rE '"github.com/dynatrace-oss/dtctl/(cmd|pkg)' --include='*.go' . || \
+	@cd sdk && ! grep -rE '"github.com/Dynatrace/dtctl/(cmd|pkg)' --include='*.go' . || \
 	  (echo "FORBIDDEN: sdk/ imports from CLI cmd/ or pkg/" && exit 1)
 	@echo "sdk/ imports OK"
 

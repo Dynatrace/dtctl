@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/skills"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/skills"
 )
 
 // --- helper: reset skills subcommand flags between tests ---

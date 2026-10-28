@@ -1,6 +1,6 @@
 package livedebugger
 
-import sdkld "github.com/dynatrace-oss/dtctl/sdk/api/livedebugger"
+import sdkld "github.com/Dynatrace/dtctl/sdk/api/livedebugger"
 
 // Re-export SDK types that have no table tags.
 type (

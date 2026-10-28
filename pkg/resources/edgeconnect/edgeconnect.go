@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkedgeconnect "github.com/dynatrace-oss/dtctl/sdk/api/edgeconnect"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkedgeconnect "github.com/Dynatrace/dtctl/sdk/api/edgeconnect"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // EdgeConnect is the CLI read model for an EdgeConnect configuration.

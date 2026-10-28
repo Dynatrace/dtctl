@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/dynatrace-oss/dtctl/pkg/proto/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/proto/livedebugger"
 )
 
 func TestParseSnapshotStringMap_ArrayFormat(t *testing.T) {

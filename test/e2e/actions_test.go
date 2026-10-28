@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/appengine"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // listActionsOrSkip lists every action, skipping the test where the App

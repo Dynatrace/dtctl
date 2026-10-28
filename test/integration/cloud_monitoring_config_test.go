@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsmonitoringconfig"
 )
 
 // knownFidelityGaps records, per cloud, the document paths that live

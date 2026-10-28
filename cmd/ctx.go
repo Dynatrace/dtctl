@@ -7,11 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/diagnostic"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // ctxCmd is a top-level shortcut for context management.

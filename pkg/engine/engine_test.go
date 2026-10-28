@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/engine"
+	"github.com/Dynatrace/dtctl/pkg/engine"
 )
 
 // mockEnv is a fake Dynatrace environment recording the Authorization header

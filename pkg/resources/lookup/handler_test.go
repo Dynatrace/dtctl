@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // newLookupTestHandler creates a Handler backed by a test server.

@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 func newTestHandler(t *testing.T, handler http.HandlerFunc) *Handler {

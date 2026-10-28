@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // WorkflowExecutor handles workflow execution

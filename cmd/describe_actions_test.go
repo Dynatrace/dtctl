@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/appengine"
 )
 
 func TestUseActionDescribeTextView(t *testing.T) {

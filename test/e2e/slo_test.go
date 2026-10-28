@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/slo"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/slo"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 func TestSLOLifecycle(t *testing.T) {

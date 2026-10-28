@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // newTestRoot creates a minimal Cobra command tree for testing.

@@ -6,8 +6,8 @@ abstract: "kubectl-inspired CLI for managing Dynatrace platform resources"
 authors:
   - family-names: "Dynatrace"
     name: "Dynatrace OSS"
-repository-code: "https://github.com/dynatrace-oss/dtctl"
-url: "https://github.com/dynatrace-oss/dtctl"
+repository-code: "https://github.com/Dynatrace/dtctl"
+url: "https://github.com/Dynatrace/dtctl"
 license: Apache-2.0
 keywords:
   - dynatrace

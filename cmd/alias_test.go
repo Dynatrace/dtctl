@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 func TestAliasSetAndList(t *testing.T) {

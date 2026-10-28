@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 const testAccountUUID = "test-uuid"

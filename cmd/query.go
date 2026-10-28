@@ -14,11 +14,11 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/resolver"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/resolver"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // isTerminal checks if the given file is a terminal

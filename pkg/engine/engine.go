@@ -11,10 +11,10 @@ import (
 
 	"github.com/google/shlex"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 // defaultAdmission is the admission state behind the package-level Execute

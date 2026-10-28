@@ -63,7 +63,7 @@ Is the code clean, idiomatic, and maintainable?
 - **Go idioms**: Follows [Effective Go](https://golang.org/doc/effective_go.html) and [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
 - **Naming**: Descriptive names, Go conventions (camelCase unexported, PascalCase exported), `-er` suffix for interfaces
 - **File size**: Files should be under 500 lines. Large files should be split.
-- **Imports**: Standard library first, then third-party, then internal (`github.com/dynatrace-oss/dtctl`)
+- **Imports**: Standard library first, then third-party, then internal (`github.com/Dynatrace/dtctl`)
 - **Duplication**: Look for copy-pasted code that should be extracted into helpers
 - **Comments**: Exported functions/types documented. Comments explain "why" not "what".
 - **Consistent patterns**: New code should follow existing patterns in the codebase. Check similar resources in `pkg/resources/` for reference implementations.

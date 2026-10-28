@@ -9,10 +9,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 // This file is the enforcement half of the stability axis; pkg/stability holds

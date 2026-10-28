@@ -28,7 +28,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 // Level is the ordered stability axis. Re-exported from sdk/session so callers

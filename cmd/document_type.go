@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
 )
 
 // requireDocumentType refuses a document whose type is not the one the command

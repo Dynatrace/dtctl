@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // AppAction is one action of an installed app, as the App Registry's

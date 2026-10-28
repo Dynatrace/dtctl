@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkmatcher "github.com/dynatrace-oss/dtctl/sdk/api/matcherverify"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkmatcher "github.com/Dynatrace/dtctl/sdk/api/matcherverify"
 )
 
 const verifyPath = "/platform/openpipeline/v1/matcher/verify"

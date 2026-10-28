@@ -6,12 +6,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // applyExtensionConfigCmd creates or updates a monitoring configuration for an extension

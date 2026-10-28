@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // captureStderr redirects os.Stderr for the duration of fn and returns

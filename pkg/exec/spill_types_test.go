@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // typedResult is a small result whose API response carries a DQL type block.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // viewerPaths maps a document type to the app path that renders it, relative

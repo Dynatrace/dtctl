@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
 )
 
 // newEnvShareMock builds an httptest server that mocks the minimal Document

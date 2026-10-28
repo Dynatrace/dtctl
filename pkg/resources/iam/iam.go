@@ -3,9 +3,9 @@ package iam
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkiam "github.com/dynatrace-oss/dtctl/sdk/api/iam"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkiam "github.com/Dynatrace/dtctl/sdk/api/iam"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // User represents a Dynatrace user (CLI version with table tags).

@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // setDevelopmentKey handles `dtctl config set development.<feature> on|off`.

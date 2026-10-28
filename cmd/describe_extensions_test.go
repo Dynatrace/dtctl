@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
 )
 
 func TestStripSchemaFluff_RemovesTopLevelKeys(t *testing.T) {

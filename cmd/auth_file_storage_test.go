@@ -9,7 +9,7 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 var errNoSecretService = errors.New("keyring probe failed: The name org.freedesktop.secrets was not provided by any .service files")

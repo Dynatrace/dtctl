@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // Error represents an enhanced diagnostic error with contextual help

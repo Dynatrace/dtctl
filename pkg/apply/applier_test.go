@@ -10,10 +10,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 func TestDetectResourceType(t *testing.T) {

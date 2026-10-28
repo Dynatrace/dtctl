@@ -1,6 +1,6 @@
 package extension
 
-import sdkext "github.com/dynatrace-oss/dtctl/sdk/api/extension"
+import sdkext "github.com/Dynatrace/dtctl/sdk/api/extension"
 
 // FluffKeys are schema fields removed by StripSchemaFluff.
 var FluffKeys = sdkext.FluffKeys

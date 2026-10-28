@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/segment"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 // inventoryCmd probes the current environment for what data actually exists

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/usage"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/usage"
 )
 
 type fakeUsageRecorder struct {

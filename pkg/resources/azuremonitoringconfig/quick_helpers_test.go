@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azureconnection"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
 )
 
 func TestSplitCSV(t *testing.T) {

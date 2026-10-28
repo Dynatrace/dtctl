@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
-	sdkdocument "github.com/dynatrace-oss/dtctl/sdk/api/document"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
+	sdkdocument "github.com/Dynatrace/dtctl/sdk/api/document"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Document is the CLI read model for a document resource.

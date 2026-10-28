@@ -16,10 +16,10 @@ import (
 	toon "github.com/toon-format/toon-go"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/plugin"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/version"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/plugin"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/version"
 )
 
 // SchemaVersion is incremented on breaking changes to the listing structure.

@@ -10,12 +10,12 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/prompt"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/resolver"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/prompt"
+	"github.com/Dynatrace/dtctl/pkg/resources/resolver"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // minAutomationChunkSize is the smallest allowed --chunk-size for listing any

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // actorUUIDPattern mirrors the PATTERN constraint the schema puts on

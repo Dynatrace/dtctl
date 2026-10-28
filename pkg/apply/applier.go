@@ -9,16 +9,16 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/hook"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azureconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/hook"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpconnection"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 // uuidRegex matches UUID-formatted strings (the Documents API rejects these for ID during creation)
@@ -673,7 +673,7 @@ func detectResourceType(data []byte) (ResourceType, bool, error) {
 	// document's only marker. Without this, the flattened "type" field sends
 	// such a file down the generic document path and an apply creates a document
 	// named after the auth type instead of updating the connection.
-	// See https://github.com/dynatrace-oss/dtctl/issues/509
+	// See https://github.com/Dynatrace/dtctl/issues/509
 	if valueMap, ok := raw["value"].(map[string]interface{}); ok {
 		valueType, _ := valueMap["type"].(string)
 		// The hyperscaler connection schemas are discriminated unions: the value
@@ -769,7 +769,7 @@ func (a *Applier) dryRun(resourceType ResourceType, data []byte, opts ApplyOptio
 
 	// Cloud resources resolve create vs update from "objectId" plus a lookup of
 	// the live list by name, so each has its own dry run that repeats exactly
-	// that resolution. See https://github.com/dynatrace-oss/dtctl/issues/509
+	// that resolution. See https://github.com/Dynatrace/dtctl/issues/509
 	switch resourceType {
 	case ResourceAWSMonitoringConfig:
 		return a.dryRunAWSMonitoringConfig(data)
@@ -785,7 +785,7 @@ func (a *Applier) dryRun(resourceType ResourceType, data []byte, opts ApplyOptio
 		// Settings objects (and the legacy AWS connection exports routed here)
 		// resolve create vs update by looking the objectId up, falling back to
 		// a create that needs schemaId and scope. See
-		// https://github.com/dynatrace-oss/dtctl/issues/521
+		// https://github.com/Dynatrace/dtctl/issues/521
 		return a.dryRunSettings(doc, data)
 	}
 
@@ -800,7 +800,7 @@ func (a *Applier) dryRun(resourceType ResourceType, data []byte, opts ApplyOptio
 	// (camelCase) or "objectid" (lowercase). Read those so that dry-run agrees
 	// with actual apply for every resource that identifies itself that way, not
 	// just for the "settings" type.
-	// See https://github.com/dynatrace-oss/dtctl/issues/256 and /issues/509
+	// See https://github.com/Dynatrace/dtctl/issues/256 and /issues/509
 	if id == "" {
 		id = objectIDFromDoc(doc)
 	}

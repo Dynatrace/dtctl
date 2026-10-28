@@ -3,7 +3,7 @@ package auth
 import (
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // TestGetScopesForSafetyLevel tests that scopes are correctly assigned for each safety level

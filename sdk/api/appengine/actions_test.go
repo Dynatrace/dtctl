@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // newActionServer serves handler and returns a Handler pointed at it.

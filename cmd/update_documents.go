@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // updateDocumentCmd updates an existing document of any type from a file.

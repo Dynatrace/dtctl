@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // TrashedDocument represents a document in the trash (from GET /trash/documents/{id})

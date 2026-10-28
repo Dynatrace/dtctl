@@ -11,7 +11,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // longContentResult is a result whose content values are far longer than a

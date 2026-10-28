@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
-	"github.com/dynatrace-oss/dtctl/pkg/wait"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/wait"
 )
 
 // waitCmd represents the wait command

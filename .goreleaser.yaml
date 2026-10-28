@@ -23,9 +23,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/dynatrace-oss/dtctl/pkg/version.Version={{.Version}}
-      - -X github.com/dynatrace-oss/dtctl/pkg/version.Commit={{.ShortCommit}}
-      - -X github.com/dynatrace-oss/dtctl/pkg/version.Date={{.Date}}
+      - -X github.com/Dynatrace/dtctl/pkg/version.Version={{.Version}}
+      - -X github.com/Dynatrace/dtctl/pkg/version.Commit={{.ShortCommit}}
+      - -X github.com/Dynatrace/dtctl/pkg/version.Date={{.Date}}
 
 archives:
   - formats:
@@ -75,7 +75,7 @@ homebrew_casks:
       owner: dynatrace-oss
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: https://github.com/dynatrace-oss/dtctl
+    homepage: https://github.com/Dynatrace/dtctl
     description: "kubectl-inspired CLI for Dynatrace - manage workflows, dashboards, SLOs, queries, and more from your terminal"
     skip_upload: auto
     completions:

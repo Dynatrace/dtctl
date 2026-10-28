@@ -12,8 +12,8 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 func TestParseByteSize(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Handler handles DQL query execution against the Dynatrace Query API.

@@ -3,8 +3,8 @@ package client_test
 import (
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 func TestAccountBaseURLForEnvironment(t *testing.T) {

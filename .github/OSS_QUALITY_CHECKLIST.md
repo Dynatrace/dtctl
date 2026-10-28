@@ -110,7 +110,7 @@ Follow these guides:
 
 ```bash
 # Set repository description and topics
-gh repo edit dynatrace-oss/dtctl \
+gh repo edit Dynatrace/dtctl \
   --description "kubectl-inspired CLI for managing Dynatrace platform resources from your terminal" \
   --add-topic dynatrace \
   --add-topic cli \
@@ -128,15 +128,15 @@ gh repo edit dynatrace-oss/dtctl \
   --add-topic developer-tools
 
 # Enable vulnerability reporting
-gh repo edit dynatrace-oss/dtctl --enable-vulnerability-alerts
+gh repo edit Dynatrace/dtctl --enable-vulnerability-alerts
 
 # Enable discussions
-gh repo edit dynatrace-oss/dtctl --enable-discussions
+gh repo edit Dynatrace/dtctl --enable-discussions
 ```
 
 ## 🎯 Community Standards Score
 
-Check your score at: `https://github.com/dynatrace-oss/dtctl/community`
+Check your score at: `https://github.com/Dynatrace/dtctl/community`
 
 Expected result: **100%** ✅
 
@@ -208,7 +208,7 @@ Monitor these regularly:
    - Enable branch protection, security features, discussions
 
 2. **Verify Community Standards** (2 minutes)
-   - Visit: `https://github.com/dynatrace-oss/dtctl/community`
+   - Visit: `https://github.com/Dynatrace/dtctl/community`
    - Ensure all items are ✅
 
 3. **Create Initial Discussion Posts** (10 minutes)

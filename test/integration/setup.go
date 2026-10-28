@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // IntegrationEnv holds the integration test environment
