@@ -314,6 +314,7 @@ Examples:
 	c.Flags().String("enabled", "", "Enable or disable the breakpoint")
 	c.Flags().String("filters", "", "workspace filters to apply (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
+	markPrompts(c, "yes")
 	c.Flags().Lookup("enabled").NoOptDefVal = "true"
 	markLiveDebuggerExperimental(c)
 	return c

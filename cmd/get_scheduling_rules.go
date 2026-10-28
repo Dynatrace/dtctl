@@ -205,6 +205,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes")
 	stability.MarkStable(c)
 	return c
 }

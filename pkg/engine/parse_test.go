@@ -58,13 +58,31 @@ func TestParse(t *testing.T) {
 			command: "apply -f .",
 			want:    Parsed{Verb: "apply", Scopes: ScopesInputDependent},
 		},
-		"a file named - is not reported": {
+		// Only the literal "-" is stdin; ./- and /- name a file that Execute
+		// opens through the filesystem.
+		"a file named -": {
 			command: "apply -f ./-",
-			want:    Parsed{Verb: "apply", Scopes: ScopesInputDependent},
+			want:    Parsed{Verb: "apply", InputFiles: []string{"-"}, Scopes: ScopesInputDependent},
+		},
+		"an absolute file named -": {
+			command: "apply -f /-",
+			want:    Parsed{Verb: "apply", InputFiles: []string{"-"}, Scopes: ScopesInputDependent},
+		},
+		"an at-path file named -": {
+			command: "exec api /platform/x -X POST -d @./-",
+			want:    Parsed{Verb: "exec", Resource: "api", InputFiles: []string{"-"}, Scopes: ScopesPerCall},
+		},
+		"at-path stdin": {
+			command: "exec api /platform/x -X POST -d @-",
+			want:    Parsed{Verb: "exec", Resource: "api", RequiresInput: true, Scopes: ScopesPerCall},
 		},
 		"empty at-path": {
 			command: "exec api /platform/x -X POST -d @",
 			want:    Parsed{Verb: "exec", Resource: "api", Scopes: ScopesPerCall},
+		},
+		"help is not a command to run": {
+			command: "get workflows --help",
+			want:    Parsed{Verb: "get", Resource: "workflows", Scopes: ScopesNone, Help: true},
 		},
 		"local command": {
 			command: "version",
@@ -159,5 +177,40 @@ func BenchmarkParse(b *testing.B) {
 		if _, err := Parse(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// TestParse_RequiresInputForConfirmationPrompts: a command that asks for
+// confirmation reads Request.Stdin, and cancels itself with exit 0 when there
+// is no answer, so Parse reports it unless the run skips the prompt.
+func TestParse_RequiresInputForConfirmationPrompts(t *testing.T) {
+	const id = "00000000-0000-0000-0000-000000000001"
+	for name, tc := range map[string]struct {
+		command string
+		want    bool
+	}{
+		"delete":                  {"delete workflow " + id, true},
+		"delete --yes":            {"delete workflow " + id + " --yes", false},
+		"delete -y":               {"delete workflow " + id + " -y", false},
+		"delete --yes=false":      {"delete workflow " + id + " --yes=false", true},
+		"delete --plain":          {"delete workflow " + id + " --plain", false},
+		"delete --agent":          {"delete workflow " + id + " --agent", false},
+		"delete --dry-run":        {"delete workflow " + id + " --dry-run", false},
+		"delete bucket":           {"delete bucket b", true},
+		"delete bucket --confirm": {"delete bucket b --confirm b", false},
+		"restore":                 {"restore workflow " + id + " 1", true},
+		"restore --force":         {"restore workflow " + id + " 1 --force", false},
+		"restore trash":           {"restore trash " + id, true},
+		"restore trash --force":   {"restore trash " + id + " --force", false},
+		"delete breakpoint":       {"delete breakpoint 123", true},
+		"delete breakpoint --yes": {"delete breakpoint 123 --yes", false},
+		"a read never asks":       {"get workflows", false},
+		"a create never asks":     {"create bucket -f b.yaml", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(context.Background(), ParseRequest{Command: tc.command, MinStability: "experimental"})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.RequiresInput)
+		})
 	}
 }

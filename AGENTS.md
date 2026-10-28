@@ -531,6 +531,15 @@ filesystem, so a file flag without the declaration fails them, naming the line
 to add.
 *Guard*: `go test ./cmd/ -run 'TestFileFlagsAreDeclared|TestFileFlagAnnotationsAreValid|TestInputWithoutArgsIsDeclared|TestVFSEnvCallSitesAreKnown'`
 
+A command that asks for confirmation on stdin is declared too, with the flags
+that skip the prompt: `markPrompts(c, "yes")` (`"force"`, `"confirm"`). Without
+an answer the command cancels itself and exits 0, so Parse reports it as
+reading input unless one of those flags, `--plain`, `--agent` or `--dry-run` is
+given. A group whose own `RunE` only refuses a missing or unknown subcommand
+(anything other than `requireSubcommand` itself) is marked with
+`markRefusalOnly(c)`, so Parse keeps the refusal instead of recording a run.
+*Guard*: `go test ./cmd/ -run 'TestPromptCallSitesAreKnown|TestPromptingCommandsAreDeclared|TestParseKeepsAGroupsDeclaredRefusal'`
+
 The test is **whose file is it**: a path the *user named* (`-f`, `--file`,
 `--data-file`, a query file, a file to `diff`, an `apply --write-id` writeback)
 is request state and must go through the seam. A path *dtctl chose* (editor temp

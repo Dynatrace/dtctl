@@ -277,13 +277,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 		return nil, err
 	}
 
-	env := make(map[string]string, len(req.Env)+1)
-	for k, v := range req.Env {
-		env[k] = v
-	}
-	if req.Profile != "" {
-		env[config.ProfileEnvVar] = req.Profile
-	}
+	env := requestEnv(req.Env, req.Profile)
 
 	// Always a reader, never nil: a nil RunOptions.Stdin leaves the *host*
 	// process's stdin in place, which a request must never see (and which can
@@ -463,4 +457,18 @@ func (e *Engine) effectiveLimits(limits Limits) Limits {
 	merged := limits.withDefaultsFrom(e.limits)
 	merged.MaxQueued = e.limits.MaxQueued
 	return merged
+}
+
+// requestEnv is the environment a request runs under: its Env, with Profile
+// (when set) overriding DTCTL_PROFILE. Execute and Parse both build it here, so
+// they cannot disagree about which profile a request resolves.
+func requestEnv(env map[string]string, profile string) map[string]string {
+	out := make(map[string]string, len(env)+1)
+	for k, v := range env {
+		out[k] = v
+	}
+	if profile != "" {
+		out[config.ProfileEnvVar] = profile
+	}
+	return out
 }
