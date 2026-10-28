@@ -102,9 +102,79 @@ func TestParse(t *testing.T) {
 					*l = []string{}
 				}
 			}
+			got.Flags, got.Args = nil, nil // TestParse_FlagsAndArgs
 			assert.Equal(t, &tc.want, got)
 		})
 	}
+}
+
+// TestParse_FlagsAndArgs: Parse reports the flags the command line set, by
+// long name, and its positional arguments in order, so a host can show how a
+// command line was understood.
+func TestParse_FlagsAndArgs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		command string
+		flags   []ParsedFlag
+		args    []string
+	}{
+		"long flag": {
+			command: "get dashboards --output json",
+			flags:   []ParsedFlag{{Name: "output", Value: "json"}},
+		},
+		"shorthand reported by long name": {
+			command: "get dashboards -o yaml",
+			flags:   []ParsedFlag{{Name: "output", Value: "yaml"}},
+		},
+		"no flags, no arguments": {command: "get dashboards"},
+		"arguments in order": {
+			command: "delete trash id-b id-a --permanent -y",
+			flags:   []ParsedFlag{{Name: "permanent", Value: "true"}, {Name: "yes", Value: "true"}},
+			args:    []string{"id-b", "id-a"},
+		},
+		"arguments after --": {
+			command: "query -o json -- 'fetch logs'",
+			flags:   []ParsedFlag{{Name: "output", Value: "json"}},
+			args:    []string{"fetch logs"},
+		},
+		"boolean and global flags, sorted by name": {
+			command: "delete workflow wf --yes --agent",
+			flags:   []ParsedFlag{{Name: "agent", Value: "true"}, {Name: "yes", Value: "true"}},
+			args:    []string{"wf"},
+		},
+		"explicitly false": {
+			command: "delete workflow wf --yes=false",
+			flags:   []ParsedFlag{{Name: "yes", Value: "false"}},
+			args:    []string{"wf"},
+		},
+		"repeated flag, one entry per value in order": {
+			command: "diff -f b.yaml -f a.yaml",
+			flags:   []ParsedFlag{{Name: "file", Value: "b.yaml"}, {Name: "file", Value: "a.yaml"}},
+		},
+		"stdin value": {
+			command: "apply -f -",
+			flags:   []ParsedFlag{{Name: "file", Value: "-"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := Parse(context.Background(), ParseRequest{Command: tc.command})
+			require.NoError(t, err)
+			if tc.flags == nil {
+				tc.flags = []ParsedFlag{}
+			}
+			if tc.args == nil {
+				tc.args = []string{}
+			}
+			assert.Equal(t, tc.flags, got.Flags)
+			assert.Equal(t, tc.args, got.Args)
+		})
+	}
+
+	// Help runs nothing, so there is no invocation to report.
+	got, err := Parse(context.Background(), ParseRequest{Command: "get workflows -o json --help"})
+	require.NoError(t, err)
+	assert.True(t, got.Help)
+	assert.Equal(t, []ParsedFlag{}, got.Flags)
+	assert.Equal(t, []string{}, got.Args)
 }
 
 // TestParse_UsageErrors holds a refused command line to a *UsageError: the

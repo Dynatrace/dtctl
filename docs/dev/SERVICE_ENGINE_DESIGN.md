@@ -121,7 +121,8 @@ and resource, the files it reads and writes (as `Request.Files` names them),
 whether it reads `Request.Stdin` (as data, or to answer a confirmation prompt
 the command line does not skip), and its required scopes with how certain they
 are (`none`, `known`, `per_call` for `exec api`, `input_dependent` for `apply`
-and `diff`). A host uses it as a preflight: to attach the files a command needs,
+and `diff`), and the flags and positional arguments it recognized (flags by long
+name, only those the command line set). A host uses it as a preflight: to attach the files a command needs,
 or to tell a caller which scopes it will need, before it runs anything.
 
 It runs Execute's pipeline and stops where the command body would start. It
