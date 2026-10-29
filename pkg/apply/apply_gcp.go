@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpmonitoringconfig"
 )
 
 // gcpConnectionItem holds the envelope fields a GCP connection payload carries

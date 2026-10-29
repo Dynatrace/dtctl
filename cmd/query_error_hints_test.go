@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // TestErrorToDetail_QueryErrorPositionAndFix pins the DQL error envelope an

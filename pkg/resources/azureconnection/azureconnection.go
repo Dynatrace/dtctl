@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/diagnostic"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 const (
@@ -17,7 +17,7 @@ const (
 	// listFields is the field projection a re-appliable export needs. The
 	// Settings API list defaults to objectId + value only, which strips the
 	// schemaId and scope that apply reads to tell a connection document from a
-	// custom document. See https://github.com/dynatrace-oss/dtctl/issues/509
+	// custom document. See https://github.com/Dynatrace/dtctl/issues/509
 	listFields = "objectId,schemaId,schemaVersion,scope,value"
 
 	// The authentication types the Azure connection schema accepts.

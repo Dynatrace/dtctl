@@ -9,7 +9,7 @@ This guide covers the Windows-specific details of running dtctl: PowerShell inst
 Open PowerShell and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.ps1 | iex
 ```
 
 This downloads the latest release, extracts it to `%LOCALAPPDATA%\dtctl`, and adds it to your PATH. Restart your terminal afterwards.
@@ -20,7 +20,7 @@ If you prefer to install manually:
 
 ### 1. Download
 
-Go to the [releases page](https://github.com/dynatrace-oss/dtctl/releases/latest) and download the Windows zip file for your architecture:
+Go to the [releases page](https://github.com/Dynatrace/dtctl/releases/latest) and download the Windows zip file for your architecture:
 
 | Architecture    | File                              |
 | --------------- | --------------------------------- |
@@ -83,7 +83,7 @@ Each release includes a `checksums.txt` file signed with [cosign](https://github
 
 ```powershell
 # Download checksums
-Invoke-WebRequest "https://github.com/dynatrace-oss/dtctl/releases/latest/download/checksums.txt" -OutFile checksums.txt
+Invoke-WebRequest "https://github.com/Dynatrace/dtctl/releases/latest/download/checksums.txt" -OutFile checksums.txt
 
 # Compute the SHA256 of your zip file
 $hash = (Get-FileHash dtctl_*_windows_*.zip -Algorithm SHA256).Hash.ToLower()
@@ -354,7 +354,7 @@ If you use WSL, follow the [Linux installation instructions](INSTALLATION.md#hom
 Re-run the install script to update to the latest version:
 
 ```powershell
-irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.ps1 | iex
 ```
 
 Or download the latest zip manually and extract to `%LOCALAPPDATA%\dtctl`.

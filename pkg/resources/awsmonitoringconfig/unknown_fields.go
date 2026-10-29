@@ -1,7 +1,7 @@
 package awsmonitoringconfig
 
 import (
-	"github.com/dynatrace-oss/dtctl/pkg/util/unknownfields"
+	"github.com/Dynatrace/dtctl/pkg/util/unknownfields"
 )
 
 // The monitoring-configuration document is read, modified and written back as

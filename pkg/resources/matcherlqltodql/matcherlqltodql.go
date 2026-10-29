@@ -4,9 +4,9 @@ package matcherlqltodql
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkapi "github.com/dynatrace-oss/dtctl/sdk/api/matcherlqltodql"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkapi "github.com/Dynatrace/dtctl/sdk/api/matcherlqltodql"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // TranslationResult is the CLI read-model for a translated LQL matcher.

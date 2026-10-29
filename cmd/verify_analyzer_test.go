@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/analyzer"
+	"github.com/Dynatrace/dtctl/pkg/resources/analyzer"
 )
 
 // TestVerifyAnalyzer_RejectsUnsupportedOutputFormat exercises the up-front

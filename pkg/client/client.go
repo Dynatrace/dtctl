@@ -1,5 +1,5 @@
 // Package client re-exports the authenticated Dynatrace HTTP client from
-// github.com/dynatrace-oss/dtctl/sdk/session, where the implementation moved: client construction
+// github.com/Dynatrace/dtctl/sdk/session, where the implementation moved: client construction
 // from a context — token resolution, OAuth refresh, the 401 retry — is shared
 // session behavior, and the User-Agent is parameterized there so each
 // consumer ships its own identity. This package pins dtctl's identity
@@ -14,10 +14,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/version"
-	sdkauth "github.com/dynatrace-oss/dtctl/sdk/auth"
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/version"
+	sdkauth "github.com/Dynatrace/dtctl/sdk/auth"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 type (

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/analyzer"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/analyzer"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // forecastAnalyzer is a stable built-in Davis analyzer used to exercise the

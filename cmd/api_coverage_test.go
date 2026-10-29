@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/commands"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	resapi "github.com/dynatrace-oss/dtctl/pkg/resources/api"
+	"github.com/Dynatrace/dtctl/pkg/commands"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	resapi "github.com/Dynatrace/dtctl/pkg/resources/api"
 )
 
 // TestNativeCoverageNamesRealCommands walks the coverage map against the real

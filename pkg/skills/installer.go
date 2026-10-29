@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
-	dtctlskill "github.com/dynatrace-oss/dtctl/skills/dtctl"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
+	dtctlskill "github.com/Dynatrace/dtctl/skills/dtctl"
 )
 
 // Agent represents a supported AI coding assistant.

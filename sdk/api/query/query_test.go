@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 func newTestClient(t *testing.T, handler http.Handler) *httpclient.Client {

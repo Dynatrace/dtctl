@@ -143,7 +143,7 @@ set -e
 DTCTL_VERSION=0.40.0
 DT_ENVIRONMENT_URL=https://abc12345.apps.dynatrace.com
 
-curl -fsSL "https://github.com/dynatrace-oss/dtctl/releases/download/v${DTCTL_VERSION}/dtctl_${DTCTL_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin dtctl
+curl -fsSL "https://github.com/Dynatrace/dtctl/releases/download/v${DTCTL_VERSION}/dtctl_${DTCTL_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin dtctl
 dtctl config set-context web --environment "$DT_ENVIRONMENT_URL" --token-ref t --safety-level readonly
 dtctl config set-credentials t --token '${DT_API_TOKEN}'
 ```

@@ -1,4 +1,4 @@
-module github.com/dynatrace-oss/dtctl/sdk
+module github.com/Dynatrace/dtctl/sdk
 
 go 1.26.10
 

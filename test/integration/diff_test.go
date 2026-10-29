@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/diff"
+	"github.com/Dynatrace/dtctl/pkg/diff"
 )
 
 func TestDiff_TwoFiles(t *testing.T) {

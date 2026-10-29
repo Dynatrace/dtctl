@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
 )
 
 func TestPrintWorkflowDescribeTableGolden(t *testing.T) {

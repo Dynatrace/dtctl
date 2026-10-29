@@ -28,7 +28,7 @@ pkg/
   ├── vfs/       # Virtual-filesystem seam: user-supplied file paths resolve against the host disk (CLI) or per-request virtual files (engine)
   ├── engine/    # Embeddable service engine: one dtctl command line per request — multi-tenant session, virtual files, CLI-identical output
   └── serve/     # `dtctl serve <protocol>` — reference servers over pkg/engine, one subcommand per protocol (`serve http` today; wired in main, outside the invocation lock). Development-tier: registered only when opted in (`dtctl config set development.serve on`)
-sdk/            # Separate Go module (github.com/dynatrace-oss/dtctl/sdk)
+sdk/            # Separate Go module (github.com/Dynatrace/dtctl/sdk)
   ├── session/     # The session layer (docs/dev/CONFIG_CONTRACT.md): config model + load/save, credential stores, OAuth flow/refresh + cross-process lock, client-from-context with parameterized User-Agent, safety semantics
   ├── api/         # Typed API wrappers (one package per Dynatrace API surface)
   │                #   apispec/ is the odd one out: it reads the environment's *own* API index and
@@ -484,7 +484,7 @@ its preview *reports* the verdict ("Safety: BLOCKED in this context"), which is
 the opposite of acting on it.
 
 **Verification**:
-- [ ] Import `github.com/dynatrace-oss/dtctl/pkg/safety`
+- [ ] Import `github.com/Dynatrace/dtctl/pkg/safety`
 - [ ] Check after `LoadConfig()`, before operations
 - [ ] Correct operation type
 - [ ] Test with `readonly` context (should block)

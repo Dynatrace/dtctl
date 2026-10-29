@@ -62,9 +62,9 @@
         ldflags = [
           "-s"
           "-w"
-          "-X github.com/dynatrace-oss/dtctl/pkg/version.Version=${defaultVersion}"
-          "-X github.com/dynatrace-oss/dtctl/pkg/version.Commit=${rev}"
-          "-X github.com/dynatrace-oss/dtctl/pkg/version.Date=1970-01-01T00:00:00Z"
+          "-X github.com/Dynatrace/dtctl/pkg/version.Version=${defaultVersion}"
+          "-X github.com/Dynatrace/dtctl/pkg/version.Commit=${rev}"
+          "-X github.com/Dynatrace/dtctl/pkg/version.Date=1970-01-01T00:00:00Z"
         ];
 
         # Reproducible builds: no cgo, no VCS stamping by the Go toolchain.
@@ -79,7 +79,7 @@
 
         meta = with pkgs.lib; {
           description = "kubectl-inspired CLI for Dynatrace (dashboards, workflows, SLOs, etc.)";
-          homepage = "https://github.com/dynatrace-oss/dtctl";
+          homepage = "https://github.com/Dynatrace/dtctl";
           license = licenses.asl20;
           mainProgram = "dtctl";
           platforms = supportedSystems;

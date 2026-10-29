@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/cmd"
 )
 
 // pre10Demotion is one flag the pre-1.0 audit took off the stable contract, and

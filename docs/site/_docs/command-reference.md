@@ -1,5 +1,5 @@
 ---
 layout: redirect
 title: Command Reference
-redirect_to: https://github.com/dynatrace-oss/dtctl/blob/main/docs/COMMANDS.md
+redirect_to: https://github.com/Dynatrace/dtctl/blob/main/docs/COMMANDS.md
 ---

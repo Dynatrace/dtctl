@@ -3,7 +3,7 @@ package auth
 import (
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // Access is the access level a command verb needs against a resource. It is

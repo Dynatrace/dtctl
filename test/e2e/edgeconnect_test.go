@@ -6,8 +6,8 @@ package e2e
 import (
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/edgeconnect"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/edgeconnect"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 func TestEdgeConnectLifecycle(t *testing.T) {

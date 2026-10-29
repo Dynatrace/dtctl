@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkext "github.com/dynatrace-oss/dtctl/sdk/api/extension"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkext "github.com/Dynatrace/dtctl/sdk/api/extension"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Extension is the CLI read model for an extension.

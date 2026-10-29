@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	cmdtestutil "github.com/dynatrace-oss/dtctl/cmd/testutil"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	cmdtestutil "github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 func TestBreakpointMessageOutputGolden(t *testing.T) {

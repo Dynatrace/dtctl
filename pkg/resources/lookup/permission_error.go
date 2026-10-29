@@ -3,7 +3,7 @@ package lookup
 import (
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/pkg/diagnostic"
 )
 
 // forbiddenError builds the 403 error for a Resource Store file operation.
@@ -15,7 +15,7 @@ import (
 // carries every storage:files:* scope, so a 403 here almost always means the
 // policy gate, not the scope gate — but the old message ("access denied to
 // delete file") read like a token problem and dropped the response body that
-// said otherwise, which is how github.com/dynatrace-oss/dtctl#344 reached
+// said otherwise, which is how github.com/Dynatrace/dtctl#344 reached
 // support as a missing-scope bug.
 //
 // verb is the user-facing operation ("delete"/"write"), permission the scope

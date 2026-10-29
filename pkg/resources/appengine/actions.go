@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/util/unknownfields"
-	sdkae "github.com/dynatrace-oss/dtctl/sdk/api/appengine"
+	"github.com/Dynatrace/dtctl/pkg/util/unknownfields"
+	sdkae "github.com/Dynatrace/dtctl/sdk/api/appengine"
 )
 
 type AppAction struct {

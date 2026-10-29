@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
+	"github.com/Dynatrace/dtctl/pkg/resources/appengine"
 )
 
 // actionsDevelopmentFeature is the opt-in key for the action resource: it gates

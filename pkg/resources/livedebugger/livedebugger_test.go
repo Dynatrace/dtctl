@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 func newGraphQLTestHandler(t *testing.T, statusCode int, responder func(body map[string]interface{}) map[string]interface{}) *Handler {

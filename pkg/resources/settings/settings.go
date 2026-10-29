@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdksettings "github.com/dynatrace-oss/dtctl/sdk/api/settings"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdksettings "github.com/Dynatrace/dtctl/sdk/api/settings"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Re-export SDK types that are identical (no table tags needed in CLI).

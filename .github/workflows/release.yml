@@ -21,7 +21,7 @@ name: Release
 # sdk/ is a second Go module in this repo, and Go resolves it by the tag
 # `sdk/vX.Y.Z`. release-please only manages the root package, so the tag-sdk job
 # below mirrors each release tag into the sdk namespace at the same commit. That
-# is what makes the root module's `require github.com/dynatrace-oss/dtctl/sdk`
+# is what makes the root module's `require github.com/Dynatrace/dtctl/sdk`
 # resolvable for anyone importing e.g. pkg/engine — the local `replace` in go.mod
 # is ignored downstream. verify-consumable then proves it from outside the repo.
 #
@@ -140,7 +140,7 @@ jobs:
           # Fetch dtctl itself straight from GitHub: the tags were created seconds
           # ago, so neither the module proxy nor the checksum database has
           # observed them yet. Everything else still goes through the proxy.
-          GOPRIVATE: github.com/dynatrace-oss/dtctl
+          GOPRIVATE: github.com/Dynatrace/dtctl
           GOFLAGS: -mod=mod
         run: |
           set -euo pipefail
@@ -154,7 +154,7 @@ jobs:
           import (
           	"fmt"
 
-          	"github.com/dynatrace-oss/dtctl/pkg/engine"
+          	"github.com/Dynatrace/dtctl/pkg/engine"
           )
 
           func main() {
@@ -163,7 +163,7 @@ jobs:
           EOF
           # Fails if go.mod's sdk require does not name a real sdk/vX.Y.Z tag —
           # the local `replace` that makes in-repo builds work is ignored here.
-          go get "github.com/dynatrace-oss/dtctl@$TAG"
+          go get "github.com/Dynatrace/dtctl@$TAG"
           go build ./...
           echo "pkg/engine is importable from an external module at $TAG"
 

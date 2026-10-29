@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 func TestAnomalyDetectorLifecycle(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
 )
 
 // These tests cover the dry runs issue #514 left without a plan in agent mode:

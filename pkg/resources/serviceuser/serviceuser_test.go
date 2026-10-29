@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	sdksu "github.com/dynatrace-oss/dtctl/sdk/api/serviceuser"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	sdksu "github.com/Dynatrace/dtctl/sdk/api/serviceuser"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 func newTestClient(t *testing.T, handler http.Handler) *httpclient.Client {

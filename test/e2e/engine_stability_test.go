@@ -17,7 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // Embedded-engine coverage for the stability floor, against a real tenant and

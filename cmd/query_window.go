@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // windowArg finds a query that names its own window.

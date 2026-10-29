@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/bucket"
+	"github.com/Dynatrace/dtctl/pkg/resources/bucket"
 )
 
 // applyBucket applies a bucket resource

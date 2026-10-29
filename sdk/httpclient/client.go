@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-resty/resty/v2"
 
-	"github.com/dynatrace-oss/dtctl/sdk/agentmode"
-	"github.com/dynatrace-oss/dtctl/sdk/auth"
+	"github.com/Dynatrace/dtctl/sdk/agentmode"
+	"github.com/Dynatrace/dtctl/sdk/auth"
 )
 
 // Client is an HTTP client for Dynatrace APIs.

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/segment"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
 )
 
 // TestSegment_CRUD tests the full create/get/update/delete lifecycle for

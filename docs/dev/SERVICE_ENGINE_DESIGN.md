@@ -325,7 +325,7 @@ The service is not a perfect mirror, and the differences are intentional:
 
 ## Consuming `pkg/engine` from another module
 
-`pkg/engine` lives in the **root** module, `github.com/dynatrace-oss/dtctl` — not
+`pkg/engine` lives in the **root** module, `github.com/Dynatrace/dtctl` — not
 in `sdk/`, and it cannot move there: `engine.Execute` runs the real command tree,
 so it depends on `cmd/`, which depends on every `pkg/resources/*`, which depends
 back on `sdk/api/*`. The SDK is deliberately the opposite kind of artifact (a few
@@ -334,11 +334,11 @@ typed API wrappers, 8 direct dependencies, no CLI concerns); the engine pulls in
 choices, not two doors to the same room.
 
 ```go
-import "github.com/dynatrace-oss/dtctl/pkg/engine"
+import "github.com/Dynatrace/dtctl/pkg/engine"
 ```
 
 ```bash
-go get github.com/dynatrace-oss/dtctl@latest
+go get github.com/Dynatrace/dtctl@latest
 ```
 
 That works only because of a coupling worth stating explicitly, since it broke

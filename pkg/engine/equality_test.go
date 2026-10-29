@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
-	"github.com/dynatrace-oss/dtctl/pkg/engine"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/engine"
 )
 
 // TestEngineOutputEqualsCLI is the E8 acceptance gate: for the same command

@@ -35,7 +35,7 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 
 2. **Clone the repository**:
    ```bash
-   git clone https://github.com/dynatrace-oss/dtctl.git
+   git clone https://github.com/Dynatrace/dtctl.git
    cd dtctl
    ```
 
@@ -75,7 +75,7 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 
 ### Finding Issues to Work On
 
-- Check the [issue tracker](https://github.com/dynatrace-oss/dtctl/issues)
+- Check the [issue tracker](https://github.com/Dynatrace/dtctl/issues)
 - Look for issues labeled `good first issue` or `help wanted`
 - Ask in discussions if you're unsure where to start
 
@@ -461,8 +461,8 @@ redirect stub only if an old published URL needs to point at it.
 
 ## Getting Help
 
-- **Questions**: Use [GitHub Discussions](https://github.com/dynatrace-oss/dtctl/discussions)
-- **Bugs**: Open an [issue](https://github.com/dynatrace-oss/dtctl/issues)
+- **Questions**: Use [GitHub Discussions](https://github.com/Dynatrace/dtctl/discussions)
+- **Bugs**: Open an [issue](https://github.com/Dynatrace/dtctl/issues)
 - **Security**: See [SECURITY.md](SECURITY.md)
 
 ## License

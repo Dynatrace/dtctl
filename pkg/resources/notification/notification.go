@@ -3,9 +3,9 @@ package notification
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdknotification "github.com/dynatrace-oss/dtctl/sdk/api/notification"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdknotification "github.com/Dynatrace/dtctl/sdk/api/notification"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // EventNotification represents an event notification (CLI version with table tags).

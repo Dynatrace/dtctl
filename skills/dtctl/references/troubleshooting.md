@@ -2,14 +2,14 @@
 
 ## Installation
 
-Install from https://github.com/dynatrace-oss/dtctl. Verify with `dtctl version`.
+Install from https://github.com/Dynatrace/dtctl. Verify with `dtctl version`.
 
 ```bash
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/arm64/arm64/')
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-TAG=$(curl -s -I -L https://github.com/dynatrace-oss/dtctl/releases/latest | tr -d '\r' | awk -F/ '/^location: /{print $NF}' | tail -n1)
+TAG=$(curl -s -I -L https://github.com/Dynatrace/dtctl/releases/latest | tr -d '\r' | awk -F/ '/^location: /{print $NF}' | tail -n1)
 TARBALL="dtctl_${TAG#v}_${OS}_${ARCH}.tar.gz"
-URL="https://github.com/dynatrace-oss/dtctl/releases/download/${TAG}/${TARBALL}"
+URL="https://github.com/Dynatrace/dtctl/releases/download/${TAG}/${TARBALL}"
 mkdir -p /tmp/dtctl && cd /tmp/dtctl
 curl -L "$URL" -o "$TARBALL"
 tar -xzf "$TARBALL"

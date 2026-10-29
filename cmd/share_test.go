@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // setupShareCmdTest wires a fresh file-backed config pointed at srv and

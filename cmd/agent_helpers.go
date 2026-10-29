@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/apply"
 )
 
 // extractApplyBase extracts the embedded ApplyResultBase from any ApplyResult

@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 func windowedInv(signals ...inventory.Signal) *inventory.Inventory {

@@ -14,7 +14,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/usage"
+	"github.com/Dynatrace/dtctl/pkg/usage"
 )
 
 // usageStateDir points the XDG state directory (where the usage ledger lives)

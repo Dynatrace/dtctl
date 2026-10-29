@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Regression tests for https://github.com/dynatrace-oss/dtctl/issues/521
+// Regression tests for https://github.com/Dynatrace/dtctl/issues/521
 //
 // The generic dry-run tail decided the settings action from the presence of an
 // objectId alone, so a payload whose objectId no longer exists — and that has

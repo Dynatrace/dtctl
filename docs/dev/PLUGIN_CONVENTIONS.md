@@ -50,7 +50,7 @@ reaches the plugin like any other inherited variable. Plugins resolve
 credentials themselves via the shared config contract
 ([CONFIG_CONTRACT.md](CONFIG_CONTRACT.md)): the config file named by
 `DTCTL_CONFIG` and the OS keyring service `dtctl`. The dtctl sdk
-(`github.com/dynatrace-oss/dtctl/sdk`) is the supported way to do this.
+(`github.com/Dynatrace/dtctl/sdk`) is the supported way to do this.
 
 ## Conventions a good plugin follows
 
