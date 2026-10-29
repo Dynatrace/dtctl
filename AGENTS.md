@@ -532,10 +532,13 @@ to add.
 *Guard*: `go test ./cmd/ -run 'TestFileFlagsAreDeclared|TestFileFlagAnnotationsAreValid|TestInputWithoutArgsIsDeclared|TestVFSEnvCallSitesAreKnown'`
 
 A command that asks for confirmation on stdin is declared too, with the flags
-that skip the prompt: `markPrompts(c, "yes")` (`"force"`, `"confirm"`). Without
-an answer the command cancels itself and exits 0, so Parse reports it as
-reading input unless one of those flags, `--plain`, `--agent` or `--dry-run` is
-given. A group whose own `RunE` only refuses a missing or unknown subcommand
+that skip the prompt: `markPrompts(c, "yes", "dry-run")` (`"force"`,
+`"confirm"`). List `"dry-run"` only when the dry run returns *before* the
+question; `delete breakpoint` and `delete scheduling-rule` ask first, so theirs
+is not listed. A command that asks only for a single argument (`restore trash`)
+uses `markPromptsOneArgument`. Without an answer the command cancels itself and
+exits 0, so Parse reports it as reading input unless a skip flag, `--plain` or
+`--agent` is given. A group whose own `RunE` only refuses a missing or unknown subcommand
 (anything other than `requireSubcommand` itself) is marked with
 `markRefusalOnly(c)`, so Parse keeps the refusal instead of recording a run.
 *Guard*: `go test ./cmd/ -run 'TestPromptCallSitesAreKnown|TestPromptingCommandsAreDeclared|TestParseKeepsAGroupsDeclaredRefusal'`

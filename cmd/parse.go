@@ -44,7 +44,7 @@ type ParseResult struct {
 	Resource string // "" when the verb takes none (apply)
 
 	// InputFiles and OutputFiles are the files the command reads and writes,
-	// as vfs.Key names, sorted and de-duplicated. The stdin values ("-",
+	// as vfs.Key names, sorted, de-duplicated and never nil. The stdin values ("-",
 	// "@-") are never one; a path that only resolves to the key "-" (./-) is a
 	// file, as it is at run time.
 	InputFiles  []string
@@ -52,14 +52,16 @@ type ParseResult struct {
 	// RequiresInput is true when the command may read stdin: a "-" file value,
 	// "-d @-", a command such as query given no argument and no file, or a
 	// command that asks for confirmation (delete, restore) and was given
-	// neither its skip flag (--yes, --force) nor --plain, --agent or --dry-run.
-	// "May": some commands ask only in one case (restore trash for a single
-	// document), and a refused or missing answer cancels the command with exit
-	// 0.
+	// neither its skip flag (--yes, --force, or --dry-run where the dry run
+	// returns before the question) nor --plain or --agent. restore trash asks
+	// only for a single document; breakpoint commands only when existing
+	// breakpoints are affected, which Parse cannot know, so it reports them as
+	// asking. A refused or missing answer cancels the command with exit 0. It
+	// is false under --check-scopes, which does not run the command.
 	RequiresInput bool
 
 	// RequiredScopes are the token scopes the catalog names for the command,
-	// complete only when Scopes is "known". Scopes is "none" (the catalog names
+	// never nil, and complete only when Scopes is "known". Scopes is "none" (the catalog names
 	// none; for a command the catalog is missing scopes for, that
 	// under-reports), "known", "per_call" (decided by the call, exec api) or
 	// "input_dependent" (decided by the input file's content, apply).
@@ -195,7 +197,10 @@ func parseTree(root *cobra.Command, argv []string) (*ParseResult, error) {
 			executed = root
 		}
 		verb, resource := verbResource(executed)
-		return &ParseResult{Verb: verb, Resource: resource, Scopes: scopeRequirementNone.String(), Help: true}, nil
+		return &ParseResult{
+			Verb: verb, Resource: resource, Scopes: scopeRequirementNone.String(), Help: true,
+			InputFiles: []string{}, OutputFiles: []string{}, RequiredScopes: []string{},
+		}, nil
 	}
 	return newParseResult(ran, ranArgs), nil
 }
@@ -282,7 +287,7 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 			}
 		}
 	})
-	if promptsFor(c) {
+	if promptsFor(c, args) {
 		res.RequiresInput = true
 	}
 	// Only a flag standing in for the argument replaces stdin: query
@@ -290,10 +295,16 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 	if c.Annotations[annotationInputWithoutArgs] == "true" && len(args) == 0 && !argumentGiven {
 		res.RequiresInput = true
 	}
-	res.InputFiles, res.OutputFiles = slices.Sorted(maps.Keys(inputs)), slices.Sorted(maps.Keys(outputs))
+	if checkScopes(cmdContext(c)) {
+		// --check-scopes prints its verdict instead of running the body, so
+		// nothing above reads stdin. Last, so no later check sets it again.
+		res.RequiresInput = false
+	}
+	res.InputFiles = append([]string{}, slices.Sorted(maps.Keys(inputs))...)
+	res.OutputFiles = append([]string{}, slices.Sorted(maps.Keys(outputs))...)
 
 	required, req := scopesForInvocation(c, verb, resource)
-	res.RequiredScopes = append([]string(nil), required...)
+	res.RequiredScopes = append([]string{}, required...)
 	res.Scopes = req.String()
 	return res
 }
@@ -302,16 +313,25 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 // stdin: it is declared with markPrompts and nothing the run was given keeps
 // it from asking. It reads the state the pre-run hooks left, so --agent (which
 // implies plain mode) and --dry-run count as Execute sees them.
-func promptsFor(c *cobra.Command) bool {
+func promptsFor(c *cobra.Command, args []string) bool {
 	skips := c.Annotations[annotationPrompts]
 	if skips == "" {
 		return false
 	}
+	if c.Annotations[annotationPromptsOneArgument] == "true" && len(args) != 1 {
+		return false
+	}
 	ctx := cmdContext(c)
-	if plainMode(ctx) || dryRun(ctx) {
+	if plainMode(ctx) {
 		return false
 	}
 	for _, name := range strings.Split(skips, ",") {
+		if name == "dry-run" {
+			if dryRun(ctx) {
+				return false
+			}
+			continue
+		}
 		// A bool flag skips when true, a string flag (--confirm) when set.
 		if f := c.Flags().Lookup(name); f != nil && f.Changed && f.Value.String() != "" && f.Value.String() != "false" {
 			return false

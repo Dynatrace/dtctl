@@ -41,6 +41,9 @@ const (
 	// to report the refusal Execute gives. Its value is "true". requireSubcommand
 	// itself needs no mark; a group with a RunE of its own does.
 	annotationRefusalOnly = "dtctl.io/refusal-only"
+	// annotationPromptsOneArgument marks an annotationPrompts command that
+	// asks only when it is given exactly one argument. Its value is "true".
+	annotationPromptsOneArgument = "dtctl.io/prompts-one-argument"
 )
 
 // Values of annotationFile.
@@ -88,23 +91,35 @@ func markArgumentFlag(cmd *cobra.Command, name string) {
 
 // markPrompts declares that cmd may ask for confirmation on stdin, and that
 // setting any of skipFlags (--yes, --force, --confirm) keeps it from asking. A
-// run that is plain (--plain, or implied by --agent) or a dry run never asks,
-// whatever the flags, so those are not listed.
+// run that is plain (--plain, or implied by --agent) never asks, whatever the
+// flags, so that is not listed.
 //
-// "May": some commands ask only in a particular case (restore trash with one
-// document, breakpoint commands when existing breakpoints are affected), and
-// the declaration covers the command, not the case. It panics when cmd has no
-// such flag, as markFileFlag does.
+// List "dry-run" only where the dry run returns before the question is asked:
+// delete breakpoint and delete scheduling-rule ask first, so a dry run of
+// either still reads stdin. --dry-run is bound after the constructors run, so
+// it is not looked up here; TestFileFlagAnnotationsAreValid checks that the
+// command has one.
+//
+// "May": breakpoint commands ask only when existing breakpoints are affected,
+// and the declaration covers the command, not the case. It panics when cmd has
+// no such flag, as markFileFlag does.
 func markPrompts(cmd *cobra.Command, skipFlags ...string) {
 	if len(skipFlags) == 0 {
 		panic(fmt.Sprintf("cmd: %s declares a prompt with no flag that skips it", cmd.Name()))
 	}
 	for _, name := range skipFlags {
-		if lookupOwnFlag(cmd, name) == nil {
+		if name != "dry-run" && lookupOwnFlag(cmd, name) == nil {
 			panic(fmt.Sprintf("cmd: %s has no flag --%s to skip its prompt", cmd.Name(), name))
 		}
 	}
 	setCommandAnnotation(cmd, annotationPrompts, strings.Join(skipFlags, ","))
+}
+
+// markPromptsOneArgument is markPrompts for a command that asks only when it
+// is given exactly one argument (restore trash).
+func markPromptsOneArgument(cmd *cobra.Command, skipFlags ...string) {
+	markPrompts(cmd, skipFlags...)
+	setCommandAnnotation(cmd, annotationPromptsOneArgument, "true")
 }
 
 // markRefusalOnly declares that cmd's RunE only refuses a missing or unknown

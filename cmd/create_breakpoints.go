@@ -170,7 +170,7 @@ Examples:
 	}
 	c.Flags().String("filters", "", "workspace filters to set before creating the breakpoint (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
-	markPrompts(c, "yes")
+	markPrompts(c, "yes", "dry-run")
 	markLiveDebuggerExperimental(c)
 	return c
 }
