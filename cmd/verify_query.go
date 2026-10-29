@@ -212,6 +212,9 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read query from file (use '-' for stdin)")
+	markFileFlag(c, "file", fileValuePath)
+	markInputWithoutArgs(c)
+	markArgumentFlag(c, "file") // the query from a file instead of the argument
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	c.Flags().Bool("canonical", false, "print canonical query representation")
 	c.Flags().String("timezone", "", "timezone for query verification (IANA, CET, +01:00, etc.)")

@@ -80,6 +80,7 @@ See also:
 		RunE:    updateDocumentRunE,
 	}
 	c.Flags().StringP("file", "f", "", "file containing the document definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("type", "", "document type (e.g. launchpad, acme:config); read from payload if not provided")
 	c.Flags().String("id", "", "ID of the document to update; read from payload if not provided")
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")

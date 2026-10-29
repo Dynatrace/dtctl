@@ -174,6 +174,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes", "dry-run")
 	stability.MarkStable(c)
 	return c
 }
