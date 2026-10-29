@@ -18,7 +18,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // fileFlagProbeHints are flags a command needs before it reaches its file

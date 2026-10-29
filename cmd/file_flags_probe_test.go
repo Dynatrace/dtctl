@@ -24,7 +24,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // isolateProbeHost points everything a command can write on the host at
@@ -272,7 +272,7 @@ func (r *recordingFS) ReadFile(name string) ([]byte, error) {
 	var stack []string
 	for {
 		f, more := frames.Next()
-		if strings.HasPrefix(f.Function, "github.com/dynatrace-oss/dtctl/cmd.") && !strings.HasSuffix(f.File, "_test.go") {
+		if strings.HasPrefix(f.Function, "github.com/Dynatrace/dtctl/cmd.") && !strings.HasSuffix(f.File, "_test.go") {
 			stack = append(stack, fmt.Sprintf("%s:%d", filepath.Base(f.File), f.Line))
 		}
 		if !more {

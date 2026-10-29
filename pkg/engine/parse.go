@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // ParseRequest is one command line to analyse. Each field means what it means
