@@ -576,6 +576,32 @@ func TestResponse_GetTypes(t *testing.T) {
 			t.Errorf("indexRange not parsed correctly: %+v", types[0].IndexRange)
 		}
 	})
+
+	t.Run("keeps array element types", func(t *testing.T) {
+		body := `{"state":"SUCCEEDED","result":{"records":[{"v":[1.5,2.5]}],` +
+			`"types":[{"indexRange":[0,0],"mappings":{"v":{"type":"array","types":` +
+			`[{"indexRange":[0,1],"mappings":{"element":{"type":"double"}}}]}}}]}}`
+		var r Response
+		if err := json.Unmarshal([]byte(body), &r); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		col := r.GetTypes()[0].Mappings["v"]
+		if col.Type != "array" || len(col.Types) != 1 {
+			t.Fatalf("array element types dropped: %+v", col)
+		}
+		if got := col.Types[0].Mappings["element"].Type; got != "double" {
+			t.Errorf("element type = %q, want double", got)
+		}
+		out, err := json.Marshal(r.GetTypes())
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		want := `[{"indexRange":[0,0],"mappings":{"v":{"type":"array","types":` +
+			`[{"indexRange":[0,1],"mappings":{"element":{"type":"double"}}}]}}}]`
+		if string(out) != want {
+			t.Errorf("round trip = %s, want %s", out, want)
+		}
+	})
 }
 
 func TestResponse_GetNotifications(t *testing.T) {
