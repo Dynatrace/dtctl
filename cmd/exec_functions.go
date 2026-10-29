@@ -103,8 +103,10 @@ Examples:
 	c.Flags().String("method", "GET", "HTTP method for app function (GET, POST, PUT, PATCH, DELETE)")
 	c.Flags().String("payload", "", "request payload (JSON string)")
 	c.Flags().String("data", "", "read payload from file (or - for stdin)")
+	markFileFlag(c, "data", fileValuePath)
 	c.Flags().String("code", "", "JavaScript code to execute (for ad-hoc execution)")
 	c.Flags().StringP("file", "f", "", "read JavaScript code from file (for ad-hoc execution)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().Bool("defer", false, "defer execution (async, for resumable functions)")
 	stability.MarkStable(c)
 	return c

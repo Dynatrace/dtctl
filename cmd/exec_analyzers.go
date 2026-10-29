@@ -162,6 +162,7 @@ func analyzerSeriesAdvice(eff output.SeriesEffect, opts seriesOptions) string {
 // "exec analyzer" and "verify analyzer".
 func addAnalyzerInputFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("file", "f", "", "read input from JSON file, or - for stdin")
+	markFileFlag(cmd, "file", fileValuePath)
 	cmd.Flags().String("input", "", "inline JSON input")
 	cmd.Flags().String("query", "", "DQL query shorthand (for timeseries analyzers)")
 	// Exactly one source is required; an explicitly empty one must not count

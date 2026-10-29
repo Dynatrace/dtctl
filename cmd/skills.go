@@ -48,6 +48,7 @@ which is automatically discovered by any agentskills.io-compatible agent.`,
   dtctl skills status`,
 		RunE: requireSkillsSubcommand,
 	}
+	markRefusalOnly(c)
 	stability.MarkStable(c)
 	return c
 }
