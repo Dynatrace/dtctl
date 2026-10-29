@@ -6,7 +6,6 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -101,48 +100,53 @@ func declName(decl ast.Decl, pos token.Pos) string {
 	return ""
 }
 
-// TestPromptingCommandsAreDeclared pins which commands carry markPrompts, so
-// a rename or a dropped declaration cannot quietly make Parse report that a
-// command which asks for confirmation needs no input.
+// TestPromptingCommandsAreDeclared pins which commands carry markPrompts, and
+// the flags that skip each one's question, so a rename or a dropped
+// declaration cannot quietly make Parse report that a command which asks for
+// confirmation needs no input. "dry-run" is listed only where the dry run
+// returns before the question: delete breakpoint and delete scheduling-rule
+// ask first. A "+one-argument" suffix is markPromptsOneArgument.
 func TestPromptingCommandsAreDeclared(t *testing.T) {
-	want := []string{
-		"dtctl create breakpoint",
-		"dtctl delete anomaly-detector",
-		"dtctl delete app",
-		"dtctl delete breakpoint",
-		"dtctl delete bucket",
-		"dtctl delete dashboard",
-		"dtctl delete document",
-		"dtctl delete edgeconnect",
-		"dtctl delete lookup",
-		"dtctl delete notebook",
-		"dtctl delete notification",
-		"dtctl delete scheduling-rule",
-		"dtctl delete segment",
-		"dtctl delete settings",
-		"dtctl delete slo",
-		"dtctl delete trash",
-		"dtctl delete workflow",
-		"dtctl restore dashboard",
-		"dtctl restore document",
-		"dtctl restore notebook",
-		"dtctl restore trash",
-		"dtctl restore workflow",
-		"dtctl update breakpoint",
-		"dtctl usage reset",
+	want := map[string]string{
+		"dtctl create breakpoint":       "yes,dry-run",
+		"dtctl delete anomaly-detector": "yes,dry-run",
+		"dtctl delete app":              "yes,dry-run",
+		"dtctl delete breakpoint":       "yes",
+		"dtctl delete bucket":           "yes,confirm,dry-run",
+		"dtctl delete dashboard":        "yes,dry-run",
+		"dtctl delete document":         "yes,dry-run",
+		"dtctl delete edgeconnect":      "yes,dry-run",
+		"dtctl delete lookup":           "yes,dry-run",
+		"dtctl delete notebook":         "yes,dry-run",
+		"dtctl delete notification":     "yes,dry-run",
+		"dtctl delete scheduling-rule":  "yes",
+		"dtctl delete segment":          "yes,confirm,dry-run",
+		"dtctl delete settings":         "yes,dry-run",
+		"dtctl delete slo":              "yes,dry-run",
+		"dtctl delete trash":            "yes,dry-run",
+		"dtctl delete workflow":         "yes,dry-run",
+		"dtctl restore dashboard":       "force,dry-run",
+		"dtctl restore document":        "force,dry-run",
+		"dtctl restore notebook":        "force,dry-run",
+		"dtctl restore trash":           "force,dry-run+one-argument",
+		"dtctl restore workflow":        "force,dry-run",
+		"dtctl update breakpoint":       "yes,dry-run",
+		"dtctl usage reset":             "yes",
 	}
-	var got []string
+	got := map[string]string{}
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
-		if c.Annotations[annotationPrompts] != "" {
-			got = append(got, c.CommandPath())
+		if skips := c.Annotations[annotationPrompts]; skips != "" {
+			if c.Annotations[annotationPromptsOneArgument] == "true" {
+				skips += "+one-argument"
+			}
+			got[c.CommandPath()] = skips
 		}
 		for _, sub := range c.Commands() {
 			walk(sub)
 		}
 	}
 	walk(newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root)
-	slices.Sort(got)
 	require.Equal(t, want, got)
 }
 

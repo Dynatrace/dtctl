@@ -94,7 +94,13 @@ func TestParse(t *testing.T) {
 			require.NoError(t, err)
 			if tc.want.Scopes == ScopesKnown && tc.want.RequiredScopes == nil {
 				assert.NotEmpty(t, got.RequiredScopes)
-				got.RequiredScopes = nil
+				got.RequiredScopes = []string{}
+			}
+			// The lists are never nil, so a host serializes [] and not null.
+			for _, l := range []*[]string{&tc.want.InputFiles, &tc.want.OutputFiles, &tc.want.RequiredScopes} {
+				if *l == nil {
+					*l = []string{}
+				}
 			}
 			assert.Equal(t, &tc.want, got)
 		})
@@ -180,6 +186,22 @@ func BenchmarkParse(b *testing.B) {
 	}
 }
 
+// TestParse_CheckScopesReadsNoInput: --check-scopes prints a verdict and does
+// not run the command, so the command reads no input.
+func TestParse_CheckScopesReadsNoInput(t *testing.T) {
+	for _, command := range []string{
+		"delete workflow wf-1 --check-scopes",
+		"query --check-scopes",
+		"apply -f - --check-scopes",
+	} {
+		t.Run(command, func(t *testing.T) {
+			got, err := Parse(context.Background(), ParseRequest{Command: command})
+			require.NoError(t, err)
+			assert.False(t, got.RequiresInput)
+		})
+	}
+}
+
 // TestParse_RequiresInputForConfirmationPrompts: a command that asks for
 // confirmation reads Request.Stdin, and cancels itself with exit 0 when there
 // is no answer, so Parse reports it unless the run skips the prompt.
@@ -202,10 +224,17 @@ func TestParse_RequiresInputForConfirmationPrompts(t *testing.T) {
 		"restore --force":         {"restore workflow " + id + " 1 --force", false},
 		"restore trash":           {"restore trash " + id, true},
 		"restore trash --force":   {"restore trash " + id + " --force", false},
-		"delete breakpoint":       {"delete breakpoint 123", true},
-		"delete breakpoint --yes": {"delete breakpoint 123 --yes", false},
-		"a read never asks":       {"get workflows", false},
-		"a create never asks":     {"create bucket -f b.yaml", false},
+		// restore trash asks only for a single document.
+		"restore trash, two documents": {"restore trash " + id + " " + id, false},
+		"delete breakpoint":            {"delete breakpoint 123", true},
+		"delete breakpoint --yes":      {"delete breakpoint 123 --yes", false},
+		// These two ask before their dry run returns, so --dry-run does not
+		// keep them from reading stdin.
+		"delete breakpoint --dry-run":      {"delete breakpoint 123 --dry-run", true},
+		"delete scheduling-rule --dry-run": {"delete scheduling-rule r --dry-run", true},
+		"delete scheduling-rule --yes":     {"delete scheduling-rule r --yes", false},
+		"a read never asks":                {"get workflows", false},
+		"a create never asks":              {"create bucket -f b.yaml", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := Parse(context.Background(), ParseRequest{Command: tc.command, MinStability: "experimental"})

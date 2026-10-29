@@ -111,7 +111,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -205,7 +205,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -299,7 +299,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -392,7 +392,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -490,7 +490,7 @@ Examples:
 		},
 	}
 	c.Flags().Bool("force", false, "Restore even if name conflicts exist")
-	markPrompts(c, "force")
+	markPromptsOneArgument(c, "force", "dry-run")
 	c.Flags().String("new-name", "", "Restore with a new name")
 	stability.MarkStable(c)
 	return c

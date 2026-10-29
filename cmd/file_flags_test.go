@@ -153,13 +153,14 @@ var stabilityAnnotationKeys = []string{
 // key or value would silently drop a file from a caller's view.
 func TestFileFlagAnnotationsAreValid(t *testing.T) {
 	known := map[string]bool{
-		annotationFile:             true,
-		annotationWritesTo:         true,
-		annotationInputWithoutArgs: true,
-		annotationScopes:           true,
-		annotationArgumentFlag:     true,
-		annotationPrompts:          true,
-		annotationRefusalOnly:      true,
+		annotationFile:               true,
+		annotationWritesTo:           true,
+		annotationInputWithoutArgs:   true,
+		annotationScopes:             true,
+		annotationArgumentFlag:       true,
+		annotationPrompts:            true,
+		annotationRefusalOnly:        true,
+		annotationPromptsOneArgument: true,
 	}
 	for _, k := range stabilityAnnotationKeys {
 		known[k] = true
@@ -173,11 +174,18 @@ func TestFileFlagAnnotationsAreValid(t *testing.T) {
 			if k == annotationInputWithoutArgs && v != "true" {
 				t.Errorf("%s: %s = %q, want \"true\"", c.CommandPath(), k, v)
 			}
-			if k == annotationRefusalOnly && v != "true" {
+			if (k == annotationRefusalOnly || k == annotationPromptsOneArgument) && v != "true" {
 				t.Errorf("%s: %s = %q, want \"true\"", c.CommandPath(), k, v)
 			}
 			if k == annotationPrompts {
 				for _, name := range strings.Split(v, ",") {
+					// --dry-run is bound after the constructors run.
+					if name == "dry-run" {
+						if !dryRunPaths()[commandPathRelative(c, root)] {
+							t.Errorf("%s: %s names --dry-run, but the command has no dry run", c.CommandPath(), k)
+						}
+						continue
+					}
 					if lookupOwnFlag(c, name) == nil {
 						t.Errorf("%s: %s names --%s, which is not a flag of the command", c.CommandPath(), k, name)
 					}

@@ -37,21 +37,24 @@ type Parsed struct {
 	Resource string // "" when the verb takes none (apply)
 
 	// InputFiles and OutputFiles are the files the command reads and writes,
-	// named the way Request.Files and Result.Files name them (vfs.Key), sorted
-	// and de-duplicated. The stdin values ("-", "@-") are never a path, but
+	// named the way Request.Files and Result.Files name them (vfs.Key), sorted,
+	// de-duplicated and never nil. The stdin values ("-", "@-") are never a path, but
 	// ./- is a file named "-" and is reported as one.
 	InputFiles  []string
 	OutputFiles []string
 	// RequiresInput is true when the command may read Request.Stdin: a "-"
 	// file argument, "-d @-", a command such as query given no argument and no
 	// file, or a command that asks for confirmation (delete, restore) and was
-	// given neither its skip flag (--yes, --force) nor --plain, --agent or
-	// --dry-run. Without an answer on Stdin that command cancels itself and
-	// exits 0, so a host that cannot supply one should pass the skip flag.
+	// given neither its skip flag (--yes, --force) nor --plain or --agent.
+	// --dry-run skips the question too, except on delete breakpoint and delete
+	// scheduling-rule, which ask before their dry run returns. Without an
+	// answer on Stdin that command cancels itself and exits 0, so a host that
+	// cannot supply one should pass the skip flag. It is false under
+	// --check-scopes, which does not run the command.
 	RequiresInput bool
 
 	// RequiredScopes are the token scopes the command needs, complete when
-	// Scopes is ScopesKnown.
+	// Scopes is ScopesKnown, and never nil.
 	RequiredScopes []string
 	Scopes         ScopeRequirement
 
