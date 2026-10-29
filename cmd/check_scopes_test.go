@@ -373,6 +373,25 @@ func TestScopesForInvocation_UnlistedCommandIsUnchanged(t *testing.T) {
 	require.Equal(t, wantReq, req)
 }
 
+// TestCopilotSkillsRequireTheirOwnScope holds the CoPilot skills under exec
+// copilot to the scope each operation declares, not the conversation scope
+// of their parent: --check-scopes finds a command nested below a resource by
+// its whole path.
+func TestCopilotSkillsRequireTheirOwnScope(t *testing.T) {
+	for skill, want := range map[string]string{
+		"nl2dql":          "davis-copilot:nl2dql:execute",
+		"dql2nl":          "davis-copilot:dql2nl:execute",
+		"document-search": "davis-copilot:document-search:execute",
+	} {
+		cmd, _, err := rootCmd.Find([]string{"exec", "copilot", skill})
+		require.NoError(t, err, skill)
+		verb, resource := verbResource(cmd)
+		got, req := scopesForInvocation(cmd, verb, resource)
+		require.Equal(t, scopeRequirementKnown, req, skill)
+		require.Equal(t, []string{want}, got, skill)
+	}
+}
+
 func TestScopePreflight_FlagScopeReachesTheVerdict(t *testing.T) {
 	cmd, _, err := rootCmd.Find([]string{"get", "dashboards"})
 	require.NoError(t, err)
