@@ -55,7 +55,7 @@
 
         # Hash of the vendored Go modules. Regenerate with
         # `nix build .#dtctl --refresh` after bumping deps and update here.
-        vendorHash = "sha256-tGz9UlhbgzP9CVfcW4KDVD5jyQ9MlSaxZXxU3+ZQ1Hs=";
+        vendorHash = "sha256-Kv7uvuLq2eMeIDBbWyI9GgDW+bJ0fNe1DoKro2GHDy0=";
 
         # Match the makefile's ldflags: embed version, commit, build date,
         # and strip debug info for a smaller binary.
