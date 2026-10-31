@@ -454,7 +454,7 @@ func newNestedNode(verbName string, cmd *cobra.Command) *Verb {
 		v.SafetyOp = safetyOp
 	}
 	v.Access = string(auth.AccessForVerb(verbName, v.SafetyOp))
-	if scopes := auth.ScopesForResource(cmd.Name(), auth.Access(v.Access)); len(scopes) > 0 {
+	if scopes := auth.ScopesForCommand(verbName, cmd.Name(), auth.Access(v.Access)); len(scopes) > 0 {
 		v.RequiredScopes = append([]string(nil), scopes...)
 	}
 	annotateStability(v, cmd)
@@ -532,7 +532,7 @@ func populateVerbScopes(name string, verb *Verb) {
 	access := auth.Access(verb.Access)
 	byResource := make(map[string][]string)
 	for _, r := range verb.Resources {
-		scopes := auth.ScopesForResource(r, access)
+		scopes := auth.ScopesForCommand(name, r, access)
 		if len(scopes) == 0 && access != auth.AccessRead {
 			// A resource nested under a mutating verb can itself be read-only
 			// (e.g. `share get` under the mutating `share` verb): such a
@@ -1045,11 +1045,11 @@ func RequiredScopesUnion(l *Listing) []string {
 func RequiredScopesForResource(l *Listing, resource string) []string {
 	resolved := ResolveAlias(resource)
 	seen := map[string]bool{}
-	for _, verb := range l.Verbs {
+	for name, verb := range l.Verbs {
 		if !containsResource(verb, resolved) && !containsResource(verb, resource) {
 			continue
 		}
-		for _, s := range auth.ScopesForResource(resolved, auth.Access(verb.Access)) {
+		for _, s := range auth.ScopesForCommand(name, resolved, auth.Access(verb.Access)) {
 			seen[s] = true
 		}
 		// A name that matches only below the verb (`create aws connection`) has

@@ -444,3 +444,52 @@ func TestFlagScopesAreRequestedAtLogin(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandScopesAreWellFormed holds auth.CommandScopes: every key names a
+// command of the tree, and login requests every scope at some safety level,
+// so a command's requirement is one a user can get.
+func TestCommandScopesAreWellFormed(t *testing.T) {
+	root := newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root
+	paths := map[string]bool{}
+	walkCommands(root, func(c *cobra.Command) {
+		if verb, resource := verbResource(c); resource != "" {
+			paths[verb+" "+resource] = true
+			paths[verb+" "+strings.TrimSuffix(resource, "s")] = true
+		}
+	})
+	requested := map[string]bool{}
+	for _, level := range []config.SafetyLevel{
+		config.SafetyLevelReadOnly,
+		config.SafetyLevelReadWriteMine,
+		config.SafetyLevelReadWriteAll,
+		config.SafetyLevelDangerouslyUnrestricted,
+	} {
+		for _, s := range auth.GetScopesForSafetyLevel(level) {
+			requested[s] = true
+		}
+	}
+	for key, cs := range auth.CommandScopes {
+		require.True(t, paths[key], "auth.CommandScopes names %q, which is not a command", key)
+		for _, scope := range cs.Required {
+			require.True(t, requested[scope], "%q needs %q, but no safety level requests it at login", key, scope)
+		}
+	}
+}
+
+// TestCommandScopesReachTheCatalog holds that a command with an
+// auth.CommandScopes entry reports that entry as its requirement, in the
+// catalog and so in --check-scopes, in place of its resource's scopes.
+func TestCommandScopesReachTheCatalog(t *testing.T) {
+	for _, c := range []struct {
+		verb, resource string
+		want           []string
+	}{
+		{"verify", "analyzer", []string{"davis:analyzers:execute"}},
+		{"share", "dashboard", []string{"document:direct-shares:read", "document:direct-shares:write", "document:documents:read"}},
+		{"unshare", "notebook", []string{"document:direct-shares:delete", "document:direct-shares:read", "document:direct-shares:write", "document:documents:read"}},
+	} {
+		got, req := requiredScopesFor(c.verb, c.resource)
+		require.Equal(t, scopeRequirementKnown, req, "%s %s", c.verb, c.resource)
+		require.ElementsMatch(t, c.want, got, "%s %s", c.verb, c.resource)
+	}
+}
