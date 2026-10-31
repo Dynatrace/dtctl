@@ -181,6 +181,15 @@ func TestComputeScopeVerdict(t *testing.T) {
 	})
 }
 
+// TestExecSLORequiresSLORead holds exec slo to the scope its endpoints
+// declare: evaluation:start and evaluation:poll take slo:slos:read and read
+// no objective template.
+func TestExecSLORequiresSLORead(t *testing.T) {
+	got, req := requiredScopesFor("exec", "slo")
+	require.Equal(t, scopeRequirementKnown, req)
+	require.Equal(t, []string{"slo:slos:read"}, got)
+}
+
 func TestScopePreflight_CheckScopes_OKSkipsAndPrints(t *testing.T) {
 	withScopeState(t, true, false, "json", []string{"automation:workflows:write"}, true)
 	cmd, _, err := rootCmd.Find([]string{"delete", "workflow"})
