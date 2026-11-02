@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/prompt"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/prompt"
+	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 var createBreakpointCmd = newCreateBreakpointCmd()
@@ -170,6 +170,7 @@ Examples:
 	}
 	c.Flags().String("filters", "", "workspace filters to set before creating the breakpoint (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
+	markPrompts(c, "yes", "dry-run")
 	markLiveDebuggerExperimental(c)
 	return c
 }

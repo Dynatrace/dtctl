@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 type Differ struct {

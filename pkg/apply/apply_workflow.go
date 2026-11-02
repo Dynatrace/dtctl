@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // applyWorkflow applies a workflow resource

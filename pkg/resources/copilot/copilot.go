@@ -3,9 +3,9 @@ package copilot
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkcop "github.com/dynatrace-oss/dtctl/sdk/api/copilot"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkcop "github.com/Dynatrace/dtctl/sdk/api/copilot"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Re-export SDK types that don't need table tags as aliases.

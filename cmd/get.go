@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/watch"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/watch"
 )
 
 var getBreakpointsCmd = newGetBreakpointsCmd()
@@ -148,6 +148,8 @@ func init() {
 	getCmd.AddCommand(getLookupsCmd)
 	getCmd.AddCommand(getAppsCmd)
 	getCmd.AddCommand(getFunctionsCmd)
+	// Development tier until the registry's /actions API is generally available.
+	addDevelopmentCommand(getCmd, getActionsCmd, actionsDevelopmentFeature)
 	getCmd.AddCommand(getIntentsCmd)
 	getCmd.AddCommand(getEdgeConnectsCmd)
 	getCmd.AddCommand(getUsersCmd)

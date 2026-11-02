@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/sdk/api/apispec"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/sdk/api/apispec"
 )
 
 // op builds a matched operation with the given declared scopes. A nil scope slice

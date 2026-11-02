@@ -1,5 +1,5 @@
 // The OAuth flow, token manager, and cross-process refresh lock moved to
-// github.com/dynatrace-oss/dtctl/sdk/session:
+// github.com/Dynatrace/dtctl/sdk/session:
 // every long-running consumer of the shared token store must
 // refresh through the same locked path, so the machinery is part of the
 // shared session layer. This file re-exports it for the root module.
@@ -14,9 +14,9 @@ package auth
 import (
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	sdkauth "github.com/dynatrace-oss/dtctl/sdk/auth"
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	sdkauth "github.com/Dynatrace/dtctl/sdk/auth"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 type (

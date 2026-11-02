@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
 )
 
 func TestSupportedAgents(t *testing.T) {

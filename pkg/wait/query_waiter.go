@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // WaitConfig configures the wait operation

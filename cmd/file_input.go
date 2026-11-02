@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
 )
 
 // stdinSourceName is how input read from `-f -` is named wherever a command

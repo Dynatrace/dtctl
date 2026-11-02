@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // getWfeTaskResultCmd retrieves the structured return value of a workflow execution task

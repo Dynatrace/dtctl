@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 )
 
 // TestQueryWindowContext pins the window note, flagged when it is the default.

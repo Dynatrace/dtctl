@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 const testAccountUUID = "00000000-0000-4000-8000-000000000001"

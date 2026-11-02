@@ -1,10 +1,10 @@
-module github.com/dynatrace-oss/dtctl
+module github.com/Dynatrace/dtctl
 
-go 1.26.9
+go 1.26.10
 
 require (
+	github.com/Dynatrace/dtctl/sdk v0.45.0 // x-release-please-version
 	github.com/adrg/xdg v0.5.3
-	github.com/dynatrace-oss/dtctl/sdk v0.43.0 // x-release-please-version
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/guptarohit/asciigraph v0.10.0
@@ -15,15 +15,15 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
-	github.com/toon-format/toon-go v0.1.0
+	github.com/toon-format/toon-go v1.0.1
 	go.opentelemetry.io/otel v1.47.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
-	golang.org/x/term v0.46.0
-	golang.org/x/text v0.42.0
+	golang.org/x/term v0.47.0
+	golang.org/x/text v0.43.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -40,7 +40,7 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	github.com/godbus/dbus/v5 v5.2.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -65,14 +65,14 @@ require (
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/zalando/go-keyring v0.2.8 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.47.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.60.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 )
 
@@ -85,4 +85,4 @@ require (
 // Keep version numbers out of this comment block. go.mod is a release-please
 // generic extra-file, and the updater rewrites the first semver token on any line
 // that mentions the annotation marker — including a line that only talks about it.
-replace github.com/dynatrace-oss/dtctl/sdk => ./sdk
+replace github.com/Dynatrace/dtctl/sdk => ./sdk

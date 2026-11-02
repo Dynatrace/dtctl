@@ -3,8 +3,8 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/hub"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/hub"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // describeHubExtensionCmd shows detailed info about a Hub catalog extension

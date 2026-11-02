@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
 )
 
 // captureRun invokes Run and returns its exit code plus everything written to

@@ -1,5 +1,5 @@
-# Every pull request requires review approval from discostu105
-* @discostu105
+# Every pull request requires review approval from discostu105 or the App Forge team
+* @discostu105 @Dynatrace/rd-sg-team-appdev-appforge
 
-# SDK changes require additional review from the SDK steward
-/sdk/ @discostu105
+# SDK changes require review approval from the SDK steward or the App Forge team
+/sdk/ @discostu105 @Dynatrace/rd-sg-team-appdev-appforge

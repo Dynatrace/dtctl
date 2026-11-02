@@ -71,7 +71,7 @@ Setup:
    - Permissions: `Contents: read+write` (repository)
    - No webhook needed (uncheck "Active" under Webhook)
 2. Install the app on the `homebrew-tap` repo only
-3. Store two secrets in `dynatrace-oss/dtctl` repo settings:
+3. Store two secrets in `Dynatrace/dtctl` repo settings:
    - `HOMEBREW_TAP_APP_ID` — the App ID (from the app's settings page)
    - `HOMEBREW_TAP_APP_PRIVATE_KEY` — a generated private key (PEM format)
 
@@ -88,7 +88,7 @@ homebrew_casks:
       owner: dynatrace-oss
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: https://github.com/dynatrace-oss/dtctl
+    homepage: https://github.com/Dynatrace/dtctl
     description: >-
       kubectl-inspired CLI for Dynatrace - manage workflows, dashboards,
       SLOs, queries, and more from your terminal
@@ -201,10 +201,10 @@ cask "dtctl" do
   version "0.12.0"
   sha256 "abc123..."
 
-  url "https://github.com/dynatrace-oss/dtctl/releases/download/v0.12.0/dtctl_0.12.0_darwin_arm64.tar.gz"
+  url "https://github.com/Dynatrace/dtctl/releases/download/v0.12.0/dtctl_0.12.0_darwin_arm64.tar.gz"
   name "dtctl"
   desc "kubectl-inspired CLI for Dynatrace - manage workflows, dashboards, SLOs, queries, and more from your terminal"
-  homepage "https://github.com/dynatrace-oss/dtctl"
+  homepage "https://github.com/Dynatrace/dtctl"
 
   binary "dtctl"
 
@@ -251,7 +251,7 @@ end
 - [x] Initialize `dynatrace-oss/homebrew-tap` with README and empty `Casks/` dir
 - [ ] Create GitHub App (`dtctl-homebrew-tap`) with `Contents: read+write`
 - [ ] Install app on `homebrew-tap` repo only
-- [ ] Store `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_PRIVATE_KEY` secrets in `dynatrace-oss/dtctl`
+- [ ] Store `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_PRIVATE_KEY` secrets in `Dynatrace/dtctl`
 - [x] Add `homebrew_casks` section to `.goreleaser.yaml`
 - [x] Fix all GoReleaser deprecation warnings (formats, version_template)
 - [x] Add GitHub App token generation to `.github/workflows/release.yml`

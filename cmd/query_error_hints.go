@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"github.com/dynatrace-oss/dtctl/pkg/dqlhint"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/pkg/dqlhint"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // addQueryErrorHints fills the repair fields of a DQL error envelope: the

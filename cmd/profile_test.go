@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // newTestTree builds a small command tree mirroring dtctl's shape for filter tests.

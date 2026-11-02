@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/settings"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/resources/settings"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // settingsPlan is the outcome of resolving a settings payload against the
@@ -33,7 +33,7 @@ func (a *Applier) resolveSettings(handler *settings.Handler, data []byte) (*sett
 	// Extract fields - handle both camelCase (API format) and lowercase (YAML keys).
 	// Also accept "id" as a final fallback so that the --id CLI flag (which injects
 	// doc["id"] via injectID) works for settings objects the same way it does for
-	// other resource types. See https://github.com/dynatrace-oss/dtctl/issues/255
+	// other resource types. See https://github.com/Dynatrace/dtctl/issues/255
 	objectID := objectIDFromDoc(setting)
 	if objectID == "" {
 		objectID, _ = setting["id"].(string)
@@ -148,7 +148,7 @@ func (a *Applier) applySettings(data []byte) (ApplyResult, error) {
 // resolving create vs update exactly as applySettings does: an objectId that
 // names no existing object is a create, and fails when the payload lacks the
 // schemaId and scope a create needs. See
-// https://github.com/dynatrace-oss/dtctl/issues/521
+// https://github.com/Dynatrace/dtctl/issues/521
 func (a *Applier) dryRunSettings(doc map[string]interface{}, data []byte) (ApplyResult, error) {
 	plan, err := a.resolveSettings(settings.NewHandler(a.client), data)
 	if err != nil {

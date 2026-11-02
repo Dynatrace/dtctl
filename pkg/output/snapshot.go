@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/dynatrace-oss/dtctl/pkg/proto/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/proto/livedebugger"
 )
 
 const maxSnapshotStringMapIndex = 100_000

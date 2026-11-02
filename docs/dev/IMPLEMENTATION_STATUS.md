@@ -12,7 +12,7 @@ This document tracks the current implementation status of dtctl. For future plan
 
 ### Core Infrastructure
 - [x] Go module with Cobra CLI framework
-- [x] **SDK module** (`sdk/`): Separate Go module (`github.com/dynatrace-oss/dtctl/sdk`) with typed API wrappers for 24 Dynatrace APIs, shared HTTP client, auth, URL handling, and credential storage. CLI resource handlers delegate to SDK.
+- [x] **SDK module** (`sdk/`): Separate Go module (`github.com/Dynatrace/dtctl/sdk`) with typed API wrappers for 24 Dynatrace APIs, shared HTTP client, auth, URL handling, and credential storage. CLI resource handlers delegate to SDK.
 - [x] Configuration management (YAML config, contexts, token storage)
 - [x] Context safety levels (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)
 - [x] HTTP client with retry, rate limiting, error handling

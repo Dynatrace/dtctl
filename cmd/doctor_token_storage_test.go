@@ -11,8 +11,8 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // runDoctorWithOAuthStorage runs the doctor checks with the keyring probe

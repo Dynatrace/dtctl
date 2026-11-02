@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
-	sdkae "github.com/dynatrace-oss/dtctl/sdk/api/appengine"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
+	sdkae "github.com/Dynatrace/dtctl/sdk/api/appengine"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Re-export SDK types that have no table tags.

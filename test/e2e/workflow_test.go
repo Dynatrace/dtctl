@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 func TestWorkflowLifecycle(t *testing.T) {

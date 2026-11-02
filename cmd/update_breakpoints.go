@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/prompt"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/prompt"
+	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 const (
@@ -314,6 +314,7 @@ Examples:
 	c.Flags().String("enabled", "", "Enable or disable the breakpoint")
 	c.Flags().String("filters", "", "workspace filters to apply (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
+	markPrompts(c, "yes", "dry-run")
 	c.Flags().Lookup("enabled").NoOptDefVal = "true"
 	markLiveDebuggerExperimental(c)
 	return c

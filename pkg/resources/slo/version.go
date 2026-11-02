@@ -3,7 +3,7 @@ package slo
 import (
 	"time"
 
-	sdkslo "github.com/dynatrace-oss/dtctl/sdk/api/slo"
+	sdkslo "github.com/Dynatrace/dtctl/sdk/api/slo"
 )
 
 // DecodeVersionTimestamp extracts the last-modified timestamp from a Dynatrace SLO version string.

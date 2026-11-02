@@ -13,8 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
-	"github.com/dynatrace-oss/dtctl/pkg/engine"
+	"github.com/Dynatrace/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/pkg/engine"
 )
 
 // executeRequest is the POST /v1/execute body. Command/argv, files, and stdin

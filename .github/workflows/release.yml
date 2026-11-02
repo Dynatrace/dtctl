@@ -21,7 +21,7 @@ name: Release
 # sdk/ is a second Go module in this repo, and Go resolves it by the tag
 # `sdk/vX.Y.Z`. release-please only manages the root package, so the tag-sdk job
 # below mirrors each release tag into the sdk namespace at the same commit. That
-# is what makes the root module's `require github.com/dynatrace-oss/dtctl/sdk`
+# is what makes the root module's `require github.com/Dynatrace/dtctl/sdk`
 # resolvable for anyone importing e.g. pkg/engine — the local `replace` in go.mod
 # is ignored downstream. verify-consumable then proves it from outside the repo.
 #
@@ -132,7 +132,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
 
       - name: Import pkg/engine from a module outside this repo
         env:
@@ -140,7 +140,7 @@ jobs:
           # Fetch dtctl itself straight from GitHub: the tags were created seconds
           # ago, so neither the module proxy nor the checksum database has
           # observed them yet. Everything else still goes through the proxy.
-          GOPRIVATE: github.com/dynatrace-oss/dtctl
+          GOPRIVATE: github.com/Dynatrace/dtctl
           GOFLAGS: -mod=mod
         run: |
           set -euo pipefail
@@ -154,7 +154,7 @@ jobs:
           import (
           	"fmt"
 
-          	"github.com/dynatrace-oss/dtctl/pkg/engine"
+          	"github.com/Dynatrace/dtctl/pkg/engine"
           )
 
           func main() {
@@ -163,7 +163,7 @@ jobs:
           EOF
           # Fails if go.mod's sdk require does not name a real sdk/vX.Y.Z tag —
           # the local `replace` that makes in-repo builds work is ignored here.
-          go get "github.com/dynatrace-oss/dtctl@$TAG"
+          go get "github.com/Dynatrace/dtctl@$TAG"
           go build ./...
           echo "pkg/engine is importable from an external module at $TAG"
 
@@ -220,7 +220,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -230,7 +230,7 @@ jobs:
 
       - name: Generate Homebrew tap token
         id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
@@ -238,7 +238,7 @@ jobs:
           repositories: homebrew-tap
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: latest
           args: release --clean ${{ steps.config.outputs.args }}

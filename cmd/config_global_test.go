@@ -9,7 +9,7 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // chdirWithLocalConfig puts the test in a directory holding a .dtctl.yaml and

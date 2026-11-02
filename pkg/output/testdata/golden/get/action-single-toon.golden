@@ -1,0 +1,14 @@
+actionName: create-thing
+appId: example.connector
+approval: true
+description: Creates a thing
+docs:
+  inputSchema:
+    required[1]: owner
+    type: object
+expressionValidation:
+  owner:
+    pattern: "^[A-Za-z0-9-]+$"
+fullName: "example.connector:create-thing"
+title: Create thing
+widget: /actions/create-thing

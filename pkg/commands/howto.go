@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/version"
+	"github.com/Dynatrace/dtctl/pkg/version"
 )
 
 // GenerateHowto writes an LLM-optimized markdown reference guide to w.

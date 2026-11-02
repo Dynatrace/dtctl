@@ -538,7 +538,7 @@ dtctl/
 ├── API_DESIGN.md
 ├── ARCHITECTURE.md
 ├── AGENTS.md
-└── sdk/                        # Separate Go module (github.com/dynatrace-oss/dtctl/sdk)
+└── sdk/                        # Separate Go module (github.com/Dynatrace/dtctl/sdk)
     ├── go.mod
     ├── api/                    # Typed API wrappers (one package per API surface)
     │   ├── analyzer/           # Query analyzer

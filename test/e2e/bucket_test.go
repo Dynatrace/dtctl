@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/bucket"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/bucket"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // waitForBucketActive polls the bucket status until it becomes "active" or timeout is reached

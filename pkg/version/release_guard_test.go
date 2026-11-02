@@ -12,7 +12,7 @@ import (
 // sdk/ is a second Go module in this repo. In-tree builds resolve it through the
 // `replace ... => ./sdk` directive in the root go.mod — but Go ignores `replace`
 // directives of a module it is consuming as a dependency, so an external caller
-// (`go get github.com/dynatrace-oss/dtctl` to import pkg/engine) resolves the
+// (`go get github.com/Dynatrace/dtctl` to import pkg/engine) resolves the
 // `require` line literally, against the tag `sdk/vX.Y.Z`.
 //
 // That require line held the placeholder `v0.0.0-00010101000000-000000000000`
@@ -22,9 +22,9 @@ import (
 // missing signal.
 var (
 	sdkRequireRe = regexp.MustCompile(
-		`(?m)^\s*github\.com/dynatrace-oss/dtctl/sdk\s+(\S+)\s*//\s*x-release-please-version\s*$`)
+		`(?m)^\s*github\.com/Dynatrace/dtctl/sdk\s+(\S+)\s*//\s*x-release-please-version\s*$`)
 	sdkReplaceRe = regexp.MustCompile(
-		`(?m)^replace\s+github\.com/dynatrace-oss/dtctl/sdk\s+=>\s+\./sdk\s*$`)
+		`(?m)^replace\s+github\.com/Dynatrace/dtctl/sdk\s+=>\s+\./sdk\s*$`)
 	versionVarRe = regexp.MustCompile(
 		`(?m)^var Version = "([^"]+)"\s*//\s*x-release-please-version\s*$`)
 	// vX.Y.Z with an optional semver prerelease of dot-separated alphanumeric
@@ -44,7 +44,7 @@ func TestSDKRequireIsResolvable(t *testing.T) {
 
 	m := sdkRequireRe.FindStringSubmatch(goMod)
 	require.NotNil(t, m,
-		"go.mod must require github.com/dynatrace-oss/dtctl/sdk on a single line carrying the "+
+		"go.mod must require github.com/Dynatrace/dtctl/sdk on a single line carrying the "+
 			"`// x-release-please-version` annotation. Without the annotation release-please stops "+
 			"bumping the version on release, and the require silently rots behind the sdk/ tags.")
 
@@ -52,11 +52,11 @@ func TestSDKRequireIsResolvable(t *testing.T) {
 		"the sdk require must name a released tag (sdk/vX.Y.Z, optionally -rc.N), not a "+
 			"pseudo-version. A pseudo-version or the `v0.0.0-00010101000000-000000000000` "+
 			"placeholder builds fine in-repo (the replace directive covers it) but makes this "+
-			"module impossible to import: `go get github.com/dynatrace-oss/dtctl` fails with "+
+			"module impossible to import: `go get github.com/Dynatrace/dtctl` fails with "+
 			"`invalid version: unknown revision`.")
 
 	require.Regexp(t, sdkReplaceRe, goMod,
-		"go.mod must keep `replace github.com/dynatrace-oss/dtctl/sdk => ./sdk`. It is ignored "+
+		"go.mod must keep `replace github.com/Dynatrace/dtctl/sdk => ./sdk`. It is ignored "+
 			"downstream, but without it local builds and CI would compile against the last released "+
 			"sdk tag instead of the in-tree sdk/ sources.")
 

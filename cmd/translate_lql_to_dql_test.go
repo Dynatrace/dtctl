@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
 )
 
 const lqlToDqlEndpoint = "/platform/openpipeline/v1/matcher/lqlToDql"

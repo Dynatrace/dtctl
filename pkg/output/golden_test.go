@@ -11,33 +11,33 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/analyzer"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/api"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azureconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azuremonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/bucket"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/dqlprocessorverify"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/edgeconnect"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpmonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/hub"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/iam"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/matcherlqltodql"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/matcherverify"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/platform"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/platformtoken"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/previewprocessor"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/schedulingrule"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/segment"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/serviceuser"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/settings"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/slo"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	sdkmatcherverify "github.com/dynatrace-oss/dtctl/sdk/api/matcherverify"
+	"github.com/Dynatrace/dtctl/pkg/resources/analyzer"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/pkg/resources/api"
+	"github.com/Dynatrace/dtctl/pkg/resources/appengine"
+	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/bucket"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/resources/dqlprocessorverify"
+	"github.com/Dynatrace/dtctl/pkg/resources/edgeconnect"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/hub"
+	"github.com/Dynatrace/dtctl/pkg/resources/iam"
+	"github.com/Dynatrace/dtctl/pkg/resources/matcherlqltodql"
+	"github.com/Dynatrace/dtctl/pkg/resources/matcherverify"
+	"github.com/Dynatrace/dtctl/pkg/resources/platform"
+	"github.com/Dynatrace/dtctl/pkg/resources/platformtoken"
+	"github.com/Dynatrace/dtctl/pkg/resources/previewprocessor"
+	"github.com/Dynatrace/dtctl/pkg/resources/schedulingrule"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
+	"github.com/Dynatrace/dtctl/pkg/resources/serviceuser"
+	"github.com/Dynatrace/dtctl/pkg/resources/settings"
+	"github.com/Dynatrace/dtctl/pkg/resources/slo"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	sdkmatcherverify "github.com/Dynatrace/dtctl/sdk/api/matcherverify"
 )
 
 // -update flag: regenerate golden files
@@ -3489,4 +3489,102 @@ func TestGolden_GetServiceUsers_Empty(t *testing.T) {
 		t.Fatalf("PrintList failed: %v", err)
 	}
 	assertGolden(t, "empty/service-users", buf.String())
+}
+
+// actionFixtures is what `get actions` lists. Extra is deliberately absent
+// from every entry: the flat /actions collection serves a fixed field set, so
+// a list can never carry arbitrary keys. Only a single action has them --
+// see actionWithExtraFixture.
+func actionFixtures() []appengine.AppAction {
+	return []appengine.AppAction{
+		{
+			AppID:       "example.app",
+			ActionName:  "send-thing",
+			Title:       "Send thing",
+			Description: "Sends a thing",
+			Stateful:    true,
+			FullName:    "example.app:send-thing",
+		},
+		{
+			AppID:       "example.app",
+			ActionName:  "list-things",
+			Title:       "List things",
+			Description: "Lists the things",
+			FullName:    "example.app:list-things",
+		},
+		{
+			AppID:       "example.connector",
+			ActionName:  "create-thing",
+			Title:       "Create thing",
+			Description: "Creates a thing",
+			FullName:    "example.connector:create-thing",
+		},
+	}
+}
+
+// actionWithExtraFixture is a single action as `get action <app>/<name>`
+// returns it: every manifest attribute the typed fields do not model lands in
+// Extra, nested and scalar both. Hidden from tables, and emitted inline under
+// its own name in the structured formats.
+func actionWithExtraFixture() appengine.AppAction {
+	return appengine.AppAction{
+		AppID:       "example.connector",
+		ActionName:  "create-thing",
+		Title:       "Create thing",
+		Description: "Creates a thing",
+		FullName:    "example.connector:create-thing",
+		Extra: map[string]json.RawMessage{
+			"approval":             json.RawMessage(`true`),
+			"widget":               json.RawMessage(`"/actions/create-thing"`),
+			"expressionValidation": json.RawMessage(`{"owner":{"pattern":"^[A-Za-z0-9-]+$"}}`),
+			"docs":                 json.RawMessage(`{"inputSchema":{"type":"object","required":["owner"]}}`),
+		},
+	}
+}
+
+func TestGolden_GetActions(t *testing.T) {
+	actions := actionFixtures()
+
+	formats := map[string]string{
+		"table": "table",
+		"wide":  "wide",
+		"json":  "json",
+		"yaml":  "yaml",
+		"csv":   "csv",
+		"toon":  "toon",
+	}
+
+	for name, format := range formats {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printer := NewPrinterWithWriter(format, &buf)
+			if err := printer.PrintList(actions); err != nil {
+				t.Fatalf("PrintList failed: %v", err)
+			}
+			assertGolden(t, "get/actions-"+name, buf.String())
+		})
+	}
+}
+
+func TestGolden_GetAction(t *testing.T) {
+	action := actionWithExtraFixture()
+
+	formats := map[string]string{
+		"table": "table",
+		"wide":  "wide",
+		"json":  "json",
+		"yaml":  "yaml",
+		"toon":  "toon",
+	}
+
+	for name, format := range formats {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printer := NewPrinterWithWriter(format, &buf)
+			if err := printer.Print(action); err != nil {
+				t.Fatalf("Print failed: %v", err)
+			}
+			assertGolden(t, "get/action-single-"+name, buf.String())
+		})
+	}
 }

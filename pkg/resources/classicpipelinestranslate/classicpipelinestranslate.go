@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdktranslate "github.com/dynatrace-oss/dtctl/sdk/api/classicpipelinestranslate"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdktranslate "github.com/Dynatrace/dtctl/sdk/api/classicpipelinestranslate"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // ValidConfigurations are the configuration scopes the endpoint accepts.

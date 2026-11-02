@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/copilot"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/copilot"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // execCopilotCmd executes a Davis CoPilot query
@@ -108,6 +108,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read message from file, or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	// Each takes its text as the positional argument or from --file: reject
 	// only an explicitly empty --file.
 	rejectEmptyFlag(c, "file")
@@ -181,6 +182,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read prompt from file, or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	rejectEmptyFlag(c, "file")
 	stability.MarkStable(c)
 	return c
@@ -247,6 +249,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read DQL query from file, or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	rejectEmptyFlag(c, "file")
 	stability.MarkStable(c)
 	return c

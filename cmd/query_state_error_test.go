@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // TestErrorToDetail_QueryStateError covers #495: each query end state gets

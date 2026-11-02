@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 )
 
 // TestWait_FailedStateFailsFast pins that a FAILED query is not retried: the

@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // getExtensionsCmd retrieves Extensions 2.0 extensions

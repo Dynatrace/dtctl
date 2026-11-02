@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpconnection"
 )
 
 func ResolveCredential(identifier string, handler *gcpconnection.Handler) (Credential, error) {

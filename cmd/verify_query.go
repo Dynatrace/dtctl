@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // verifyQueryCmd represents the verify query subcommand
@@ -212,6 +212,9 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read query from file (use '-' for stdin)")
+	markFileFlag(c, "file", fileValuePath)
+	markInputWithoutArgs(c)
+	markArgumentFlag(c, "file") // the query from a file instead of the argument
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	c.Flags().Bool("canonical", false, "print canonical query representation")
 	c.Flags().String("timezone", "", "timezone for query verification (IANA, CET, +01:00, etc.)")

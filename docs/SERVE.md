@@ -272,7 +272,7 @@ wrapper over — same request shape, same isolation, no HTTP hop and no port to
 protect:
 
 ```bash
-go get github.com/dynatrace-oss/dtctl@latest
+go get github.com/Dynatrace/dtctl@latest
 ```
 
 Note that this is the **CLI** module, not the separate

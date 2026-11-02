@@ -38,7 +38,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
 )
 
 // YAML renders known (a method-less alias of the struct) the way yaml.v3

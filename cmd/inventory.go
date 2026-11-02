@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/segment"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 // inventoryCmd probes the current environment for what data actually exists
@@ -289,6 +289,7 @@ func topCensusTypes(census map[string]int64, n int) string {
 // whichever question it is answering.
 func addInventoryDiscoveryFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArray("definitions", nil, "Capability-definitions file merged over the built-in set (repeatable, later files win)")
+	markFileFlag(cmd, "definitions", fileValuePath)
 	cmd.Flags().Bool("no-builtin-definitions", false, "Start from an empty capability set instead of the built-in one")
 	cmd.Flags().Int("budget-queries", 100, "Discovery budget: max queries")
 	cmd.Flags().Float64("budget-seconds", 300, "Discovery budget: max cumulative query seconds — a query that would overrun it is cut off")

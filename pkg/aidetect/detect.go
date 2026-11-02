@@ -1,6 +1,6 @@
 package aidetect
 
-import "github.com/dynatrace-oss/dtctl/sdk/agentmode"
+import "github.com/Dynatrace/dtctl/sdk/agentmode"
 
 // AgentInfo represents detected AI agent information.
 // Alias for agentmode.AgentInfo from the SDK.

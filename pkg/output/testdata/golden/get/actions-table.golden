@@ -1,0 +1,4 @@
+APP ID              ACTION         TITLE          FULL NAME                        
+example.app         send-thing     Send thing     example.app:send-thing           
+example.app         list-things    List things    example.app:list-things          
+example.connector   create-thing   Create thing   example.connector:create-thing   

@@ -16,10 +16,10 @@ import (
 	toon "github.com/toon-format/toon-go"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/plugin"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/version"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/plugin"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/version"
 )
 
 // SchemaVersion is incremented on breaking changes to the listing structure.
@@ -268,6 +268,13 @@ var defaultTimeFormats = &TimeFormats{
 	Relative: []string{"1h", "30m", "7d", "5min"},
 	Absolute: "RFC3339 (e.g., 2024-01-15T10:00:00Z)",
 	Unix:     "Unix timestamp (e.g., 1705312800)",
+}
+
+// BuildVerbs walks the Cobra command tree rooted at root and returns the
+// Listing's verbs alone. Unlike Build it does no I/O: Build also discovers
+// plugins, which reads the directories on PATH.
+func BuildVerbs(root *cobra.Command) map[string]*Verb {
+	return buildVerbs(root)
 }
 
 // Build walks the Cobra command tree rooted at root and returns a Listing.

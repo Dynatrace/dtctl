@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/diagnostic"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // listDocuments lists documents and, when --admin-access is what the API

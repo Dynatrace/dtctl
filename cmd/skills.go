@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/skills"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/skills"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
 )
 
 // skillsCmd is the parent command for AI assistant skill management.
@@ -48,6 +48,7 @@ which is automatically discovered by any agentskills.io-compatible agent.`,
   dtctl skills status`,
 		RunE: requireSkillsSubcommand,
 	}
+	markRefusalOnly(c)
 	stability.MarkStable(c)
 	return c
 }

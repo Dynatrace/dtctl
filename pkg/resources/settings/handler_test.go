@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // newTestHandler creates a handler backed by a test server running the given handler func.

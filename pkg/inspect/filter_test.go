@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // hostsOf collects the "host" column from a row set for order-sensitive asserts.

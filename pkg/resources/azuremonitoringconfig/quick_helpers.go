@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azureconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
 )
 
 // ResolveCredential resolves Azure connection by name or ID and maps it to monitoring credential structure.

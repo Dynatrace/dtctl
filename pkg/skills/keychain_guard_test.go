@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	dtctlskill "github.com/dynatrace-oss/dtctl/skills/dtctl"
+	dtctlskill "github.com/Dynatrace/dtctl/skills/dtctl"
 )
 
 // forbiddenKeychainCommands are OS credential-store CLIs that must never appear

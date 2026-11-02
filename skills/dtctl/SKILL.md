@@ -158,7 +158,7 @@ Gotchas: set `davis.enabled: false` on data tiles; `makeTimeseries` for log/span
 
 ## Permissions & safety
 
-- Verify before mutating: `dtctl auth can-i <verb> <resource>`. Scopes: [TOKEN_SCOPES.md](https://github.com/dynatrace-oss/dtctl/blob/main/docs/TOKEN_SCOPES.md).
+- Verify before mutating: `dtctl auth can-i <verb> <resource>`. Scopes: [TOKEN_SCOPES.md](https://github.com/Dynatrace/dtctl/blob/main/docs/TOKEN_SCOPES.md).
 - Destructive ops may be blocked by safety level — switch with `dtctl config use-context <name>`, or raise the level when creating the context.
 - Prefer `get`/`describe` first; `--mine` scopes to resources you own; `--plain` for all machine consumption.
 

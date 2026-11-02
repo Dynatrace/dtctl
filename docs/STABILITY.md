@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 19 experimental, 14 development
+- commands: 269 stable, 19 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 951
+- entries below (commands + flags): 956
 
 ## Surface
 
@@ -551,6 +551,7 @@ delete workflow                      stable
   --dry-run                          stable
   --yes                              stable
 describe                             stable
+describe action                      development  (opt-in key: actions)
 describe analyzer                    stable
   --doc                              stable
 describe anomaly-detector            stable
@@ -737,6 +738,10 @@ find intents                         stable
 get                                  stable
   --fields                           experimental  since 0.40.0  (declared)
   --limit                            experimental  since 0.40.0  (declared)
+get actions                          development  (opt-in key: actions)
+  --app                              development
+  --filter                           development
+  --name                             development
 get analyzers                        stable
   --filter                           stable
 get anomaly-detectors                stable
@@ -990,21 +995,21 @@ share                                stable
 share dashboard                      stable
   --access                           stable
   --dry-run                          stable
-  --environment                      experimental  since 0.44.0  (declared)
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
 share document                       stable
   --access                           stable
   --dry-run                          stable
-  --environment                      experimental  since 0.44.0  (declared)
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
 share notebook                       stable
   --access                           stable
   --dry-run                          stable
-  --environment                      experimental  since 0.44.0  (declared)
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
@@ -1033,21 +1038,21 @@ unshare dashboard                    stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
-  --environment                      experimental  since 0.44.0  (declared)
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --user                             stable
 unshare document                     stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
-  --environment                      experimental  since 0.44.0  (declared)
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --user                             stable
 unshare notebook                     stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
-  --environment                      experimental  since 0.44.0  (declared)
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --user                             stable
 update                               stable

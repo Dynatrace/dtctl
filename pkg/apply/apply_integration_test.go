@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // writeHookScript writes a bash hook script with the given body to
@@ -2397,7 +2397,7 @@ func TestApply_SettingsArray_YAML_RoundTrip(t *testing.T) {
 }
 
 // TestApply_Settings_OverrideID_TriggersUpdate is a regression test for
-// https://github.com/dynatrace-oss/dtctl/issues/255
+// https://github.com/Dynatrace/dtctl/issues/255
 //
 // When --id <objectId> is provided for a settings object that has no
 // objectId/objectid field, apply must issue a PUT (UPDATE) rather than a
@@ -2454,7 +2454,7 @@ func TestApply_Settings_OverrideID_TriggersUpdate(t *testing.T) {
 }
 
 // TestApply_Settings_DryRun_WithObjectID_ReportsUpdated is a regression test for
-// https://github.com/dynatrace-oss/dtctl/issues/256
+// https://github.com/Dynatrace/dtctl/issues/256
 //
 // When a settings YAML file contains objectid: (or objectId:), --dry-run must
 // report "updated", not "created". Actual apply already does the right thing;

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // resultWithFullGrailMetadata carries every field the issue (#577) calls out as

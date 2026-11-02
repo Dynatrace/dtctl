@@ -5,8 +5,8 @@ import (
 	"sync"
 	"weak"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/usage"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/usage"
 )
 
 // UsageRecorder receives one sample per DQL execution: the scan totals the

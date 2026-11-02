@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/prompt"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/resolver"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/prompt"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/resources/resolver"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // restoreCmd represents the restore command
@@ -111,6 +111,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -204,6 +205,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -297,6 +299,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -389,6 +392,7 @@ Examples:
 		},
 	}
 	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
+	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
@@ -486,6 +490,7 @@ Examples:
 		},
 	}
 	c.Flags().Bool("force", false, "Restore even if name conflicts exist")
+	markPromptsOneArgument(c, "force", "dry-run")
 	c.Flags().String("new-name", "", "Restore with a new name")
 	stability.MarkStable(c)
 	return c

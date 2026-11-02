@@ -1,8 +1,8 @@
 package auth
 
 import (
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 // accountScopesForSafetyLevel returns account OAuth scopes for the given safety level.

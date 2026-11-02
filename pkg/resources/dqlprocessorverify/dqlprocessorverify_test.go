@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 const verifyPath = "/platform/openpipeline/v1/dqlProcessor/verify"

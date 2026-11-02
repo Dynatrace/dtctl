@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // TestResolveUUIDNoDiscovery exercises the account-UUID resolution order used by

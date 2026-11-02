@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/segment"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
 )
 
 func TestNewResolver(t *testing.T) {

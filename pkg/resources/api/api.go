@@ -14,9 +14,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/sdk/api/apispec"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/sdk/api/apispec"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Re-exported so callers need not import the SDK package alongside this one.

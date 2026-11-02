@@ -17,7 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/cmd"
 )
 
 // DevelopmentFeature is the stability opt-in key for the `dtctl serve` command

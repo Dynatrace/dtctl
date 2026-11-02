@@ -6,12 +6,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/settings"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/settings"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // createSettingsCmd creates a settings object from a file
@@ -124,6 +124,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing settings value, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("schema", "", "schema ID (required)")
 	c.Flags().String("scope", "", "scope for the settings object (required)")
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")

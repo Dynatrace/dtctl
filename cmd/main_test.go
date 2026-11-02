@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // TestMain keeps the cmd test binary away from the real OS keyring.

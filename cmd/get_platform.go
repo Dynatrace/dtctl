@@ -3,8 +3,8 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/platform"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/platform"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // getEnvironmentCmd retrieves environment information

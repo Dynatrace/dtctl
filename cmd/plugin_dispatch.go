@@ -7,11 +7,11 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/plugin"
-	"github.com/dynatrace-oss/dtctl/pkg/version"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/plugin"
+	"github.com/Dynatrace/dtctl/pkg/version"
 )
 
 // tryPluginDispatch gives an unknown top-level command one shot at plugin

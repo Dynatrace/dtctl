@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/settings"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/settings"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 func TestSettingsListSchemas(t *testing.T) {

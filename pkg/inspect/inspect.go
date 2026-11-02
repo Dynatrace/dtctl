@@ -3,7 +3,7 @@ package inspect
 import (
 	"io"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // Primitive is the single analytics operation an inspect call performs. Exactly

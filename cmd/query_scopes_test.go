@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // withGrantedScopes overrides grantedScopesFunc for one test.

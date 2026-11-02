@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 func newHandler(t *testing.T, fn http.HandlerFunc) (*Handler, *httptest.Server) {

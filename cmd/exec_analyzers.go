@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/analyzer"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/analyzer"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // execAnalyzerCmd executes a Davis analyzer
@@ -162,6 +162,7 @@ func analyzerSeriesAdvice(eff output.SeriesEffect, opts seriesOptions) string {
 // "exec analyzer" and "verify analyzer".
 func addAnalyzerInputFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("file", "f", "", "read input from JSON file, or - for stdin")
+	markFileFlag(cmd, "file", fileValuePath)
 	cmd.Flags().String("input", "", "inline JSON input")
 	cmd.Flags().String("query", "", "DQL query shorthand (for timeseries analyzers)")
 	// Exactly one source is required; an explicitly empty one must not count

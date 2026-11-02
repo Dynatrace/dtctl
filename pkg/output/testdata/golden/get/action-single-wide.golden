@@ -1,0 +1,2 @@
+APP ID              ACTION         TITLE          DESCRIPTION       STATEFUL   FULL NAME                        
+example.connector   create-thing   Create thing   Creates a thing   false      example.connector:create-thing   

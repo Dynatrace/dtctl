@@ -1,5 +1,5 @@
 ---
 layout: redirect
 title: Quick Start
-redirect_to: https://github.com/dynatrace-oss/dtctl/blob/main/docs/QUICK_START.md
+redirect_to: https://github.com/Dynatrace/dtctl/blob/main/docs/QUICK_START.md
 ---

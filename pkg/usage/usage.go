@@ -34,7 +34,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 const (

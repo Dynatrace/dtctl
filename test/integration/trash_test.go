@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
 )
 
 // TestTrash_DashboardLifecycle tests the complete lifecycle of a dashboard through trash

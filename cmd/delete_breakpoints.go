@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/prompt"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/prompt"
+	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 type breakpointDeleteOps struct {
@@ -135,6 +135,7 @@ Examples:
 	}
 	c.Flags().Bool("all", false, "Delete all breakpoints in the current workspace")
 	c.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes")
 	markLiveDebuggerExperimental(c)
 	return c
 }

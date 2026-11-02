@@ -3,9 +3,9 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // execFunctionCmd executes an app function or ad-hoc code
@@ -103,8 +103,10 @@ Examples:
 	c.Flags().String("method", "GET", "HTTP method for app function (GET, POST, PUT, PATCH, DELETE)")
 	c.Flags().String("payload", "", "request payload (JSON string)")
 	c.Flags().String("data", "", "read payload from file (or - for stdin)")
+	markFileFlag(c, "data", fileValuePath)
 	c.Flags().String("code", "", "JavaScript code to execute (for ad-hoc execution)")
 	c.Flags().StringP("file", "f", "", "read JavaScript code from file (for ad-hoc execution)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().Bool("defer", false, "defer execution (async, for resumable functions)")
 	stability.MarkStable(c)
 	return c

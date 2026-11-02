@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 // TestFunctionExecutor_Execute_ErrorEnvelope verifies end-to-end that the

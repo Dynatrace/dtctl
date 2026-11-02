@@ -4,7 +4,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // rowPreallocCap bounds the up-front slice capacity a row-access primitive

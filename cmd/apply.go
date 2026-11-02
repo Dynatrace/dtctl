@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // applyCmd represents the apply command
@@ -319,12 +319,14 @@ resources in sync with their file definitions.
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing resource definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	c.Flags().Bool("dry-run", false, "preview changes without applying")
 	c.Flags().Bool("show-diff", false, "show diff of changes when updating existing resources")
 	c.Flags().Bool("no-hooks", false, "skip pre-apply and post-apply hooks")
 	c.Flags().String("id", "", "override or inject resource ID (use with --write-id to stamp ID into file)")
 	c.Flags().Bool("write-id", false, "write the created resource ID back into the source file for idempotent future applies")
+	markWritesTo(c, "write-id", "file")
 	c.Flags().String("type", "", "document type (e.g. launchpad, acme:config); forces the file to be applied as a document of this type")
 	c.Flags().StringArray("label", []string{}, "document classification label (repeatable); replaces the document's labels, overriding any in the payload (labels cannot be cleared, only replaced)")
 	c.Flags().Bool("create-snapshot", false, "snapshot the document's current state before updating it, so the previous version stays available via 'dtctl history'/'dtctl restore' (documents only)")
@@ -337,6 +339,7 @@ resources in sync with their file definitions.
 	// --environment link|public` does each on its own.
 	_ = c.Flags().MarkDeprecated("share-environment", shareEnvironmentDeprecation)
 	stability.MarkStable(c)
+	markScopesInputDependent(c)
 	markFlagRequiredNonEmpty(c, "file")
 	return c
 }
@@ -347,7 +350,7 @@ func init() {
 
 // shareEnvironmentDeprecation is apply --share-environment's deprecation
 // note. pflag prints it after "Flag --share-environment has been deprecated, ".
-const shareEnvironmentDeprecation = "in 0.44.0, removal planned in 0.46.0: " +
+const shareEnvironmentDeprecation = "in 0.46.0, removal planned in 0.48.0: " +
 	"apply the file, then use `dtctl share document <id> --environment link,public [--access read-write]`"
 
 // validateShareEnvironmentValue rejects any --share-environment value outside

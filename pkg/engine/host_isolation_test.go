@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/engine"
+	"github.com/Dynatrace/dtctl/pkg/engine"
 )
 
 // The tests here pin the boundary the engine promises: a request sees its own

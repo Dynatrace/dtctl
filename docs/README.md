@@ -1,6 +1,6 @@
 # dtctl documentation
 
-Reference documentation for [`dtctl`](https://github.com/dynatrace-oss/dtctl), the Dynatrace platform CLI. Start at the repository [README](../README.md) for install and first steps; this folder is the detailed reference.
+Reference documentation for [`dtctl`](https://github.com/Dynatrace/dtctl), the Dynatrace platform CLI. Start at the repository [README](../README.md) for install and first steps; this folder is the detailed reference.
 
 ## How this is organized
 

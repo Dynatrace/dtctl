@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/diff"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/workflow"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/diff"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
 )
 
 var diffCmd = newDiffCmd()
@@ -61,6 +61,7 @@ Exit Codes:
 		RunE: runDiff,
 	}
 	c.Flags().StringSliceP("file", "f", []string{}, "Files to compare (can specify twice; - reads one side from stdin)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("format", "unified", "Diff format: unified, side-by-side, json-patch, semantic")
 	c.Flags().Bool("semantic", false, "Use semantic diff (resource-aware)")
 	c.Flags().Bool("side-by-side", false, "Show side-by-side comparison")
@@ -73,6 +74,10 @@ Exit Codes:
 	stability.MarkFlag(c, "context", stability.Experimental, pre10Since)
 	stability.MarkFlag(c, "output", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
+	// diff -f FILE compares with the live resource of the file's kind. Two
+	// local files reach no API, but "unknown" for them is the cautious answer,
+	// where dropping the mark would give the remote comparison a false "ok".
+	markScopesInputDependent(c)
 	return c
 }
 

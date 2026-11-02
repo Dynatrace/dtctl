@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	cmdtestutil "github.com/dynatrace-oss/dtctl/cmd/testutil"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	cmdtestutil "github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 func inventoryFixture() *inventory.Inventory {

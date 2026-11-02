@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
 )
 
 // safetyLevelConfig points dtctl at env with the given safety level.

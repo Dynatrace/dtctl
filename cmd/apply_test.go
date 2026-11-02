@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
 )
 
 // newEnvShareMock builds an httptest server that mocks the minimal Document
@@ -257,7 +257,7 @@ func TestApplyCmd_ShareEnvironmentDeprecated(t *testing.T) {
 	if f.Value.Type() != "string" || f.NoOptDefVal != "read" {
 		t.Errorf("flag type %q, NoOptDefVal %q; want string and \"read\"", f.Value.Type(), f.NoOptDefVal)
 	}
-	for _, want := range []string{"in 0.44.0", "removal planned in 0.46.0", "share document <id> --environment link,public"} {
+	for _, want := range []string{"in 0.46.0", "removal planned in 0.48.0", "share document <id> --environment link,public"} {
 		if !strings.Contains(f.Deprecated, want) {
 			t.Errorf("deprecation %q does not mention %q", f.Deprecated, want)
 		}

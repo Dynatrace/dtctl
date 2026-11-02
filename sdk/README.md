@@ -1,11 +1,11 @@
 # dtctl SDK
 
-A shared Go module for building tools and integrations against the Dynatrace platform, extracted from [dtctl](https://github.com/dynatrace-oss/dtctl).
+A shared Go module for building tools and integrations against the Dynatrace platform, extracted from [dtctl](https://github.com/Dynatrace/dtctl).
 
 ## Install
 
 ```bash
-go get github.com/dynatrace-oss/dtctl/sdk@latest
+go get github.com/Dynatrace/dtctl/sdk@latest
 ```
 
 ## Versioning

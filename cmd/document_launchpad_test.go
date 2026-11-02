@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // setupDocumentCmdTest points the command tree at srv through a temporary

@@ -1,5 +1,5 @@
 // Package safety re-exports the safety-level semantics from
-// github.com/dynatrace-oss/dtctl/sdk/session, where the implementation moved:
+// github.com/Dynatrace/dtctl/sdk/session, where the implementation moved:
 // a readonly context must mean the same thing in dtctl and every dtctl-*
 // plugin, so the checker is part of
 // the shared session layer. This package remains so the root module's import
@@ -7,8 +7,8 @@
 package safety
 
 import (
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 type (

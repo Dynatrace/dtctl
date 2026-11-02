@@ -3,8 +3,8 @@ package serviceuser
 import (
 	"context"
 
-	sdksu "github.com/dynatrace-oss/dtctl/sdk/api/serviceuser"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	sdksu "github.com/Dynatrace/dtctl/sdk/api/serviceuser"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // ServiceUserCreate is the request body for creating a service user.

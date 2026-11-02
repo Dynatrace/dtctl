@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
 )
 
 // Empty-result diagnosis (#579).

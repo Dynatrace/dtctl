@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Regression tests for https://github.com/dynatrace-oss/dtctl/issues/509
+// Regression tests for https://github.com/Dynatrace/dtctl/issues/509
 //
 // --dry-run reported "created" with an empty id for every cloud resource, even
 // for a document whose apply issues a PUT: the generic dry-run tail only read

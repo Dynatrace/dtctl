@@ -1,5 +1,5 @@
 // Package config re-exports the dtctl session layer from
-// github.com/dynatrace-oss/dtctl/sdk/session, where the implementation moved:
+// github.com/Dynatrace/dtctl/sdk/session, where the implementation moved:
 // the config model, load/save, credential stores, and token resolution are
 // the shared contract consumed by dtctl and dtctl-* plugins; this package remains so the root module's
 // import surface is stable. New code (and external consumers) should import
@@ -9,7 +9,7 @@ package config
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 // Config model — see sdk/session.

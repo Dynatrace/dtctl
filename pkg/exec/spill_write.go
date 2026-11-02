@@ -4,7 +4,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // spillProvenanceOf reads the provenance a spill records from the Grail

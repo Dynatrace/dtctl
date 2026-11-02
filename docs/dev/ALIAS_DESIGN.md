@@ -334,7 +334,7 @@ import (
     "strconv"
     "strings"
 
-    "github.com/dynatrace-oss/dtctl/pkg/config"
+    "github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // resolveAlias checks if the first argument is an alias and expands it.

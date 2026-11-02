@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Execution represents a workflow execution.

@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
 )
 
 // Everything the mock environment serves is synthetic. It has to be: a recording

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // runFilter streams every record in the file through the compiled --jq program

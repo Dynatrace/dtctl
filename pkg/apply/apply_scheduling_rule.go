@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/schedulingrule"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/resources/schedulingrule"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // applySchedulingRule applies a scheduling rule resource.

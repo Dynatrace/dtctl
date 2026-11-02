@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/lookup"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/lookup"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // waitForLookupQueryable polls until the lookup can be queried or timeout is reached

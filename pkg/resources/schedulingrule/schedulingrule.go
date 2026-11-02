@@ -4,9 +4,9 @@ package schedulingrule
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkschedulingrule "github.com/dynatrace-oss/dtctl/sdk/api/schedulingrule"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkschedulingrule "github.com/Dynatrace/dtctl/sdk/api/schedulingrule"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // SchedulingRule represents a scheduling rule (CLI version with table tags).

@@ -3,9 +3,9 @@ package livedebugger
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkld "github.com/dynatrace-oss/dtctl/sdk/api/livedebugger"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkld "github.com/Dynatrace/dtctl/sdk/api/livedebugger"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Handler handles live debugger resources.

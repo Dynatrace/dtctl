@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
-	"github.com/dynatrace-oss/dtctl/pkg/serve"
+	"github.com/Dynatrace/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/pkg/serve"
 )
 
 // update mirrors the -update switch the golden tests use, so one flag

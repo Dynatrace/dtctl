@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azureconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azuremonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
 )
 
 // azureConnectionItem holds the envelope fields an Azure connection payload

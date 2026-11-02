@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	resapi "github.com/dynatrace-oss/dtctl/pkg/resources/api"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	resapi "github.com/Dynatrace/dtctl/pkg/resources/api"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // The assertions in this file are deliberately derived from whatever the

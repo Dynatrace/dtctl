@@ -10,10 +10,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsmonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
 )
 
 // WorkflowFixture returns a minimal workflow JSON for integration testing
