@@ -23,3 +23,10 @@ updates:
       interval: weekly
     labels:
       - dependencies
+    # init, analyze and upload-sarif must run the same codeql-action version:
+    # the analyze step refuses a config written by a different one. Bump them
+    # together, or each single-action PR fails CodeQL.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
