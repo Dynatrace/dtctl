@@ -66,6 +66,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read query from file, or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	stability.MarkStable(c)
 	// The query can be the positional argument instead: reject only an
 	// explicitly empty --file.

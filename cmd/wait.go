@@ -223,6 +223,9 @@ Examples:
 	}
 	c.Flags().String("for", "", "condition to wait for (required: count=N, count-gte=N, count-gt=N, count-lte=N, count-lt=N, any, none)")
 	c.Flags().StringP("file", "f", "", "read query from file (use - for stdin)")
+	markFileFlag(c, "file", fileValuePath)
+	markInputWithoutArgs(c)
+	markArgumentFlag(c, "file") // the query from a file instead of the argument
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	c.Flags().Duration("timeout", 5*time.Minute, "maximum time to wait (0 = unlimited)")
 	c.Flags().Int("max-attempts", 0, "maximum number of attempts (0 = unlimited)")

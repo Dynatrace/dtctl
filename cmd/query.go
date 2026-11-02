@@ -603,9 +603,13 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read query from file")
+	markFileFlag(c, "file", fileValuePath)
+	markInputWithoutArgs(c)
+	markArgumentFlag(c, "file") // the query from a file instead of the argument
 	rejectEmptyFlag(c, "file")
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	c.Flags().String("dql", "", "DQL text (alias for the positional argument)")
+	markArgumentFlag(c, "dql")
 	c.Flags().Bool("live", false, "enable live mode with periodic updates")
 	c.Flags().Duration("interval", 60*time.Second, "refresh interval for live mode")
 	c.Flags().Int("width", 0, "chart width in characters (0 = default)")
@@ -646,6 +650,7 @@ bare --decode-snapshots simplifies variant wrappers to plain values;
 	c.Flags().StringArrayP("segment", "S", nil, `filter segment ID or name (repeatable, max 10, AND-combined)
 supports inline variables: -S "SEGMENT?var=val&var2=val1,val2"`)
 	c.Flags().String("segments-file", "", "YAML file with filter segment definitions (supports variables)")
+	markFileFlag(c, "segments-file", fileValuePath)
 	c.Flags().StringArrayP("segment-var", "V", nil, `override a segment variable (repeatable)
 format: SEGMENT:VARIABLE=VALUE[,VALUE,...]
 takes precedence over --segments-file variables`)

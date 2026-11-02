@@ -144,6 +144,7 @@ Examples:
 	}
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
 	c.Flags().String("confirm", "", "Confirm deletion by providing the segment UID (for non-interactive use)")
+	markPrompts(c, "yes", "confirm", "dry-run")
 	stability.MarkStable(c)
 	return c
 }

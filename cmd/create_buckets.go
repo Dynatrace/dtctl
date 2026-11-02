@@ -111,6 +111,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing bucket definition, or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("name", "", "bucket name (3-100 chars, lowercase alphanumeric, underscores, hyphens)")
 	c.Flags().String("table", "", "table type (logs, events, or bizevents)")
 	c.Flags().Int("retention", 0, "retention period in days (1-3657)")

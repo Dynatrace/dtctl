@@ -319,12 +319,14 @@ resources in sync with their file definitions.
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing resource definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	c.Flags().Bool("dry-run", false, "preview changes without applying")
 	c.Flags().Bool("show-diff", false, "show diff of changes when updating existing resources")
 	c.Flags().Bool("no-hooks", false, "skip pre-apply and post-apply hooks")
 	c.Flags().String("id", "", "override or inject resource ID (use with --write-id to stamp ID into file)")
 	c.Flags().Bool("write-id", false, "write the created resource ID back into the source file for idempotent future applies")
+	markWritesTo(c, "write-id", "file")
 	c.Flags().String("type", "", "document type (e.g. launchpad, acme:config); forces the file to be applied as a document of this type")
 	c.Flags().StringArray("label", []string{}, "document classification label (repeatable); replaces the document's labels, overriding any in the payload (labels cannot be cleared, only replaced)")
 	c.Flags().Bool("create-snapshot", false, "snapshot the document's current state before updating it, so the previous version stays available via 'dtctl history'/'dtctl restore' (documents only)")
@@ -332,6 +334,7 @@ resources in sync with their file definitions.
 	c.Flags().String("share-environment", "", "share the applied notebook/dashboard with everyone in the environment (values: 'read' or 'read-write'; bare --share-environment defaults to 'read')")
 	c.Flags().Lookup("share-environment").NoOptDefVal = "read"
 	stability.MarkStable(c)
+	markScopesInputDependent(c)
 	markFlagRequiredNonEmpty(c, "file")
 	return c
 }

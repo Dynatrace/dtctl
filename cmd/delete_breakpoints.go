@@ -135,6 +135,7 @@ Examples:
 	}
 	c.Flags().Bool("all", false, "Delete all breakpoints in the current workspace")
 	c.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes")
 	markLiveDebuggerExperimental(c)
 	return c
 }

@@ -68,6 +68,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "path to the extension zip file (for custom extension upload), or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("hub-extension", "", "Hub extension catalog ID to install (e.g. com.dynatrace.extension.host-monitoring)")
 	c.Flags().String("version", "", "version to install (only for --hub-extension; defaults to latest)")
 	stability.MarkStable(c)

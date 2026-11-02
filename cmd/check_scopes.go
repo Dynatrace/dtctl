@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -240,7 +241,38 @@ const (
 	// scopeRequirementPerCall: the scopes are a property of the invocation, not of
 	// the command, so the catalog cannot hold them.
 	scopeRequirementPerCall
+	// scopeRequirementInputDependent: the command's resource kind comes from its
+	// input file (apply), so the scopes are decided by the file's content and the
+	// command line alone cannot name them.
+	scopeRequirementInputDependent
 )
+
+// String names the requirement the way ParseResult.Scopes reports it.
+func (r scopeRequirement) String() string {
+	switch r {
+	case scopeRequirementKnown:
+		return "known"
+	case scopeRequirementPerCall:
+		return "per_call"
+	case scopeRequirementInputDependent:
+		return "input_dependent"
+	}
+	return "none"
+}
+
+// annotationScopes marks a command whose required scopes the catalog cannot
+// hold. Its only value is scopesInputDependent. Namespaced like pkg/stability's
+// keys.
+const (
+	annotationScopes     = "dtctl.io/scopes"
+	scopesInputDependent = "input-dependent"
+)
+
+// markScopesInputDependent declares that cmd's resource kind, and so its
+// required scopes, come from the content of its input file.
+func markScopesInputDependent(cmd *cobra.Command) {
+	setCommandAnnotation(cmd, annotationScopes, scopesInputDependent)
+}
 
 // perCallScopeCommands are `<verb> <resource>` leaves whose required scopes
 // depend on their arguments.
@@ -295,6 +327,9 @@ var flagScopeRequirements = map[string]map[string][]string{
 // this particular invocation contribute. It is what both callers want: the
 // requirement of the command line in front of us, not of the command in general.
 func scopesForInvocation(c *cobra.Command, verb, resource string) ([]string, scopeRequirement) {
+	if c.Annotations[annotationScopes] == scopesInputDependent {
+		return nil, scopeRequirementInputDependent
+	}
 	required, req := requiredScopesIn(c.Root(), verb, resource)
 	extra := flagContributedScopes(c, verb, resource)
 	if len(extra) == 0 || req != scopeRequirementKnown {
@@ -426,21 +461,35 @@ func unionScopes(lists ...[]string) []string {
 	return out
 }
 
+// scopeCatalog is the commands catalog's verbs, which the scope lookups read.
+// It is built once per process, because the catalog is deterministic for a
+// binary and rebuilding it was a cost every preflight paid. It is built from a
+// fresh tree rather than from the one an invocation runs: a run masks its tree
+// (profile, stability floor), and the catalog leaves masked commands out. It
+// holds the verbs alone, not a full commands.Build: plugin discovery reads the
+// directories on PATH, and Parse promises no I/O.
+var scopeCatalog = sync.OnceValue(func() map[string]*commands.Verb {
+	return commands.BuildVerbs(newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root)
+})
+
 // requiredScopesFor looks up a command's required scopes from the catalog (the
 // single source of truth), and reports what kind of answer that is.
 func requiredScopesFor(verb, resource string) ([]string, scopeRequirement) {
-	return requiredScopesIn(rootCmd, verb, resource)
+	return requiredScopesIn(nil, verb, resource)
 }
 
-// requiredScopesIn is requiredScopesFor against the catalog of the tree root
-// heads, so a concurrent invocation reads its own tree rather than the
-// singleton.
+// requiredScopesIn is requiredScopesFor for a command of the tree under root.
+// A development-tier verb is attached to the singleton only when its feature
+// is enabled, so the shared catalog, built from a fresh tree, does not have
+// it: its scopes are looked up in root's own catalog instead.
 func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, scopeRequirement) {
 	if perCallScopeCommands[verb+" "+resource] {
 		return nil, scopeRequirementPerCall
 	}
-	listing := commands.Build(root)
-	v, ok := listing.Verbs[verb]
+	v, ok := scopeCatalog()[verb]
+	if !ok && root != nil && attachedDevelopmentVerb(root, verb) {
+		v, ok = commands.BuildVerbs(root)[verb]
+	}
 	if !ok {
 		return nil, scopeRequirementNone
 	}
@@ -453,6 +502,17 @@ func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, sco
 		return v.RequiredScopes, scopeRequirementKnown
 	}
 	return nil, scopeRequirementNone
+}
+
+// attachedDevelopmentVerb reports whether verb is a development-tier command
+// attached under root.
+func attachedDevelopmentVerb(root *cobra.Command, verb string) bool {
+	for _, dc := range developmentCommands {
+		if dc.cmd.Name() == verb && dc.cmd.Parent() == root {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvePerCallScopes resolves the scopes this specific invocation needs, for a
@@ -537,6 +597,18 @@ func computeScopeVerdict(ctx context.Context, verb, resource string, required []
 				"not knowable in advance",
 			"dtctl describe api <name> --operation '<METHOD> <path>'  -- the scope the " +
 				"specification declares for that endpoint",
+		}
+		return res
+	case scopeRequirementInputDependent:
+		// The resource kinds are in the file, which a verdict on the command line
+		// does not read. "No scopes required" would be the false assurance the
+		// verdict exists to prevent.
+		res.Status = scopeStatusUnknown
+		res.RequiredScopes = []string{}
+		res.Suggestions = []string{
+			"this command's required scopes depend on the resource kinds in its input file, " +
+				"so they are not knowable from the command line",
+			"dtctl commands --full  -- the scopes each resource kind needs",
 		}
 		return res
 	}

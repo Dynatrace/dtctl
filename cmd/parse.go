@@ -1,0 +1,366 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
+)
+
+// ParseOptions configures Parse. Each field means what its counterpart on
+// Session or RunOptions means for Run, so a caller that restricts what it runs
+// gets the same answer from Parse.
+type ParseOptions struct {
+	SafetyLevel         config.SafetyLevel
+	MinStability        config.StabilityLevel
+	StabilityExceptions []string
+	NoDeprecated        bool
+
+	// Env sets environment variables for the analysis, as RunOptions.Env
+	// does for a run (e.g. DTCTL_PROFILE).
+	Env map[string]string
+	// BlockedCommands removes top-level commands from the surface, as
+	// RunOptions.BlockedCommands does.
+	BlockedCommands map[string]string
+	// Context bounds the wait for a serialized invocation to finish. nil is
+	// context.Background().
+	Context context.Context
+}
+
+// ParseResult is what a command line means, without running it.
+type ParseResult struct {
+	Verb     string // "get", "apply", "exec", ...
+	Resource string // "" when the verb takes none (apply)
+
+	// InputFiles and OutputFiles are the files the command reads and writes,
+	// as vfs.Key names, sorted, de-duplicated and never nil. The stdin values ("-",
+	// "@-") are never one; a path that only resolves to the key "-" (./-) is a
+	// file, as it is at run time.
+	InputFiles  []string
+	OutputFiles []string
+	// RequiresInput is true when the command may read stdin: a "-" file value,
+	// "-d @-", a command such as query given no argument and no file, or a
+	// command that asks for confirmation (delete, restore) and was given
+	// neither its skip flag (--yes, --force, or --dry-run where the dry run
+	// returns before the question) nor --plain or --agent. restore trash asks
+	// only for a single document; breakpoint commands only when existing
+	// breakpoints are affected, which Parse cannot know, so it reports them as
+	// asking. A refused or missing answer cancels the command with exit 0. It
+	// is false under --check-scopes, which does not run the command.
+	RequiresInput bool
+
+	// RequiredScopes are the token scopes the catalog names for the command,
+	// never nil, and complete only when Scopes is "known". Scopes is "none" (the catalog names
+	// none; for a command the catalog is missing scopes for, that
+	// under-reports), "known", "per_call" (decided by the call, exec api) or
+	// "input_dependent" (decided by the input file's content, apply).
+	RequiredScopes []string
+	Scopes         string
+
+	// Help is true when the command line asks for help text (--help) or names
+	// a group that only prints its usage: nothing would run, and Verb and
+	// Resource name the command whose help it is, not a command to run. Scopes
+	// is "none" because nothing is called.
+	Help bool
+}
+
+// ParseError is a command line that Execute would refuse before running the
+// command body. ExitCode is the exit code Execute returns for it. Code,
+// Message and Suggestions classify the refusal the way the --agent envelope
+// does, and are what Execute prints there for an error in the command line
+// itself (an unknown flag, a missing argument). A refusal of the surface (the
+// profile, the stability floor, a blocked command) is printed by Execute as
+// plain text even under --agent, so for those Code is Parse's classification
+// and not text Execute outputs.
+type ParseError struct {
+	Code        string
+	Message     string
+	Suggestions []string
+	ExitCode    int
+}
+
+func (e *ParseError) Error() string { return e.Message }
+
+// errParseOnlySession is what a parse-only session's client construction
+// returns: Parse must never reach the platform.
+var errParseOnlySession = errors.New("a command line being parsed cannot reach the platform")
+
+// Parse analyses a command line the way Run would run it, and stops where the
+// command body would start: by then cobra has parsed the flags, validated the
+// arguments and required flags, and run the pre-run hooks. It reads no file,
+// calls no platform API and needs no token.
+//
+// It goes through the pipeline Run does — a fresh tree, the same surface
+// masks, cobra's validation, the same error classification — so a command
+// line Execute would refuse returns a *ParseError with the error Execute
+// reports. Validation inside a command body is the one thing it cannot see. Any
+// other error is a fault in Parse itself.
+//
+// Parse runs on a tree of its own and takes the invocation lock shared, like a
+// concurrent Run, so it is safe to call from many goroutines.
+func Parse(argv []string, opts ParseOptions) (*ParseResult, error) {
+	return parseWith(argv, opts, vfs.NewMapFS(nil), strings.NewReader(""))
+}
+
+// parseWith is Parse with the filesystem and stdin passed in, so a test can
+// watch that neither is touched.
+func parseWith(argv []string, opts ParseOptions, fsys vfs.FS, stdin io.Reader) (res *ParseResult, err error) {
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := runMu.RLock(ctx); err != nil {
+		return nil, fmt.Errorf("cmd: gave up waiting for a serialized invocation to finish: %w", err)
+	}
+	defer runMu.RUnlock()
+	concurrentActive.Add(1)
+	defer concurrentActive.Add(-1)
+
+	// A session, not none: without one, config resolution falls back to the
+	// host's config file, profile and floor, which would both read a file and
+	// give a different answer than Execute does.
+	session := &Session{
+		SafetyLevel:         opts.SafetyLevel,
+		MinStability:        opts.MinStability,
+		StabilityExceptions: opts.StabilityExceptions,
+		NoDeprecated:        opts.NoDeprecated,
+		parseOnly:           true,
+	}
+	inv := &invocation{session: session, blocked: opts.BlockedCommands, concurrent: true} // no capabilities
+	ctx = withInvocation(ctx, inv)
+	defer inv.ended.Store(true)
+
+	cleanup, err := applyRunEnvironment(ctx, RunOptions{Session: session, Env: opts.Env, FS: fsys, Concurrent: true})
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	restoreStdio, err := redirectStdio(ctx, io.Discard, io.Discard, stdin)
+	if err != nil {
+		return nil, err
+	}
+	defer restoreStdio()
+	output.PinColorOff()
+
+	defer func() {
+		if r := recover(); r != nil {
+			res, err = nil, fmt.Errorf("cmd: parse: internal error: %v", r)
+		}
+	}()
+	tree := newCommandTree(ctx)
+	inv.treeRoot = tree.root
+	tree.root.SetOut(currentStdout(ctx))
+	tree.root.SetErr(currentStderr(ctx))
+	tree.root.SetIn(currentStdin(ctx))
+	return parseTree(tree.root, argv)
+}
+
+// parseTree is executeTree's pipeline with the command body replaced by a
+// record of what cobra resolved. The steps executeTree has and this does not
+// have nothing to analyse: tracing, alias resolution (a session has no
+// aliases), plugin dispatch (no capability grants it) and the get paging setup.
+func parseTree(root *cobra.Command, argv []string) (*ParseResult, error) {
+	ctx := cmdContext(root)
+	devEnabled, devSignpost := resolveDevelopmentFeatures(ctx, argv)
+	setupErrorHandlers(root)
+
+	// Installed where installScopePreflight is, before the surface masks, so a
+	// masked command keeps the refusal its mask installs.
+	var ran *cobra.Command
+	var ranArgs []string
+	installParseHook(root, func(c *cobra.Command, args []string) { ran, ranArgs = c, args })
+
+	root.SetArgs(argv)
+	if code, err := applySurface(root, argv, devEnabled); err != nil {
+		return nil, newParseError(ctx, err, code)
+	}
+	executed, err := root.ExecuteContextC(ctx)
+	if err != nil {
+		initConcurrentOnError(ctx)
+		err = classifyCommandLineError(root, err, devSignpost)
+		return nil, newParseError(ctx, err, exitCodeForError(err))
+	}
+	if ran == nil {
+		// Help, or a group that only prints its usage: no body would run.
+		if executed == nil {
+			executed = root
+		}
+		verb, resource := verbResource(executed)
+		return &ParseResult{
+			Verb: verb, Resource: resource, Scopes: scopeRequirementNone.String(), Help: true,
+			InputFiles: []string{}, OutputFiles: []string{}, RequiredScopes: []string{},
+		}, nil
+	}
+	return newParseResult(ran, ranArgs), nil
+}
+
+// installParseHook replaces the body of every runnable command with record.
+// A group command's refusal stays (requireSubcommand, or a RunE declared with
+// markRefusalOnly): it is the check that refuses a missing or unknown resource
+// (`get`, `get bogus`), and it runs nothing.
+func installParseHook(cmd *cobra.Command, record func(*cobra.Command, []string)) {
+	for _, sub := range cmd.Commands() {
+		installParseHook(sub, record)
+	}
+	if cmd.RunE != nil && !isRefusal(cmd) {
+		cmd.RunE = func(c *cobra.Command, args []string) error {
+			record(c, args)
+			return nil
+		}
+	}
+	if cmd.Run != nil {
+		cmd.Run = func(c *cobra.Command, args []string) { record(c, args) }
+	}
+}
+
+// isRefusal reports whether cmd's RunE only refuses a missing or unknown
+// subcommand: requireSubcommand itself, or a RunE its constructor declared.
+func isRefusal(cmd *cobra.Command) bool {
+	return reflect.ValueOf(cmd.RunE).Pointer() == reflect.ValueOf(requireSubcommand).Pointer() ||
+		cmd.Annotations[annotationRefusalOnly] == "true"
+}
+
+func newParseError(ctx context.Context, err error, code int) *ParseError {
+	detail := errorToDetail(ctx, err)
+	return &ParseError{
+		Code:        detail.Code,
+		Message:     detail.Message,
+		Suggestions: detail.Suggestions,
+		ExitCode:    code,
+	}
+}
+
+// newParseResult reads what the command c would read and write, and its
+// scopes, from its parsed flags and the declarations (file_flags.go).
+func newParseResult(c *cobra.Command, args []string) *ParseResult {
+	verb, resource := verbResource(c)
+	res := &ParseResult{Verb: verb, Resource: resource}
+	inputs, outputs := map[string]bool{}, map[string]bool{}
+	argumentGiven := false
+
+	// c.Flags() holds the inherited persistent flags too once cobra has parsed.
+	c.Flags().VisitAll(func(f *pflag.Flag) {
+		if !f.Changed {
+			return
+		}
+		// An empty value stands in for nothing: query --dql "" still reads
+		// stdin.
+		if len(f.Annotations[annotationArgumentFlag]) > 0 && f.Value.String() != "" {
+			argumentGiven = true
+		}
+		kind := firstAnnotation(f, annotationFile)
+		if kind == "" {
+			return
+		}
+		for _, v := range flagValues(f) {
+			switch {
+			case kind == fileValuePath && v == "-", kind == fileValueAtPath && v == "@-":
+				res.RequiresInput = true
+			case kind == fileValuePath:
+				addFileKey(inputs, v)
+			case strings.HasPrefix(v, "@"):
+				addFileKey(inputs, v[1:])
+			}
+		}
+	})
+	c.Flags().VisitAll(func(f *pflag.Flag) {
+		target := firstAnnotation(f, annotationWritesTo)
+		if target == "" || !f.Changed || f.Value.String() != "true" {
+			return
+		}
+		if t := c.Flags().Lookup(target); t != nil {
+			for _, v := range flagValues(t) {
+				if v != "-" {
+					addFileKey(outputs, v)
+				}
+			}
+		}
+	})
+	if promptsFor(c, args) {
+		res.RequiresInput = true
+	}
+	// Only a flag standing in for the argument replaces stdin: query
+	// --segments-file names a file, but the query still comes from stdin.
+	if c.Annotations[annotationInputWithoutArgs] == "true" && len(args) == 0 && !argumentGiven {
+		res.RequiresInput = true
+	}
+	if checkScopes(cmdContext(c)) {
+		// --check-scopes prints its verdict instead of running the body, so
+		// nothing above reads stdin. Last, so no later check sets it again.
+		res.RequiresInput = false
+	}
+	res.InputFiles = append([]string{}, slices.Sorted(maps.Keys(inputs))...)
+	res.OutputFiles = append([]string{}, slices.Sorted(maps.Keys(outputs))...)
+
+	required, req := scopesForInvocation(c, verb, resource)
+	res.RequiredScopes = append([]string{}, required...)
+	res.Scopes = req.String()
+	return res
+}
+
+// promptsFor reports whether c, as invoked, would ask for confirmation on
+// stdin: it is declared with markPrompts and nothing the run was given keeps
+// it from asking. It reads the state the pre-run hooks left, so --agent (which
+// implies plain mode) and --dry-run count as Execute sees them.
+func promptsFor(c *cobra.Command, args []string) bool {
+	skips := c.Annotations[annotationPrompts]
+	if skips == "" {
+		return false
+	}
+	if c.Annotations[annotationPromptsOneArgument] == "true" && len(args) != 1 {
+		return false
+	}
+	ctx := cmdContext(c)
+	if plainMode(ctx) {
+		return false
+	}
+	for _, name := range strings.Split(skips, ",") {
+		if name == "dry-run" {
+			if dryRun(ctx) {
+				return false
+			}
+			continue
+		}
+		// A bool flag skips when true, a string flag (--confirm) when set.
+		if f := c.Flags().Lookup(name); f != nil && f.Changed && f.Value.String() != "" && f.Value.String() != "false" {
+			return false
+		}
+	}
+	return true
+}
+
+// addFileKey adds the file a value names to set. A value that names no file
+// ("", ".", "@" with nothing after it) adds nothing. The stdin values are
+// handled by the caller before this: a path that merely resolves to the key
+// "-" (./-, /-) is a file named "-", as it is at run time.
+func addFileKey(set map[string]bool, value string) {
+	if key := vfs.Key(value); key != "" {
+		set[key] = true
+	}
+}
+
+func firstAnnotation(f *pflag.Flag, key string) string {
+	if v := f.Annotations[key]; len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+// flagValues is a flag's value, one entry per item for a slice flag.
+func flagValues(f *pflag.Flag) []string {
+	if sv, ok := f.Value.(pflag.SliceValue); ok {
+		return sv.GetSlice()
+	}
+	return []string{f.Value.String()}
+}
