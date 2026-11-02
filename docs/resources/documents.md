@@ -114,7 +114,7 @@ dtctl unshare document my-launchpad --environment public
 dtctl unshare document my-launchpad --environment link,public   # undo both
 ```
 
-`apply --share-environment[=read|read-write]` still does both halves for applied notebooks and dashboards, but is deprecated (removal planned in 0.46.0): apply the file, then run `share document <id> --environment link,public` on the IDs `apply -o json` returns.
+`apply --share-environment[=read|read-write]` still does both halves for applied notebooks and dashboards, but is deprecated (removal planned in 0.48.0): apply the file, then run `share document <id> --environment link,public` on the IDs `apply -o json` returns.
 
 Version history and deletion (same commands work for `document` or `trash`):
 
