@@ -75,10 +75,11 @@ type ParseResult struct {
 	Help bool
 
 	// Flags are the flags the command line set, by long name (-o is
-	// "output"), sorted by name. A repeatable flag has one entry per value, in
-	// the order given; a flag left at its default is not listed. Args are the
-	// positional arguments the command receives, in order. Both are never nil,
-	// and empty for Help.
+	// "output"), sorted by name. A repeatable flag has one entry per item, in
+	// the order given, and a comma-separated slice value is split into its
+	// items (--collections a,b is two entries); a flag left at its default is
+	// not listed. Args are the positional arguments the command receives, in
+	// order. Both are never nil, and empty for Help.
 	Flags []ParsedFlag
 	Args  []string
 }
@@ -270,7 +271,8 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 		if !f.Changed {
 			return
 		}
-		for _, v := range flagValues(f) {
+		values := flagValues(f)
+		for _, v := range values {
 			res.Flags = append(res.Flags, ParsedFlag{Name: f.Name, Value: v})
 		}
 		// An empty value stands in for nothing: query --dql "" still reads
@@ -282,7 +284,7 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 		if kind == "" {
 			return
 		}
-		for _, v := range flagValues(f) {
+		for _, v := range values {
 			switch {
 			case kind == fileValuePath && v == "-", kind == fileValueAtPath && v == "@-":
 				res.RequiresInput = true

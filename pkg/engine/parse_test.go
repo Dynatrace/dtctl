@@ -150,6 +150,11 @@ func TestParse_FlagsAndArgs(t *testing.T) {
 			command: "diff -f b.yaml -f a.yaml",
 			flags:   []ParsedFlag{{Name: "file", Value: "b.yaml"}, {Name: "file", Value: "a.yaml"}},
 		},
+		"comma-separated slice value, one entry per item": {
+			command: "exec copilot document-search q --collections notebooks,dashboards",
+			flags:   []ParsedFlag{{Name: "collections", Value: "notebooks"}, {Name: "collections", Value: "dashboards"}},
+			args:    []string{"q"},
+		},
 		"stdin value": {
 			command: "apply -f -",
 			flags:   []ParsedFlag{{Name: "file", Value: "-"}},

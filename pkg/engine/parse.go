@@ -65,10 +65,11 @@ type Parsed struct {
 	Help bool
 
 	// Flags are the flags the command line set, by long name (-o is
-	// "output"), sorted by name. A repeatable flag has one entry per value, in
-	// the order given; a flag left at its default is not listed. Args are the
-	// positional arguments the command receives, in order. Both are never nil,
-	// and empty for Help.
+	// "output"), sorted by name. A repeatable flag has one entry per item, in
+	// the order given, and a comma-separated slice value is split into its
+	// items (--collections a,b is two entries); a flag left at its default is
+	// not listed. Args are the positional arguments the command receives, in
+	// order. Both are never nil, and empty for Help.
 	Flags []ParsedFlag
 	Args  []string
 }
