@@ -120,8 +120,11 @@ type ColumnTypes struct {
 }
 
 // ColumnType is the DQL type descriptor for a single column, e.g. {"type": "long"}.
+// Array columns also carry the element types in Types, e.g.
+// {"type": "array", "types": [{"indexRange": [0, 9], "mappings": {"element": {"type": "double"}}}]}.
 type ColumnType struct {
-	Type string `json:"type" yaml:"type"`
+	Type  string        `json:"type" yaml:"type"`
+	Types []ColumnTypes `json:"types,omitempty" yaml:"types,omitempty"`
 }
 
 // MetricInfo describes a single metric referenced in a timeseries query result.
