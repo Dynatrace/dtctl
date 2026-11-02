@@ -73,6 +73,22 @@ type ParseResult struct {
 	// Resource name the command whose help it is, not a command to run. Scopes
 	// is "none" because nothing is called.
 	Help bool
+
+	// Flags are the flags the command line set, by long name (-o is
+	// "output"), sorted by name. A repeatable flag has one entry per item, in
+	// the order given, and a comma-separated slice value is split into its
+	// items (--collections a,b is two entries); a flag left at its default is
+	// not listed. Args are the positional arguments the command receives, in
+	// order. Both are never nil, and empty for Help.
+	Flags []ParsedFlag
+	Args  []string
+}
+
+// ParsedFlag is one flag value a command line set, as the command reads it: a
+// boolean is "true" or "false", a count its number.
+type ParsedFlag struct {
+	Name  string
+	Value string
 }
 
 // ParseError is a command line that Execute would refuse before running the
@@ -200,6 +216,7 @@ func parseTree(root *cobra.Command, argv []string) (*ParseResult, error) {
 		return &ParseResult{
 			Verb: verb, Resource: resource, Scopes: scopeRequirementNone.String(), Help: true,
 			InputFiles: []string{}, OutputFiles: []string{}, RequiredScopes: []string{},
+			Flags: []ParsedFlag{}, Args: []string{},
 		}, nil
 	}
 	return newParseResult(ran, ranArgs), nil
@@ -245,7 +262,7 @@ func newParseError(ctx context.Context, err error, code int) *ParseError {
 // scopes, from its parsed flags and the declarations (file_flags.go).
 func newParseResult(c *cobra.Command, args []string) *ParseResult {
 	verb, resource := verbResource(c)
-	res := &ParseResult{Verb: verb, Resource: resource}
+	res := &ParseResult{Verb: verb, Resource: resource, Flags: []ParsedFlag{}, Args: append([]string{}, args...)}
 	inputs, outputs := map[string]bool{}, map[string]bool{}
 	argumentGiven := false
 
@@ -253,6 +270,10 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 	c.Flags().VisitAll(func(f *pflag.Flag) {
 		if !f.Changed {
 			return
+		}
+		values := flagValues(f)
+		for _, v := range values {
+			res.Flags = append(res.Flags, ParsedFlag{Name: f.Name, Value: v})
 		}
 		// An empty value stands in for nothing: query --dql "" still reads
 		// stdin.
@@ -263,7 +284,7 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 		if kind == "" {
 			return
 		}
-		for _, v := range flagValues(f) {
+		for _, v := range values {
 			switch {
 			case kind == fileValuePath && v == "-", kind == fileValueAtPath && v == "@-":
 				res.RequiresInput = true
