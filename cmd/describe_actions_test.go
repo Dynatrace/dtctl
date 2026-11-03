@@ -60,6 +60,7 @@ func TestDescribeActionTable(t *testing.T) {
 			Title:       "Create thing",
 			Description: "Creates a thing",
 			Stateful:    true,
+			Approval:    true,
 			FullName:    "example.connector:create-thing",
 			Extra: map[string]json.RawMessage{
 				"widget": json.RawMessage(`"/actions/create-thing"`),
@@ -80,6 +81,7 @@ func TestDescribeActionTable(t *testing.T) {
 			"Title:        Create thing",
 			"Description:  Creates a thing",
 			"Stateful:     yes",
+			"Approval:     yes",
 			"\ndocs:\n  inputSchema:\n    type: object\n",
 			"\nwidget: /actions/create-thing\n",
 		} {
@@ -108,7 +110,7 @@ func TestDescribeActionTable(t *testing.T) {
 		// Stateful prints only when set: the manifest omits it rather than
 		// declaring it false, so "Stateful: no" would assert something the
 		// manifest never said.
-		for _, absent := range []string{"Title:", "Description:", "Stateful:"} {
+		for _, absent := range []string{"Title:", "Description:", "Stateful:", "Approval:"} {
 			if strings.Contains(got, absent) {
 				t.Errorf("output contains %q although the field is empty:\n%s", absent, got)
 			}

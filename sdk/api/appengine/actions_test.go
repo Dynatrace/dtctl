@@ -40,7 +40,7 @@ func newActionBodyServer(t *testing.T, status int, body string, got **http.Reque
 
 func TestHandler_GetAction(t *testing.T) {
 	const body = `{"app":{"id":"acme.app"},"action":{
-		"name":"send-report","title":"Send report","description":"Sends it","stateful":true,
+		"name":"send-report","title":"Send report","description":"Sends it","stateful":true,"approval":true,
 		"widget":"/actions/send-report"}}`
 
 	t.Run("found", func(t *testing.T) {
@@ -54,7 +54,7 @@ func TestHandler_GetAction(t *testing.T) {
 			t.Errorf("requested %q", r.URL.Path)
 		}
 		if action.AppID != "acme.app" || action.ActionName != "send-report" || action.Title != "Send report" ||
-			action.Description != "Sends it" || !action.Stateful {
+			action.Description != "Sends it" || !action.Stateful || !action.Approval {
 			t.Errorf("unexpected action: %+v", action)
 		}
 		if action.FullName != "acme.app:send-report" {
@@ -115,7 +115,7 @@ func TestHandler_ListActions(t *testing.T) {
 	// not reach the result: a list never carries Extra.
 	const body = `{"actions":[
 		{"app":{"id":"other.app"},"action":{"name":"b1","widget":"/w/b1"}},
-		{"app":{"id":"acme.app"},"action":{"name":"a2","title":"A2","description":"Second","stateful":true}},
+		{"app":{"id":"acme.app"},"action":{"name":"a2","title":"A2","description":"Second","stateful":true,"approval":true}},
 		{"app":{"id":"acme.app"},"action":{"name":"a1"}},
 		{"app":{"id":"acme.app"},"action":{"title":"nameless"}}
 	]}`
@@ -144,7 +144,7 @@ func TestHandler_ListActions(t *testing.T) {
 			t.Fatalf("got %d actions, want 2: %+v", len(actions), actions)
 		}
 		a2 := actions[1]
-		if a2.ActionName != "a2" || a2.Title != "A2" || a2.Description != "Second" || !a2.Stateful || a2.AppID != "acme.app" {
+		if a2.ActionName != "a2" || a2.Title != "A2" || a2.Description != "Second" || !a2.Stateful || !a2.Approval || a2.AppID != "acme.app" {
 			t.Errorf("unexpected action: %+v", a2)
 		}
 	})
@@ -171,7 +171,7 @@ func TestHandler_ListActions(t *testing.T) {
 		}
 	})
 
-	t.Run("requests GET /actions with stateful added", func(t *testing.T) {
+	t.Run("requests GET /actions with stateful and approval added", func(t *testing.T) {
 		var r *http.Request
 		if _, err := newActionBodyServer(t, 200, `{"actions":[]}`, &r).ListActions(context.Background(), ListActionsOptions{}); err != nil {
 			t.Fatalf("ListActions: %v", err)
@@ -179,7 +179,7 @@ func TestHandler_ListActions(t *testing.T) {
 		if r.URL.Path != "/platform/app-engine/registry/v1/actions" {
 			t.Errorf("requested %q", r.URL.Path)
 		}
-		if got := r.URL.Query().Get("add-fields"); got != "action.stateful" {
+		if got := r.URL.Query().Get("add-fields"); got != "action.stateful,action.approval" {
 			t.Errorf("add-fields = %q", got)
 		}
 	})

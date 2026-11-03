@@ -13,4 +13,5 @@
   actionName: create-thing
   title: Create thing
   description: Creates a thing
+  approval: true
   fullName: example.connector:create-thing
