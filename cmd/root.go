@@ -1703,6 +1703,12 @@ func newClientFromConfig(ctx context.Context, cfg *config.Config) (*client.Clien
 	if err != nil {
 		return nil, err
 	}
+	// A session that brings its own transport (a host's stand-in environment,
+	// a private TLS configuration) replaces the shared pool for this client
+	// only; see Session.Transport.
+	if s := currentSession(ctx); s != nil && s.Transport != nil {
+		c.HTTP().SetTransport(s.Transport)
+	}
 	// If --debug flag is set, force verbosity to 2 (full debug mode)
 	if debugMode(ctx) {
 		c.SetVerbosity(2)

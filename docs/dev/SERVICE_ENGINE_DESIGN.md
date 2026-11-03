@@ -114,6 +114,23 @@ runs either one serialized invocation or any number of concurrent ones, never a
 mix. It is off unless a host asks for it; what it guarantees, what it costs and
 what it does not cover are in [CONCURRENT_EXECUTION.md](CONCURRENT_EXECUTION.md).
 
+### Injecting the HTTP transport
+
+`Session.Transport`, reached through `engine.New(limits, engine.WithTransport(rt))`,
+replaces the process-wide connection pool for every client an invocation
+builds. It exists so a host can test the success path of its own integration
+against a stand-in environment — an `httptest` server, usually over TLS with a
+certificate only `srv.Client().Transport` trusts — and so a host with its own
+TLS or proxy requirements can supply an `*http.Transport` configured for them.
+
+It is a seam under the request, not a way around it: the request still names
+the environment and carries the token, and dtctl still adds its User-Agent,
+retries and request-path guard above `rt`, so the `Result` is byte-identical to
+what the same command line produces against a real environment. It is
+per-`Engine`, not per-`Request`, and `dtctl serve http` does not expose it — a
+caller of the reference server must not choose where the server's requests go.
+The package-level `Execute` keeps the default pool.
+
 ### Analysing a command line without running it (`Parse`)
 
 `engine.Parse` reports what a command line means without running it: its verb

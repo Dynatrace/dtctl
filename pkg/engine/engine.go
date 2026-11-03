@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -166,6 +167,7 @@ type Engine struct {
 	limits     Limits
 	adm        *admission
 	concurrent bool
+	transport  http.RoundTripper
 }
 
 // Option configures an Engine at construction.
@@ -174,6 +176,7 @@ type Option func(*engineOptions)
 type engineOptions struct {
 	concurrent    bool
 	maxConcurrent int
+	transport     http.RoundTripper
 }
 
 // WithConcurrentExecution opts an Engine into running up to maxConcurrent
@@ -187,6 +190,24 @@ func WithConcurrentExecution(maxConcurrent int) Option {
 		o.concurrent = true
 		o.maxConcurrent = max(maxConcurrent, 1)
 	}
+}
+
+// WithTransport sends every platform request of this Engine's invocations
+// through rt instead of the process-wide connection pool. It is the seam a
+// host uses to run requests against a stand-in environment — typically an
+// httptest.Server, passing its URL as Request.EnvironmentURL and
+// srv.Client().Transport here, which also trusts the server's TLS
+// certificate — or to give the engine a TLS configuration of its own (an
+// *http.Transport with TLSClientConfig set).
+//
+// Only the transport changes: the request still names the environment and
+// carries the token, the safety level and the command surface, and dtctl
+// still adds its User-Agent, retries and request-path checks above rt, so the
+// Result is what the same command line would produce against a real
+// environment. rt is shared by every invocation of the Engine and must be
+// safe for concurrent use. nil keeps the default pool.
+func WithTransport(rt http.RoundTripper) Option {
+	return func(o *engineOptions) { o.transport = rt }
 }
 
 // New builds an Engine with the given budget. Without WithConcurrentExecution
@@ -208,6 +229,7 @@ func New(limits Limits, opts ...Option) *Engine {
 		limits:     l,
 		adm:        &admission{slot: make(chan struct{}, o.maxConcurrent)},
 		concurrent: o.concurrent,
+		transport:  o.transport,
 	}
 }
 
@@ -218,14 +240,14 @@ func (e *Engine) MaxConcurrent() int { return cap(e.adm.slot) }
 // Execute runs one invocation against this engine's budget. Its Result and
 // error read as the package-level Execute documents.
 func (e *Engine) Execute(ctx context.Context, req Request) (*Result, error) {
-	return executeInner(ctx, req, e.limits, e.adm, e.concurrent)
+	return executeInner(ctx, req, e.limits, e.adm, e.concurrent, e.transport)
 }
 
 // Limits reports the budget this engine was built with, after defaults.
 func (e *Engine) Limits() Limits { return e.limits }
 
 // executeInner is the shared implementation called by ExecuteWithLimits.
-func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, concurrent bool) (*Result, error) {
+func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, concurrent bool, transport http.RoundTripper) (*Result, error) {
 	argv, err := req.argv()
 	if err != nil {
 		return nil, err
@@ -304,6 +326,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 			MinStability:        config.StabilityLevel(req.MinStability),
 			StabilityExceptions: req.StabilityExceptions,
 			NoDeprecated:        req.NoDeprecated,
+			Transport:           transport,
 		},
 		Env:             env,
 		FS:              files,
@@ -443,7 +466,7 @@ func contextEnded(ctx context.Context) error {
 // deadline cut off returns its Result together with the context's error (see
 // Execute).
 func (e *Engine) ExecuteWithLimits(ctx context.Context, req Request, limits Limits) (*Result, error) {
-	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.concurrent)
+	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.concurrent, e.transport)
 }
 
 // effectiveLimits is the budget one ExecuteWithLimits call runs under: the

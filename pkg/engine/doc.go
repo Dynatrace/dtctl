@@ -53,6 +53,15 @@
 // every request a WASM instance instead costs about 55ms of CPU to start each
 // one.
 //
+// Transport: by default every invocation reaches its environment through one
+// process-wide connection pool. An Engine built with
+// New(limits, WithTransport(rt)) sends its invocations' platform requests
+// through rt instead — how a host tests against a stand-in environment
+// (an httptest.Server's URL as EnvironmentURL, its Client().Transport as rt)
+// or gives the engine a TLS configuration of its own. Only the transport
+// changes; credentials, safety and output are what they would be against a
+// real environment.
+//
 // Admission and resource limits: ExecuteWithLimits (which Execute calls with
 // DefaultLimits) bounds how many requests may queue for an execution slot
 // (MaxQueued, ErrTooManyQueued once exceeded), how long a request may occupy
