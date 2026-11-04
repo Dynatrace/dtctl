@@ -109,6 +109,7 @@ storage:system:read,
 storage:security.events:read,
 storage:buckets:read,
 storage:bucket-definitions:read,
+storage:bucket-definitions:write,
 storage:files:read,
 storage:files:write,
 storage:filter-segments:read,
@@ -180,6 +181,7 @@ storage:profiles:read,
 storage:buckets:read,
 storage:buckets:write,
 storage:bucket-definitions:read,
+storage:bucket-definitions:write,
 storage:fieldsets:read,
 storage:fieldset-definitions:read,
 storage:files:read,
@@ -341,6 +343,8 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | --- | --- |
 | app | `app-engine:apps:delete` |
 | breakpoint | `dev-obs:breakpoints:set` |
+| bucket | `storage:bucket-definitions:delete` |
+| bucket | `storage:bucket-definitions:read` |
 | dashboard | `document:documents:delete` |
 | document | `document:documents:delete` |
 | edgeconnect | `app-engine:edge-connects:delete` |
@@ -372,7 +376,7 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | azure | `extensions:configurations:read` |
 | azure | `settings:objects:read` |
 | breakpoint | `dev-obs:breakpoints:set` |
-| bucket | `storage:buckets:read` |
+| bucket | `storage:bucket-definitions:read` |
 | classic-pipelines | `settings:objects:read` |
 | copilot-skill | `davis-copilot:conversations:execute` |
 | dashboard | `document:documents:read` |
@@ -436,7 +440,7 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | azure | `extensions:configurations:write` |
 | azure | `settings:objects:write` |
 | breakpoint | `dev-obs:breakpoints:set` |
-| bucket | `storage:buckets:write` |
+| bucket | `storage:bucket-definitions:write` |
 | dashboard | `document:documents:write` |
 | document | `document:documents:write` |
 | edgeconnect | `app-engine:edge-connects:write` |

@@ -11,6 +11,8 @@ import (
 // TestGetScopesForSafetyLevelBaseline asserts the refactor is behavior-
 // preserving: login must request exactly the same scopes as before. Update this
 // table only with an intentional, reviewed change to login behavior.
+// readwrite-mine and readwrite-all request storage:bucket-definitions:write,
+// because both levels allow create bucket.
 var baselineScopes = map[config.SafetyLevel][]string{
 	config.SafetyLevelReadOnly: { // 43 scopes
 		"openid",
@@ -57,7 +59,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"openpipeline:configurations:read",
 		"environment-api:dashboard-3rdgen-migration:execute",
 	},
-	config.SafetyLevelReadWriteMine: { // 57 scopes
+	config.SafetyLevelReadWriteMine: { // 58 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -107,6 +109,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"extensions:configurations:write",
 		"storage:files:write",
 		"storage:filter-segments:write",
+		"storage:bucket-definitions:write",
 		"iam:service-users:use",
 		"davis:analyzers:execute",
 		"davis-copilot:conversations:execute",
@@ -116,7 +119,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"dev-obs:breakpoints:set",
 		"environment-api:dashboard-3rdgen-migration:execute",
 	},
-	config.SafetyLevelReadWriteAll: { // 78 scopes
+	config.SafetyLevelReadWriteAll: { // 79 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -173,6 +176,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"extensions:configurations:write",
 		"storage:files:write",
 		"storage:filter-segments:write",
+		"storage:bucket-definitions:write",
 		"iam:service-users:use",
 		"davis:analyzers:execute",
 		"davis-copilot:conversations:execute",
