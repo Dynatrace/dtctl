@@ -132,6 +132,7 @@ func newDescribeGCPMonitoringConfigCmd() *cobra.Command {
 		},
 	}
 	stability.MarkStable(c)
+	markRunsDQL(c)
 	return c
 }
 

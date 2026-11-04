@@ -166,5 +166,6 @@ bare --decode-snapshots simplifies variant wrappers to plain values;
 bare --metadata or -M shows all fields; --metadata=field1,field2 selects specific fields`)
 	c.Flags().Lookup("metadata").NoOptDefVal = "all"
 	markLiveDebuggerExperimental(c)
+	markRunsDQL(c)
 	return c
 }

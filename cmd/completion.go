@@ -60,6 +60,7 @@ Note:
 		},
 	}
 	stability.MarkStable(c)
+	markLocal(c)
 	return c
 }
 

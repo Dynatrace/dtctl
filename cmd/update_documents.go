@@ -90,6 +90,7 @@ See also:
 	c.Flags().Bool("dry-run", false, "preview the update without applying it")
 	c.Flags().Bool("show-diff", false, "show a diff of the change")
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	markFlagRequiredNonEmpty(c, "file")
 	return c
 }

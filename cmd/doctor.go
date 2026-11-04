@@ -67,6 +67,7 @@ Checks performed:
 		},
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 

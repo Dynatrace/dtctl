@@ -34,6 +34,7 @@ DTCTL_PLAIN, DTCTL_CALLER_VERSION), never tokens or other secrets.
 See docs/dev/PLUGIN_CONVENTIONS.md for the plugin author guide.`,
 	}
 	stability.MarkStable(c)
+	markLocal(c)
 	return c
 }
 

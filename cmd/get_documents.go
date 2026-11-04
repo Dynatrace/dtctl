@@ -88,6 +88,7 @@ Examples:
 		},
 	}
 	stability.MarkStable(c)
+	markResolvesUserWithFlag(c, "mine")
 	addWatchFlags(c)
 	addDocumentListFlags(c, false)
 	return c
@@ -165,6 +166,7 @@ Examples:
 		},
 	}
 	stability.MarkStable(c)
+	markResolvesUserWithFlag(c, "mine")
 	addWatchFlags(c)
 	addDocumentListFlags(c, false)
 	return c
@@ -343,6 +345,7 @@ Examples:
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
 	markPrompts(c, "yes", "dry-run")
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 
@@ -424,6 +427,7 @@ Examples:
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
 	markPrompts(c, "yes", "dry-run")
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 
@@ -639,6 +643,7 @@ Examples:
 	}
 	c.Flags().Bool("types", false, "List distinct document types and counts")
 	stability.MarkStable(c)
+	markResolvesUserWithFlag(c, "mine")
 	addWatchFlags(c)
 	addDocumentListFlags(c, true)
 	return c
@@ -726,6 +731,7 @@ Examples:
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
 	markPrompts(c, "yes", "dry-run")
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 

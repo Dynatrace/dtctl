@@ -16,7 +16,7 @@
 | `resources/extensions.md` | Extensions | extension, extension-config, hub-extension, hub-extension-release | generated |
 | `resources/app-engine.md` | App Engine | app, function, intent | generated |
 | `resources/analyzers.md` | Analyzers | analyzer | generated |
-| `resources/copilot.md` | Davis CoPilot | copilot, copilot-skill | generated |
+| `resources/copilot.md` | Davis CoPilot | copilot, copilot-skill, nl2dql, dql2nl, document-search | generated |
 | `resources/anomaly-detectors.md` | Anomaly Detectors | anomaly-detector | generated |
 | `resources/live-debugger.md` | Live Debugger | breakpoint, snapshot | generated |
 | `resources/documents.md` | Documents & Trash | document, trash | generated |

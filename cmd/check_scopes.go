@@ -247,22 +247,9 @@ const (
 	scopeRequirementInputDependent
 )
 
-// String names the requirement the way ParseResult.Scopes reports it.
-func (r scopeRequirement) String() string {
-	switch r {
-	case scopeRequirementKnown:
-		return "known"
-	case scopeRequirementPerCall:
-		return "per_call"
-	case scopeRequirementInputDependent:
-		return "input_dependent"
-	}
-	return "none"
-}
-
 // annotationScopes marks a command whose required scopes the catalog cannot
-// hold. Its only value is scopesInputDependent. Namespaced like pkg/stability's
-// keys.
+// hold. Its value is scopesInputDependent, scopesDQL or scopesAny
+// (scope_bounds.go). Namespaced like pkg/stability's keys.
 const (
 	annotationScopes     = "dtctl.io/scopes"
 	scopesInputDependent = "input-dependent"

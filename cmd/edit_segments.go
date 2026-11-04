@@ -149,6 +149,7 @@ Examples:
 	}
 	c.Flags().StringP("format", "", "yaml", "edit format (yaml|json)")
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 

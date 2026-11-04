@@ -71,6 +71,7 @@ Examples:
 	// The query can be the positional argument instead: reject only an
 	// explicitly empty --file.
 	rejectEmptyFlag(c, "file")
+	markScopesDQL(c)
 	return c
 }
 
