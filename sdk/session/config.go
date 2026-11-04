@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/adrg/xdg"
@@ -72,6 +73,19 @@ type Config struct {
 	// tell an unadopted reference from a literal URL. See
 	// resolveLocalEnvironments, restoreRawEnvironments.
 	rawEnvironments map[string]string
+	// envRefs records, by config path, every value the file wrote as an
+	// environment-variable reference and what it resolved to when LoadFrom
+	// expanded it. SaveTo writes the reference back for each value unchanged
+	// since load, so a load-modify-save cycle never persists a resolved secret.
+	// See envrefs.go.
+	envRefs map[string]envRef
+	// pendingKeyringDeletes maps credential names to the keyring holding an
+	// entry SaveTo must remove once the file is written: an older value that a
+	// ${VAR} reference now replaces. Deleting before the write would lose the
+	// working credential if the write failed. A later SetToken for the same
+	// name cancels the delete, and one that fails stays queued for the next
+	// save.
+	pendingKeyringDeletes map[string]keyringBackend
 	// inlineOnly is set by SealInlineCredentials to restrict token resolution to
 	// the inline Tokens list. When true, GetToken never consults the keyring,
 	// file store, or OAuth machinery — only the values carried in the struct.
@@ -655,6 +669,7 @@ func loadFrom(path string, expandEnv bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
+	raw := data
 	if expandEnv {
 		// Expand environment variables in the config file.
 		//
@@ -673,6 +688,10 @@ func loadFrom(path string, expandEnv bool) (*Config, error) {
 
 	if !isSupportedAPIVersion(cfg.APIVersion) {
 		return nil, fmt.Errorf("config file %s has schema version %q; this build understands %q — upgrade the tool reading it to a build that does", path, cfg.APIVersion, CurrentAPIVersion)
+	}
+
+	if expandEnv {
+		cfg.envRefs = collectEnvRefs(raw, &cfg)
 	}
 
 	return &cfg, nil
@@ -836,9 +855,11 @@ func (c *Config) Save() error {
 
 // SaveTo saves the configuration to a specific path.
 //
-// Contract rule (docs/dev/CONFIG_CONTRACT.md): fields unknown to this build —
-// written by a newer dtctl or another schema-v1 writer — are grafted back
-// from the file being overwritten, so an older writer never destroys them.
+// Contract rules (docs/dev/CONFIG_CONTRACT.md): values loaded from a ${VAR}
+// reference and unchanged since are written back as the reference, never as
+// what it resolved to; and fields unknown to this build — written by a newer
+// dtctl or another schema-v1 writer — are grafted back from the file being
+// overwritten, so an older writer never destroys them.
 func (c *Config) SaveTo(path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -849,6 +870,7 @@ func (c *Config) SaveTo(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
+	data = c.restoreEnvRefs(data)
 
 	if existing, err := os.ReadFile(path); err == nil {
 		data = preserveUnknownFields(existing, data)
@@ -858,6 +880,30 @@ func (c *Config) SaveTo(path string) error {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
+	return c.runPendingKeyringDeletes()
+}
+
+// runPendingKeyringDeletes removes the keyring entries SetToken queued. A
+// delete that fails stays queued, so the next save retries it; GetToken
+// prefers an inline reference over the keyring meanwhile, so the stale entry
+// cannot shadow it.
+func (c *Config) runPendingKeyringDeletes() error {
+	names := make([]string, 0, len(c.pendingKeyringDeletes))
+	for name := range c.pendingKeyringDeletes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var errs []error
+	for _, name := range names {
+		if err := c.pendingKeyringDeletes[name].Delete(name); err != nil {
+			errs = append(errs, fmt.Errorf("failed to remove previous token %q from keyring: %w", name, err))
+			continue
+		}
+		delete(c.pendingKeyringDeletes, name)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("config saved, but %w", errors.Join(errs...))
+	}
 	return nil
 }
 
@@ -939,6 +985,13 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 		}
 	}
 
+	// A token the config names as a ${VAR} reference is read from the
+	// environment, never from a plain keyring entry of the same name: such an
+	// entry can only be a stale value the reference replaced. OAuth tokens keep
+	// their precedence. (Local configs never get here with an inline token:
+	// they are refused above.)
+	envValue, envRaw, isEnvRef := c.envRefToken(tokenRef)
+
 	// Try keyring first (skipped when file storage is explicitly requested)
 	if IsKeyringAvailable() && !IsFileTokenStorage() {
 		ts := NewTokenStore()
@@ -961,9 +1014,11 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 		}
 
 		// Fall back to regular token
-		token, err := ts.GetToken(tokenRef)
-		if err == nil && token != "" {
-			return token, nil
+		if !isEnvRef {
+			token, err := ts.GetToken(tokenRef)
+			if err == nil && token != "" {
+				return token, nil
+			}
 		}
 	}
 
@@ -983,6 +1038,13 @@ func (c *Config) GetToken(tokenRef string) (string, error) {
 				return tokenData.AccessToken, nil
 			}
 		}
+	}
+
+	if isEnvRef {
+		if envValue == "" {
+			return "", fmt.Errorf("token %q is read from %s, which is not set in the environment", tokenRef, envRaw)
+		}
+		return envValue, nil
 	}
 
 	// Fall back to config file
@@ -1393,7 +1455,10 @@ func (c *Config) PruneEmptyEnvironments(keepContext string, placeholderNames map
 
 // SetToken creates or updates a token.
 // If keyring is available, the token is stored securely in the OS keyring
-// and only a reference is kept in the config file.
+// and only a reference is kept in the config file. A token that is itself an
+// environment-variable reference (see IsEnvReference) always stays in the
+// config file as written: the keyring would store the literal, which nothing
+// ever expands.
 // Any cached OAuth tokens for this credential name are invalidated so that
 // a rotated platform token does not keep using a stale refresh token.
 func (c *Config) SetToken(name, token string) error {
@@ -1410,8 +1475,21 @@ func (c *Config) setTokenWithKeyring(name, token string, kr keyringBackend, file
 		fileStore = NewOAuthFileStore()
 	}
 
+	// An explicit value replaces whatever reference the entry was loaded from,
+	// and whatever keyring cleanup an earlier SetToken queued for it.
+	delete(c.envRefs, tokenValuePath(name))
+	delete(c.pendingKeyringDeletes, name)
+
 	keyringAvailable := kr.Available()
-	if keyringAvailable {
+	if keyringAvailable && IsEnvReference(token) {
+		// Kept inline. A keyring entry left from an earlier value goes, but
+		// only after SaveTo has written the reference: until then the keyring
+		// entry is the credential.
+		if c.pendingKeyringDeletes == nil {
+			c.pendingKeyringDeletes = make(map[string]keyringBackend)
+		}
+		c.pendingKeyringDeletes[name] = kr
+	} else if keyringAvailable {
 		if err := kr.Set(name, token); err != nil {
 			return fmt.Errorf("failed to store token in keyring: %w", err)
 		}
