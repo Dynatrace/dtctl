@@ -241,6 +241,55 @@ var ResourceScopes = map[string]AccessScopes{
 	"license-settings": platformManagementRead,
 }
 
+// sharing reads the document's metadata for the ownership check, then works
+// on its direct shares (/platform/document/v1/direct-shares), whose
+// operations declare the document:direct-shares:* scopes. It does not write
+// the document.
+// unshare's flags add the scope of what they do: removing some recipients
+// writes the share, removing all deletes it (see flagScopeRequirements in
+// cmd/).
+var (
+	shareScopes   = []string{"document:documents:read", "document:direct-shares:read", "document:direct-shares:write"}
+	unshareScopes = []string{"document:documents:read", "document:direct-shares:read"}
+)
+
+// CommandScopes are the commands whose scopes ResourceScopes cannot express,
+// because the verb calls other endpoints than its resource's at its access
+// level. Keys are "<verb> <resource>" with the resource's singular name; each
+// value replaces the resource's scopes as the command's requirement.
+// ScopesForCommand reads them in place of ResourceScopes.
+var CommandScopes = map[string][]string{
+	// :validate declares davis:analyzers:execute, although verify is a read:
+	// it validates an execution's input without executing the analyzer.
+	"verify analyzer": {"davis:analyzers:execute"},
+
+	"share document":    shareScopes,
+	"share dashboard":   shareScopes,
+	"share notebook":    shareScopes,
+	"unshare document":  unshareScopes,
+	"unshare dashboard": unshareScopes,
+	"unshare notebook":  unshareScopes,
+}
+
+// lookupCommandScopes finds the CommandScopes entry of verb on resource, by
+// the resource's singular or plural name.
+func lookupCommandScopes(verb, resource string) ([]string, bool) {
+	if scopes, ok := CommandScopes[verb+" "+resource]; ok {
+		return scopes, true
+	}
+	scopes, ok := CommandScopes[verb+" "+singularize(resource)]
+	return scopes, ok
+}
+
+// ScopesForCommand returns the scopes verb requires on resource: its
+// CommandScopes entry, or else ScopesForResource at access.
+func ScopesForCommand(verb, resource string, access Access) []string {
+	if scopes, ok := lookupCommandScopes(verb, resource); ok {
+		return scopes
+	}
+	return ScopesForResource(resource, access)
+}
+
 // localResources are catalog subcommands that operate entirely on the local
 // machine (config, contexts, credentials, skills, aliases) and therefore
 // require no platform scopes. They are excluded from the scope catalog and the
@@ -421,6 +470,7 @@ func (s *scopeSet) addReadTier(extended bool) {
 	s.addResource("user", AccessRead)
 	s.addResource("group", AccessRead)
 	s.addResource("analyzer", AccessRead)
+	s.add(CommandScopes["verify analyzer"]...)
 	s.addResource("app", AccessRead)
 	s.addResource("edgeconnect", AccessRead)
 	s.addResource("notification", AccessRead)
@@ -470,11 +520,12 @@ func (s *scopeSet) addAllExtras() {
 	s.addResource("notification", AccessWrite)
 }
 
-// addUnrestricted builds the dangerously-unrestricted scope set, which is not a
-// strict superset of readwrite-all: it grants environment shares instead of
-// direct shares and adds destructive Grail/storage scopes.
+// addUnrestricted builds the dangerously-unrestricted scope set: the
+// readwrite-all scopes plus destructive Grail/storage scopes. It grants the
+// direct shares too, because share and unshare are allowed at every level from
+// readwrite-mine upward.
 func (s *scopeSet) addUnrestricted() {
-	// reads (environment shares replace direct shares)
+	// reads
 	s.addResource("workflow", AccessRead)
 	s.addResource("scheduling-rule", AccessRead)
 	s.addResource("dashboard", AccessRead)
@@ -505,6 +556,8 @@ func (s *scopeSet) addUnrestricted() {
 	// writes / destructive
 	s.addResource("dashboard", AccessWrite, AccessDelete)
 	s.add("document:environment-shares:write")
+	s.add(shareScopes...)
+	s.add("document:direct-shares:delete")
 	s.addResource("environment-share", AccessClaim)
 	s.add(DocumentAdminScope)
 	s.add("document:trash.documents:restore", "document:trash.documents:delete")

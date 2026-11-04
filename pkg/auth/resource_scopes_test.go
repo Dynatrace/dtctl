@@ -14,7 +14,7 @@ import (
 // readwrite-mine and readwrite-all request storage:bucket-definitions:write,
 // because both levels allow create bucket.
 var baselineScopes = map[config.SafetyLevel][]string{
-	config.SafetyLevelReadOnly: { // 43 scopes
+	config.SafetyLevelReadOnly: { // 44 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -52,6 +52,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"iam:users:read",
 		"iam:groups:read",
 		"davis:analyzers:read",
+		"davis:analyzers:execute",
 		"app-engine:apps:run",
 		"app-engine:edge-connects:read",
 		"notification:notifications:read",
@@ -200,7 +201,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"app-engine:edge-connects:write",
 		"notification:notifications:write",
 	},
-	config.SafetyLevelDangerouslyUnrestricted: { // 86 scopes
+	config.SafetyLevelDangerouslyUnrestricted: { // 89 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -246,6 +247,9 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"document:documents:write",
 		"document:documents:delete",
 		"document:environment-shares:write",
+		"document:direct-shares:read",
+		"document:direct-shares:write",
+		"document:direct-shares:delete",
 		"document:environment-shares:claim",
 		"document:documents:admin",
 		"document:trash.documents:restore",

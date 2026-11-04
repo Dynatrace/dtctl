@@ -27,6 +27,8 @@ Read-only access for production monitoring and troubleshooting.
 
 This level does not include the Live Debugger write scope `dev-obs:breakpoints:set`.
 
+This level includes `davis:analyzers:execute`, because `dtctl verify analyzer` calls the analyzer's validate endpoint, which requires that scope. The scope also lets a `readonly` login run `dtctl exec analyzer`, a read-shaped analysis that the `readonly` safety level allows.
+
 ```
 document:documents:read,
 document:direct-shares:read,
@@ -63,6 +65,7 @@ iam:users:read,
 iam:groups:read,
 notification:notifications:read,
 davis:analyzers:read,
+davis:analyzers:execute,
 app-engine:apps:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
@@ -316,8 +319,10 @@ A few flags reach a second API, so they need a scope the resource itself does no
 | --- | --- | --- |
 | `dtctl get documents` / `dashboards` / `notebooks` | `--admin-access` | `document:documents:admin` |
 | `dtctl update extension` / `extensions` | `--with-configurations` | `extensions:configurations:read`, `extensions:configurations:write` |
+| `dtctl unshare document` / `dashboard` / `notebook` | `--user`, `--group` | `document:direct-shares:write` |
+| `dtctl unshare document` / `dashboard` / `notebook` | `--all` | `document:direct-shares:delete` |
 
-Without the extra scope the flag fails with `403 Insufficient permissions`, while the same command without it succeeds — which is why the scope is not declared on the resource.
+Without the extra scope the flag fails with `403 Insufficient permissions`, while the same command without it succeeds — which is why the scope is not declared on the resource. `dtctl unshare` always needs `--user`, `--group` or `--all`. With only `--user`/`--group` it writes the direct share and needs the write scope; with only `--all` it deletes the share and needs the delete scope. A command line that sets `--all` together with `--user` or `--group` asks for both scopes.
 
 `dtctl auth login` requests `document:documents:admin` at the `readwrite-all` and `dangerously-unrestricted` safety levels (not at `readonly` or `readwrite-mine`, which exist to keep other users' documents out of reach). The scope alone is not enough: the tenant's IAM policy must also grant the `document:documents:admin` permission — a user without it can still log in, the API just keeps refusing `--admin-access`. OAuth sessions created before dtctl requested the scope do not carry it; run `dtctl auth login` again to pick it up.
 

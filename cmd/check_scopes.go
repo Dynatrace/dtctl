@@ -321,6 +321,17 @@ var flagScopeRequirements = map[string]map[string][]string{
 	"update extensions": {"with-configurations": {
 		"extensions:configurations:read", "extensions:configurations:write",
 	}},
+
+	// Removing recipients writes a direct share; --all deletes it.
+	"unshare document":  unshareFlagScopes,
+	"unshare dashboard": unshareFlagScopes,
+	"unshare notebook":  unshareFlagScopes,
+}
+
+var unshareFlagScopes = map[string][]string{
+	"all":   {"document:direct-shares:delete"},
+	"user":  {"document:direct-shares:write"},
+	"group": {"document:direct-shares:write"},
 }
 
 // scopesForInvocation is requiredScopesFor plus the scopes that the flags set on
