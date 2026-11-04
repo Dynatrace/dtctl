@@ -167,6 +167,7 @@ Examples:
 	stability.MarkFlag(c, "trigger", stability.Experimental, pre10Since)
 	c.Flags().Int64("limit", 0, "Maximum number of workflows to return (0 = unlimited)")
 	stability.MarkStable(c)
+	markResolvesUserWithFlag(c, "mine")
 	addWatchFlags(c)
 	return c
 }
@@ -373,6 +374,7 @@ Examples:
 	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
 	markPrompts(c, "yes", "dry-run")
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 

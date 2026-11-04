@@ -51,6 +51,7 @@ Examples:
   dtctl wf-count`,
 	}
 	stability.MarkStable(c)
+	markLocal(c)
 	return c
 }
 

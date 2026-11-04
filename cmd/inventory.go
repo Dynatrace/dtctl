@@ -123,6 +123,7 @@ an instrumentation change or an ingest — use 'dtctl inventory arrivals'.
 	}
 	stability.Mark(c, stability.Experimental, "0.39.0")
 	addInventoryDiscoveryFlags(c)
+	markScopesDQL(c)
 	return c
 }
 

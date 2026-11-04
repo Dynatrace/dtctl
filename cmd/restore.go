@@ -114,6 +114,7 @@ Examples:
 	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 
@@ -208,6 +209,7 @@ Examples:
 	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 
@@ -302,6 +304,7 @@ Examples:
 	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 
@@ -395,6 +398,7 @@ Examples:
 	markPrompts(c, "force", "dry-run")
 	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	return c
 }
 

@@ -145,6 +145,7 @@ Examples:
 	c.Flags().Int("timeout", 30, "timeout in seconds when polling for evaluation results")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
+	markRunsDQL(c)
 	return c
 }
 

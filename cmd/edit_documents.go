@@ -191,6 +191,7 @@ Examples:
 		},
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addEditDocumentFlags(c)
 	return c
 }
@@ -352,6 +353,7 @@ Examples:
 		},
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addEditDocumentFlags(c)
 	return c
 }
@@ -510,6 +512,7 @@ Examples:
 		},
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addEditDocumentFlags(c)
 	return c
 }
