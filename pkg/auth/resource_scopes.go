@@ -23,7 +23,7 @@ const (
 // single resource type. A nil/empty list means the access level either does not
 // apply to the resource or has no distinct scope. Delete falls back to Write
 // when Delete is empty, matching resources that fold deletion into their write
-// scope (e.g. workflows, buckets) rather than exposing a distinct :delete scope
+// scope (e.g. workflows) rather than exposing a distinct :delete scope
 // (e.g. documents).
 //
 // The per-level lists are conjunctive: a token needs every scope in them.
@@ -127,10 +127,18 @@ var ResourceScopes = map[string]AccessScopes{
 	// same Grail read surface as `query`, no managed resource of its own.
 	"arrivals": {Read: QueryScopes},
 
-	// Grail storage. Buckets are managed via the bucket data scopes (delete
-	// folds into write); lookups and segments are stored as files / filter
+	// Grail storage. Buckets are managed through the bucket definitions of
+	// Storage Management (/platform/storage/management/v1/bucket-definitions),
+	// whose operations declare the storage:bucket-definitions:* scopes; the
+	// storage:buckets:* scopes are the ones a query or an ingest needs to
+	// reach a bucket's data. Delete also reads: delete bucket gets the bucket
+	// before it deletes it. Lookups and segments are stored as files / filter
 	// segments respectively.
-	"bucket":  {Read: []string{"storage:buckets:read"}, Write: []string{"storage:buckets:write"}},
+	"bucket": {
+		Read:   []string{"storage:bucket-definitions:read"},
+		Write:  []string{"storage:bucket-definitions:write"},
+		Delete: []string{"storage:bucket-definitions:delete", "storage:bucket-definitions:read"},
+	},
 	"lookup":  {Read: []string{"storage:files:read"}, Write: []string{"storage:files:write"}, Delete: []string{"storage:files:delete"}},
 	"segment": {Read: []string{"storage:filter-segments:read"}, Write: []string{"storage:filter-segments:write"}, Delete: []string{"storage:filter-segments:delete"}},
 
@@ -405,8 +413,7 @@ func (s *scopeSet) addReadTier(extended bool) {
 	if extended {
 		s.add(grailExtendedReadScopes...)
 	}
-	s.addResource("bucket", AccessRead)
-	s.add("storage:bucket-definitions:read")
+	s.add("storage:buckets:read", "storage:bucket-definitions:read")
 	s.addResource("lookup", AccessRead)
 	s.addResource("segment", AccessRead)
 	s.addResource("user", AccessRead)
@@ -425,7 +432,9 @@ func (s *scopeSet) addReadTier(extended bool) {
 }
 
 // addMineWrites adds the write/run scopes granted from readwrite-mine upward:
-// modifying one's own resources, running workflows/functions/analyzers.
+// modifying one's own resources, running workflows/functions/analyzers. It
+// includes the bucket write scope, because the safety checker allows create
+// bucket (OperationCreate) from readwrite-mine upward.
 func (s *scopeSet) addMineWrites() {
 	s.addResource("dashboard", AccessWrite, AccessDelete)
 	s.add("document:direct-shares:write", "document:direct-shares:delete", "document:trash.documents:restore")
@@ -437,6 +446,7 @@ func (s *scopeSet) addMineWrites() {
 	s.addResource("extension-config", AccessWrite)
 	s.addResource("lookup", AccessWrite)
 	s.addResource("segment", AccessWrite)
+	s.addResource("bucket", AccessWrite)
 	s.add("iam:service-users:use")
 	s.addResource("analyzer", AccessRun)
 	s.add("davis-copilot:conversations:execute")
@@ -446,13 +456,12 @@ func (s *scopeSet) addMineWrites() {
 }
 
 // addAllExtras adds the scopes that readwrite-all grants on top of
-// readwrite-mine: environment sharing, Grail writes, bucket writes, CoPilot
+// readwrite-mine: environment sharing, Grail record writes, CoPilot
 // generation, and app/EdgeConnect lifecycle.
 func (s *scopeSet) addAllExtras() {
 	s.add("document:environment-shares:read", "document:environment-shares:write")
 	s.add(DocumentAdminScope)
-	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write")
-	s.addResource("bucket", AccessWrite)
+	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write", "storage:buckets:write")
 	s.add("davis-copilot:nl2dql:execute", "davis-copilot:dql2nl:execute", "davis-copilot:document-search:execute")
 	s.addResource("app", AccessWrite, AccessDelete)
 	s.addResource("edgeconnect", AccessWrite)
@@ -475,8 +484,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("extension-config", AccessRead)
 	s.add(QueryScopes...)
 	s.add(grailExtendedReadScopes...)
-	s.addResource("bucket", AccessRead)
-	s.add("storage:bucket-definitions:read")
+	s.add("storage:buckets:read", "storage:bucket-definitions:read")
 	s.addResource("lookup", AccessRead)
 	s.addResource("segment", AccessRead)
 	s.addResource("user", AccessRead)
@@ -504,9 +512,9 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("setting", AccessWrite)
 	s.addResource("extension", AccessWrite)
 	s.addResource("extension-config", AccessWrite)
-	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write")
-	s.addResource("bucket", AccessWrite)
-	s.add("storage:bucket-definitions:write", "storage:bucket-definitions:delete", "storage:bucket-definitions:truncate")
+	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write", "storage:buckets:write")
+	s.addResource("bucket", AccessWrite, AccessDelete)
+	s.add("storage:bucket-definitions:truncate")
 	s.add("storage:fieldset-definitions:write")
 	s.addResource("lookup", AccessWrite, AccessDelete)
 	s.addResource("segment", AccessWrite)
