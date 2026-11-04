@@ -84,7 +84,7 @@ def matches(key: str, stems: set[str]) -> bool:
 
 
 def resource_managed_body(title: str, stems: list[str], catalog: dict,
-                          raw_index: dict[str, list[dict]]) -> str:
+                          raw_index: dict[str, list[dict]], flag_scoped: set[str]) -> str:
     """Build the generator-managed body for a resource page: the three tables
     (Supported operations, Flags, Required token scopes). This is the ONLY part
     of a resource page the generator owns; it is wrapped in
@@ -157,11 +157,35 @@ def resource_managed_body(title: str, stems: list[str], catalog: dict,
                   for level in sorted(by_level.keys())]
     out.append(gen_docs.md_table(["Safety level", "Scopes"], scope_rows))
 
+    # A command whose scopes differ from its resource's at its access level
+    # (auth.CommandScopes) needs them in place of the row above.
+    own_rows = []
+    own_has_flag_scopes = False
+    for canon in sorted(raw_index.keys()):
+        if not matches(canon, stemset):
+            continue
+        for op in sorted(raw_index[canon], key=lambda o: (o["verb"], o["resource_as_written"])):
+            base = resource_scopes.get(canon, {}).get(op["access"] or "")
+            if base is None or sorted(op["required_scopes"]) == sorted(base):
+                continue
+            command = f"{op['verb']} {op['resource_as_written']}"
+            own_rows.append([f"`dtctl {command}`",
+                             gen_docs.scope_cell(op["required_scopes"], None)])
+            own_has_flag_scopes = own_has_flag_scopes or command in flag_scoped
+    if own_rows:
+        intro = ("These commands call other endpoints than the resource's, so they "
+                 "need these scopes instead of the ones for their access level.")
+        if own_has_flag_scopes:
+            intro += (" Some flags add a scope; see "
+                      "[Flags that need an extra scope](../TOKEN_SCOPES.md#flags-that-need-an-extra-scope).")
+        out.append(intro + "\n")
+        out.append(gen_docs.md_table(["Command", "Scopes"], own_rows))
+
     return "\n".join(out).rstrip() + "\n"
 
 
 def render_grouped_page(fname: str, title: str, stems: list[str], catalog: dict,
-                        raw_index: dict[str, list[dict]], note: str) -> str:
+                        raw_index: dict[str, list[dict]], flag_scoped: set[str], note: str) -> str:
     """Full skeleton for a NEW generated resource page (no markers present yet).
 
     Section order: `# Title`, `## Overview` (placeholder), the GENERATED managed
@@ -170,7 +194,7 @@ def render_grouped_page(fname: str, title: str, stems: list[str], catalog: dict,
     usage / edge cases / troubleshooting). On regeneration of an EXISTING page,
     `inject_managed` replaces only the managed block, so every placeholder that
     an SME has since filled in is preserved."""
-    body = resource_managed_body(title, stems, catalog, raw_index)
+    body = resource_managed_body(title, stems, catalog, raw_index, flag_scoped)
     parts = [f"# {title}\n"]
     if note:
         parts.append(f"<!-- NOTE: {note} -->\n")
@@ -216,6 +240,33 @@ def token_scopes_body(catalog: dict) -> str:
             continue
         body.append("###" + l[2:] if l.startswith("## ") else l)
     return "## Required scopes by resource (generated)\n" + "\n".join(body).strip() + "\n"
+
+
+FLAG_SCOPES_HEADING = "### Flags that need an extra scope"
+
+
+def commands_with_flag_scopes(token_scopes: Path) -> set[str]:
+    """The commands (`verb resource`) listed in the hand-authored "Flags that
+    need an extra scope" table of TOKEN_SCOPES.md. The catalog does not carry
+    flag scopes, so that table is the only place the docs can read them from.
+
+    A cell names the first command in full and its siblings by resource only:
+    "`dtctl get documents` / `dashboards`" lists `get documents` and
+    `get dashboards`."""
+    text = token_scopes.read_text(encoding="utf-8")
+    if FLAG_SCOPES_HEADING not in text:
+        raise SystemExit(f"{token_scopes} has no '{FLAG_SCOPES_HEADING}' section")
+    section = text.split(FLAG_SCOPES_HEADING, 1)[1].split("\n#", 1)[0]
+    commands = set()
+    for line in section.splitlines():
+        if not line.startswith("| `dtctl "):
+            continue
+        names = [n.strip().strip("`") for n in line.split("|")[1].split("/")]
+        verb, first = names[0].removeprefix("dtctl ").split(" ", 1)
+        commands.update(f"{verb} {resource}" for resource in [first, *names[1:]])
+    if not commands:
+        raise SystemExit(f"{token_scopes}: '{FLAG_SCOPES_HEADING}' lists no command")
+    return commands
 
 
 def managed_wrapper(tag: str, body: str) -> str:
@@ -268,7 +319,7 @@ def has_markers(path: Path, tag: str) -> bool:
 
 def emit_resource_page(path: Path, fname: str, title: str, stems: list[str],
                        catalog: dict, raw_index: dict[str, list[dict]],
-                       authored: bool, note: str) -> str:
+                       flag_scoped: set[str], authored: bool, note: str) -> str:
     """Write/refresh one docs/resources/<fname>.md, durable against regeneration:
 
       - file does NOT exist            -> write the full skeleton (grouped page
@@ -285,11 +336,11 @@ def emit_resource_page(path: Path, fname: str, title: str, stems: list[str],
     Returns a short status string for the run log."""
     if not path.exists():
         page = (render_authored_stub(title, note) if authored
-                else render_grouped_page(fname, title, stems, catalog, raw_index, note))
+                else render_grouped_page(fname, title, stems, catalog, raw_index, flag_scoped, note))
         path.write_text(page, encoding="utf-8")
         return "created"
     if has_markers(path, fname):
-        inject_managed(path, fname, resource_managed_body(title, stems, catalog, raw_index))
+        inject_managed(path, fname, resource_managed_body(title, stems, catalog, raw_index, flag_scoped))
         return "injected"
     return "skipped (no markers; authored/hand-edited page left untouched)"
 
@@ -303,6 +354,7 @@ def main() -> int:
     (out_dir / "resources").mkdir(parents=True, exist_ok=True)
 
     raw_index = build_raw_index(catalog)
+    flag_scoped = commands_with_flag_scopes(out_dir / "TOKEN_SCOPES.md")
     all_keys = set(raw_index.keys()) | set(catalog.get("resource_scopes", {}).keys())
 
     index_rows = []
@@ -314,7 +366,8 @@ def main() -> int:
         # catalog keys too, so they must not surface as "unmapped".
         covered_keys.update(k for k in all_keys if matches(k, set(stems)))
         path = out_dir / "resources" / f"{fname}.md"
-        status = emit_resource_page(path, fname, title, stems, catalog, raw_index, authored, note)
+        status = emit_resource_page(path, fname, title, stems, catalog, raw_index, flag_scoped,
+                                    authored, note)
         print(f"  resources/{fname}.md: {status}")
         index_rows.append([f"`resources/{fname}.md`", title, ", ".join(stems) or "-", gen])
 
