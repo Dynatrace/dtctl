@@ -172,6 +172,7 @@ var ResourceAliases = map[string]string{
 	"nb":   "notebooks",
 	"bkt":  "buckets",
 	"ec":   "edgeconnect",
+	"cred": "credentials",
 	"fn":   "functions",
 	"func": "functions",
 	"ad":   "anomaly-detectors",

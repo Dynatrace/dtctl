@@ -27,6 +27,7 @@ var fileFlagProbeHints = map[string][]string{
 	"exec api":           {"--method", "POST"}, // -d needs an explicit method
 	"inventory arrivals": {"--scope", `service.name == "probe"`},
 	"wait query":         {"--for", "any"},
+	"create credential":  {"--type", "certificate", "--name", "probe", "--scope", "extension"},
 }
 
 // fileFlagUnreached lists declared file flags and read call sites the probe

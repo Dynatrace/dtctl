@@ -50,6 +50,7 @@ Supported resources:
   extension-configs (extcfg)  documents (doc)         anomaly-detectors (ad)
   hub-extensions              hub-extension-releases  apis
   environment                 license                 license-settings
+  credentials (cred)
 
 Use 'dtctl get <resource> --help' for resource-specific options.`,
 		Example: `  # List all workflows
@@ -152,6 +153,7 @@ func init() {
 	addDevelopmentCommand(getCmd, getActionsCmd, actionsDevelopmentFeature)
 	getCmd.AddCommand(getIntentsCmd)
 	getCmd.AddCommand(getEdgeConnectsCmd)
+	getCmd.AddCommand(getCredentialsCmd)
 	getCmd.AddCommand(getUsersCmd)
 	getCmd.AddCommand(getGroupsCmd)
 	getCmd.AddCommand(getSDKVersionsCmd)

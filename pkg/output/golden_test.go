@@ -18,6 +18,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
 	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
 	"github.com/Dynatrace/dtctl/pkg/resources/bucket"
+	"github.com/Dynatrace/dtctl/pkg/resources/credentialvault"
 	"github.com/Dynatrace/dtctl/pkg/resources/document"
 	"github.com/Dynatrace/dtctl/pkg/resources/dqlprocessorverify"
 	"github.com/Dynatrace/dtctl/pkg/resources/edgeconnect"
@@ -3585,6 +3586,76 @@ func TestGolden_GetAction(t *testing.T) {
 				t.Fatalf("Print failed: %v", err)
 			}
 			assertGolden(t, "get/action-single-"+name, buf.String())
+		})
+	}
+}
+
+func credentialFixtures() []credentialvault.Credential {
+	return []credentialvault.Credential{
+		{
+			ID:              "CREDENTIALS_VAULT-0000000000000001",
+			Name:            "extension-signing-ca",
+			Type:            "PUBLIC_CERTIFICATE",
+			Scopes:          []string{"EXTENSION"},
+			ScopeList:       "EXTENSION",
+			Owner:           "admin@example.invalid",
+			OwnerAccessOnly: false,
+			Description:     "CA trusted for custom extension signatures",
+		},
+		{
+			ID:              "CREDENTIALS_VAULT-0000000000000002",
+			Name:            "synthetic-login",
+			Type:            "USERNAME_PASSWORD",
+			Scopes:          []string{"SYNTHETIC", "EXTENSION"},
+			ScopeList:       "SYNTHETIC,EXTENSION",
+			Owner:           "ops@example.invalid",
+			OwnerAccessOnly: true,
+			AllowedEntities: []credentialvault.AccessData{{ID: "ops@example.invalid", Type: "USER"}},
+		},
+	}
+}
+
+func TestGolden_GetCredentials(t *testing.T) {
+	creds := credentialFixtures()
+
+	formats := map[string]string{
+		"table": "table",
+		"wide":  "wide",
+		"json":  "json",
+		"yaml":  "yaml",
+		"csv":   "csv",
+		"toon":  "toon",
+	}
+
+	for name, format := range formats {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printer := NewPrinterWithWriter(format, &buf)
+			if err := printer.PrintList(creds); err != nil {
+				t.Fatalf("PrintList failed: %v", err)
+			}
+			assertGolden(t, "get/credentials-"+name, buf.String())
+		})
+	}
+}
+
+func TestGolden_DescribeCredential(t *testing.T) {
+	cred := credentialFixtures()[1]
+
+	formats := map[string]string{
+		"json": "json",
+		"yaml": "yaml",
+		"toon": "toon",
+	}
+
+	for name, format := range formats {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printer := NewPrinterWithWriter(format, &buf)
+			if err := printer.Print(cred); err != nil {
+				t.Fatalf("Print failed: %v", err)
+			}
+			assertGolden(t, "describe/credential-"+name, buf.String())
 		})
 	}
 }

@@ -21,6 +21,7 @@
 | `resources/live-debugger.md` | Live Debugger | breakpoint, snapshot | generated |
 | `resources/documents.md` | Documents & Trash | document, trash | generated |
 | `resources/edgeconnect.md` | EdgeConnect | edgeconnect | generated |
+| `resources/credential-vault.md` | Credential Vault | credential | generated |
 | `resources/notifications.md` | Notifications | notification | generated |
 | `resources/api-discovery.md` | API Discovery | api | generated |
 | `resources/platform-tokens.md` | Platform Tokens | platform-token, account-token, token | generated |

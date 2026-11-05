@@ -16,6 +16,7 @@ Each resource type has its own page under [`resources/`](resources/), pairing ge
 - [Anomaly Detectors](resources/anomaly-detectors.md)
 - [App Engine](resources/app-engine.md)
 - [Cloud Integrations](resources/cloud-integrations.md)
+- [Credential Vault](resources/credential-vault.md)
 - [DQL Queries](resources/dql-queries.md)
 - [Dashboards & Notebooks](resources/dashboards-notebooks.md)
 - [Davis CoPilot](resources/copilot.md)

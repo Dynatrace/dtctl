@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 19 experimental, 16 development
+- commands: 269 stable, 23 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 950
+- entries below (commands + flags): 971
 
 ## Surface
 
@@ -385,6 +385,19 @@ create bucket                        stable
   --name                             stable
   --retention                        stable
   --table                            stable
+create credential                    experimental  since 0.46.0
+  --certificate-file                 experimental
+  --certificate-format               experimental
+  --description                      experimental
+  --dry-run                          experimental
+  --file                             experimental
+  --name                             experimental
+  --owner-access-only                experimental
+  --password-file                    experimental
+  --scope                            experimental
+  --token-file                       experimental
+  --type                             experimental
+  --user                             experimental
 create dashboard                     stable
   --description                      stable
   --dry-run                          stable
@@ -507,6 +520,9 @@ delete bucket                        stable
   --confirm                          stable
   --dry-run                          stable
   --yes                              stable
+delete credential                    experimental  since 0.46.0
+  --dry-run                          experimental
+  --yes                              experimental
 delete dashboard                     stable
   --dry-run                          stable
   --yes                              stable
@@ -571,6 +587,7 @@ describe azure connection            stable
 describe azure monitoring            stable
 describe breakpoint                  experimental  since 0.39.0
 describe bucket                      stable
+describe credential                  experimental  since 0.46.0
 describe dashboard                   stable
 describe document                    stable
 describe edgeconnect                 stable
@@ -763,6 +780,10 @@ get azure monitoring-locations       stable
 get breakpoints                      experimental  since 0.39.0
 get buckets                          stable
 get copilot-skills                   stable
+get credentials                      experimental  since 0.46.0
+  --name                             experimental
+  --scope                            experimental
+  --type                             experimental
 get dashboards                       stable
   --add-fields                       stable
   --admin-access                     stable
