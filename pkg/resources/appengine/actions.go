@@ -15,6 +15,7 @@ type AppAction struct {
 	Title       string `json:"title,omitempty" yaml:"title,omitempty" table:"TITLE"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty" table:"DESCRIPTION,wide"`
 	Stateful    bool   `json:"stateful,omitempty" yaml:"stateful,omitempty" table:"STATEFUL,wide"`
+	Approval    bool   `json:"approval,omitempty" yaml:"approval,omitempty" table:"APPROVAL,wide"`
 	FullName    string `json:"fullName" yaml:"fullName" table:"FULL_NAME"`
 
 	// Extra holds the manifest attributes with no typed field; MarshalJSON
@@ -53,6 +54,7 @@ func fromSDKAppAction(s *sdkae.AppAction) (AppAction, error) {
 		Title:       s.Title,
 		Description: s.Description,
 		Stateful:    s.Stateful,
+		Approval:    s.Approval,
 		FullName:    s.FullName,
 		Extra:       extra,
 	}, nil

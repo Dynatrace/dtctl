@@ -72,9 +72,9 @@ func useActionDescribeTextView(ctx context.Context) bool {
 	return outputFormat(ctx) == "" || outputFormat(ctx) == "table"
 }
 
-// describeActionTable renders the vertical view. Stateful prints only when
-// set: the manifest omits it rather than declaring it false, so "Stateful: no"
-// would assert something the manifest never said.
+// describeActionTable renders the vertical view. Stateful and Approval print
+// only when set: the manifest omits them rather than declaring them false, so
+// "Stateful: no" would assert something the manifest never said.
 func describeActionTable(w io.Writer, action *appengine.AppAction) error {
 	const kw = 14
 
@@ -89,6 +89,9 @@ func describeActionTable(w io.Writer, action *appengine.AppAction) error {
 	}
 	if action.Stateful {
 		output.FprintDescribeKV(w, "Stateful:", kw, "yes")
+	}
+	if action.Approval {
+		output.FprintDescribeKV(w, "Approval:", kw, "yes")
 	}
 
 	if len(action.Extra) > 0 {
