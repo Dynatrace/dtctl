@@ -107,9 +107,9 @@ func TestDescribeActionTable(t *testing.T) {
 		}
 		got := buf.String()
 
-		// Stateful prints only when set: the manifest omits it rather than
-		// declaring it false, so "Stateful: no" would assert something the
-		// manifest never said.
+		// Stateful and Approval print only when set: the manifest omits them
+		// rather than declaring them false, so "Stateful: no" would assert
+		// something the manifest never said.
 		for _, absent := range []string{"Title:", "Description:", "Stateful:", "Approval:"} {
 			if strings.Contains(got, absent) {
 				t.Errorf("output contains %q although the field is empty:\n%s", absent, got)

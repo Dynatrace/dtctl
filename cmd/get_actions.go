@@ -65,7 +65,7 @@ Examples:
   # Output as JSON
   dtctl get actions -o json
 
-  # Wide output (adds description and stateful flag)
+  # Wide output (adds description, stateful and approval flags)
   dtctl get actions -o wide
 `,
 		Args: cobra.MaximumNArgs(1),
