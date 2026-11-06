@@ -29,6 +29,15 @@ var fileFlagProbeHints = map[string][]string{
 	"wait query":         {"--for", "any"},
 }
 
+// fileFlagProbeFlagHints are like fileFlagProbeHints, but added only to the
+// probes of one flag ("command --flag"). A command-wide hint would reach every
+// probe of the command: it would override the flag it repeats, and force every
+// argument shape into the one mode the hinted flag needs.
+var fileFlagProbeFlagHints = map[string][]string{
+	// read only for ad-hoc code
+	"exec function --sdk-major-versions": {"--code", "export default () => 1"},
+}
+
 // fileFlagUnreached lists declared file flags and read call sites the probe
 // does not reach, each with the reason. The list can only shrink: an entry
 // the probe reaches fails the test until it is removed.

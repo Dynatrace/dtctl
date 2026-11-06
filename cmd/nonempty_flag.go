@@ -35,6 +35,12 @@ func (v *nonEmptyStringValue) Set(value string) error {
 // (resetFlagSet) calls it instead of Set(DefValue), which the empty check
 // would reject.
 func (v *nonEmptyStringValue) Reset() {
+	// A wrapped value with reset semantics of its own (singleUseStringValue)
+	// keeps them: Set(defValue) would mark it as already provided.
+	if rv, ok := v.Value.(interface{ Reset() }); ok {
+		rv.Reset()
+		return
+	}
 	_ = v.Value.Set(v.defValue)
 }
 
