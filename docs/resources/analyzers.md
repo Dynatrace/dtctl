@@ -30,6 +30,12 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | --- | --- |
 | read | `davis:analyzers:read` |
 | run | `davis:analyzers:execute` |
+
+These commands call other endpoints than the resource's, so they need these scopes instead of the ones for their access level.
+
+| Command | Scopes |
+| --- | --- |
+| `dtctl verify analyzer` | `davis:analyzers:execute` |
 <!-- GENERATED:analyzers:end -->
 
 ## Output

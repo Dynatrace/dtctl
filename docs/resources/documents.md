@@ -41,6 +41,13 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | delete | `document:documents:delete`, `document:trash.documents:delete` |
 | read | `document:documents:read`, `document:trash.documents:read` |
 | write | `document:documents:write`, `document:trash.documents:restore` |
+
+These commands call other endpoints than the resource's, so they need these scopes instead of the ones for their access level. Some flags add a scope; see [Flags that need an extra scope](../TOKEN_SCOPES.md#flags-that-need-an-extra-scope).
+
+| Command | Scopes |
+| --- | --- |
+| `dtctl share document` | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
+| `dtctl unshare document` | `document:documents:read`, `document:direct-shares:read` |
 <!-- GENERATED:documents:end -->
 
 ## Output
