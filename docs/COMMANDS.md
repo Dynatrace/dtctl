@@ -296,7 +296,7 @@ _mutating | access: run | safety: OperationCreate_
 | api | _(none declared)_ |
 | function | `app-engine:functions:run` |
 | preview-processor | `openpipeline:configurations:read` |
-| slo | `slo:slos:read`, `slo:objective-templates:read` |
+| slo | `slo:slos:read` |
 | workflow | `automation:workflows:run` |
 
 Subcommands:
