@@ -814,6 +814,22 @@ dtctl apply -f workflow.yaml --dry-run
 
 `--dry-run` is not a global flag: each command that can preview its own mutation declares it. Most `apply`, `create`, `update`, `delete`, `restore`, `share`/`unshare` and `enable`/`disable` commands do, as does `exec api`; `dtctl <verb> <resource> --help` is the authoritative list. A command that has no dry run, such as `exec workflow` or `query`, rejects the flag with a usage error (exit code 2) and does nothing — for a DQL statement, `dtctl verify query` is the check-without-running command.
 
+### Pinning SDK versions for ad-hoc JavaScript
+
+To run ad-hoc code against specific SDK major versions, pass
+`--sdk-major-versions` to `exec function` rather than building the request by
+hand with `exec api`:
+
+```bash
+dtctl exec function -f script.js --sdk-major-versions '{"@dynatrace-sdk/adhoc-utils":"1"}' --agent
+dtctl exec function -f script.js --sdk-major-versions @sdk-versions.json --agent
+```
+
+The value is a JSON object of SDK package name to major version (a string),
+given inline, as `@file`, or as `@-` for stdin. It applies only to ad-hoc code
+(`--code` or `-f`); with a named app function or `--defer` the command fails
+before sending anything. `dtctl get sdk-versions` lists what is available.
+
 ### Diff
 
 Use `--show-diff` to see what would change when updating an existing resource:

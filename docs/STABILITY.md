@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 19 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 950
+- entries below (commands + flags): 951
 
 ## Surface
 
@@ -719,6 +719,7 @@ exec function                        stable
   --file                             stable
   --method                           stable
   --payload                          stable
+  --sdk-major-versions               stable  (declared)
 exec preview-processor               stable
   --config-id                        stable
   --file                             stable

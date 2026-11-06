@@ -54,6 +54,11 @@ type DeferredExecutionResponse struct {
 type FunctionExecutorRequest struct {
 	SourceCode string `json:"sourceCode"`
 	Payload    string `json:"payload,omitempty"`
+	// SDKMajorVersions pins SDK packages (package name → major version) for the
+	// execution. A pointer, so nil leaves the field out of the request while a
+	// non-nil empty map is sent as {}: a plain map with omitempty would drop
+	// both.
+	SDKMajorVersions *map[string]string `json:"sdkMajorVersions,omitempty"`
 }
 
 // FunctionExecutorResponse represents an ad-hoc function execution response
@@ -185,11 +190,15 @@ func (h *FunctionHandler) DeferExecution(ctx context.Context, req *DeferredExecu
 
 // ExecuteCode executes ad-hoc JavaScript code using the function executor
 func (h *FunctionHandler) ExecuteCode(ctx context.Context, sourceCode, payload string) (*FunctionExecutorResponse, error) {
-	req := FunctionExecutorRequest{
+	return h.ExecuteRequest(ctx, &FunctionExecutorRequest{
 		SourceCode: sourceCode,
 		Payload:    payload,
-	}
+	})
+}
 
+// ExecuteRequest executes a prepared ad-hoc function executor request, for
+// callers that set fields beyond the source code and payload.
+func (h *FunctionHandler) ExecuteRequest(ctx context.Context, req *FunctionExecutorRequest) (*FunctionExecutorResponse, error) {
 	resp, err := h.client.HTTP().R().SetContext(ctx).
 		SetBody(req).
 		Post("/platform/app-engine/function-executor/v1/executions")
