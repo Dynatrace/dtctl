@@ -1,0 +1,27 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: dtctl
+  title: dtctl
+  description: kubectl-inspired CLI for Dynatrace — manage dashboards, workflows, SLOs, and more from the terminal.
+  annotations:
+    github.com/project-slug: Dynatrace/dtctl
+  links:
+    - url: https://github.com/Dynatrace/dtctl
+      title: Repository
+      icon: github
+    - url: https://docs.dynatrace.com/docs/platform/dtctl
+      title: Documentation
+      icon: docs
+  tags:
+    - cli
+    - dynatrace
+    - open-source
+spec:
+  type: cli
+  # TODO(APPDEV-20026): switch to `production` once v1.0.0 ships (GA).
+  lifecycle: experimental
+  owner: group:default/team-app-forge
+  dependsOn:
+    - component:default/dynatrace-control
+    - githubapp:delivery/dtctl-homebrew-tap-app
