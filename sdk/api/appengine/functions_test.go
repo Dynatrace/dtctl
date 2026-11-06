@@ -3,6 +3,7 @@ package appengine
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -75,5 +76,71 @@ func TestFunctionHandler_ExecutionErrorStatuses(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// ExecuteCode keeps sending exactly the body it always did; ExecuteRequest
+// omits sdkMajorVersions when nil and sends an empty map as {}.
+func TestFunctionHandler_ExecuteRequestBody(t *testing.T) {
+	versions := map[string]string{"@dynatrace-sdk/adhoc-utils": "1"}
+	empty := map[string]string{}
+	tests := []struct {
+		name string
+		call func(*FunctionHandler) error
+		want string
+	}{
+		{
+			name: "ExecuteCode",
+			call: func(h *FunctionHandler) error {
+				_, err := h.ExecuteCode(context.Background(), "code", "p")
+				return err
+			},
+			want: `{"sourceCode":"code","payload":"p"}`,
+		},
+		{
+			name: "nil versions",
+			call: func(h *FunctionHandler) error {
+				_, err := h.ExecuteRequest(context.Background(), &FunctionExecutorRequest{SourceCode: "code"})
+				return err
+			},
+			want: `{"sourceCode":"code"}`,
+		},
+		{
+			name: "empty versions",
+			call: func(h *FunctionHandler) error {
+				_, err := h.ExecuteRequest(context.Background(), &FunctionExecutorRequest{SourceCode: "code", SDKMajorVersions: &empty})
+				return err
+			},
+			want: `{"sourceCode":"code","sdkMajorVersions":{}}`,
+		},
+		{
+			name: "versions",
+			call: func(h *FunctionHandler) error {
+				_, err := h.ExecuteRequest(context.Background(), &FunctionExecutorRequest{SourceCode: "code", SDKMajorVersions: &versions})
+				return err
+			},
+			want: `{"sourceCode":"code","sdkMajorVersions":{"@dynatrace-sdk/adhoc-utils":"1"}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				got = string(b)
+				_, _ = w.Write([]byte(`{"result":1,"logs":""}`))
+			}))
+			t.Cleanup(srv.Close)
+			c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, time.Millisecond, time.Millisecond))
+			if err != nil {
+				t.Fatalf("httpclient.New: %v", err)
+			}
+			if err := tt.call(NewFunctionHandler(c)); err != nil {
+				t.Fatalf("call: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("body = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }

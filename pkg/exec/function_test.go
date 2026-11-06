@@ -2,6 +2,7 @@ package exec
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -282,5 +283,83 @@ func TestReadFileOrStdinWith_UsesTheGivenEnv(t *testing.T) {
 	t.Cleanup(func() { vfs.SetActive(prev) })
 	if got, err := ReadFileOrStdin("g.txt"); err != nil || got != "installed" {
 		t.Errorf("ReadFileOrStdin = %q, %v, want the installed filesystem's file", got, err)
+	}
+}
+
+// TestFunctionExecutor_SDKMajorVersions pins that SDK versions reach the ad-hoc
+// request, and that they are refused, without a request, for a named function
+// or a deferred execution rather than routing them anywhere.
+func TestFunctionExecutor_SDKMajorVersions(t *testing.T) {
+	versions := map[string]string{"@dynatrace-sdk/adhoc-utils": "1"}
+	tests := []struct {
+		name     string
+		opts     FunctionExecuteOptions
+		wantBody string
+		wantErr  bool
+	}{
+		{
+			name:     "ad-hoc code sends them",
+			opts:     FunctionExecuteOptions{SourceCode: "code", SDKMajorVersions: &versions},
+			wantBody: `{"sourceCode":"code","sdkMajorVersions":{"@dynatrace-sdk/adhoc-utils":"1"}}`,
+		},
+		{
+			name:     "unset leaves them out",
+			opts:     FunctionExecuteOptions{SourceCode: "code"},
+			wantBody: `{"sourceCode":"code"}`,
+		},
+		{
+			name:    "named function",
+			opts:    FunctionExecuteOptions{FunctionName: "my.app/fn", Method: "POST", SDKMajorVersions: &versions},
+			wantErr: true,
+		},
+		{
+			name:    "no function at all",
+			opts:    FunctionExecuteOptions{SDKMajorVersions: &versions},
+			wantErr: true,
+		},
+		{
+			name:    "deferred",
+			opts:    FunctionExecuteOptions{FunctionName: "my.app/fn", Defer: true, SDKMajorVersions: &versions},
+			wantErr: true,
+		},
+		{
+			name:    "deferred ad-hoc",
+			opts:    FunctionExecuteOptions{SourceCode: "code", Defer: true, SDKMajorVersions: &versions},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var bodies []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				bodies = append(bodies, string(b))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"result":1,"logs":""}`))
+			}))
+			defer server.Close()
+			c, err := client.NewForTesting(server.URL, "test-token")
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+
+			_, err = NewFunctionExecutor(c).Execute(tt.opts)
+
+			if tt.wantErr {
+				if !errors.Is(err, ErrSDKMajorVersionsNotAdhoc) {
+					t.Fatalf("Execute() error = %v, want ErrSDKMajorVersionsNotAdhoc", err)
+				}
+				if len(bodies) != 0 {
+					t.Errorf("sent %d request(s), want none", len(bodies))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Execute() unexpected error: %v", err)
+			}
+			if len(bodies) != 1 || bodies[0] != tt.wantBody {
+				t.Errorf("bodies = %q, want [%s]", bodies, tt.wantBody)
+			}
+		})
 	}
 }

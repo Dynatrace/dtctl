@@ -87,6 +87,10 @@ dtctl exec function dynatrace.automations/long-running --method POST --payload '
 # Ad-hoc JavaScript (no app deployment; --code or -f selects this mode)
 dtctl exec function --code 'export default async function () { return "hi" }'
 dtctl exec function -f script.js --payload '{"input":"data"}'
+
+# Pin SDK major versions for ad-hoc code: inline JSON, @file, or @- for stdin
+dtctl exec function -f script.js --sdk-major-versions '{"@dynatrace-sdk/adhoc-utils":"1"}'
+dtctl exec function -f script.js --sdk-major-versions @sdk-versions.json
 ```
 
 `--method` accepts `GET` (default), `POST`, `PUT`, `PATCH`, or `DELETE`. `--payload` takes an inline JSON string; `--data` reads the same payload from a file (or `-` for stdin) — pass at most one of the two. If you're unsure what fields a function expects, try executing it with an empty payload (`--payload '{}'`); the error response typically lists the required fields.
@@ -125,6 +129,12 @@ cat payload.json | dtctl exec function dynatrace.automations/execute-dql-query -
 ```
 
 In ad-hoc mode, `--payload`/`--data` supply the input passed to the code; the `--method` and `--defer` flags do not apply, and dtctl ignores any `app-id/function-name` argument.
+
+### Pinning SDK major versions
+
+`--sdk-major-versions` sets the function executor's `sdkMajorVersions` for ad-hoc code: a JSON object mapping SDK package names to major versions, each a string (`{"@dynatrace-sdk/adhoc-utils":"1"}`). Pass it inline, as `@file` to read it from a file, or as `@-` to read it from stdin; a value that does not start with `@` is always treated as JSON, never as a path. `{}` is sent as an empty object. Without the flag the request is unchanged.
+
+dtctl checks only the shape — an object whose values are all strings — and fails before sending anything if it is wrong. Package names and versions are left to the API, whose error is shown as returned; `dtctl get sdk-versions` lists the versions available. The flag is rejected with a named app function or `--defer`, and `@-` cannot be combined with `-f -` or `--data -`, since stdin can feed only one flag.
 
 ### Common built-in functions
 

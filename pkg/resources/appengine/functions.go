@@ -93,6 +93,11 @@ func (h *FunctionHandler) ExecuteCode(sourceCode, payload string) (*FunctionExec
 	return h.sdk.ExecuteCode(context.Background(), sourceCode, payload)
 }
 
+// ExecuteRequest executes a prepared ad-hoc function executor request
+func (h *FunctionHandler) ExecuteRequest(req *FunctionExecutorRequest) (*FunctionExecutorResponse, error) {
+	return h.sdk.ExecuteRequest(context.Background(), req)
+}
+
 // GetSDKVersions lists available SDK versions
 func (h *FunctionHandler) GetSDKVersions() (*SDKVersionsResponse, error) {
 	sdkResult, err := h.sdk.GetSDKVersions(context.Background())

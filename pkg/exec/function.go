@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -41,15 +42,32 @@ type FunctionExecuteOptions struct {
 	// For ad-hoc execution
 	SourceCode     string
 	SourceCodeFile string
+	// SDKMajorVersions pins SDK packages for ad-hoc execution. nil leaves
+	// sdkMajorVersions out of the request; a non-nil empty map sends {}.
+	SDKMajorVersions *map[string]string
 
 	// For deferred execution
 	Defer bool
 }
 
+// ErrSDKMajorVersionsNotAdhoc is returned when SDK major versions are given
+// for a named app function or a deferred execution: the function executor
+// accepts them only for ad-hoc code.
+var ErrSDKMajorVersionsNotAdhoc = errors.New("--sdk-major-versions is only supported for ad-hoc execution with --code or -f (not with a named app function or --defer)")
+
 // Execute executes a function based on the provided options
 func (e *FunctionExecutor) Execute(opts FunctionExecuteOptions) (interface{}, error) {
+	adhoc := opts.SourceCode != "" || opts.SourceCodeFile != ""
+
+	// Checked before routing: SDK versions never select a mode, so a named
+	// function with only this option would otherwise fail later with a
+	// misleading "app ID and function name are required".
+	if opts.SDKMajorVersions != nil && (!adhoc || opts.Defer) {
+		return nil, ErrSDKMajorVersionsNotAdhoc
+	}
+
 	// Determine execution mode
-	if opts.SourceCode != "" || opts.SourceCodeFile != "" {
+	if adhoc {
 		// Ad-hoc code execution
 		return e.executeCode(opts)
 	}
@@ -85,7 +103,11 @@ func (e *FunctionExecutor) executeCode(opts FunctionExecuteOptions) (*appengine.
 		payload = content
 	}
 
-	return e.handler.ExecuteCode(sourceCode, payload)
+	return e.handler.ExecuteRequest(&appengine.FunctionExecutorRequest{
+		SourceCode:       sourceCode,
+		Payload:          payload,
+		SDKMajorVersions: opts.SDKMajorVersions,
+	})
 }
 
 // executeAppFunction executes a function from an installed app
