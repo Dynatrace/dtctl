@@ -71,6 +71,7 @@ Examples:
 	c.Flags().BoolVar(&requiredScopesMode, "required-scopes", false, "print the minimal token scope union for the (optionally filtered) command set")
 	c.MarkFlagsMutuallyExclusive("brief", "full")
 	stability.MarkStable(c)
+	markLocal(c)
 	return c
 }
 

@@ -249,6 +249,7 @@ Examples:
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
 	rejectEmptyFlag(c, "file")
+	markScopesDQL(c)
 	return c
 }
 

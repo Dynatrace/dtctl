@@ -60,18 +60,19 @@ type ParseResult struct {
 	// is false under --check-scopes, which does not run the command.
 	RequiresInput bool
 
-	// RequiredScopes are the token scopes the catalog names for the command,
-	// never nil, and complete only when Scopes is "known". Scopes is "none" (the catalog names
-	// none; for a command the catalog is missing scopes for, that
-	// under-reports), "known", "per_call" (decided by the call, exec api) or
-	// "input_dependent" (decided by the input file's content, apply).
-	RequiredScopes []string
-	Scopes         string
+	// MinimumScopes are the exact scopes the command cannot run without.
+	// MaximumScopes are patterns of the scopes it can use: "*" matches any
+	// text, every other character itself. [] means no platform access (a
+	// local command, or help); ["*"] any scope the user holds. Both are
+	// never nil, and every minimum scope matches a maximum pattern. See
+	// scopeBounds.
+	MinimumScopes []string
+	MaximumScopes []string
 
 	// Help is true when the command line asks for help text (--help) or names
 	// a group that only prints its usage: nothing would run, and Verb and
-	// Resource name the command whose help it is, not a command to run. Scopes
-	// is "none" because nothing is called.
+	// Resource name the command whose help it is, not a command to run.
+	// MinimumScopes and MaximumScopes are [] because nothing is called.
 	Help bool
 
 	// Flags are the flags the command line set, by long name (-o is
@@ -213,11 +214,13 @@ func parseTree(root *cobra.Command, argv []string) (*ParseResult, error) {
 			executed = root
 		}
 		verb, resource := verbResource(executed)
-		return &ParseResult{
-			Verb: verb, Resource: resource, Scopes: scopeRequirementNone.String(), Help: true,
-			InputFiles: []string{}, OutputFiles: []string{}, RequiredScopes: []string{},
+		res := &ParseResult{
+			Verb: verb, Resource: resource, Help: true,
+			InputFiles: []string{}, OutputFiles: []string{},
 			Flags: []ParsedFlag{}, Args: []string{},
-		}, nil
+		}
+		res.MinimumScopes, res.MaximumScopes = noScopes()
+		return res, nil
 	}
 	return newParseResult(ran, ranArgs), nil
 }
@@ -324,9 +327,7 @@ func newParseResult(c *cobra.Command, args []string) *ParseResult {
 	res.InputFiles = append([]string{}, slices.Sorted(maps.Keys(inputs))...)
 	res.OutputFiles = append([]string{}, slices.Sorted(maps.Keys(outputs))...)
 
-	required, req := scopesForInvocation(c, verb, resource)
-	res.RequiredScopes = append([]string{}, required...)
-	res.Scopes = req.String()
+	res.MinimumScopes, res.MaximumScopes = scopeBounds(c, verb, resource)
 	return res
 }
 

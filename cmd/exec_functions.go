@@ -109,6 +109,7 @@ Examples:
 	markFileFlag(c, "file", fileValuePath)
 	c.Flags().Bool("defer", false, "defer execution (async, for resumable functions)")
 	stability.MarkStable(c)
+	markScopesAny(c)
 	return c
 }
 

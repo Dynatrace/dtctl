@@ -104,6 +104,7 @@ Examples:
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")
+	markScopesAny(c)
 	return c
 }
 

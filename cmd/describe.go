@@ -245,6 +245,7 @@ func newDescribeAzureMonitoringConfigCmd() *cobra.Command {
 		},
 	}
 	stability.MarkStable(c)
+	markRunsDQL(c)
 	return c
 }
 

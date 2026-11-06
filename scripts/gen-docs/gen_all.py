@@ -48,7 +48,7 @@ PLAN = {
                              "hub-extensions folded in here per the plan."),
     "app-engine":           ("App Engine", ["app", "function", "intent"], False, ""),
     "analyzers":            ("Analyzers", ["analyzer"], False, ""),
-    "copilot":              ("Davis CoPilot", ["copilot", "copilot-skill"], False,
+    "copilot":              ("Davis CoPilot", ["copilot", "copilot-skill", "nl2dql", "dql2nl", "document-search"], False,
                              "kept split from analyzers; grouped as 'Davis AI' on the docs.dynatrace.com page only."),
     "anomaly-detectors":    ("Anomaly Detectors", ["anomaly-detector"], False, ""),
     "live-debugger":        ("Live Debugger", ["breakpoint", "snapshot"], False, ""),

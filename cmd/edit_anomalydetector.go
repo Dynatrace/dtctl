@@ -122,6 +122,7 @@ Examples:
 		},
 	}
 	stability.MarkStable(c)
+	markScopesAny(c)
 	return c
 }
 

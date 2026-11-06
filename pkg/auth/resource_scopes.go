@@ -165,6 +165,12 @@ var ResourceScopes = map[string]AccessScopes{
 	"copilot":  {Run: []string{"davis-copilot:conversations:execute"}},
 	// lists Davis CoPilot skills (/platform/davis/copilot/v1/skills)
 	"copilot-skill": {Read: []string{"davis-copilot:conversations:execute"}},
+	// The CoPilot skills under exec copilot. Each operation declares a scope
+	// of its own (nl2dql:generate, dql2nl:explain, document-search:execute),
+	// not the conversation scope of their parent.
+	"nl2dql":          {Run: []string{"davis-copilot:nl2dql:execute"}},
+	"dql2nl":          {Run: []string{"davis-copilot:dql2nl:execute"}},
+	"document-search": {Run: []string{"davis-copilot:document-search:execute"}},
 
 	// Notifications (/platform/notification/v2/...)
 	"notification": {Read: []string{"notification:notifications:read"}, Write: []string{"notification:notifications:write"}},
@@ -268,6 +274,40 @@ var QueryScopes = []string{
 	"storage:smartscape:read",
 	"storage:system:read",
 	"storage:security.events:read",
+}
+
+// QueryScopePattern matches every Grail read scope (storage:<table>:read,
+// storage:buckets:read, ...), "*" standing for any text. A DQL statement can
+// read any table, so it is the most a command that runs DQL can use. Every
+// entry of QueryScopes and grailExtendedReadScopes matches it.
+const QueryScopePattern = "storage:*:read"
+
+// CurrentUserScope is the scope of /platform/metadata/v1/user, which dtctl
+// calls to find the current user (client.CurrentUserID): for an ownership
+// check, or to filter by owner (--mine). A platform token cannot be decoded
+// instead, so without this scope the user stays unknown.
+const CurrentUserScope = "app-engine:apps:run"
+
+// ScopeMatches reports whether scope matches pattern, where "*" matches any
+// text, including none, and every other character matches itself. It is the
+// rule engine.Parsed.MaximumScopes is read with.
+func ScopeMatches(pattern, scope string) bool {
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return pattern == scope
+	}
+	if !strings.HasPrefix(scope, parts[0]) {
+		return false
+	}
+	rest := scope[len(parts[0]):]
+	for _, part := range parts[1 : len(parts)-1] {
+		i := strings.Index(rest, part)
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+len(part):]
+	}
+	return strings.HasSuffix(rest, parts[len(parts)-1])
 }
 
 // singularize returns a basic singular form by stripping a trailing "s".

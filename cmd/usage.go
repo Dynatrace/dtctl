@@ -118,6 +118,7 @@ scripts and agents consume.`,
 	}
 	c.Flags().BoolVar(&allContexts, "all-contexts", false, "show every context with recorded usage, not just the current one")
 	stability.Mark(c, stability.Experimental, "0.43.0")
+	markLocal(c)
 	return c
 }
 

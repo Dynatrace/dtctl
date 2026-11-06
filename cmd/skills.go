@@ -50,6 +50,7 @@ which is automatically discovered by any agentskills.io-compatible agent.`,
 	}
 	markRefusalOnly(c)
 	stability.MarkStable(c)
+	markLocal(c)
 	return c
 }
 

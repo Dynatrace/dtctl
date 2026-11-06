@@ -171,6 +171,7 @@ Examples:
 	// Not marked required (see the RunE check for why); an explicitly empty
 	// value is still a usage error.
 	rejectEmptyFlag(c, "scope")
+	markScopesDQL(c)
 	return c
 }
 
