@@ -223,7 +223,7 @@ func (c *Client) EnableVerboseLogging(level int, w io.Writer) {
 				}
 			}
 			if bodyText := readRequestBodyForDebug(req); bodyText != "" {
-				sb.WriteString(fmt.Sprintf("BODY:\n%s\n", bodyText))
+				sb.WriteString(fmt.Sprintf("BODY:\n%s\n", RedactBodyForDebug(bodyText)))
 			}
 		}
 		fmt.Fprint(w, sb.String())
@@ -244,7 +244,7 @@ func (c *Client) EnableVerboseLogging(level int, w io.Writer) {
 					sb.WriteString(fmt.Sprintf("    %s: %s\n", k, strings.Join(v, ", ")))
 				}
 			}
-			sb.WriteString(fmt.Sprintf("BODY:\n%s\n", resp.String()))
+			sb.WriteString(fmt.Sprintf("BODY:\n%s\n", RedactBodyForDebug(resp.String())))
 		}
 		fmt.Fprint(w, sb.String())
 		return nil

@@ -95,6 +95,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 		newGetFunctionsCmd(),
 		newGetIntentsCmd(),
 		newGetEdgeConnectsCmd(),
+		newGetCredentialsCmd(),
 		newGetUsersCmd(),
 		newGetGroupsCmd(),
 		newGetSDKVersionsCmd(),
@@ -158,6 +159,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 		newCreateBucketCmd(),
 		newCreateLookupCmd(),
 		newCreateEdgeConnectCmd(),
+		newCreateCredentialCmd(),
 	)
 	create.AddCommand(newCreateBreakpointCmd())
 	create.AddCommand(
@@ -179,6 +181,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 	update := newUpdateCmd()
 	update.AddCommand(newUpdateDocumentCmd(), newUpdateSettingsHintCmd())
 	update.AddCommand(newUpdateBreakpointCmd())
+	update.AddCommand(newUpdateCredentialCmd())
 	updateAzure := newUpdateAzureProviderCmd()
 	updateAzure.AddCommand(newUpdateAzureConnectionCmd(), newUpdateAzureMonitoringConfigCmd())
 	update.AddCommand(updateAzure)
@@ -205,6 +208,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 		newDeleteSettingsCmd(),
 		newDeleteAppCmd(),
 		newDeleteEdgeConnectCmd(),
+		newDeleteCredentialCmd(),
 		newDeleteDocumentCmd(),
 		newDeleteSegmentCmd(),
 		newDeleteAnomalyDetectorCmd(),
@@ -238,6 +242,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 		newDescribeFunctionCmd(),
 		newDescribeIntentCmd(),
 		newDescribeEdgeConnectCmd(),
+		newDescribeCredentialCmd(),
 		newDescribeUserCmd(),
 		newDescribeGroupCmd(),
 		newDescribeSettingsCmd(),

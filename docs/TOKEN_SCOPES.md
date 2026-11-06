@@ -65,6 +65,7 @@ notification:notifications:read,
 davis:analyzers:read,
 app-engine:apps:run,
 app-engine:edge-connects:read,
+credential-vault:entries:read,
 openpipeline:configurations:read,
 environment-api:dashboard-3rdgen-migration:execute
 ```
@@ -122,6 +123,7 @@ davis-copilot:conversations:execute,
 app-engine:apps:run,
 app-engine:functions:run,
 app-engine:edge-connects:read,
+credential-vault:entries:read,
 openpipeline:configurations:read,
 email:emails:send,
 environment-api:dashboard-3rdgen-migration:execute
@@ -201,8 +203,10 @@ app-engine:apps:run,
 app-engine:apps:delete,
 app-engine:functions:run,
 app-engine:edge-connects:read,
+credential-vault:entries:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
+credential-vault:entries:write,
 email:emails:send,
 environment-api:dashboard-3rdgen-migration:execute
 ```
@@ -293,8 +297,10 @@ app-engine:apps:run,
 app-engine:apps:delete,
 app-engine:functions:run,
 app-engine:edge-connects:read,
+credential-vault:entries:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
+credential-vault:entries:write,
 app-engine:edge-connects:delete,
 email:emails:send,
 environment-api:dashboard-3rdgen-migration:execute
@@ -375,6 +381,7 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | bucket | `storage:buckets:read` |
 | classic-pipelines | `settings:objects:read` |
 | copilot-skill | `davis-copilot:conversations:execute` |
+| credential | `credential-vault:entries:read` |
 | dashboard | `document:documents:read` |
 | document | `document:documents:read` |
 | edgeconnect | `app-engine:edge-connects:read` |
@@ -437,6 +444,7 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | azure | `settings:objects:write` |
 | breakpoint | `dev-obs:breakpoints:set` |
 | bucket | `storage:buckets:write` |
+| credential | `credential-vault:entries:write` |
 | dashboard | `document:documents:write` |
 | document | `document:documents:write` |
 | edgeconnect | `app-engine:edge-connects:write` |

@@ -88,6 +88,7 @@ _mutating | access: write | safety: OperationCreate_
 | anomaly-detector | `settings:objects:write` |
 | breakpoint | `dev-obs:breakpoints:set` |
 | bucket | `storage:buckets:write` |
+| credential | `credential-vault:entries:write` |
 | dashboard | `document:documents:write` |
 | document | `document:documents:write` |
 | edgeconnect | `app-engine:edge-connects:write` |
@@ -136,6 +137,7 @@ _mutating | access: delete | safety: OperationDelete_
 | app | `app-engine:apps:delete` |
 | breakpoint | `dev-obs:breakpoints:set` |
 | bucket | `storage:buckets:write` |
+| credential | `credential-vault:entries:write` |
 | dashboard | `document:documents:delete` |
 | document | `document:documents:delete` |
 | edgeconnect | `app-engine:edge-connects:delete` |
@@ -172,6 +174,7 @@ _read-only | access: read_
 | app | `app-engine:apps:run` |
 | breakpoint | `dev-obs:breakpoints:set` |
 | bucket | `storage:buckets:read` |
+| credential | `credential-vault:entries:read` |
 | dashboard | `document:documents:read` |
 | document | `document:documents:read` |
 | edgeconnect | `app-engine:edge-connects:read` |
@@ -332,6 +335,7 @@ _read-only | access: read_
 | breakpoints | `dev-obs:breakpoints:set` |
 | buckets | `storage:buckets:read` |
 | copilot-skills | `davis-copilot:conversations:execute` |
+| credentials | `credential-vault:entries:read` |
 | dashboards | `document:documents:read` |
 | documents | `document:documents:read` |
 | edgeconnects | `app-engine:edge-connects:read` |
@@ -518,6 +522,7 @@ _mutating | access: write | safety: OperationUpdate_
 | Resource | Required scopes |
 | --- | --- |
 | breakpoint | `dev-obs:breakpoints:set` |
+| credential | `credential-vault:entries:write` |
 | document | `document:documents:write` |
 | extension | `extensions:definitions:write` |
 | extensions | `extensions:definitions:write` |

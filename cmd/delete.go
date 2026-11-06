@@ -33,7 +33,8 @@ Supported resources:
   slos                    settings                  buckets (bkt)
   apps                    edgeconnect (ec)          notifications
   lookup-tables (lu)      trash                     segments (seg)
-  anomaly-detectors (ad)  azure connection          azure monitoring`,
+  anomaly-detectors (ad)  azure connection          azure monitoring
+  credentials (cred)`,
 		Example: `  # Delete a workflow by ID
   dtctl delete workflow abc-123
 
@@ -194,6 +195,7 @@ func init() {
 	deleteCmd.AddCommand(deleteSettingsCmd)
 	deleteCmd.AddCommand(deleteAppCmd)
 	deleteCmd.AddCommand(deleteEdgeConnectCmd)
+	deleteCmd.AddCommand(deleteCredentialCmd)
 	deleteCmd.AddCommand(deleteDocumentCmd)
 	deleteCmd.AddCommand(deleteSegmentCmd)
 	deleteCmd.AddCommand(deleteAnomalyDetectorCmd)

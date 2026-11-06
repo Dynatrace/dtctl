@@ -54,6 +54,7 @@ PLAN = {
     "live-debugger":        ("Live Debugger", ["breakpoint", "snapshot"], False, ""),
     "documents":            ("Documents & Trash", ["document", "trash"], False, ""),
     "edgeconnect":          ("EdgeConnect", ["edgeconnect"], False, ""),
+    "credential-vault":     ("Credential Vault", ["credential"], False, ""),
     "notifications":        ("Notifications", ["notification"], False, ""),
     "api-discovery":        ("API Discovery", ["api"], False, ""),
     "platform-tokens":      ("Platform Tokens", ["platform-token", "account-token", "token"], False,

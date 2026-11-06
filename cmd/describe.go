@@ -39,7 +39,7 @@ Supported resources:
   trash                   azure connection           azure monitoring
   extensions (ext)        extension-configs (extcfg) hub-extensions
   analyzers (az)          api                        environment
-  license`,
+  license                 credentials (cred)`,
 		Example: `  # Describe a workflow to see its trigger and task details
   dtctl describe workflow my-workflow
 
@@ -362,6 +362,7 @@ func init() {
 	addDevelopmentCommand(describeCmd, describeActionCmd, actionsDevelopmentFeature)
 	describeCmd.AddCommand(describeIntentCmd)
 	describeCmd.AddCommand(describeEdgeConnectCmd)
+	describeCmd.AddCommand(describeCredentialCmd)
 	describeCmd.AddCommand(describeUserCmd)
 	describeCmd.AddCommand(describeGroupCmd)
 	describeCmd.AddCommand(describeSettingsCmd)

@@ -31,7 +31,7 @@ Supported resources:
   workflows (wf)          dashboards (dash, db)     notebooks (nb)
   slos                    settings                  buckets (bkt)
   edgeconnect (ec)        lookup-tables (lu)        extensions (ext)
-  scheduling-rules (sr)`,
+  scheduling-rules (sr)    credentials (cred)`,
 		Example: `  # Create a workflow from a YAML file
   dtctl create workflow -f workflow.yaml
 
@@ -85,6 +85,7 @@ func init() {
 	createCmd.AddCommand(createBucketCmd)
 	createCmd.AddCommand(createLookupCmd)
 	createCmd.AddCommand(createEdgeConnectCmd)
+	createCmd.AddCommand(createCredentialCmd)
 	createCmd.AddCommand(createBreakpointCmd)
 	createCmd.AddCommand(createSegmentCmd)
 	createCmd.AddCommand(createAnomalyDetectorCmd)

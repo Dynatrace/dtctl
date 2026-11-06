@@ -39,6 +39,7 @@ var nativeCoverage = map[string]Coverage{
 	"/platform/storage/filter-segments/v1":      {"segment", "dtctl get segments"},
 	"/platform/storage/resource-store/v1":       {"lookup", "dtctl get lookups"},
 	"/platform/classic/environment-api/v2":      {"settings", "dtctl get settings"},
+	"/platform/credential-vault/v1":             {"credential", "dtctl get credentials"},
 	"/platform/extensions/v2":                   {"extension", "dtctl get extensions"},
 	"/platform/hub/v1":                          {"hub-extension", "dtctl get hub-extensions"},
 	"/platform/iam/v1":                          {"user", "dtctl get users"},

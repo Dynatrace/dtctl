@@ -12,7 +12,7 @@ import (
 // preserving: login must request exactly the same scopes as before. Update this
 // table only with an intentional, reviewed change to login behavior.
 var baselineScopes = map[config.SafetyLevel][]string{
-	config.SafetyLevelReadOnly: { // 43 scopes
+	config.SafetyLevelReadOnly: { // 44 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -52,12 +52,13 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"davis:analyzers:read",
 		"app-engine:apps:run",
 		"app-engine:edge-connects:read",
+		"credential-vault:entries:read",
 		"notification:notifications:read",
 		"hub:catalog:read",
 		"openpipeline:configurations:read",
 		"environment-api:dashboard-3rdgen-migration:execute",
 	},
-	config.SafetyLevelReadWriteMine: { // 57 scopes
+	config.SafetyLevelReadWriteMine: { // 58 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -90,6 +91,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"davis:analyzers:read",
 		"app-engine:apps:run",
 		"app-engine:edge-connects:read",
+		"credential-vault:entries:read",
 		"notification:notifications:read",
 		"hub:catalog:read",
 		"openpipeline:configurations:read",
@@ -116,7 +118,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"dev-obs:breakpoints:set",
 		"environment-api:dashboard-3rdgen-migration:execute",
 	},
-	config.SafetyLevelReadWriteAll: { // 78 scopes
+	config.SafetyLevelReadWriteAll: { // 80 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -156,6 +158,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"davis:analyzers:read",
 		"app-engine:apps:run",
 		"app-engine:edge-connects:read",
+		"credential-vault:entries:read",
 		"notification:notifications:read",
 		"hub:catalog:read",
 		"openpipeline:configurations:read",
@@ -194,9 +197,10 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"app-engine:apps:install",
 		"app-engine:apps:delete",
 		"app-engine:edge-connects:write",
+		"credential-vault:entries:write",
 		"notification:notifications:write",
 	},
-	config.SafetyLevelDangerouslyUnrestricted: { // 86 scopes
+	config.SafetyLevelDangerouslyUnrestricted: { // 88 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -236,6 +240,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"davis:analyzers:read",
 		"app-engine:apps:run",
 		"app-engine:edge-connects:read",
+		"credential-vault:entries:read",
 		"notification:notifications:read",
 		"hub:catalog:read",
 		"openpipeline:configurations:read",
@@ -278,6 +283,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"app-engine:apps:delete",
 		"app-engine:functions:run",
 		"app-engine:edge-connects:write",
+		"credential-vault:entries:write",
 		"app-engine:edge-connects:delete",
 		"notification:notifications:write",
 		"email:emails:send",
