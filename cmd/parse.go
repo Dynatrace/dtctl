@@ -243,9 +243,16 @@ func installParseHook(cmd *cobra.Command, record func(*cobra.Command, []string))
 
 // isRefusal reports whether cmd's RunE only refuses a missing or unknown
 // subcommand: requireSubcommand itself, or a RunE its constructor declared.
+// requireSubcommandAfterPreflight counts too, so that nestedScopesIn
+// recognises a refusal-only group inside the scope preflight.
 func isRefusal(cmd *cobra.Command) bool {
-	return reflect.ValueOf(cmd.RunE).Pointer() == reflect.ValueOf(requireSubcommand).Pointer() ||
+	return sameFunc(cmd.RunE, requireSubcommand) || sameFunc(cmd.RunE, requireSubcommandAfterPreflight) ||
 		cmd.Annotations[annotationRefusalOnly] == "true"
+}
+
+// sameFunc reports whether a and b are the same top-level function.
+func sameFunc(a, b func(*cobra.Command, []string) error) bool {
+	return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
 }
 
 func newParseError(ctx context.Context, err error, code int) *ParseError {

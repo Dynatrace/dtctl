@@ -442,6 +442,36 @@ func TestScopesForInvocation_UnlistedCommandIsUnchanged(t *testing.T) {
 	require.Equal(t, wantReq, req)
 }
 
+// TestNestedCommandsRequireTheirOwnScope holds a command that the verb's
+// resources do not list to the scope of its own catalog node: the CoPilot chat
+// (exec copilot), and each CoPilot skill below it, whose operation declares a
+// scope of its own and not the conversation scope of the chat. A group that
+// only asks for a subcommand calls no API, so it needs no scope, also after
+// the scope preflight has wrapped it.
+func TestNestedCommandsRequireTheirOwnScope(t *testing.T) {
+	root := newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root
+	installScopePreflight(root)
+	for path, want := range map[string][]string{
+		"exec copilot":                 {"davis-copilot:conversations:execute"},
+		"exec copilot nl2dql":          {"davis-copilot:nl2dql:execute"},
+		"exec copilot dql2nl":          {"davis-copilot:dql2nl:execute"},
+		"exec copilot document-search": {"davis-copilot:document-search:execute"},
+		"create aws":                   nil,
+		"get gcp":                      nil,
+	} {
+		cmd, _, err := root.Find(strings.Fields(path))
+		require.NoError(t, err, path)
+		verb, resource := verbResource(cmd)
+		got, req := scopesForInvocation(cmd, verb, resource)
+		if want == nil {
+			require.Equal(t, scopeRequirementNone, req, path)
+			continue
+		}
+		require.Equal(t, scopeRequirementKnown, req, path)
+		require.Equal(t, want, got, path)
+	}
+}
+
 func TestScopePreflight_FlagScopeReachesTheVerdict(t *testing.T) {
 	cmd, _, err := rootCmd.Find([]string{"get", "dashboards"})
 	require.NoError(t, err)
