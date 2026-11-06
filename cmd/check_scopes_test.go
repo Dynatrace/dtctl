@@ -17,6 +17,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/commands"
 	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // withScopeState overrides grantedScopesFunc and the relevant global flags for a
@@ -134,6 +135,67 @@ func TestRequiredScopesFor(t *testing.T) {
 	// verdict from "needs nothing" — see TestComputeScopeVerdict.
 	_, req = requiredScopesFor("exec", "api")
 	require.Equal(t, scopeRequirementPerCall, req)
+}
+
+// TestBucketCommandsRequireBucketDefinitionScopes holds the bucket commands to
+// the scopes their endpoints declare: /platform/storage/management/v1/
+// bucket-definitions takes storage:bucket-definitions:*, not the
+// storage:buckets:* scopes a query or an ingest needs for a bucket's data.
+// delete bucket also reads, because it gets the bucket before it deletes it.
+func TestBucketCommandsRequireBucketDefinitionScopes(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"get", "buckets"}, []string{"storage:bucket-definitions:read"}},
+		{[]string{"describe", "bucket"}, []string{"storage:bucket-definitions:read"}},
+		{[]string{"create", "bucket"}, []string{"storage:bucket-definitions:write"}},
+		{[]string{"delete", "bucket"}, []string{"storage:bucket-definitions:delete", "storage:bucket-definitions:read"}},
+	} {
+		cmd, _, err := rootCmd.Find(c.args)
+		require.NoError(t, err, "find %v", c.args)
+		got, req := requiredScopesFor(verbResource(cmd))
+		require.Equal(t, scopeRequirementKnown, req, "%v", c.args)
+		require.Equal(t, c.want, got, "%v", c.args)
+	}
+}
+
+// TestBucketCommandsFitTheLoginScopesOfEveryLevelThatAllowsThem holds login to
+// the bucket commands: for every safety level, a bucket command the level
+// allows must find all its required scopes in the scopes that level's login
+// requests. Otherwise the safety check lets the command run and the API
+// refuses it. create and delete use the operation each passes to
+// setupWithSafety; get and describe run without a safety check, so
+// OperationRead stands for "allowed at every level".
+func TestBucketCommandsFitTheLoginScopesOfEveryLevelThatAllowsThem(t *testing.T) {
+	bucketCommands := []struct {
+		args []string
+		op   safety.Operation
+	}{
+		{[]string{"get", "buckets"}, safety.OperationRead},
+		{[]string{"describe", "bucket"}, safety.OperationRead},
+		{[]string{"create", "bucket"}, safety.OperationCreate},
+		{[]string{"delete", "bucket"}, safety.OperationDeleteBucket},
+	}
+	for _, level := range config.ValidSafetyLevels() {
+		checker := safety.NewCheckerWithLevel("test", level)
+		login := map[string]bool{}
+		for _, s := range auth.GetScopesForSafetyLevel(level) {
+			login[s] = true
+		}
+		for _, c := range bucketCommands {
+			if !checker.Check(c.op, safety.OwnershipUnknown).Allowed {
+				continue
+			}
+			cmd, _, err := rootCmd.Find(c.args)
+			require.NoError(t, err, "find %v", c.args)
+			required, req := requiredScopesFor(verbResource(cmd))
+			require.Equal(t, scopeRequirementKnown, req, "%v", c.args)
+			for _, s := range required {
+				assert.True(t, login[s], "%s allows %v, but its login does not request %s", level, c.args, s)
+			}
+		}
+	}
 }
 
 func TestComputeScopeVerdict(t *testing.T) {
