@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 
 	"github.com/Dynatrace/dtctl/pkg/auth"
@@ -286,7 +287,9 @@ var perCallScopeCommands = map[string]bool{
 }
 
 // flagScopeRequirements are scopes that a flag adds to its command's catalog
-// requirement, keyed by `<verb> <resource>` and then by flag name.
+// requirement, keyed by `<verb> <resource>` and then by flag name. A key of the
+// form `<flag>=<value>` applies only when the flag is set to that value (or,
+// for a list flag, includes it), for a flag whose values reach different APIs.
 //
 // The catalog keys scopes by (verb, resource), so it cannot express "this flag
 // reaches a second API". `get documents --admin-access` lists documents as their
@@ -311,6 +314,17 @@ var flagScopeRequirements = map[string]map[string][]string{
 	"get documents":  {"admin-access": {auth.DocumentAdminScope}},
 	"get dashboards": {"admin-access": {auth.DocumentAdminScope}},
 	"get notebooks":  {"admin-access": {auth.DocumentAdminScope}},
+
+	// --environment link (alone or in link,public) works on environment
+	// shares, a second API next to the documents one: share lists and creates
+	// them, unshare lists and deletes them. --environment public only calls the
+	// document's :makePublic/:makePrivate, which the documents scopes cover.
+	"share document":    {"environment=link": environmentShareWriteScopes},
+	"share dashboard":   {"environment=link": environmentShareWriteScopes},
+	"share notebook":    {"environment=link": environmentShareWriteScopes},
+	"unshare document":  {"environment=link": environmentShareDeleteScopes},
+	"unshare dashboard": {"environment=link": environmentShareDeleteScopes},
+	"unshare notebook":  {"environment=link": environmentShareDeleteScopes},
 
 	// Activating a version touches extension *definitions*;
 	// --with-configurations additionally reads every monitoring configuration of
@@ -352,19 +366,25 @@ func flagContributedScopes(c *cobra.Command, verb, resource string) []string {
 		return nil
 	}
 	var extra []string
-	for name, scopes := range byFlag {
+	for key, scopes := range byFlag {
+		name, value, byValue := strings.Cut(key, "=")
 		f := c.Flags().Lookup(name)
 		if f == nil {
 			continue
 		}
-		if f.Value.Type() == "bool" {
-			if on, err := c.Flags().GetBool(name); err != nil || !on {
-				continue
-			}
-		} else if !f.Changed || f.Value.String() == "" {
-			continue
+		var on bool
+		switch {
+		case byValue:
+			on = f.Changed && flagHasValue(f, value)
+		case f.Value.Type() == "bool":
+			v, err := c.Flags().GetBool(name)
+			on = err == nil && v
+		default:
+			on = f.Changed && f.Value.String() != ""
 		}
-		extra = append(extra, scopes...)
+		if on {
+			extra = append(extra, scopes...)
+		}
 	}
 	return extra
 }
@@ -735,4 +755,17 @@ func subtractScopes(required, granted []string) []string {
 	}
 	sort.Strings(missing)
 	return missing
+}
+
+// flagHasValue reports whether f is set to value or, for a list flag, lists it.
+func flagHasValue(f *pflag.Flag, value string) bool {
+	if sv, ok := f.Value.(pflag.SliceValue); ok {
+		for _, v := range sv.GetSlice() {
+			if strings.TrimSpace(v) == value {
+				return true
+			}
+		}
+		return false
+	}
+	return f.Value.String() == value
 }

@@ -410,7 +410,13 @@ dtctl share dashboard <id> --user <user-sso-id>  # Share with user (read access)
 dtctl share dashboard <id> --user <id> --access read-write  # Read-write access
 dtctl share dashboard <id> --group <group-sso-id> # Share with group
 dtctl unshare dashboard <id> --user <user-sso-id> # Remove user access
-dtctl unshare dashboard <id> --all               # Remove all shares
+dtctl unshare dashboard <id> --all               # Remove all user and group shares
+dtctl share dashboard <id> --environment link    # Environment share link (prints #share= URL)
+dtctl share dashboard <id> --environment link --access read-write  # Link with write access
+dtctl share dashboard <id> --environment public  # Everyone in the environment can read it
+dtctl unshare dashboard <id> --environment link  # Delete the environment share link(s)
+dtctl unshare dashboard <id> --environment public  # Make it private again
+dtctl share dashboard <id> --environment link,public  # Both at once (unshare too)
 dtctl claim environment-share <share-id|share-url> # Claim a #share= link; prints the document ID
 
 # (not implemented yet)
@@ -442,7 +448,11 @@ dtctl share notebook <id> --user <user-sso-id>   # Share with user (read access)
 dtctl share notebook <id> --user <id> --access read-write  # Read-write access
 dtctl share notebook <id> --group <group-sso-id> # Share with group
 dtctl unshare notebook <id> --user <user-sso-id> # Remove user access
-dtctl unshare notebook <id> --all                # Remove all shares
+dtctl unshare notebook <id> --all                # Remove all user and group shares
+dtctl share notebook <id> --environment link     # Environment share link (prints #share= URL)
+dtctl share notebook <id> --environment public   # Everyone in the environment can read it
+dtctl unshare notebook <id> --environment link   # Delete the environment share link(s)
+dtctl unshare notebook <id> --environment public # Make it private again
 
 # (not implemented yet)
 # dtctl lock notebook <id>                         # Acquire active lock
