@@ -181,6 +181,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 	update := newUpdateCmd()
 	update.AddCommand(newUpdateDocumentCmd(), newUpdateSettingsHintCmd())
 	update.AddCommand(newUpdateBreakpointCmd())
+	update.AddCommand(newUpdateCredentialCmd())
 	updateAzure := newUpdateAzureProviderCmd()
 	updateAzure.AddCommand(newUpdateAzureConnectionCmd(), newUpdateAzureMonitoringConfigCmd())
 	update.AddCommand(updateAzure)

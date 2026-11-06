@@ -324,6 +324,7 @@ var dryRunCommands = []*cobra.Command{
 	updateAzureConnectionCmd,
 	updateAzureMonitoringConfigCmd,
 	updateBreakpointCmd,
+	updateCredentialCmd,
 	updateExtensionCmd,
 	updateExtensionsCmd,
 	updateGCPConnectionCmd,

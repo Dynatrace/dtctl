@@ -522,6 +522,7 @@ _mutating | access: write | safety: OperationUpdate_
 | Resource | Required scopes |
 | --- | --- |
 | breakpoint | `dev-obs:breakpoints:set` |
+| credential | `credential-vault:entries:write` |
 | document | `document:documents:write` |
 | extension | `extensions:definitions:write` |
 | extensions | `extensions:definitions:write` |

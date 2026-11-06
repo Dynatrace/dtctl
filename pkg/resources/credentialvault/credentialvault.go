@@ -98,6 +98,12 @@ func (h *Handler) Create(req CredentialRequest) (string, error) {
 	return h.sdk.Create(context.Background(), req)
 }
 
+// Update replaces a credentials set, keeping its ID. The request must carry
+// the secret material again.
+func (h *Handler) Update(id string, req CredentialRequest) error {
+	return h.sdk.Update(context.Background(), id, req)
+}
+
 // Delete deletes a credentials set.
 func (h *Handler) Delete(id string) error {
 	return h.sdk.Delete(context.Background(), id)

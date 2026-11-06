@@ -44,7 +44,7 @@ func selfSignedCA(t *testing.T, cn string) []byte {
 
 // TestCredentialVaultPublicCertificateLifecycle covers create (flag path and
 // -f path, PEM and base64), get, filtered list and delete of extension signing
-// CAs, which exercises the certificate encoding the API requires.
+// CAs, plus an in-place rotation, which exercises the certificate encoding the API requires.
 func TestCredentialVaultPublicCertificateLifecycle(t *testing.T) {
 	env := integration.SetupIntegration(t)
 	defer env.Cleanup.Cleanup(t)
@@ -86,6 +86,20 @@ func TestCredentialVaultPublicCertificateLifecycle(t *testing.T) {
 	if got.Name != flagName || got.Type != "PUBLIC_CERTIFICATE" || len(got.Scopes) != 1 || got.Scopes[0] != "EXTENSION" {
 		t.Errorf("unexpected credential: %+v", got)
 	}
+
+	// Rotate the certificate in place: the ID must survive.
+	rot, err := credentialvault.BuildRequest(flagName+"-rotated", "PUBLIC_CERTIFICATE", "dtctl e2e", []string{"EXTENSION"}, false,
+		credentialvault.SecretInput{Certificate: selfSignedCA(t, flagName+"-rotated")})
+	if err != nil {
+		t.Fatalf("BuildRequest (rotate): %v", err)
+	}
+	if err := handler.Update(flagID, rot); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got, err := handler.Get(flagID); err != nil || got.Name != flagName+"-rotated" {
+		t.Errorf("after update: %+v, %v", got, err)
+	}
+	t.Logf("✓ Rotated %s in place", flagID)
 
 	// The type filter for PUBLIC_CERTIFICATE runs client-side.
 	list, err := handler.List(credentialvault.ListOptions{Type: "PUBLIC_CERTIFICATE", Scope: "EXTENSION", PageSize: 1})

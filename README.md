@@ -91,7 +91,7 @@ Token-based authentication and multi-environment configuration are covered in th
 | Analyzers & CoPilot | statistical analyzers, CoPilot chat, NL-to-DQL, document search |
 | Cloud Integrations | AWS, Azure & GCP connections and monitoring (get, describe, create, delete, apply, update, enable) |
 | EdgeConnect | get, describe, create, delete |
-| Credential vault | get, describe, create, delete |
+| Credential vault | get, describe, create, update, delete |
 | Notifications | get, describe, delete, watch |
 | Users & Groups | get, describe |
 | Live Debugger | breakpoints, workspace filters, snapshot decoding |

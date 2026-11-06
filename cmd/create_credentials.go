@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -65,22 +66,10 @@ Examples:
 			var req credentialvault.CredentialRequest
 
 			if file != "" {
-				data, err := readFileFlag(ctx, "file", file)
-				if err != nil {
-					return fmt.Errorf("failed to read file: %w", err)
-				}
-				for _, f := range []string{"type", "name", "scope", "description", "owner-access-only",
-					"certificate-file", "certificate-format", "password-file", "token-file", "user"} {
-					if cmd.Flags().Changed(f) {
-						return fmt.Errorf("-f cannot be combined with --%s; put the value in the definition file", f)
-					}
-				}
-				jsonData, err := format.ValidateAndConvert(data)
-				if err != nil {
-					return fmt.Errorf("invalid file format: %w", err)
-				}
-				if err := json.Unmarshal(jsonData, &req); err != nil {
-					return fmt.Errorf("failed to parse credential definition: %w", err)
+				var err error
+				if req, err = readCredentialDefinition(cmd, file, []string{"type", "name", "scope", "description", "owner-access-only",
+					"certificate-file", "certificate-format", "password-file", "token-file", "user"}); err != nil {
+					return err
 				}
 				if err := credentialvault.NormalizeRequest(&req); err != nil {
 					return err
@@ -97,36 +86,10 @@ Examples:
 				if err != nil {
 					return err
 				}
-
-				stdinUses := 0
-				for _, p := range []string{certFile, passwordFile, tokenFile} {
-					if p == "-" {
-						stdinUses++
-					}
+				in, err := readCredentialSecrets(ctx, certFile, passwordFile, tokenFile, certFormat, user)
+				if err != nil {
+					return err
 				}
-				if stdinUses > 1 {
-					return fmt.Errorf("only one of --certificate-file, --password-file, --token-file can read stdin")
-				}
-
-				var in credentialvault.SecretInput
-				in.CertificateFormat = certFormat
-				in.User = user
-				if certFile != "" {
-					if in.Certificate, err = readFileFlag(ctx, "certificate-file", certFile); err != nil {
-						return fmt.Errorf("failed to read certificate: %w", err)
-					}
-				}
-				if passwordFile != "" {
-					if in.Password, err = readFileFlag(ctx, "password-file", passwordFile); err != nil {
-						return fmt.Errorf("failed to read password: %w", err)
-					}
-				}
-				if tokenFile != "" {
-					if in.Token, err = readFileFlag(ctx, "token-file", tokenFile); err != nil {
-						return fmt.Errorf("failed to read token: %w", err)
-					}
-				}
-
 				req, err = credentialvault.BuildRequest(name, t, description, normScopes, ownerAccessOnly, in)
 				if err != nil {
 					return err
@@ -135,14 +98,7 @@ Examples:
 
 			if dryRun(ctx) {
 				// Never include secret material (or the request payload) in the preview.
-				report := newDryRunReport(cmd).Linef("Dry run: would create credential")
-				// The vault is environment-wide: name the environment the write would land in.
-				if cfg, cerr := loadConfig(ctx); cerr == nil {
-					if cur, cerr := cfg.CurrentContextObj(); cerr == nil {
-						report = report.Field("Context", "%s", cfg.CurrentContext).Field("Environment", "%s", cur.Environment)
-					}
-				}
-				return report.
+				return credentialDryRunTarget(cmd, newDryRunReport(cmd).Linef("Dry run: would create credential")).
 					Field("Name", "%s", req.Name).
 					Field("Type", "%s", req.Type).
 					Field("Scopes", "%s", strings.Join(req.Scopes, ", ")).
@@ -184,4 +140,70 @@ Examples:
 	rejectEmptyFlag(c, "name")
 	stability.Mark(c, stability.Experimental, credentialsSince)
 	return c
+}
+
+// credentialDryRunTarget adds the context and environment a credential write
+// would land in: the vault is environment-wide.
+func credentialDryRunTarget(cmd *cobra.Command, report *dryRunReport) *dryRunReport {
+	if cfg, err := loadConfig(cmdContext(cmd)); err == nil {
+		if cur, err := cfg.CurrentContextObj(); err == nil {
+			report = report.Field("Context", "%s", cfg.CurrentContext).Field("Environment", "%s", cur.Environment)
+		}
+	}
+	return report
+}
+
+// readCredentialDefinition reads a -f credential definition (YAML or JSON, API
+// field names), refusing any of the conflicting flags.
+func readCredentialDefinition(cmd *cobra.Command, file string, conflicting []string) (credentialvault.CredentialRequest, error) {
+	var req credentialvault.CredentialRequest
+	data, err := readFileFlag(cmdContext(cmd), "file", file)
+	if err != nil {
+		return req, fmt.Errorf("failed to read file: %w", err)
+	}
+	for _, f := range conflicting {
+		if cmd.Flags().Changed(f) {
+			return req, fmt.Errorf("-f cannot be combined with --%s; put the value in the definition file", f)
+		}
+	}
+	jsonData, err := format.ValidateAndConvert(data)
+	if err != nil {
+		return req, fmt.Errorf("invalid file format: %w", err)
+	}
+	if err := json.Unmarshal(jsonData, &req); err != nil {
+		return req, fmt.Errorf("failed to parse credential definition: %w", err)
+	}
+	return req, nil
+}
+
+// readCredentialSecrets reads the secret flags' files (or stdin, for at most
+// one of them).
+func readCredentialSecrets(ctx context.Context, certFile, passwordFile, tokenFile, certFormat, user string) (credentialvault.SecretInput, error) {
+	in := credentialvault.SecretInput{CertificateFormat: certFormat, User: user}
+	stdinUses := 0
+	for _, p := range []string{certFile, passwordFile, tokenFile} {
+		if p == "-" {
+			stdinUses++
+		}
+	}
+	if stdinUses > 1 {
+		return in, fmt.Errorf("only one of --certificate-file, --password-file, --token-file can read stdin")
+	}
+	var err error
+	if certFile != "" {
+		if in.Certificate, err = readFileFlag(ctx, "certificate-file", certFile); err != nil {
+			return in, fmt.Errorf("failed to read certificate: %w", err)
+		}
+	}
+	if passwordFile != "" {
+		if in.Password, err = readFileFlag(ctx, "password-file", passwordFile); err != nil {
+			return in, fmt.Errorf("failed to read password: %w", err)
+		}
+	}
+	if tokenFile != "" {
+		if in.Token, err = readFileFlag(ctx, "token-file", tokenFile); err != nil {
+			return in, fmt.Errorf("failed to read token: %w", err)
+		}
+	}
+	return in, nil
 }

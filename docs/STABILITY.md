@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 23 experimental, 16 development
+- commands: 269 stable, 24 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 971
+- entries below (commands + flags): 983
 
 ## Surface
 
@@ -1104,6 +1104,18 @@ update breakpoint                    experimental  since 0.39.0
   --filters                          experimental
   --log-message                      experimental
   --yes                              experimental
+update credential                    experimental  since 0.46.0
+  --certificate-file                 experimental
+  --certificate-format               experimental
+  --description                      experimental
+  --dry-run                          experimental
+  --file                             experimental
+  --name                             experimental
+  --owner-access-only                experimental
+  --password-file                    experimental
+  --scope                            experimental
+  --token-file                       experimental
+  --user                             experimental
 update document                      stable
   --create-snapshot                  stable
   --dry-run                          stable
