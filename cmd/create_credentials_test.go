@@ -131,3 +131,61 @@ func TestEmptyCredentialListHint(t *testing.T) {
 	require.Empty(t, emptyCredentialListHint(nil, credentialvault.ListOptions{Scope: "EXTENSION_AUTHENTICATION", Type: "TOKEN"}), "tokens legitimately use extension-authentication")
 	require.Empty(t, emptyCredentialListHint(nil, credentialvault.ListOptions{Scope: "EXTENSION"}))
 }
+
+// Under readwrite-mine a credential may be deleted only by its owner; the vault
+// reports the owner as an email address.
+func TestDeleteCredential_ReadWriteMineChecksOwner(t *testing.T) {
+	for _, tc := range []struct {
+		owner     string
+		wantFlow  bool
+		wantCalls []string
+	}{
+		{"me@example.invalid", true, []string{"GET cred", "GET user", "DELETE cred"}},
+		{"ME@Example.invalid", true, []string{"GET cred", "GET user", "DELETE cred"}},
+		{"someone@example.invalid", false, []string{"GET cred", "GET user"}},
+	} {
+		var mu sync.Mutex
+		var calls []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.URL.Path == "/platform/metadata/v1/user":
+				calls = append(calls, "GET user")
+				_, _ = io.WriteString(w, `{"userId":"00000000-0000-0000-0000-000000000001","emailAddress":"me@example.invalid"}`)
+			case strings.HasPrefix(r.URL.Path, "/platform/credential-vault/v1/entries/") && r.Method == http.MethodGet:
+				calls = append(calls, "GET cred")
+				_, _ = io.WriteString(w, `{"id":"CREDENTIAL_VAULT_ENTRY-1","name":"ca","type":"PUBLIC_CERTIFICATE","scopes":["EXTENSION"],"owner":"`+tc.owner+`"}`)
+			case r.Method == http.MethodDelete:
+				calls = append(calls, "DELETE cred")
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		code, _, errOut := runCredentialCreate(t, srv.URL, config.SafetyLevelReadWriteMine, "",
+			"delete", "credential", "CREDENTIAL_VAULT_ENTRY-1", "--yes", "--no-agent")
+		srv.Close()
+		if tc.wantFlow {
+			require.Zero(t, code, errOut)
+		} else {
+			require.NotZero(t, code, "deleting another user's credential under readwrite-mine must be refused")
+		}
+		require.Equal(t, tc.wantCalls, calls, tc.owner)
+	}
+}
+
+// -vv prints request bodies; the certificate must be redacted from them.
+func TestCreateCredential_VerboseDebugRedactsSecrets(t *testing.T) {
+	srv, rec := newCredentialServer(t)
+	code, out, errOut := runCredentialCreate(t, srv.URL, config.SafetyLevelReadWriteAll, credTestPEM,
+		append(append([]string{}, publicCertArgs...), "--no-agent", "-vv")...)
+	require.Zero(t, code, errOut)
+	require.Len(t, rec.calls, 1)
+	require.Contains(t, errOut, "BODY:", "-vv must still print the request body")
+	require.Contains(t, errOut, "[REDACTED]")
+	b64 := rec.body["certificate"].(string)
+	require.NotContains(t, out+errOut, b64, "the base64 certificate must not be printed")
+	require.NotContains(t, out+errOut, "c2VjcmV0LW1hcmtlcg")
+}

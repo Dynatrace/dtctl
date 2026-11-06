@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/prompt"
 	"github.com/Dynatrace/dtctl/pkg/resources/credentialvault"
@@ -40,6 +42,13 @@ Examples:
 `,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				for _, f := range []string{"type", "scope", "name"} {
+					if cmd.Flags().Changed(f) {
+						return fmt.Errorf("--%s filters a list and cannot be combined with a credential ID", f)
+					}
+				}
+			}
 			opts := credentialvault.ListOptions{Name: name}
 			if typ != "" {
 				t, err := credentialvault.NormalizeType(typ)
@@ -104,6 +113,26 @@ func emptyCredentialListHint(list []credentialvault.Credential, opts credentialv
 	return "CAs that validate extension signatures use scope extension, not extension-authentication: try --scope extension"
 }
 
+// credentialOwnership compares a credential's owner with the current user. The
+// vault reports the owner as an email address, so both the user ID and the
+// email are checked; anything unresolvable is OwnershipUnknown.
+func credentialOwnership(c *client.Client, owner string) safety.ResourceOwnership {
+	if owner == "" {
+		return safety.OwnershipUnknown
+	}
+	u, err := c.CurrentUser()
+	if err != nil || u == nil {
+		return safety.OwnershipUnknown
+	}
+	if owner == u.UserID || (u.EmailAddress != "" && strings.EqualFold(owner, u.EmailAddress)) {
+		return safety.OwnershipOwn
+	}
+	if u.UserID == "" && u.EmailAddress == "" {
+		return safety.OwnershipUnknown
+	}
+	return safety.OwnershipShared
+}
+
 // deleteCredentialCmd deletes a credential vault entry.
 var deleteCredentialCmd = newDeleteCredentialCmd()
 
@@ -126,7 +155,7 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 
-			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationDelete)
+			cfg, c, err := setupClient(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
@@ -135,6 +164,9 @@ Examples:
 			cred, err := handler.Get(id)
 			if err != nil {
 				return credentialAccessDenied(err, "get credential", auth.AccessRead)
+			}
+			if err := checkSafety(cmdContext(cmd), cfg, safety.OperationDelete, credentialOwnership(c, cred.Owner)); err != nil {
+				return err
 			}
 
 			if dryRun(cmdContext(cmd)) {

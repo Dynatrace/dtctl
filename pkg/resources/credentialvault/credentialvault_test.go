@@ -176,3 +176,68 @@ func TestFromSDKFoldsDeprecatedScope(t *testing.T) {
 		t.Errorf("got %+v", c)
 	}
 }
+
+// Every CLI spelling a map lists, and its API enum, must be accepted: the
+// valid list in the error message is built from these keys.
+func TestEveryListedSpellingNormalizes(t *testing.T) {
+	for _, tc := range []struct {
+		names map[string]string
+		norm  func(string) (string, error)
+	}{{typeNames, NormalizeType}, {scopeNames, NormalizeScope}} {
+		for cli, api := range tc.names {
+			for _, in := range []string{cli, strings.ToUpper(cli), api, " " + cli + " "} {
+				if got, err := tc.norm(in); err != nil || got != api {
+					t.Errorf("normalize(%q) = %q, %v; want %q", in, got, err, api)
+				}
+			}
+		}
+	}
+}
+
+func TestNormalizeRequestAcceptsPEMOrBase64Certificates(t *testing.T) {
+	b64PEM := base64.StdEncoding.EncodeToString([]byte(testPEM))
+	pkcs12 := []byte{0x30, 0x82, 0x01, 0x02, 0xde, 0xad}
+	b64P12 := base64.StdEncoding.EncodeToString(pkcs12)
+	for _, tc := range []struct {
+		name, typ, cert, wantFormat string
+		wantRaw                     []byte
+	}{
+		{"public PEM text", "PUBLIC_CERTIFICATE", testPEM, "PEM", []byte(testPEM)},
+		{"public base64 PEM", "PUBLIC_CERTIFICATE", b64PEM, "PEM", []byte(testPEM)},
+		{"certificate PEM text", "CERTIFICATE", testPEM, "PEM", []byte(testPEM)},
+		{"certificate base64 PEM", "CERTIFICATE", b64PEM, "PEM", []byte(testPEM)},
+		{"certificate base64 PKCS12", "CERTIFICATE", b64P12, "PKCS12", pkcs12},
+	} {
+		cert := tc.cert
+		req := CredentialRequest{Name: "n", Type: tc.typ, Scopes: []string{"extension"}, Certificate: &cert}
+		if err := NormalizeRequest(&req); err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if *req.Certificate != base64.StdEncoding.EncodeToString(tc.wantRaw) {
+			t.Errorf("%s: certificate not sent as base64 of the original bytes", tc.name)
+		}
+		if req.CertificateFormat == nil || *req.CertificateFormat != tc.wantFormat {
+			t.Errorf("%s: format = %v, want %s", tc.name, req.CertificateFormat, tc.wantFormat)
+		}
+	}
+}
+
+func TestNormalizeRequestRejectsMismatchedCertificateFormat(t *testing.T) {
+	p12 := "PKCS12"
+	pemFmt := "PEM"
+	b64P12 := base64.StdEncoding.EncodeToString([]byte{0x30, 0x82, 0x01})
+	for name, req := range map[string]CredentialRequest{
+		"public PKCS12":        {Type: "PUBLIC_CERTIFICATE", Certificate: ptr(testPEM), CertificateFormat: &p12},
+		"certificate PEM bin":  {Type: "CERTIFICATE", Certificate: &b64P12, CertificateFormat: &pemFmt},
+		"certificate P12 text": {Type: "CERTIFICATE", Certificate: ptr(testPEM), CertificateFormat: &p12},
+		"neither PEM nor b64":  {Type: "CERTIFICATE", Certificate: ptr("not a cert!")},
+	} {
+		req.Name, req.Scopes = "n", []string{"extension"}
+		if err := NormalizeRequest(&req); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }

@@ -124,8 +124,9 @@ type ListOptions struct {
 
 // List lists credentials, following nextPageKey until all pages are read.
 //
-// Filters and page-size go on the first request only; the page token embeds
-// them. The server-side type filter does not accept PUBLIC_CERTIFICATE, so that
+// Filters and page-size go on the first request only: the page token embeds
+// them, and the API rejects any of them alongside page-key with HTTP 400
+// (verified against the live API across pages). The server-side type filter does not accept PUBLIC_CERTIFICATE, so that
 // type is filtered here instead.
 func (h *Handler) List(ctx context.Context, opts ListOptions) (*CredentialList, error) {
 	var all []Credential

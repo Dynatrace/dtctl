@@ -62,7 +62,9 @@ dtctl delete credential CREDENTIALS_VAULT-0123456789ABCDEF --yes
 
 ## Notes
 
-- Types: `public-certificate` (`--certificate-file`, PEM, sent as text), `certificate` (`--certificate-file`, PEM or PKCS#12, sent base64-encoded; `--password-file` for PKCS#12), `token` (`--token-file`), `username-password` (`--user`, `--password-file`). Other types (AWS, SNMPv3) can be created with `-f`.
+- Types: `public-certificate` (`--certificate-file`, PEM), `certificate` (`--certificate-file`, PEM or PKCS#12; `--password-file` for PKCS#12), `token` (`--token-file`), `username-password` (`--user`, `--password-file`). Other types (AWS, SNMPv3) can be created with `-f`.
+- Certificates are always sent base64-encoded, as the API requires. In a `-f` definition, `certificate` may hold PEM text or base64 (of PEM text, or of a PKCS#12 file for `CERTIFICATE`); dtctl encodes PEM text itself. `certificateFormat` is inferred when omitted and must match the content.
+- `delete credential` checks ownership: under `readwrite-mine` you can delete only credentials you own.
 - Scopes: `extension` (UI: "Extension validation", the scope a CA for custom extension signatures needs), `extension-authentication` (secrets an extension uses to reach a data source), `synthetic`, `app-engine`. `--scope` is repeatable.
 - Only one secret flag can read stdin (`-`) per invocation.
 - Reading needs `credential-vault:entries:read`; creating and deleting need `credential-vault:entries:write`. `dtctl auth login` requests the read scope at every safety level and the write scope at `readwrite-all` and `dangerously-unrestricted`. A context logged in before these scopes existed needs `dtctl auth login` again. Without the scope the commands fail with a 403 that names the missing scope.

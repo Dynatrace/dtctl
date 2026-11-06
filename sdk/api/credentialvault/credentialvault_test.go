@@ -33,10 +33,10 @@ func TestListPaginatesAndSendsFiltersOnFirstPageOnly(t *testing.T) {
 		q := r.URL.Query()
 		calls = append(calls, r.URL.RawQuery)
 
-		// Simulate the API constraint: nextPageKey must not be combined with
-		// any other query parameter (the page token embeds them all).
-		if q.Get("nextPageKey") != "" {
-			for _, p := range []string{"pageSize", "type", "name", "scope", "user"} {
+		// Simulate the API constraint (verified live): page-key must not be
+		// combined with any other query parameter (the page token embeds them).
+		if q.Get("page-key") != "" {
+			for _, p := range []string{"page-size", "type", "name", "scope"} {
 				if q.Get(p) != "" {
 					w.WriteHeader(http.StatusBadRequest)
 					fmt.Fprint(w, `{"error":{"code":400,"message":"Constraints violated."}}`)

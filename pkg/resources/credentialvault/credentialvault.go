@@ -129,6 +129,11 @@ func toEnum(v string) string {
 }
 
 func lookupEnum(kind, v string, names map[string]string) (string, error) {
+	// The CLI spelling first: it does not always derive from the enum
+	// (aws-key-based is AWS_MONITORING_KEY_BASED).
+	if api, ok := names[strings.ToLower(strings.TrimSpace(v))]; ok {
+		return api, nil
+	}
 	want := toEnum(v)
 	for _, api := range names {
 		if api == want {
@@ -284,34 +289,79 @@ func NormalizeRequest(req *CredentialRequest) error {
 	}
 	req.Scopes = scopes
 
-	// Match the flag path: the API marks `password` required on certificate
-	// types (empty for PEM / public certificates).
+	// Match the flag path. The certificate may be written as PEM text or as
+	// base64 (the API field format); either way it is sent base64-encoded. The
+	// API marks `password` required on certificate types (empty for PEM and
+	// public certificates).
 	switch req.Type {
 	case sdkcv.TypePublicCertificate:
-		if req.Certificate == nil || *req.Certificate == "" {
-			return fmt.Errorf("definition is missing `certificate`")
-		}
-		if err := validatePEMCertificate([]byte(*req.Certificate)); err != nil {
+		raw, err := certificateFromDefinition(req.Certificate)
+		if err != nil {
 			return err
 		}
-		// The definition carries PEM text, like the flag path; the API wants base64.
-		enc := base64.StdEncoding.EncodeToString([]byte(*req.Certificate))
-		req.Certificate = &enc
-		if req.CertificateFormat == nil {
-			f := sdkcv.CertificateFormatPEM
-			req.CertificateFormat = &f
+		if req.CertificateFormat != nil && toEnum(*req.CertificateFormat) != sdkcv.CertificateFormatPEM {
+			return fmt.Errorf("type PUBLIC_CERTIFICATE supports only certificateFormat PEM")
 		}
+		if err := validatePEMCertificate(raw); err != nil {
+			return err
+		}
+		enc := base64.StdEncoding.EncodeToString(raw)
+		f := sdkcv.CertificateFormatPEM
+		req.Certificate, req.CertificateFormat = &enc, &f
 		if req.Password == nil {
 			empty := ""
 			req.Password = &empty
 		}
 	case sdkcv.TypeCertificate:
+		raw, err := certificateFromDefinition(req.Certificate)
+		if err != nil {
+			return err
+		}
+		isPEM := false
+		if blk, _ := pem.Decode(raw); blk != nil {
+			isPEM = true
+		}
+		format := sdkcv.CertificateFormatPKCS12
+		if isPEM {
+			format = sdkcv.CertificateFormatPEM
+		}
+		if req.CertificateFormat != nil && *req.CertificateFormat != "" {
+			format = toEnum(*req.CertificateFormat)
+		}
+		switch {
+		case format != sdkcv.CertificateFormatPEM && format != sdkcv.CertificateFormatPKCS12:
+			return fmt.Errorf("unknown certificateFormat %q (valid: PEM, PKCS12)", format)
+		case format == sdkcv.CertificateFormatPEM && !isPEM:
+			return fmt.Errorf("certificateFormat is PEM but `certificate` is not PEM text or base64-encoded PEM")
+		case format == sdkcv.CertificateFormatPKCS12 && isPEM:
+			return fmt.Errorf("certificateFormat is PKCS12 but `certificate` holds PEM text")
+		}
+		enc := base64.StdEncoding.EncodeToString(raw)
+		req.Certificate, req.CertificateFormat = &enc, &format
 		if req.Password == nil {
 			empty := ""
 			req.Password = &empty
 		}
 	}
 	return nil
+}
+
+// certificateFromDefinition returns the certificate bytes of a definition's
+// `certificate` field, which may hold PEM text or base64 (of PEM text or of a
+// PKCS#12 file).
+func certificateFromDefinition(v *string) ([]byte, error) {
+	if v == nil || strings.TrimSpace(*v) == "" {
+		return nil, fmt.Errorf("definition is missing `certificate`")
+	}
+	if blk, _ := pem.Decode([]byte(*v)); blk != nil {
+		return []byte(*v), nil
+	}
+	compact := strings.Join(strings.Fields(*v), "")
+	raw, err := base64.StdEncoding.DecodeString(compact)
+	if err != nil || len(raw) == 0 {
+		return nil, fmt.Errorf("`certificate` must be PEM text or base64")
+	}
+	return raw, nil
 }
 
 func validatePEMCertificate(b []byte) error {

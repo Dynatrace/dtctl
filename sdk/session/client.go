@@ -300,7 +300,7 @@ func (c *Client) SetVerbosity(level int) {
 				}
 			}
 			if bodyText := readRequestBodyForDebug(req); bodyText != "" {
-				sb.WriteString(fmt.Sprintf("BODY:\n%s\n", bodyText))
+				sb.WriteString(fmt.Sprintf("BODY:\n%s\n", httpclient.RedactBodyForDebug(bodyText)))
 			}
 		}
 		fmt.Fprint(os.Stderr, sb.String())
@@ -321,7 +321,7 @@ func (c *Client) SetVerbosity(level int) {
 					sb.WriteString(fmt.Sprintf("    %s: %s\n", k, strings.Join(v, ", ")))
 				}
 			}
-			sb.WriteString(fmt.Sprintf("BODY:\n%s\n", resp.String()))
+			sb.WriteString(fmt.Sprintf("BODY:\n%s\n", httpclient.RedactBodyForDebug(resp.String())))
 		}
 		fmt.Fprint(os.Stderr, sb.String())
 		return nil
