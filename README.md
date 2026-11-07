@@ -118,6 +118,22 @@ cp -r skills/dtctl ~/.agents/skills/   # Cross-client (any agent)
 
 Compatible with GitHub Copilot, Claude Code, OpenAI Codex CLI, Cursor, Kiro, Junie, OpenCode, OpenClaw, and other [Agent Skills](https://agentskills.io)-compatible tools. See the **[AI Agent Mode docs](docs/AGENT_MODE.md)** for details on the structured JSON envelope and agent auto-detection.
 
+### Claude Code plugin
+
+Each release also has a `dtctl-plugin.zip` asset: a [Claude Code plugin](https://code.claude.com/docs/en/plugins) with the `dtctl` binary for Windows (amd64), Linux and macOS and the `dtctl` skill. Claude Code puts the plugin's `bin/` on the `PATH` of its shell tools and updates an installed plugin (binary and skill together) when a release has a new version. To install it, list the latest release asset in a [plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces) (`.claude-plugin/marketplace.json`):
+
+```json
+{
+  "name": "dtctl",
+  "source": {
+    "source": "archive",
+    "url": "https://github.com/Dynatrace/dtctl/releases/latest/download/dtctl-plugin.zip"
+  }
+}
+```
+
+and run `claude plugin install dtctl@<marketplace>`. A `dtctl` earlier on your `PATH` (for example from Homebrew) shadows the plugin's one.
+
 ### Dynatrace domain skills
 
 For deeper Dynatrace domain knowledge (DQL syntax, observability patterns, dashboards, logs, Kubernetes, and more) install the skills from **[Dynatrace/dynatrace-for-ai](https://github.com/Dynatrace/dynatrace-for-ai)**:

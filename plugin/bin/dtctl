@@ -1,0 +1,11 @@
+#!/bin/sh
+d=$(cd "$(dirname "$0")" && pwd)
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) exec "$d/linux-amd64/dtctl" "$@" ;;
+  Linux-aarch64|Linux-arm64) exec "$d/linux-arm64/dtctl" "$@" ;;
+  Darwin-x86_64) exec "$d/darwin-amd64/dtctl" "$@" ;;
+  Darwin-arm64) exec "$d/darwin-arm64/dtctl" "$@" ;;
+  MINGW*-*|MSYS*-*|CYGWIN*-*) exec "$d/dtctl.exe" "$@" ;;
+esac
+echo "dtctl: unsupported platform $(uname -s)-$(uname -m)" >&2
+exit 1

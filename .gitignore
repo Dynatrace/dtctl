@@ -1,5 +1,7 @@
 # Binaries
 bin/
+# The Claude Code plugin keeps its shell wrapper in plugin/bin/
+!/plugin/bin/
 dist/
 releases/
 *.exe
