@@ -137,7 +137,7 @@ func runExecAPI(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	headerMap, err := parseHeaderFlags(headers)
+	headerMap, err := parseHeaderFlags(headers, currentSession(cmdContext(cmd)) != nil)
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,12 @@ func readRequestBody(ctx context.Context, data string) ([]byte, error) {
 // Auth headers are refused: the context is the identity, and dtctl attaches
 // its credentials itself. A -H that replaced them would fight the client's own
 // auth silently — whichever writes last wins, and nothing would say so.
-func parseHeaderFlags(headers []string) (map[string]string, error) {
+//
+// Embedded in a service, the routing and origin headers are refused too (see
+// infrastructureHeader). The CLI keeps them: a request it sends leaves the
+// caller's own machine with the caller's own token, which could send the same
+// headers with any HTTP client.
+func parseHeaderFlags(headers []string, embedded bool) (map[string]string, error) {
 	out := make(map[string]string, len(headers))
 	for _, h := range headers {
 		name, value, found := strings.Cut(h, ":")
@@ -267,9 +272,48 @@ func parseHeaderFlags(headers []string) (map[string]string, error) {
 			return nil, fmt.Errorf("refusing -H %s: dtctl sends the current context's credentials; "+
 				"to call as a different identity, switch contexts (dtctl ctx use <name>)", canonical)
 		}
+		if embedded {
+			if reason := infrastructureHeader(canonical); reason != "" {
+				return nil, fmt.Errorf("refusing -H %s when dtctl runs in a service: %s", canonical, reason)
+			}
+		}
 		out[canonical] = strings.TrimSpace(value)
 	}
 	return out, nil
+}
+
+// clientDtHeaders are the Dt-* headers a client is meant to send to a public
+// API. dtctl sends both itself; everything else in the Dt-* namespace is set by
+// the platform's own infrastructure.
+var clientDtHeaders = map[string]bool{
+	"Dt-Client-Context":  true,
+	"Dt-External-Source": true,
+}
+
+// infrastructureHeader says why a header belongs to the infrastructure between
+// dtctl and the environment, or returns "" when a caller may set it. It applies
+// only when dtctl runs embedded in a service.
+//
+// These headers say where a request goes and where it came from. The
+// infrastructure sets them, and the services behind it may trust them. Run
+// inside a service, dtctl sends a request from within the platform's network,
+// where a caller's version of such a header is more likely to be believed. Go
+// already dials and names the TLS server after the session's environment, so a
+// caller-set Host would only make the request disagree with itself.
+func infrastructureHeader(canonical string) string {
+	switch {
+	case canonical == "Host":
+		return "the request goes to the session's environment"
+	case canonical == "Forwarded",
+		canonical == "X-Real-Ip",
+		canonical == "X-Client-Ip",
+		canonical == "True-Client-Ip",
+		strings.HasPrefix(canonical, "X-Forwarded-"):
+		return "it says where a request came from, which the infrastructure in front of the environment sets"
+	case strings.HasPrefix(canonical, "Dt-") && !clientDtHeaders[canonical]:
+		return "Dt-* headers are set by the platform's infrastructure, not by its callers"
+	}
+	return ""
 }
 
 // warnAboutTarget prints the two notices that make the escape hatch

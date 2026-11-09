@@ -318,6 +318,18 @@ Path matching uses the longest base-path prefix at a segment boundary, so
   are refused: the context is the identity, dtctl attaches its credentials
   itself, and a caller-supplied value would silently fight the client's own
   auth (whichever writes last wins). Changing identity means changing context.
+- **Embedded in a service, `-H` cannot set routing or origin headers.**
+  `Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-Ip`, `X-Client-Ip`,
+  `True-Client-Ip` and the `Dt-*` namespace are refused when a session is set.
+  The infrastructure in front of an environment sets them, and the services
+  behind it may trust them. In a service, dtctl sends a request from inside the
+  platform's network, where a forged value is more likely to be believed. Go
+  already dials and names the TLS server after the session's environment, so a
+  caller-set `Host` would only make the request disagree with itself. The `Dt-*`
+  headers a client is meant to send (`Dt-Client-Context`, `Dt-External-Source`)
+  stay allowed; dtctl sends both itself. The CLI sends all of these as given: its
+  request leaves the caller's own machine with the caller's own token, which
+  could send the same headers with any HTTP client.
 - **The output protocol is declared, not sniffed.** A JSON body goes through the
   normal printer, so `-o json/yaml` and the agent envelope behave as they do
   everywhere else. Anything else is passed through **verbatim, even under

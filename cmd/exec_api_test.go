@@ -178,6 +178,69 @@ func TestExecAPIRefusesCallerSuppliedAuthHeaders(t *testing.T) {
 	require.Zero(t, env.requestCount(), "the refusal must precede every request")
 }
 
+// infrastructureHeaders are the routing and origin headers an embedded run
+// refuses, in the spellings a caller might use.
+var infrastructureHeaders = []string{
+	"Host: other.example.invalid",
+	"host: other.example.invalid",
+	"Forwarded: for=203.0.113.7",
+	"X-Forwarded-For: 203.0.113.7",
+	"x-forwarded-host: other.example.invalid",
+	"X-Forwarded-Proto: http",
+	"X-Real-IP: 203.0.113.7",
+	"X-Client-IP: 203.0.113.7",
+	"True-Client-IP: 203.0.113.7",
+	"Dt-Tenant: other",
+	"dt-origin-address: 203.0.113.7",
+}
+
+// TestExecAPIInAServiceRefusesInfrastructureHeaders pins that, embedded in a
+// service, -H cannot set the headers that route a request or say where it came
+// from. The infrastructure in front of an environment sets them, and services
+// behind it may trust them; a request dtctl sends from inside a service must not
+// carry a caller's version.
+func TestExecAPIInAServiceRefusesInfrastructureHeaders(t *testing.T) {
+	env := newMockEnvironmentAt(t, "readonly")
+	session := &Session{EnvironmentURL: env.server.URL, Token: "t", SafetyLevel: "readonly"}
+
+	for _, header := range infrastructureHeaders {
+		code, _, errOut := runAPI(t, []string{
+			"exec", "api", "/platform/widget/v1/widgets", "-H", header,
+		}, RunOptions{Session: session})
+		require.NotZero(t, code, "header %q must be refused", header)
+		require.Contains(t, errOut, "when dtctl runs in a service", "header %q", header)
+	}
+	require.Zero(t, env.requestCount(), "the refusal must precede every request")
+}
+
+// TestExecAPIOnTheCLISendsInfrastructureHeaders pins that the refusal above is
+// the service's alone. On the CLI the request leaves the caller's own machine
+// with the caller's own token, which could send the same headers with any HTTP
+// client, so -H keeps sending them as given.
+func TestExecAPIOnTheCLISendsInfrastructureHeaders(t *testing.T) {
+	env := newMockEnvironmentAt(t, "readonly")
+	env.respond(http.MethodGet, "/platform/widget/v1/widgets", mockResponse{
+		status: 200, contentType: "application/json", body: `{}`,
+	})
+
+	for _, header := range infrastructureHeaders {
+		code, _, errOut := runAPI(t, []string{
+			"exec", "api", "/platform/widget/v1/widgets", "-H", header,
+		}, RunOptions{})
+		require.Zero(t, code, "header %q: %s", header, errOut)
+	}
+}
+
+// TestExecAPIInAServiceSendsClientHeaders pins what the service's refusal leaves
+// alone: an ordinary header, and the Dt-* headers a client is meant to send.
+func TestExecAPIInAServiceSendsClientHeaders(t *testing.T) {
+	for _, header := range []string{"Dt-Client-Context: dtctl", "Dt-External-Source: dtctl", "Accept-Language: en", "X-Request-Id: abc"} {
+		got, err := parseHeaderFlags([]string{header}, true)
+		require.NoError(t, err, "header %q", header)
+		require.Len(t, got, 1, "header %q", header)
+	}
+}
+
 // TestExecAPIRefusesToInferAMethod pins that a body does not promote a request to
 // POST the way curl does. Inferring the method would infer the safety operation,
 // which is the one thing this command must never do.
