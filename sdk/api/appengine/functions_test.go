@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,27 @@ func TestFunctionHandler_ExecutionErrorStatuses(t *testing.T) {
 					t.Errorf("error also matches *httpclient.APIError (status %d)", apiErr.StatusCode)
 				}
 			})
+		}
+	}
+}
+
+func TestGetSDKVersions_NewStructure(t *testing.T) {
+	h := newTestFunctionHandler(t, 200, `{"layerVersion":"2026","packages":{"@x/a":["1.0.4"],"@x/b":["3.4.1","4.0.1"]}}`)
+	got, err := h.GetSDKVersions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LayerVersion != "2026" || len(got.Packages) != 2 || len(got.Packages["@x/b"]) != 2 {
+		t.Errorf("unexpected result: %+v", got)
+	}
+}
+
+func TestGetSDKVersions_UnexpectedStructure(t *testing.T) {
+	for _, body := range []string{`{"versions":[{"version":"1","default":true}]}`, `{"packages":["a"]}`} {
+		h := newTestFunctionHandler(t, 200, body)
+		_, err := h.GetSDKVersions(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "unexpected structure") {
+			t.Errorf("body %s: want unexpected structure error, got %v", body, err)
 		}
 	}
 }
