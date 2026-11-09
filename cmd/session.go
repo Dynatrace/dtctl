@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"unicode"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/stability"
@@ -67,6 +69,18 @@ type Session struct {
 	// passes any floor, it merely has a removal date. Off by default, because
 	// a host that has not asked to be broken early should not be.
 	NoDeprecated bool
+	// Profile, when non-nil, is a command profile the host defines itself
+	// rather than one of the built-in presets: the session's context is bound
+	// to it, so it shapes the surface exactly as a profile defined in a config
+	// file would (default-deny, aliases resolved against the real tree, the
+	// always-available catalog kept). It keeps the allowlist with the host
+	// that owns it instead of in dtctl.
+	//
+	// A DTCTL_PROFILE entry in RunOptions.Env still takes precedence, as an
+	// environment variable does over a context binding; the engine sets that
+	// entry to Profile.Name so a request cannot select something else. Name
+	// is required and may not be "full", which would mean no profile at all.
+	Profile *config.Profile
 
 	// Transport, when non-nil, carries every platform request this invocation
 	// sends, in place of the process-wide connection pool. It is how a host
@@ -151,6 +165,33 @@ func (s *Session) validate() error {
 	if _, err := stability.ParseExceptions(s.StabilityExceptions); err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
+	if s.Profile != nil {
+		if err := ValidateProfileDefinition(s.Profile.Name, s.Profile.Commands); err != nil {
+			return fmt.Errorf("session: %w", err)
+		}
+	}
+	return nil
+}
+
+// ValidateProfileDefinition checks a caller-supplied profile definition. It
+// refuses what would silently resolve to a different surface than the one
+// written down: a missing name (no profile is selected), the reserved name
+// "full" (the unrestricted tree), and a blank allowlist entry. An empty
+// allowlist is valid — it leaves only the always-available catalog.
+func ValidateProfileDefinition(name string, commands []string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("profile definition has no name")
+	case strings.IndexFunc(name, unicode.IsSpace) >= 0:
+		return fmt.Errorf("profile name %q must not contain whitespace", name)
+	case name == config.ProfileFull:
+		return fmt.Errorf("profile name %q is reserved for the unrestricted command tree", name)
+	}
+	for i, entry := range commands {
+		if strings.TrimSpace(entry) == "" {
+			return fmt.Errorf("profile %q: command entry %d is blank", name, i)
+		}
+	}
 	return nil
 }
 
@@ -192,6 +233,20 @@ func (s *Session) syntheticConfig() *config.Config {
 			Name:  tokenRef,
 			Token: s.Token,
 		}},
+	}
+	if s.Profile != nil {
+		// Copied, so a host that reuses or mutates its definition after the
+		// call cannot change the surface of a run already in flight. Entries
+		// are normalized to single-space paths, the form commandPathRelative
+		// produces and Allows compares against.
+		commands := make([]string, 0, len(s.Profile.Commands))
+		for _, entry := range s.Profile.Commands {
+			commands = append(commands, strings.Join(strings.Fields(entry), " "))
+		}
+		cfg.Profiles = map[string]config.Profile{
+			s.Profile.Name: {Description: s.Profile.Description, Commands: commands},
+		}
+		cfg.Contexts[0].Context.Profile = s.Profile.Name
 	}
 	// The inline token must win unconditionally; no host credential store should
 	// be consulted for a synthetic session config.

@@ -347,3 +347,41 @@ func TestRunWithSession_HostAliasesIgnored(t *testing.T) {
 	defer env.mu.Unlock()
 	require.Empty(t, env.authSeen, "no request may be sent for an unexpanded alias")
 }
+
+// TestRunWithSession_ProfileDefinition: a host-defined profile on the session
+// masks the surface like a config-file profile, and is copied, so the host
+// changing its definition afterwards does not change a later run's surface.
+func TestRunWithSession_ProfileDefinition(t *testing.T) {
+	clearAgentEnvVars(t)
+
+	def := &config.Profile{Name: "host-agent", Commands: []string{"get analyzers"}}
+	session := &Session{EnvironmentURL: "https://x.example.invalid", Token: "t", Profile: def}
+
+	cfg := session.syntheticConfig()
+	def.Commands[0] = "get workflows"
+	p, err := withInvocationEnv(context.Background(), cfg).ResolveProfile()
+	require.NoError(t, err)
+	require.Equal(t, "host-agent", p.Name)
+	require.Equal(t, []string{"get analyzers"}, p.Commands)
+
+	def.Commands[0] = "get analyzers"
+	code, out := captureRun(t, []string{"get", "--help"}, RunOptions{Session: session})
+	require.Zero(t, code)
+	section := availableCommandsSection(t, out)
+	require.Contains(t, section, "analyzers")
+	require.NotContains(t, section, "workflows")
+}
+
+// TestSessionRejectsInvalidProfileDefinition: a definition that would resolve
+// to a different surface than the one written down fails validation.
+func TestSessionRejectsInvalidProfileDefinition(t *testing.T) {
+	for _, p := range []*config.Profile{
+		{},
+		{Name: config.ProfileFull},
+		{Name: "a b"},
+		{Name: "p", Commands: []string{""}},
+	} {
+		s := &Session{EnvironmentURL: "https://x.example.invalid", Token: "t", Profile: p}
+		require.Error(t, s.validate(), "profile %+v", p)
+	}
+}

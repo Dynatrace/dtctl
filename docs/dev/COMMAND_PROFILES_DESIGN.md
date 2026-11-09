@@ -52,8 +52,10 @@ many surfaces.
   unset `DTCTL_PROFILE` or edit config. For real restriction, scope the API token.
 - **Per-flag filtering.** Profiles operate at command granularity, not flag
   granularity. Hiding individual flags of a visible command is out of scope.
-- **Dynamic/remote profiles.** Profiles are defined locally in config. No
-  server-delivered profile definitions.
+- **Remote profiles.** dtctl never fetches a profile definition. A CLI profile
+  is defined locally in config; an embedding host may hand the engine a
+  definition in-process (see [Host-defined profiles](#host-defined-profiles-in-the-engine)),
+  which is still local to the process that runs dtctl.
 - **Read/write filtering.** A profile does not know or care whether a command
   mutates. "No writes" is a *safety level*, set independently on the context. A
   profile never enumerates mutating commands.
@@ -347,6 +349,53 @@ One deliberate difference: the blocked mask also guards **non-runnable parents**
 (and neutralizes their arg/flag parsing), so a masked bare `config` cannot answer
 with its own help text and exit 0. The profile mask guards only runnable nodes.
 See [SERVICE_ENGINE_DESIGN.md](SERVICE_ENGINE_DESIGN.md).
+
+### Host-defined profiles in the engine
+
+A service embedding dtctl (`pkg/engine`) often owns its allowlist: it is part
+of the service's own contract, reviewed and versioned with the service, and a
+preset in dtctl would have to change in lockstep with it. So besides selecting
+a preset by name (`Request.Profile`), a request can carry the definition
+itself:
+
+```go
+engine.Execute(ctx, engine.Request{
+	// ...
+	ProfileDefinition: &engine.ProfileDefinition{
+		Name:     "my-service",
+		Commands: []string{"query", "get analyzers", "describe analyzer"},
+	},
+})
+```
+
+The definition goes onto the session (`cmd.Session.Profile`), whose synthetic
+config carries it in `profiles:` and binds the session context to it. From
+there it is an ordinary config-file profile: the same `Allows`, the same mask,
+the same `profile_blocked` error, the same catalog metadata. The host keeps the
+list; dtctl keeps the semantics — alias resolution, parent reachability, the
+always-available floor, and composition with the stability floor and
+`BlockedCommands`.
+
+Rules that keep the definition from meaning something other than what it says:
+
+- `Profile` and `ProfileDefinition` are mutually exclusive.
+- The definition's name is also written to `DTCTL_PROFILE` for the run, so an
+  `Env` entry cannot select a preset — or `full` — in its place.
+- The name is required, has no whitespace, and is not `full`.
+- A blank entry is refused; whitespace inside an entry is normalized
+  (`"get   analyzers"` is `get analyzers`). An empty list is valid and leaves
+  only the always-available commands.
+- Entries are canonical paths. An alias a caller types (`get az`) still runs,
+  because cobra resolves it to `get analyzers` before the profile is consulted;
+  an alias *in the list* (`get az`) matches nothing.
+
+dtctl does not check that each entry names an existing command: an entry for a
+command the stability floor hides, or one added in a later release, is not an
+error. A host that wants an upgrade to fail when a listed command is renamed or
+removed checks that in its own tests: `engine.Parse` on `<entry> --help` for
+every entry, with the request's floor, and compare `Verb`/`Resource` with the
+entry. An unknown verb is a `*UsageError`, but an unknown resource is not — it
+falls back to the verb's help, with `Help` set and `Resource` empty.
 
 ### Config schema changes
 
