@@ -695,6 +695,7 @@ dtctl exec function -f script.js                 # Execute JavaScript file
 dtctl exec function -f script.js --payload '{"input":"data"}'
 dtctl exec function --code 'export default async function() { return "hello" }'
 dtctl get sdk-versions                           # List available SDK versions
+dtctl get runtime-type-definitions --package-name <name> --major-version <int>  # TypeScript .d.ts of an SDK package
 
 # App Intents
 # Resource name: intent/intents

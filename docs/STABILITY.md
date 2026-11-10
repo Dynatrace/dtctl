@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 19 experimental, 16 development
+- commands: 270 stable, 19 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 951
+- entries below (commands + flags): 954
 
 ## Surface
 
@@ -823,6 +823,9 @@ get notebooks                        stable
   --watch-only                       stable
 get notifications                    stable
   --type                             stable
+get runtime-type-definitions         stable
+  --major-version                    stable
+  --package-name                     stable
 get scheduling-rules                 stable
   --interval                         stable
   --limit                            stable

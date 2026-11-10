@@ -400,6 +400,7 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | openpipeline-dql-processor | `openpipeline:configurations:read` |
 | openpipeline-matcher | `openpipeline:configurations:read` |
 | preview-processor | `openpipeline:configurations:read` |
+| runtime-type-definition | `app-engine:functions:run` |
 | scheduling-rule | `automation:rules:read` |
 | sdk-version | `app-engine:apps:run` |
 | segment | `storage:filter-segments:read` |

@@ -20,6 +20,16 @@ type (
 	SDKVersionsResponse      = sdkae.SDKVersionsResponse
 )
 
+// RuntimeTypeDefinitions is the type definitions of one SDK package version
+// (CLI version with table tags). The declaration text has no table column:
+// the command prints it as plain text instead of a table.
+type RuntimeTypeDefinitions struct {
+	PackageName     string `json:"packageName" table:"PACKAGE"`
+	Version         string `json:"version" table:"VERSION"`
+	FileName        string `json:"fileName" table:"FILE NAME"`
+	TypeDefinitions string `json:"typeDefinitions" table:"-"`
+}
+
 // DeferredExecutionResponse represents a deferred execution response (CLI version with table tags).
 type DeferredExecutionResponse struct {
 	ID string `json:"id" table:"ID"`
@@ -81,4 +91,13 @@ func (h *FunctionHandler) ExecuteRequest(req *FunctionExecutorRequest) (*Functio
 // GetSDKVersions lists available SDK versions as returned by the function executor
 func (h *FunctionHandler) GetSDKVersions() (*SDKVersionsResponse, error) {
 	return h.sdk.GetSDKVersions(context.Background())
+}
+
+// GetRuntimeTypeDefinitions returns the type definitions of a package for a major version
+func (h *FunctionHandler) GetRuntimeTypeDefinitions(packageName string, majorVersion int) (*RuntimeTypeDefinitions, error) {
+	r, err := h.sdk.GetRuntimeTypeDefinitions(context.Background(), packageName, majorVersion)
+	if err != nil {
+		return nil, err
+	}
+	return &RuntimeTypeDefinitions{PackageName: r.PackageName, Version: r.Version, FileName: r.FileName, TypeDefinitions: r.TypeDefinitions}, nil
 }
