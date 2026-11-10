@@ -72,8 +72,9 @@ type Request struct {
 	// host whose allowlist is its own rather than one of dtctl's presets. It
 	// behaves exactly like a profile in a config file: default-deny, matched
 	// against the real command tree (so an alias of an allowed command runs
-	// like its full name), hidden from help and `dtctl commands`, and refused
-	// with profile_blocked. Mutually exclusive with Profile and with a
+	// like its full name), hidden from help, `dtctl commands` and shell
+	// completion, and refused with profile_blocked — `help <command>`
+	// included. Mutually exclusive with Profile and with a
 	// DTCTL_PROFILE entry in Env that names a different profile.
 	ProfileDefinition *ProfileDefinition
 	// MinStability is the stability floor for this request: the weakest
@@ -140,7 +141,8 @@ type Request struct {
 // "apply extension-config" also allows `apply -f <any file>`, because `apply`
 // runs on its own. For a group that only lists its subcommands (`get`) that is
 // harmless; for a parent that runs, list it only if it may run. `commands` and
-// `help` are always available whatever the list says.
+// `help` are always available whatever the list says; `help <command>` answers
+// what `<command> --help` does, so it refuses a command outside the list.
 //
 // Entries name commands by their canonical path: "get workflows", not
 // "get wf". A caller's alias still runs, because it resolves to the canonical

@@ -170,6 +170,15 @@ Both are pure discovery: they run no operation, read no data, and mutate nothing
 They are merged into every profile's allowlist so a minimal profile never hides
 the very catalog an agent needs to discover its surface.
 
+`help` being available does not make every command's help available:
+`help <command>` answers exactly what `<command> --help` answers, so help on a
+masked command is that command's refusal (`profile_blocked`,
+`unsupported_in_service`, or the stability floor's error). dtctl installs its
+own `help` command, declared `stable`, for this: cobra's built-in one printed
+the target's help unconditionally, and was created lazily during `Execute`,
+after the masks had run, so on a reused tree its fate depended on whether an
+earlier run had created it.
+
 **Everything else is subject to the allowlist -- including `config`, `ctx`,
 `completion`, and `version`.** This is deliberate. Earlier drafts kept
 `config`/`ctx` always-available for "context management", but those verbs can
@@ -283,7 +292,12 @@ returns the named profile (or nil for `full`).
 The key enabling fact: **every discovery surface we care about already honors
 `cmd.Hidden`.**
 
-- Cobra's help and shell completion skip hidden commands natively.
+- Cobra's help and shell completion skip hidden commands natively when they
+  *list* subcommands. They do not stop at a hidden command named explicitly:
+  `help <masked>` and a completion request for `<masked> --` used to print its
+  help and flags. dtctl's own `help` command answers as `<command> --help`
+  does, and a completion request whose target a surface stage masked
+  completes nothing (every stage marks what it masks, `isSurfaceMasked`).
 - `pkg/commands/listing.go` (which backs `dtctl commands` and `commands howto`)
   already skips hidden commands -- e.g. `listing.go:196`
   (`if hiddenCommands[name] || cmd.Hidden { continue }`) and the analogous checks

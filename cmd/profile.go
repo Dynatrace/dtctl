@@ -78,6 +78,7 @@ func applyProfile(root *cobra.Command, p *config.Profile, pinned bool) {
 		if p.Allows(commandPathRelative(cmd, root)) {
 			return
 		}
+		markSurfaceMasked(cmd)
 		cmd.Hidden = true
 		if cmd.RunE != nil || cmd.Run != nil {
 			// Cobra validates Args and parses flags *before* invoking RunE, so a
