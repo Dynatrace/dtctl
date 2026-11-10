@@ -7,9 +7,11 @@ import (
 )
 
 const (
-	// Change both values when Cluster direct central create is customer-released.
-	centralEnrichmentDefault = false
-	centralEnrichmentHidden  = true
+	// Cloud monitoring configs are created with central enrichment unless the
+	// caller opts out. Reverting to the hidden, backend-chosen mode is a matter
+	// of flipping both values back.
+	centralEnrichmentDefault = true
+	centralEnrichmentHidden  = false
 )
 
 // createCmd represents the create command
@@ -54,11 +56,10 @@ Supported resources:
 // schema, so nil ("let the backend choose") must stay distinguishable from an
 // explicit false ("keep legacy enrichment").
 //
-// While the flag is hidden and defaults to false, an untouched flag means the
-// caller has no opinion and the field is omitted. Once centralEnrichmentDefault
-// flips to true at customer release the value is always sent explicitly, so
-// --central-enrichment=false remains a working opt-out instead of silently
-// falling back to the backend default.
+// With centralEnrichmentDefault set to true the value is always sent
+// explicitly, so --central-enrichment=false remains a working opt-out instead
+// of silently falling back to the backend default. Only with the default off
+// does an untouched flag mean "no opinion" and omit the field.
 func centralEnrichmentIntent(cmd *cobra.Command, enabled bool) *bool {
 	if !centralEnrichmentDefault && !cmd.Flags().Changed("central-enrichment") {
 		return nil
@@ -67,7 +68,7 @@ func centralEnrichmentIntent(cmd *cobra.Command, enabled bool) *bool {
 }
 
 func addCentralEnrichmentFlag(command *cobra.Command, target *bool) {
-	command.Flags().BoolVar(target, "central-enrichment", centralEnrichmentDefault, "Use central enrichment configuration")
+	command.Flags().BoolVar(target, "central-enrichment", centralEnrichmentDefault, "Use central enrichment configuration (--central-enrichment=false keeps legacy enrichment)")
 	if centralEnrichmentHidden {
 		_ = command.Flags().MarkHidden("central-enrichment")
 	}
