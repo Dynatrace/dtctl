@@ -62,15 +62,11 @@ type FunctionExecutorResponse struct {
 	Logs   string      `json:"logs"`
 }
 
-// SDKVersion represents an SDK version
-type SDKVersion struct {
-	Version string `json:"version"`
-	Default bool   `json:"default"`
-}
-
-// SDKVersionsResponse represents SDK versions response
+// SDKVersionsResponse represents the SDK versions response: the SDK layer
+// version plus, per SDK package, every version the function executor offers.
 type SDKVersionsResponse struct {
-	Versions []SDKVersion `json:"versions"`
+	LayerVersion string              `json:"layerVersion"`
+	Packages     map[string][]string `json:"packages"`
 }
 
 // escapeFunctionName escapes a function name for the "/api/" portion of an
@@ -232,7 +228,10 @@ func (h *FunctionHandler) GetSDKVersions(ctx context.Context) (*SDKVersionsRespo
 
 	var result SDKVersionsResponse
 	if err := json.Unmarshal(resp.Body(), &result); err != nil {
-		return nil, fmt.Errorf("parse SDK versions response: %w", err)
+		return nil, fmt.Errorf("parse SDK versions response: unexpected structure: %w", err)
+	}
+	if result.Packages == nil {
+		return nil, fmt.Errorf("parse SDK versions response: unexpected structure: missing \"packages\" object")
 	}
 
 	return &result, nil
