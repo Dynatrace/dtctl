@@ -379,15 +379,27 @@ always-available floor, and composition with the stability floor and
 Rules that keep the definition from meaning something other than what it says:
 
 - `Profile` and `ProfileDefinition` are mutually exclusive.
-- The definition's name is also written to `DTCTL_PROFILE` for the run, so an
-  `Env` entry cannot select a preset — or `full` — in its place.
+- The session pins `DTCTL_PROFILE` to the definition's name for the run, so
+  nothing in the process environment selects a preset — or `full` — in its
+  place. An `Env` entry naming a different profile is an error, not silently
+  overridden: it means the host believes some other profile applies. Because
+  the host pinned the profile, a `profile_blocked` error does not suggest
+  unsetting `DTCTL_PROFILE`.
 - The name is required, has no whitespace, and is not `full`.
-- A blank entry is refused; whitespace inside an entry is normalized
-  (`"get   analyzers"` is `get analyzers`). An empty list is valid and leaves
-  only the always-available commands.
+- A blank entry is refused, and so is an entry that starts with `dtctl` or
+  contains a flag token (`query --dql`): entries are command paths relative to
+  the root, and allow every flag of the command they name. An empty list is
+  valid and leaves only the always-available commands.
+- The definition is copied once when the request is accepted; what is
+  validated is what runs.
 - Entries are canonical paths. An alias a caller types (`get az`) still runs,
-  because cobra resolves it to `get analyzers` before the profile is consulted;
-  an alias *in the list* (`get az`) matches nothing.
+  because cobra resolves it to `get analyzers` before the profile is consulted.
+  An alias or a misspelling *in the list* selects no command of its own, but
+  still allows its ancestors (`get`).
+- An entry allows every ancestor, and an ancestor that runs on its own runs its
+  own body: `apply extension-config` also allows `apply -f <any file>`. For a
+  group that only lists subcommands (`get`) that is harmless; list an entry
+  under a runnable parent only if that parent may run too.
 
 dtctl does not check that each entry names an existing command: an entry for a
 command the stability floor hides, or one added in a later release, is not an

@@ -141,16 +141,17 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSurface(req.SafetyLevel, req.Profile, req.ProfileDefinition, req.MinStability, req.StabilityExceptions); err != nil {
+	profileDef := req.ProfileDefinition.sessionProfile() // one snapshot, as in Execute
+	if err := validateSurface(req.SafetyLevel, req.Profile, profileDef, req.Env, req.MinStability, req.StabilityExceptions); err != nil {
 		return nil, err
 	}
-	env := requestEnv(req.Env, req.Profile, req.ProfileDefinition)
+	env := requestEnv(req.Env, req.Profile)
 	res, err := cmd.Parse(argv, cmd.ParseOptions{
 		SafetyLevel:         config.SafetyLevel(req.SafetyLevel),
 		MinStability:        config.StabilityLevel(req.MinStability),
 		StabilityExceptions: req.StabilityExceptions,
 		NoDeprecated:        req.NoDeprecated,
-		Profile:             req.ProfileDefinition.sessionProfile(),
+		Profile:             profileDef,
 		Env:                 env,
 		BlockedCommands:     unsupportedCommands,
 		Context:             ctx,

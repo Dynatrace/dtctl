@@ -13,8 +13,8 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/engine"
 )
 
-// hostProfile is a host-defined allowlist, as a service like dt-control keeps
-// on its own side of the engine.
+// hostProfile is a host-defined allowlist, as an embedding service keeps on
+// its own side of the engine.
 func hostProfile() *engine.ProfileDefinition {
 	return &engine.ProfileDefinition{
 		Name:        "host-agent",
@@ -95,20 +95,54 @@ func TestParse_ProfileDefinitionResolvesAliases(t *testing.T) {
 	require.Equal(t, "profile_blocked", ue.Code)
 }
 
-// TestParse_ProfileDefinitionWinsOverEnv: a DTCTL_PROFILE entry in Env cannot
-// select a different profile — in particular not "full" — in place of the
-// definition.
-func TestParse_ProfileDefinitionWinsOverEnv(t *testing.T) {
+// TestProfileDefinition_ConflictingEnvIsRejected: a DTCTL_PROFILE entry in Env
+// naming any other profile — in particular "full" — is a host bug, refused
+// before anything runs. Naming the definition itself is harmless.
+func TestProfileDefinition_ConflictingEnvIsRejected(t *testing.T) {
 	for _, env := range []string{"full", "investigate"} {
 		_, err := engine.Parse(context.Background(), engine.ParseRequest{
 			Command:           "get buckets",
 			ProfileDefinition: hostProfile(),
 			Env:               map[string]string{"DTCTL_PROFILE": env},
 		})
+		require.ErrorContains(t, err, "DTCTL_PROFILE", "DTCTL_PROFILE=%s", env)
 		var ue *engine.UsageError
-		require.ErrorAs(t, err, &ue, "DTCTL_PROFILE=%s", env)
-		require.Equal(t, "profile_blocked", ue.Code)
+		require.NotErrorAs(t, err, &ue)
+
+		res, err := engine.Execute(context.Background(), engine.Request{
+			Command:           "get buckets",
+			EnvironmentURL:    unroutable,
+			Token:             "t",
+			ProfileDefinition: hostProfile(),
+			Env:               map[string]string{"DTCTL_PROFILE": env},
+		})
+		require.ErrorContains(t, err, "DTCTL_PROFILE", "DTCTL_PROFILE=%s", env)
+		require.Nil(t, res)
 	}
+
+	_, err := engine.Parse(context.Background(), engine.ParseRequest{
+		Command:           "get buckets",
+		ProfileDefinition: hostProfile(),
+		Env:               map[string]string{"DTCTL_PROFILE": "host-agent"},
+	})
+	var ue *engine.UsageError
+	require.ErrorAs(t, err, &ue)
+	require.Equal(t, "profile_blocked", ue.Code)
+}
+
+// TestExecute_ProfileDefinitionErrorHasNoUnsetHint: the profile is pinned by
+// the host, so the error must not tell the caller to unset DTCTL_PROFILE.
+func TestExecute_ProfileDefinitionErrorHasNoUnsetHint(t *testing.T) {
+	res, err := engine.Execute(context.Background(), engine.Request{
+		Command:           "get buckets --agent",
+		EnvironmentURL:    unroutable,
+		Token:             "t",
+		ProfileDefinition: hostProfile(),
+	})
+	require.NoError(t, err)
+	out := string(res.Stdout) + string(res.Stderr)
+	require.Contains(t, out, "profile_blocked")
+	require.NotContains(t, out, "unset")
 }
 
 // TestParse_ProfileDefinitionNormalizesEntries: an entry with stray

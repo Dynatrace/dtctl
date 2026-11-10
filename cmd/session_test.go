@@ -353,6 +353,7 @@ func TestRunWithSession_HostAliasesIgnored(t *testing.T) {
 // changing its definition afterwards does not change a later run's surface.
 func TestRunWithSession_ProfileDefinition(t *testing.T) {
 	clearAgentEnvVars(t)
+	t.Setenv("DTCTL_PROFILE", "")
 
 	def := &config.Profile{Name: "host-agent", Commands: []string{"get analyzers"}}
 	session := &Session{EnvironmentURL: "https://x.example.invalid", Token: "t", Profile: def}
@@ -380,8 +381,35 @@ func TestSessionRejectsInvalidProfileDefinition(t *testing.T) {
 		{Name: config.ProfileFull},
 		{Name: "a b"},
 		{Name: "p", Commands: []string{""}},
+		{Name: "p", Commands: []string{"query --dql"}},
+		{Name: "p", Commands: []string{"dtctl query"}},
 	} {
 		s := &Session{EnvironmentURL: "https://x.example.invalid", Token: "t", Profile: p}
 		require.Error(t, s.validate(), "profile %+v", p)
 	}
+}
+
+// TestRunWithSession_ProfileDefinitionIsPinned: an Env entry cannot select a
+// different profile in place of the session's, and the refusal of a command
+// outside it does not tell the caller to unset DTCTL_PROFILE.
+func TestRunWithSession_ProfileDefinitionIsPinned(t *testing.T) {
+	clearAgentEnvVars(t)
+	t.Setenv("DTCTL_PROFILE", "")
+
+	session := &Session{
+		EnvironmentURL: "https://x.example.invalid",
+		Token:          "t",
+		Profile:        &config.Profile{Name: "host-agent", Commands: []string{"get analyzers"}},
+	}
+
+	_, err := Parse([]string{"get", "buckets"}, ParseOptions{
+		Profile: session.Profile,
+		Env:     map[string]string{"DTCTL_PROFILE": "full"},
+	})
+	require.ErrorContains(t, err, "DTCTL_PROFILE")
+
+	code, out := captureRun(t, []string{"get", "buckets", "--agent"}, RunOptions{Session: session})
+	require.NotZero(t, code)
+	require.Contains(t, out, "profile_blocked")
+	require.NotContains(t, out, "unset")
 }
