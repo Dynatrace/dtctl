@@ -276,7 +276,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # Federates into the cloud signing service
-    uses: Dynatrace/dt-sign-service-actions/.github/workflows/sign-windows.yml@v1
+    uses: Dynatrace/dt-sign-service-actions/.github/workflows/sign-windows.yml@cc7a0c02f73a28667e3188e6c3455a51c6c9c744 # v1
     with:
       unsigned-artifact-name: unsigned-windows-amd64
       file-to-sign: dtctl.exe
@@ -298,7 +298,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # Federates into the cloud signing service
-    uses: Dynatrace/dt-sign-service-actions/.github/workflows/sign-windows.yml@v1
+    uses: Dynatrace/dt-sign-service-actions/.github/workflows/sign-windows.yml@cc7a0c02f73a28667e3188e6c3455a51c6c9c744 # v1
     with:
       unsigned-artifact-name: unsigned-windows-arm64
       file-to-sign: dtctl.exe

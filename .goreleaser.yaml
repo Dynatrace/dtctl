@@ -25,7 +25,7 @@ builds:
       - -s -w
       - -X github.com/Dynatrace/dtctl/pkg/version.Version={{.Version}}
       - -X github.com/Dynatrace/dtctl/pkg/version.Commit={{.ShortCommit}}
-      - -X github.com/Dynatrace/dtctl/pkg/version.Date={{.Date}}
+      - -X github.com/Dynatrace/dtctl/pkg/version.Date={{.CommitDate}}
     hooks:
       post:
         # Release pipeline only: with SIGNED_WINDOWS_DIR set, replace the freshly
