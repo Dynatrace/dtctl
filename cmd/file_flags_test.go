@@ -161,6 +161,9 @@ func TestFileFlagAnnotationsAreValid(t *testing.T) {
 		annotationPrompts:            true,
 		annotationRefusalOnly:        true,
 		annotationPromptsOneArgument: true,
+		annotationLocal:              true,
+		annotationRunsDQL:            true,
+		annotationResolvesUser:       true,
 	}
 	for _, k := range stabilityAnnotationKeys {
 		known[k] = true
@@ -174,7 +177,7 @@ func TestFileFlagAnnotationsAreValid(t *testing.T) {
 			if k == annotationInputWithoutArgs && v != "true" {
 				t.Errorf("%s: %s = %q, want \"true\"", c.CommandPath(), k, v)
 			}
-			if (k == annotationRefusalOnly || k == annotationPromptsOneArgument) && v != "true" {
+			if (k == annotationRefusalOnly || k == annotationPromptsOneArgument || k == annotationLocal || k == annotationRunsDQL) && v != "true" {
 				t.Errorf("%s: %s = %q, want \"true\"", c.CommandPath(), k, v)
 			}
 			if k == annotationPrompts {
@@ -191,8 +194,11 @@ func TestFileFlagAnnotationsAreValid(t *testing.T) {
 					}
 				}
 			}
-			if k == annotationScopes && v != scopesInputDependent {
-				t.Errorf("%s: %s = %q, want %q", c.CommandPath(), k, v, scopesInputDependent)
+			if k == annotationResolvesUser && v != "true" && lookupOwnFlag(c, v) == nil {
+				t.Errorf("%s: %s = %q, want \"true\" or a flag of the command", c.CommandPath(), k, v)
+			}
+			if k == annotationScopes && v != scopesInputDependent && v != scopesDQL && v != scopesAny {
+				t.Errorf("%s: %s = %q, want %q, %q or %q", c.CommandPath(), k, v, scopesInputDependent, scopesDQL, scopesAny)
 			}
 		}
 		c.LocalFlags().VisitAll(func(f *pflag.Flag) {

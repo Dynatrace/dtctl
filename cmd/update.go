@@ -78,6 +78,7 @@ func newUpdateSettingsHintCmd() *cobra.Command {
 		},
 	}
 	stability.MarkStable(c)
+	markLocal(c)
 	return c
 }
 

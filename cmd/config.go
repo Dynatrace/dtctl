@@ -104,6 +104,7 @@ func newConfigCmd() *cobra.Command {
 		Long:  `View and modify dtctl configuration including contexts and credentials.`,
 	}
 	stability.MarkStable(c)
+	markLocal(c)
 	return c
 }
 

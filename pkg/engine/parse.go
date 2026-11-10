@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/Dynatrace/dtctl/cmd"
 	"github.com/Dynatrace/dtctl/pkg/config"
@@ -53,10 +52,26 @@ type Parsed struct {
 	// --check-scopes, which does not run the command.
 	RequiresInput bool
 
-	// RequiredScopes are the token scopes the command needs, complete when
-	// Scopes is ScopesKnown, and never nil.
-	RequiredScopes []string
-	Scopes         ScopeRequirement
+	// MinimumScopes are the exact scopes the command cannot run without: a
+	// token that lacks one fails. [] means the command needs no particular
+	// scope.
+	//
+	// MaximumScopes are the scopes the command can use, as patterns: "*"
+	// matches any text, including none, and every other character matches
+	// itself. A host restricts the command's token to the scopes the user
+	// holds that match one. [] means the command has no platform access (it is
+	// local, or the command line asks for help); ["*"] means it can use any
+	// scope the user holds, which is also the answer for a command whose
+	// scopes dtctl does not know.
+	//
+	// Both are always non-nil, every minimum scope matches a maximum pattern,
+	// and both come from fixed lists in dtctl: never from a DQL statement, a
+	// payload or an input file. They are only as correct as those lists (the
+	// scope catalog, auth.ResourceScopes): a catalog entry that names the
+	// wrong scope gives a wrong minimum and a maximum without the scope the
+	// command calls, so a token restricted to it fails.
+	MinimumScopes []string
+	MaximumScopes []string
 
 	// Help is true when the command line asks for help text (--help) or names
 	// a group that only prints its usage. Nothing would run: Verb and Resource
@@ -82,24 +97,6 @@ type ParsedFlag struct {
 	Name  string // the long name, without dashes
 	Value string
 }
-
-// ScopeRequirement says how certain Parsed.RequiredScopes is.
-type ScopeRequirement string
-
-const (
-	// ScopesNone: the catalog names no scopes for the command. For a local
-	// command (ctx, commands) that is the answer; for a command the catalog is
-	// still missing scopes for, it under-reports.
-	ScopesNone ScopeRequirement = "none"
-	// ScopesKnown: RequiredScopes is the command's requirement.
-	ScopesKnown ScopeRequirement = "known"
-	// ScopesPerCall: the scopes are decided by the call (exec api), and
-	// resolving them needs the environment's API specification.
-	ScopesPerCall ScopeRequirement = "per_call"
-	// ScopesInputDependent: the scopes are decided by the input file's
-	// content (apply), which Parse does not read.
-	ScopesInputDependent ScopeRequirement = "input_dependent"
-)
 
 // UsageError is a command line that Execute would refuse before running the
 // command. ExitCode is the exit code Execute returns for it (2 for a usage
@@ -160,21 +157,17 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 	if err != nil {
 		return nil, err
 	}
-	scopes, err := scopeRequirementOf(res.Scopes)
-	if err != nil {
-		return nil, err
-	}
 	return &Parsed{
-		Verb:           res.Verb,
-		Resource:       res.Resource,
-		InputFiles:     res.InputFiles,
-		OutputFiles:    res.OutputFiles,
-		RequiresInput:  res.RequiresInput,
-		RequiredScopes: res.RequiredScopes,
-		Scopes:         scopes,
-		Help:           res.Help,
-		Flags:          parsedFlagsOf(res.Flags),
-		Args:           res.Args,
+		Verb:          res.Verb,
+		Resource:      res.Resource,
+		InputFiles:    res.InputFiles,
+		OutputFiles:   res.OutputFiles,
+		RequiresInput: res.RequiresInput,
+		MinimumScopes: res.MinimumScopes,
+		MaximumScopes: res.MaximumScopes,
+		Help:          res.Help,
+		Flags:         parsedFlagsOf(res.Flags),
+		Args:          res.Args,
 	}, nil
 }
 
@@ -184,17 +177,6 @@ func parsedFlagsOf(flags []cmd.ParsedFlag) []ParsedFlag {
 		out = append(out, ParsedFlag{Name: f.Name, Value: f.Value})
 	}
 	return out
-}
-
-// scopeRequirementOf maps cmd's name for a requirement to its constant. A
-// name with no constant is an engine fault, not a value to pass on: a host
-// switching on the constants would fall through without noticing.
-func scopeRequirementOf(name string) (ScopeRequirement, error) {
-	switch r := ScopeRequirement(name); r {
-	case ScopesNone, ScopesKnown, ScopesPerCall, ScopesInputDependent:
-		return r, nil
-	}
-	return "", fmt.Errorf("engine: parse: unknown scope requirement %q", name)
 }
 
 // Parse analyses a command line with the rules the package-level Parse
