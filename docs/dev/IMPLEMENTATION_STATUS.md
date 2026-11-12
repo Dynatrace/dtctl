@@ -52,7 +52,7 @@ This document tracks the current implementation status of dtctl. For future plan
 - [x] `wait` - Wait for conditions on resources (polling with exponential backoff)
 - [x] `history` - Show version history (snapshots)
 - [x] `restore` - Restore to previous version
-- [x] `share/unshare` - Share dashboards and notebooks
+- [x] `share/unshare` - Share documents of any type with users, groups, or the whole environment (`--environment link,public`, experimental; `apply --share-environment` is deprecated in its favor)
 - [x] `claim environment-share` - Claim an environment share by ID or `#share=` URL; returns the document ID/type/access (experimental)
 - [x] `alias` - Manage command aliases (set, list, delete, import, export)
 - [x] `ctx` - Quick context management (list, switch, describe, set, delete)
