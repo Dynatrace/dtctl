@@ -245,3 +245,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      # The Claude Code plugin (binaries of all platforms + the skill) is a second
+      # release asset. It is built from the GoReleaser output in dist/, so it is not
+      # part of checksums.txt. The version inside it is the release version, which is
+      # what makes Claude Code update an installed plugin (and its binary).
+      - name: Build and upload the Claude Code plugin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.republish_tag || needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          .github/scripts/build-plugin.sh "$TAG"
+          gh release upload "$TAG" dist/dtctl-plugin.zip --clobber

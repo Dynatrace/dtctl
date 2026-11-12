@@ -1,0 +1,8 @@
+{
+  "name": "dtctl",
+  "version": "0.0.0-dev",
+  "description": "kubectl-inspired CLI for Dynatrace. Ships the dtctl binary for Windows, Linux and macOS and the dtctl skill.",
+  "author": { "name": "Dynatrace" },
+  "repository": "https://github.com/Dynatrace/dtctl",
+  "license": "Apache-2.0"
+}
