@@ -546,7 +546,8 @@ Two caveats worth knowing:
   query unless approximate answers are what the whole context is for.
 
 Limits apply to `dtctl query` and `dtctl wait query`. `dtctl inventory` keeps its
-own discovery cap (`--scan-limit-gbytes`, default 25).
+own discovery caps (`--scan-limit-gbytes`, default 25, and `--max-result-bytes`,
+unset by default) and does not read this block.
 
 ## Usage Tracking
 
