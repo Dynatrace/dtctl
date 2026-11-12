@@ -78,7 +78,10 @@ an instrumentation change or an ingest — use 'dtctl inventory arrivals'.
 			if err != nil {
 				return err
 			}
-			runner := newInventoryRunner(cmd, cfg, c)
+			runner, err := newInventoryRunner(cmd, cfg, c)
+			if err != nil {
+				return err
+			}
 
 			// Segments come from the API, not DQL — fetched here, best-effort. A
 			// failure must stay distinguishable from "no segments exist".
@@ -148,10 +151,15 @@ func loadDefinitionsFile(ctx context.Context, path string) (*inventory.Definitio
 const inventoryMaxResultRecords = 20000
 
 // inventoryRunner adapts the DQL executor to the discovery Runner interface.
-// Every probe carries the scan cap; queries are tagged for observability.
+// Every probe carries the scan cap, and the byte cap when one was set; queries
+// are tagged for observability.
 type inventoryRunner struct {
 	executor    *exec.DQLExecutor
 	scanLimitGB float64
+	// maxResultBytes bounds one probe's response body. Zero leaves it to the
+	// platform, as before the flag existed. The record cap does not bound the
+	// size of a row, so a custom probe can return a large body without it.
+	maxResultBytes int64
 }
 
 func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunResult, error) {
@@ -159,6 +167,7 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 	resp, err := r.executor.ExecuteQueryWithContext(ctx, dql, exec.DQLExecuteOptions{
 		DefaultScanLimitGbytes: r.scanLimitGB,
 		MaxResultRecords:       inventoryMaxResultRecords,
+		MaxResultBytes:         r.maxResultBytes,
 		ClientContext:          "inventory",
 	})
 	if err != nil {
@@ -294,6 +303,18 @@ func addInventoryDiscoveryFlags(cmd *cobra.Command) {
 	cmd.Flags().Int("budget-queries", 100, "Discovery budget: max queries")
 	cmd.Flags().Float64("budget-seconds", 300, "Discovery budget: max cumulative query seconds — a query that would overrun it is cut off")
 	cmd.Flags().Float64("scan-limit-gbytes", 25, "Scan cap applied to every discovery probe")
+	cmd.Flags().Int64("max-result-bytes", 0, "Result-size cap in bytes applied to every discovery probe (0 = platform default)")
+}
+
+// inventoryMaxResultBytes reads --max-result-bytes. A negative value is
+// refused rather than dropped: only a positive limit reaches the request, so
+// -1 would run every probe with no byte cap while the caller believed one held.
+func inventoryMaxResultBytes(cmd *cobra.Command) (int64, error) {
+	v, _ := cmd.Flags().GetInt64("max-result-bytes")
+	if v < 0 {
+		return 0, fmt.Errorf("--max-result-bytes must not be negative (got %d); use 0 for the platform default", v)
+	}
+	return v, nil
 }
 
 // inventoryDefinitions builds the capability set a run evaluates.
@@ -321,12 +342,17 @@ func inventoryBudget(cmd *cobra.Command) (int, float64) {
 	return queries, seconds
 }
 
-func newInventoryRunner(cmd *cobra.Command, cfg *config.Config, c *client.Client) *inventoryRunner {
+func newInventoryRunner(cmd *cobra.Command, cfg *config.Config, c *client.Client) (*inventoryRunner, error) {
 	scanLimitGB, _ := cmd.Flags().GetFloat64("scan-limit-gbytes")
-	return &inventoryRunner{
-		executor:    newDQLExecutorFromConfig(cmdContext(cmd), cfg, c),
-		scanLimitGB: scanLimitGB,
+	maxResultBytes, err := inventoryMaxResultBytes(cmd)
+	if err != nil {
+		return nil, err
 	}
+	return &inventoryRunner{
+		executor:       newDQLExecutorFromConfig(cmdContext(cmd), cfg, c),
+		scanLimitGB:    scanLimitGB,
+		maxResultBytes: maxResultBytes,
+	}, nil
 }
 
 // inventoryCancelContext cancels discovery cleanly on Ctrl+C, so a run aborts

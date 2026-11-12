@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -513,6 +514,23 @@ func TestDiscoverTruncatedEmptyProbeIsUnknown(t *testing.T) {
 		if a.Name == "rap" {
 			t.Errorf("a limit-cut probe must not fabricate absence evidence: %+v", a)
 		}
+	}
+}
+
+// A probe cut by the byte limit (--max-result-bytes) that still returned a
+// matching row is present: one hit answers an existence probe, so the rows
+// past the cut cannot change the verdict.
+func TestDiscoverByteCutProbeWithAMatchIsPresent(t *testing.T) {
+	runner := testRunner()
+	runner.responses = append([]mockResponse{
+		{match: "RAPPROBE", records: []map[string]interface{}{{"n": 1}}, truncated: true, cause: TruncationResultLimit},
+	}, runner.responses...)
+	inv, err := Discover(context.Background(), runner, testDefs(), DiscoverOptions{})
+	if err != nil {
+		t.Fatalf("Discover() error: %v", err)
+	}
+	if !slices.Contains(inv.Capabilities, "rap") {
+		t.Errorf("a byte-cut probe with a match must be present, got capabilities=%v unknown=%v", inv.Capabilities, inv.Unknown)
 	}
 }
 

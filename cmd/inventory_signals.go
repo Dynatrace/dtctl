@@ -127,7 +127,10 @@ Examples:
 
 			scanLimitGB, _ := cmd.Flags().GetFloat64("scan-limit-gbytes")
 			noSample, _ := cmd.Flags().GetBool("no-sample")
-			runner := newInventoryRunner(cmd, cfg, c)
+			runner, err := newInventoryRunner(cmd, cfg, c)
+			if err != nil {
+				return err
+			}
 			ctx, cancel := inventoryCancelContext(cmd)
 			defer cancel()
 

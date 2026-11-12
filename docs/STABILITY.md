@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 19 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 951
+- entries below (commands + flags): 953
 
 ## Surface
 
@@ -898,12 +898,14 @@ inventory                            experimental  since 0.39.0
   --budget-queries                   experimental
   --budget-seconds                   experimental
   --definitions                      experimental
+  --max-result-bytes                 experimental
   --no-builtin-definitions           experimental
   --scan-limit-gbytes                experimental
 inventory arrivals                   experimental
   --budget-queries                   experimental
   --budget-seconds                   experimental
   --definitions                      experimental
+  --max-result-bytes                 experimental
   --no-builtin-definitions           experimental
   --no-sample                        experimental
   --require                          experimental
