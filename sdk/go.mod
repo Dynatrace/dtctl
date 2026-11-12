@@ -1,6 +1,6 @@
 module github.com/Dynatrace/dtctl/sdk
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/adrg/xdg v0.5.3
