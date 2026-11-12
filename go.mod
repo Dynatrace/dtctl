@@ -1,6 +1,6 @@
 module github.com/Dynatrace/dtctl
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/Dynatrace/dtctl/sdk v0.45.0 // x-release-please-version
