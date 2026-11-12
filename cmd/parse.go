@@ -26,6 +26,8 @@ type ParseOptions struct {
 	MinStability        config.StabilityLevel
 	StabilityExceptions []string
 	NoDeprecated        bool
+	// Profile is a host-defined command profile, as Session.Profile.
+	Profile *config.Profile
 
 	// Env sets environment variables for the analysis, as RunOptions.Env
 	// does for a run (e.g. DTCTL_PROFILE).
@@ -151,6 +153,7 @@ func parseWith(argv []string, opts ParseOptions, fsys vfs.FS, stdin io.Reader) (
 		MinStability:        opts.MinStability,
 		StabilityExceptions: opts.StabilityExceptions,
 		NoDeprecated:        opts.NoDeprecated,
+		Profile:             opts.Profile,
 		parseOnly:           true,
 	}
 	inv := &invocation{session: session, blocked: opts.BlockedCommands, concurrent: true} // no capabilities

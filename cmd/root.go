@@ -224,6 +224,9 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", err)
 		return code
 	}
+	if completeMaskedTarget(cmdContext(root), root, spanArgs) {
+		return 0
+	}
 
 	// Initialise OpenTelemetry tracing. Done after alias resolution so that
 	// the span name reflects the actual command (not a pre-alias invocation).
@@ -452,6 +455,8 @@ var verbSynonyms = map[string]struct{ verb, hint string }{
 // non-nil error is reported with the returned exit code, and the command does
 // not run.
 func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool) (int, error) {
+	dropStaleCompletionCommand(root)
+
 	// --- Command profile filter ---
 	// Resolve the active profile (DTCTL_PROFILE > context binding > full) and
 	// mask out-of-profile commands before Cobra dispatches, so help, the
@@ -462,7 +467,7 @@ func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool
 	if profErr != nil {
 		return exitCodeForError(profErr), profErr
 	}
-	applyProfile(root, prof)
+	applyProfile(root, prof, currentSession(cmdContext(root)) != nil)
 
 	// --- Blocked-command filter (embedded callers) ---
 	// Mask commands the embedding caller declared unsupported in its

@@ -21,6 +21,7 @@ type ParseRequest struct {
 
 	SafetyLevel         string
 	Profile             string
+	ProfileDefinition   *ProfileDefinition // as Request.ProfileDefinition
 	MinStability        string
 	StabilityExceptions []string
 	NoDeprecated        bool
@@ -140,7 +141,8 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSurface(req.SafetyLevel, req.MinStability, req.StabilityExceptions); err != nil {
+	profileDef := req.ProfileDefinition.sessionProfile() // one snapshot, as in Execute
+	if err := validateSurface(req.SafetyLevel, req.Profile, profileDef, req.Env, req.MinStability, req.StabilityExceptions); err != nil {
 		return nil, err
 	}
 	env := requestEnv(req.Env, req.Profile)
@@ -149,6 +151,7 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 		MinStability:        config.StabilityLevel(req.MinStability),
 		StabilityExceptions: req.StabilityExceptions,
 		NoDeprecated:        req.NoDeprecated,
+		Profile:             profileDef,
 		Env:                 env,
 		BlockedCommands:     unsupportedCommands,
 		Context:             ctx,

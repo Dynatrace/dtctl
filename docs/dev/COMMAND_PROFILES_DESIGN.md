@@ -52,8 +52,10 @@ many surfaces.
   unset `DTCTL_PROFILE` or edit config. For real restriction, scope the API token.
 - **Per-flag filtering.** Profiles operate at command granularity, not flag
   granularity. Hiding individual flags of a visible command is out of scope.
-- **Dynamic/remote profiles.** Profiles are defined locally in config. No
-  server-delivered profile definitions.
+- **Remote profiles.** dtctl never fetches a profile definition. A CLI profile
+  is defined locally in config; an embedding host may hand the engine a
+  definition in-process (see [Host-defined profiles](#host-defined-profiles-in-the-engine)),
+  which is still local to the process that runs dtctl.
 - **Read/write filtering.** A profile does not know or care whether a command
   mutates. "No writes" is a *safety level*, set independently on the context. A
   profile never enumerates mutating commands.
@@ -168,6 +170,15 @@ Both are pure discovery: they run no operation, read no data, and mutate nothing
 They are merged into every profile's allowlist so a minimal profile never hides
 the very catalog an agent needs to discover its surface.
 
+`help` being available does not make every command's help available:
+`help <command>` answers exactly what `<command> --help` answers, so help on a
+masked command is that command's refusal (`profile_blocked`,
+`unsupported_in_service`, or the stability floor's error). dtctl installs its
+own `help` command, declared `stable`, for this: cobra's built-in one printed
+the target's help unconditionally, and was created lazily during `Execute`,
+after the masks had run, so on a reused tree its fate depended on whether an
+earlier run had created it.
+
 **Everything else is subject to the allowlist -- including `config`, `ctx`,
 `completion`, and `version`.** This is deliberate. Earlier drafts kept
 `config`/`ctx` always-available for "context management", but those verbs can
@@ -281,7 +292,12 @@ returns the named profile (or nil for `full`).
 The key enabling fact: **every discovery surface we care about already honors
 `cmd.Hidden`.**
 
-- Cobra's help and shell completion skip hidden commands natively.
+- Cobra's help and shell completion skip hidden commands natively when they
+  *list* subcommands. They do not stop at a hidden command named explicitly:
+  `help <masked>` and a completion request for `<masked> --` used to print its
+  help and flags. dtctl's own `help` command answers as `<command> --help`
+  does, and a completion request whose target a surface stage masked
+  completes nothing (every stage marks what it masks, `isSurfaceMasked`).
 - `pkg/commands/listing.go` (which backs `dtctl commands` and `commands howto`)
   already skips hidden commands -- e.g. `listing.go:196`
   (`if hiddenCommands[name] || cmd.Hidden { continue }`) and the analogous checks
@@ -347,6 +363,65 @@ One deliberate difference: the blocked mask also guards **non-runnable parents**
 (and neutralizes their arg/flag parsing), so a masked bare `config` cannot answer
 with its own help text and exit 0. The profile mask guards only runnable nodes.
 See [SERVICE_ENGINE_DESIGN.md](SERVICE_ENGINE_DESIGN.md).
+
+### Host-defined profiles in the engine
+
+A service embedding dtctl (`pkg/engine`) often owns its allowlist: it is part
+of the service's own contract, reviewed and versioned with the service, and a
+preset in dtctl would have to change in lockstep with it. So besides selecting
+a preset by name (`Request.Profile`), a request can carry the definition
+itself:
+
+```go
+engine.Execute(ctx, engine.Request{
+	// ...
+	ProfileDefinition: &engine.ProfileDefinition{
+		Name:     "my-service",
+		Commands: []string{"query", "get analyzers", "describe analyzer"},
+	},
+})
+```
+
+The definition goes onto the session (`cmd.Session.Profile`), whose synthetic
+config carries it in `profiles:` and binds the session context to it. From
+there it is an ordinary config-file profile: the same `Allows`, the same mask,
+the same `profile_blocked` error, the same catalog metadata. The host keeps the
+list; dtctl keeps the semantics — alias resolution, parent reachability, the
+always-available floor, and composition with the stability floor and
+`BlockedCommands`.
+
+Rules that keep the definition from meaning something other than what it says:
+
+- `Profile` and `ProfileDefinition` are mutually exclusive.
+- The session pins `DTCTL_PROFILE` to the definition's name for the run, so
+  nothing in the process environment selects a preset — or `full` — in its
+  place. An `Env` entry naming a different profile is an error, not silently
+  overridden: it means the host believes some other profile applies. Because
+  the host pinned the profile, a `profile_blocked` error does not suggest
+  unsetting `DTCTL_PROFILE`.
+- The name is required, has no whitespace, and is not `full`.
+- A blank entry is refused, and so is an entry that starts with `dtctl` or
+  contains a flag token (`query --dql`): entries are command paths relative to
+  the root, and allow every flag of the command they name. An empty list is
+  valid and leaves only the always-available commands.
+- The definition is copied once when the request is accepted; what is
+  validated is what runs.
+- Entries are canonical paths. An alias a caller types (`get az`) still runs,
+  because cobra resolves it to `get analyzers` before the profile is consulted.
+  An alias or a misspelling *in the list* selects no command of its own, but
+  still allows its ancestors (`get`).
+- An entry allows every ancestor, and an ancestor that runs on its own runs its
+  own body: `apply extension-config` also allows `apply -f <any file>`. For a
+  group that only lists subcommands (`get`) that is harmless; list an entry
+  under a runnable parent only if that parent may run too.
+
+dtctl does not check that each entry names an existing command: an entry for a
+command the stability floor hides, or one added in a later release, is not an
+error. A host that wants an upgrade to fail when a listed command is renamed or
+removed checks that in its own tests: `engine.Parse` on `<entry> --help` for
+every entry, with the request's floor, and compare `Verb`/`Resource` with the
+entry. An unknown verb is a `*UsageError`, but an unknown resource is not — it
+falls back to the verb's help, with `Help` set and `Resource` empty.
 
 ### Config schema changes
 

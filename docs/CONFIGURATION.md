@@ -734,7 +734,8 @@ lets an agent discover its surface and a user get help:
 
 - `commands` (and `commands howto`) -- the machine-readable catalog agents
   bootstrap from
-- `help`
+- `help` -- `help <command>` answers what `<command> --help` does, so it is
+  refused for a command outside the profile
 
 Everything else is subject to the allowlist, **including `config`, `ctx`,
 `completion`, and `version`**. This is deliberate: `config`/`ctx` can rotate

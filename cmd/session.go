@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/stability"
@@ -67,6 +68,19 @@ type Session struct {
 	// passes any floor, it merely has a removal date. Off by default, because
 	// a host that has not asked to be broken early should not be.
 	NoDeprecated bool
+	// Profile, when non-nil, is a command profile the host defines itself
+	// rather than one of the built-in presets: the session's context is bound
+	// to it, so it shapes the surface exactly as a profile defined in a config
+	// file would (default-deny, aliases resolved against the real tree, the
+	// always-available catalog kept). It keeps the allowlist with the host
+	// that owns it instead of in dtctl.
+	//
+	// The session pins DTCTL_PROFILE to Profile.Name for the run, so an
+	// RunOptions.Env entry cannot select a preset — or "full" — in its place;
+	// an Env entry naming a different profile is an error rather than being
+	// silently overridden. See config.Profile.Validate for what a definition
+	// may contain.
+	Profile *config.Profile
 
 	// Transport, when non-nil, carries every platform request this invocation
 	// sends, in place of the process-wide connection pool. It is how a host
@@ -151,6 +165,11 @@ func (s *Session) validate() error {
 	if _, err := stability.ParseExceptions(s.StabilityExceptions); err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
+	if s.Profile != nil {
+		if err := s.Profile.Validate(); err != nil {
+			return fmt.Errorf("session: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -192,6 +211,14 @@ func (s *Session) syntheticConfig() *config.Config {
 			Name:  tokenRef,
 			Token: s.Token,
 		}},
+	}
+	if s.Profile != nil {
+		// Cloned, so a caller of cmd.Run that mutates its definition while
+		// the run is in flight cannot change the surface between two reads.
+		cfg.Profiles = map[string]config.Profile{
+			s.Profile.Name: {Description: s.Profile.Description, Commands: slices.Clone(s.Profile.Commands)},
+		}
+		cfg.Contexts[0].Context.Profile = s.Profile.Name
 	}
 	// The inline token must win unconditionally; no host credential store should
 	// be consulted for a synthetic session config.
@@ -260,6 +287,12 @@ func applyRunEnvironment(ctx context.Context, opts RunOptions) (cleanup func(), 
 		if err := opts.Session.validate(); err != nil {
 			return nil, err
 		}
+		if p := opts.Session.Profile; p != nil {
+			if v := opts.Env[config.ProfileEnvVar]; v != "" && v != p.Name {
+				return nil, fmt.Errorf("session: Env sets %s=%q, but the session defines profile %q",
+					config.ProfileEnvVar, v, p.Name)
+			}
+		}
 	}
 
 	// A concurrent invocation records its
@@ -305,6 +338,12 @@ func applyRunEnvironment(ctx context.Context, opts RunOptions) (cleanup func(), 
 	}
 	for key, value := range opts.Env {
 		set(key, value)
+	}
+	// A session profile is pinned here rather than by each caller, so the
+	// guarantee holds for every caller of Run and Parse, not only the engine.
+	// An Env entry naming another profile was refused above.
+	if opts.Session != nil && opts.Session.Profile != nil {
+		set(config.ProfileEnvVar, opts.Session.Profile.Name)
 	}
 
 	if concurrent {

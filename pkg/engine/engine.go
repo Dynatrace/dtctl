@@ -66,8 +66,17 @@ type Request struct {
 	SafetyLevel string
 	// Profile selects a built-in command profile (e.g. "query") that reduces
 	// the visible command surface for this request. Empty is the full
-	// (service-supported) surface.
+	// (service-supported) surface. Mutually exclusive with ProfileDefinition.
 	Profile string
+	// ProfileDefinition is a command profile the host defines itself, for a
+	// host whose allowlist is its own rather than one of dtctl's presets. It
+	// behaves exactly like a profile in a config file: default-deny, matched
+	// against the real command tree (so an alias of an allowed command runs
+	// like its full name), hidden from help, `dtctl commands` and shell
+	// completion, and refused with profile_blocked — `help <command>`
+	// included. Mutually exclusive with Profile and with a
+	// DTCTL_PROFILE entry in Env that names a different profile.
+	ProfileDefinition *ProfileDefinition
 	// MinStability is the stability floor for this request: the weakest
 	// contract a command or flag may offer and still be reachable
 	// (stable | experimental). `development` is rejected — that tier is gated
@@ -120,8 +129,51 @@ type Request struct {
 	// DTCTL_OUTPUT). Applied after credential scrubbing, so entries here win;
 	// grant with care — the engine deliberately does not expose this in its
 	// HTTP reference wrapper. Profile, when set, overrides an Env entry for
-	// DTCTL_PROFILE.
+	// DTCTL_PROFILE. With ProfileDefinition, a DTCTL_PROFILE entry naming any
+	// other profile is an error.
 	Env map[string]string
+}
+
+// ProfileDefinition is a host-defined command profile: a default-deny
+// allowlist of command paths. An entry allows the command it names and its
+// whole subtree, and every ancestor of it. Being an ancestor allows the
+// command itself, not only the way through to the entry: listing
+// "apply extension-config" also allows `apply -f <any file>`, because `apply`
+// runs on its own. For a group that only lists its subcommands (`get`) that is
+// harmless; for a parent that runs, list it only if it may run. `commands` and
+// `help` are always available whatever the list says; `help <command>` answers
+// what `<command> --help` does, so it refuses a command outside the list.
+//
+// Entries name commands by their canonical path: "get workflows", not
+// "get wf". A caller's alias still runs, because it resolves to the canonical
+// command before the profile is consulted. An alias or a misspelling in the
+// list selects no command of its own, but still allows its ancestors.
+// Validate-time checks catch a flag token or a leading "dtctl"; whether every
+// entry names a real command is for the host's own tests.
+type ProfileDefinition struct {
+	// Name identifies the profile in the profile_blocked error and in the
+	// `dtctl commands` metadata. Required, without whitespace, and not
+	// "full" — that name means no profile at all.
+	Name string
+	// Description is a human-readable summary of the profile's purpose.
+	Description string
+	// Commands is the allowlist of space-separated command paths. Empty
+	// leaves only the always-available commands.
+	Commands []string
+}
+
+// sessionProfile converts a definition into the profile a session carries,
+// copying it: the copy is the request's snapshot, validated and run as one.
+// nil stays nil: no definition, no profile.
+func (p *ProfileDefinition) sessionProfile() *config.Profile {
+	if p == nil {
+		return nil
+	}
+	return &config.Profile{
+		Name:        p.Name,
+		Description: p.Description,
+		Commands:    append([]string(nil), p.Commands...),
+	}
 }
 
 // Result is the outcome of one execution. Stdout and Stderr are byte-identical
@@ -252,7 +304,11 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 	if err != nil {
 		return nil, err
 	}
-	if err := req.validate(); err != nil {
+	// One snapshot of the definition, taken before anything reads it: what is
+	// validated is exactly what runs, even when the host mutates its
+	// definition while this request waits for a slot.
+	profileDef := req.ProfileDefinition.sessionProfile()
+	if err := req.validate(profileDef); err != nil {
 		return nil, err
 	}
 	if limits.MaxFileBytes > 0 {
@@ -326,6 +382,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 			MinStability:        config.StabilityLevel(req.MinStability),
 			StabilityExceptions: req.StabilityExceptions,
 			NoDeprecated:        req.NoDeprecated,
+			Profile:             profileDef,
 			Transport:           transport,
 		},
 		Env:             env,
@@ -398,19 +455,33 @@ func commandArgv(command string, argv []string) ([]string, error) {
 // surface as Go errors instead of a CLI error transcript. The same
 // constraints are enforced again inside the run (cmd.Session.validate) —
 // this is the caller-friendly first line.
-func (r *Request) validate() error {
+func (r *Request) validate(profileDef *config.Profile) error {
 	if r.EnvironmentURL == "" {
 		return errors.New("engine: EnvironmentURL is required")
 	}
 	if r.Token == "" {
 		return errors.New("engine: Token is required")
 	}
-	return validateSurface(r.SafetyLevel, r.MinStability, r.StabilityExceptions)
+	return validateSurface(r.SafetyLevel, r.Profile, profileDef, r.Env, r.MinStability, r.StabilityExceptions)
 }
 
 // validateSurface checks the fields that decide a request's surface, which
 // Request and ParseRequest share.
-func validateSurface(safetyLevel, minStability string, exceptions []string) error {
+func validateSurface(safetyLevel, profile string, definition *config.Profile, env map[string]string, minStability string, exceptions []string) error {
+	if definition != nil {
+		// Naming a second profile is a host bug however it is spelled; picking
+		// one would leave the host believing the other applied.
+		if profile != "" {
+			return errors.New("engine: Profile and ProfileDefinition are mutually exclusive")
+		}
+		if v := env[config.ProfileEnvVar]; v != "" && v != definition.Name {
+			return fmt.Errorf("engine: Env sets %s=%q, but ProfileDefinition defines profile %q",
+				config.ProfileEnvVar, v, definition.Name)
+		}
+		if err := definition.Validate(); err != nil {
+			return fmt.Errorf("engine: %w", err)
+		}
+	}
 	if safetyLevel != "" {
 		valid := false
 		for _, l := range config.ValidSafetyLevels() {
@@ -484,7 +555,9 @@ func (e *Engine) effectiveLimits(limits Limits) Limits {
 
 // requestEnv is the environment a request runs under: its Env, with Profile
 // (when set) overriding DTCTL_PROFILE. Execute and Parse both build it here, so
-// they cannot disagree about which profile a request resolves.
+// they cannot disagree about which profile a request resolves. A
+// ProfileDefinition is pinned by the session itself (cmd.Session.Profile), so
+// it needs nothing here.
 func requestEnv(env map[string]string, profile string) map[string]string {
 	out := make(map[string]string, len(env)+1)
 	for k, v := range env {
