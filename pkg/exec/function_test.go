@@ -284,3 +284,61 @@ func TestReadFileOrStdinWith_UsesTheGivenEnv(t *testing.T) {
 		t.Errorf("ReadFileOrStdin = %q, %v, want the installed filesystem's file", got, err)
 	}
 }
+
+// TestFunctionExecutor_SDKMajorVersions pins that SDK versions reach the ad-hoc
+// request: nil leaves the field out, an empty map is sent as {}, and Defer,
+// which ad-hoc execution ignores, does not drop them.
+func TestFunctionExecutor_SDKMajorVersions(t *testing.T) {
+	versions := map[string]string{"@dynatrace-sdk/adhoc-utils": "1"}
+	tests := []struct {
+		name     string
+		opts     FunctionExecuteOptions
+		wantBody string
+	}{
+		{
+			name:     "ad-hoc code sends them",
+			opts:     FunctionExecuteOptions{SourceCode: "code", SDKMajorVersions: versions},
+			wantBody: `{"sourceCode":"code","sdkMajorVersions":{"@dynatrace-sdk/adhoc-utils":"1"}}`,
+		},
+		{
+			name:     "unset leaves them out",
+			opts:     FunctionExecuteOptions{SourceCode: "code"},
+			wantBody: `{"sourceCode":"code"}`,
+		},
+		{
+			name:     "empty map is sent as {}",
+			opts:     FunctionExecuteOptions{SourceCode: "code", SDKMajorVersions: map[string]string{}},
+			wantBody: `{"sourceCode":"code","sdkMajorVersions":{}}`,
+		},
+		{
+			name:     "defer is ignored for ad-hoc code",
+			opts:     FunctionExecuteOptions{SourceCode: "code", Defer: true, SDKMajorVersions: versions},
+			wantBody: `{"sourceCode":"code","sdkMajorVersions":{"@dynatrace-sdk/adhoc-utils":"1"}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var bodies []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				bodies = append(bodies, string(b))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"result":1,"logs":""}`))
+			}))
+			defer server.Close()
+			c, err := client.NewForTesting(server.URL, "test-token")
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+
+			_, err = NewFunctionExecutor(c).Execute(tt.opts)
+
+			if err != nil {
+				t.Fatalf("Execute() unexpected error: %v", err)
+			}
+			if len(bodies) != 1 || bodies[0] != tt.wantBody {
+				t.Errorf("bodies = %q, want [%s]", bodies, tt.wantBody)
+			}
+		})
+	}
+}

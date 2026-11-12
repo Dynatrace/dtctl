@@ -924,6 +924,16 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// A value the command itself found invalid, typed so the code does not
+	// depend on how the message happens to be worded.
+	var invalidInput *invalidInputError
+	if errors.As(err, &invalidInput) {
+		return &output.ErrorDetail{
+			Code:    "validation_error",
+			Message: err.Error(),
+		}
+	}
+
 	// suggest.FlagError — unknown flag with "did you mean?" suggestion
 	var flagErr *suggest.FlagError
 	if errors.As(err, &flagErr) {
@@ -1275,6 +1285,13 @@ func exitCodeForError(err error) int {
 	}
 
 	if errors.Is(err, errEmptyFlagValue) {
+		return client.ExitUsageError
+	}
+
+	// A bad value the caller passed: the same exit as any other usage error,
+	// to match the validation_error code agent mode reports for it.
+	var invalidInput *invalidInputError
+	if errors.As(err, &invalidInput) {
 		return client.ExitUsageError
 	}
 

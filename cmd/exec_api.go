@@ -217,6 +217,19 @@ func validateRequestPath(p string) (canonical string, err error) {
 	return resapi.CanonicalRequestPath(p)
 }
 
+// atFileName splits a curl-style flag value: "@name" names a file to read
+// ("@-" for stdin), anything else is the value itself. A bare "@" is an error
+// naming the flag as spelled. Shared by exec api -d and exec function
+// --sdk-major-versions so the two parse "@" the same way; each reads the file
+// its own way, since an empty body is valid for one and not the other.
+func atFileName(flag, value string) (name string, isPath bool, err error) {
+	name, isPath = strings.CutPrefix(value, "@")
+	if isPath && name == "" {
+		return "", false, fmt.Errorf("%s @ needs a filename, or @- to read stdin", flag)
+	}
+	return name, isPath, nil
+}
+
 // readRequestBody resolves the -d value: inline text, @file, or @- for stdin —
 // the curl idiom, because that is what a caller reaching for a raw HTTP call
 // already knows.
@@ -228,13 +241,12 @@ func readRequestBody(ctx context.Context, data string) ([]byte, error) {
 	if data == "" {
 		return nil, nil
 	}
-	if !strings.HasPrefix(data, "@") {
-		return []byte(data), nil
+	name, isPath, err := atFileName("-d", data)
+	if err != nil {
+		return nil, err
 	}
-
-	name := strings.TrimPrefix(data, "@")
-	if name == "" {
-		return nil, fmt.Errorf("-d @ needs a filename, or @- to read stdin")
+	if !isPath {
+		return []byte(data), nil
 	}
 	// ReadFileOrStdin maps "-" to the process stdin, which is the stream seam an
 	// embedded invocation swaps. Opening /dev/stdin as a path would slip past it.

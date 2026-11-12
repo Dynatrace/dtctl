@@ -73,9 +73,9 @@ func (h *FunctionHandler) DeferExecution(req *DeferredExecutionRequest) (*Deferr
 	return fromSDKDeferredExecutionResponse(sdkResult), nil
 }
 
-// ExecuteCode executes ad-hoc JavaScript code using the function executor
-func (h *FunctionHandler) ExecuteCode(sourceCode, payload string) (*FunctionExecutorResponse, error) {
-	return h.sdk.ExecuteCode(context.Background(), sourceCode, payload)
+// ExecuteRequest executes a prepared ad-hoc function executor request
+func (h *FunctionHandler) ExecuteRequest(req *FunctionExecutorRequest) (*FunctionExecutorResponse, error) {
+	return h.sdk.ExecuteRequest(context.Background(), req)
 }
 
 // GetSDKVersions lists available SDK versions as returned by the function executor
