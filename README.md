@@ -118,6 +118,9 @@ cp -r skills/dtctl ~/.agents/skills/   # Cross-client (any agent)
 
 Compatible with GitHub Copilot, Claude Code, OpenAI Codex CLI, Cursor, Kiro, Junie, OpenCode, OpenClaw, and other [Agent Skills](https://agentskills.io)-compatible tools. See the **[AI Agent Mode docs](docs/AGENT_MODE.md)** for details on the structured JSON envelope and agent auto-detection.
 
+When agent mode is auto-detected, `--no-agent` opts out of the structured
+JSON envelope.
+
 ### Dynatrace domain skills
 
 For deeper Dynatrace domain knowledge (DQL syntax, observability patterns, dashboards, logs, Kubernetes, and more) install the skills from **[Dynatrace/dynatrace-for-ai](https://github.com/Dynatrace/dynatrace-for-ai)**:
