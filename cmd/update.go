@@ -27,6 +27,7 @@ from a YAML/JSON file (the update-only counterpart to 'create document').
 
 Available resources:
   document                Update an existing document of any type from a file
+  credential              Rotate the secret of a credential vault entry, keeping its ID
   breakpoint              Update breakpoint condition/enabled state or workspace filters
   extension               Activate a specific, latest-installed, or Hub-latest version of an extension
   extensions              Bulk-upgrade all installed extensions (requires --all)
@@ -85,6 +86,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.AddCommand(updateDocumentCmd)
 	updateCmd.AddCommand(updateSettingsHintCmd)
+	updateCmd.AddCommand(updateCredentialCmd)
 }
 
 // Declared stable: the invocation and output contract of this command is

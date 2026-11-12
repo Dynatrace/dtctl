@@ -84,6 +84,7 @@ This document tracks the current implementation status of dtctl. For future plan
 | app | ✅ | ✅ | - | ✅ | - | - |
 | function | ✅ | ✅ | - | - | - | - |
 | edgeconnect | ✅ | ✅ | ✅ | ✅ | - | - |
+| credential (vault) | ✅ | ✅ | ✅ | ✅ | - | - |
 | user | ✅ | ✅ | - | - | - | - |
 | group | ✅ | ✅ | - | - | - | - |
 | analyzer | ✅ | ✅ | - | - | - | - |

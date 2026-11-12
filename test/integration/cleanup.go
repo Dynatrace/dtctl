@@ -15,6 +15,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
 	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
 	"github.com/Dynatrace/dtctl/pkg/resources/bucket"
+	"github.com/Dynatrace/dtctl/pkg/resources/credentialvault"
 	"github.com/Dynatrace/dtctl/pkg/resources/document"
 	"github.com/Dynatrace/dtctl/pkg/resources/edgeconnect"
 	"github.com/Dynatrace/dtctl/pkg/resources/extension"
@@ -222,6 +223,14 @@ func (c *CleanupTracker) deleteResource(resource Resource) error {
 		}
 		return err
 
+	case "credential":
+		err := credentialvault.NewHandler(c.client).Delete(resource.ID)
+		// Ignore 404 errors - resource already deleted is OK
+		if err != nil && isNotFoundError(err) {
+			return nil
+		}
+		return err
+
 	case "edgeconnect":
 		handler := edgeconnect.NewHandler(c.client)
 		err := handler.Delete(resource.ID)
@@ -390,6 +399,13 @@ func (c *CleanupTracker) verifyDeletion(resource Resource) error {
 			return nil
 		}
 		return fmt.Errorf("slo %s still exists after deletion", resource.ID)
+
+	case "credential":
+		if _, err := credentialvault.NewHandler(c.client).Get(resource.ID); err != nil {
+			// We expect an error (404) - this is success
+			return nil
+		}
+		return fmt.Errorf("credential %s still exists after deletion", resource.ID)
 
 	case "edgeconnect":
 		handler := edgeconnect.NewHandler(c.client)

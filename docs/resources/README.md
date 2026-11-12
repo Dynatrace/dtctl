@@ -9,6 +9,7 @@ Per-resource reference for [`dtctl`](https://github.com/Dynatrace/dtctl). Each p
 - [Anomaly Detectors](anomaly-detectors.md)
 - [App Engine](app-engine.md)
 - [Cloud Integrations](cloud-integrations.md)
+- [Credential Vault](credential-vault.md)
 - [DQL Queries](dql-queries.md)
 - [Dashboards & Notebooks](dashboards-notebooks.md)
 - [Davis CoPilot](copilot.md)

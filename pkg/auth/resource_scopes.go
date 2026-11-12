@@ -138,6 +138,10 @@ var ResourceScopes = map[string]AccessScopes{
 	"setting":         {Read: []string{"settings:objects:read", "app-settings:objects:read"}, Write: []string{"settings:objects:write"}},
 	"settings-schema": {Read: []string{"settings:schemas:read"}},
 
+	// Credential vault (/platform/credential-vault/v1/entries).
+	// Delete uses the write scope (no distinct :delete scope in the API spec).
+	"credential": {Read: []string{"credential-vault:entries:read"}, Write: []string{"credential-vault:entries:write"}},
+
 	// SLOs
 	"slo":          {Read: []string{"slo:slos:read", "slo:objective-templates:read"}, Write: []string{"slo:slos:write"}},
 	"slo-template": {Read: []string{"slo:objective-templates:read"}},
@@ -414,6 +418,7 @@ func (s *scopeSet) addReadTier(extended bool) {
 	s.addResource("analyzer", AccessRead)
 	s.addResource("app", AccessRead)
 	s.addResource("edgeconnect", AccessRead)
+	s.addResource("credential", AccessRead)
 	s.addResource("notification", AccessRead)
 	s.add("hub:catalog:read")
 	s.addResource("classic-pipelines", AccessRead)
@@ -456,6 +461,7 @@ func (s *scopeSet) addAllExtras() {
 	s.add("davis-copilot:nl2dql:execute", "davis-copilot:dql2nl:execute", "davis-copilot:document-search:execute")
 	s.addResource("app", AccessWrite, AccessDelete)
 	s.addResource("edgeconnect", AccessWrite)
+	s.addResource("credential", AccessWrite)
 	s.addResource("notification", AccessWrite)
 }
 
@@ -484,6 +490,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("analyzer", AccessRead)
 	s.addResource("app", AccessRead)
 	s.addResource("edgeconnect", AccessRead)
+	s.addResource("credential", AccessRead)
 	s.addResource("notification", AccessRead)
 	s.add("hub:catalog:read")
 	s.addResource("classic-pipelines", AccessRead)
@@ -518,6 +525,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("app", AccessWrite, AccessDelete)
 	s.addResource("function", AccessRun)
 	s.addResource("edgeconnect", AccessWrite, AccessDelete)
+	s.addResource("credential", AccessWrite)
 	s.addResource("notification", AccessWrite)
 	s.add("email:emails:send", "dev-obs:breakpoints:set")
 }
