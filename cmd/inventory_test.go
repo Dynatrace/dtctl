@@ -3,12 +3,19 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	cmdtestutil "github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
@@ -149,4 +156,114 @@ func TestInventoryOutputGoldenAgent(t *testing.T) {
 		t.Fatalf("print failed: %v", err)
 	}
 	cmdtestutil.AssertGolden(t, "inventory/agent", buf.String())
+}
+
+// grailRecorder serves one canned query:execute body and records the
+// maxResultBytes each request carried, so a test can see what a discovery
+// probe asked Grail for.
+type grailRecorder struct {
+	srv  *httptest.Server
+	seen []map[string]any
+}
+
+func newGrailRecorder(t *testing.T, body string) *grailRecorder {
+	t.Helper()
+	g := &grailRecorder{}
+	g.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		g.seen = append(g.seen, req)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(g.srv.Close)
+	return g
+}
+
+func (g *grailRecorder) runner(t *testing.T, maxResultBytes int64) *inventoryRunner {
+	t.Helper()
+	c, err := client.NewForTesting(g.srv.URL, "test-token")
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	return &inventoryRunner{executor: exec.NewDQLExecutor(c), scanLimitGB: 25, maxResultBytes: maxResultBytes}
+}
+
+const oneRowBody = `{"state":"SUCCEEDED","result":{"records":[{"n":1}],"metadata":{"grail":{"queryId":"q"}}}}`
+
+// A probe carries --max-result-bytes as maxResultBytes. Unset, the request
+// stays as it was before the flag existed: no maxResultBytes, platform default.
+func TestInventoryRunnerSendsMaxResultBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		bytes int64
+		want  any // nil = key absent
+	}{
+		{"set", 1000000, float64(1000000)},
+		{"unset", 0, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGrailRecorder(t, oneRowBody)
+			if _, err := g.runner(t, tc.bytes).RunQuery(context.Background(), "fetch logs | limit 1"); err != nil {
+				t.Fatalf("RunQuery: %v", err)
+			}
+			if len(g.seen) == 0 {
+				t.Fatal("no request reached the server")
+			}
+			got, present := g.seen[0]["maxResultBytes"]
+			if tc.want == nil {
+				if present {
+					t.Errorf("maxResultBytes = %v sent with the flag unset; the request must stay as before", got)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Errorf("maxResultBytes = %v, want %v", got, tc.want)
+			}
+			// The existing caps still ride along.
+			if g.seen[0]["maxResultRecords"] != float64(inventoryMaxResultRecords) || g.seen[0]["defaultScanLimitGbytes"] != float64(25) {
+				t.Errorf("record or scan cap lost: %v", g.seen[0])
+			}
+		})
+	}
+}
+
+// A probe Grail cut at the byte limit is truncated with the result-limit
+// cause, so discovery reads a probe with no matching row as unknown rather
+// than absent.
+func TestInventoryRunnerByteCutIsTruncated(t *testing.T) {
+	body := `{"state":"SUCCEEDED","result":{"records":[{"n":1}],"metadata":{"grail":{"queryId":"q",
+	  "notifications":[{"severity":"WARNING","notificationType":"RESULT_LIMIT_BYTES",
+	    "message":"Your result has been limited because the maximum bytes (1000) were reached."}]}}}}`
+	res, err := newGrailRecorder(t, body).runner(t, 1000).RunQuery(context.Background(), "fetch logs")
+	if err != nil {
+		t.Fatalf("RunQuery: %v", err)
+	}
+	if !res.Truncated || res.TruncationCause != inventory.TruncationResultLimit {
+		t.Errorf("byte cut: truncated=%v cause=%q, want true/%q", res.Truncated, res.TruncationCause, inventory.TruncationResultLimit)
+	}
+}
+
+// Both discovery commands take the flag, and a negative value is refused:
+// dtctl sends only a positive limit, so -1 would silently mean "no limit".
+func TestInventoryMaxResultBytesFlag(t *testing.T) {
+	for _, c := range []*cobra.Command{newInventoryCmd(), newInventoryArrivalsCmd()} {
+		if c.Flags().Lookup("max-result-bytes") == nil {
+			t.Errorf("%s has no --max-result-bytes", c.Name())
+		}
+	}
+	c := newInventoryCmd()
+	if err := c.Flags().Set("max-result-bytes", "-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inventoryMaxResultBytes(c); err == nil {
+		t.Error("--max-result-bytes -1 accepted; it must be refused, not dropped")
+	}
+	c = newInventoryCmd()
+	if err := c.Flags().Set("max-result-bytes", "5000000"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := inventoryMaxResultBytes(c); err != nil || got != 5000000 {
+		t.Errorf("inventoryMaxResultBytes = %d, %v; want 5000000, nil", got, err)
+	}
 }
