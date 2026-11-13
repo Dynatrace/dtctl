@@ -22,6 +22,7 @@ spec:
   # TODO(APPDEV-20026): switch to `production` once v1.0.0 ships (GA).
   lifecycle: experimental
   owner: group:default/team-app-forge
+  system: dt-platform/platform-services
   dependsOn:
     - component:default/dynatrace-control
     - githubapp:delivery/dtctl-homebrew-tap-app
