@@ -838,6 +838,16 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// HeaderRefusedError — the embedding caller's header policy refused an
+	// `exec api -H` header.
+	var headerErr *HeaderRefusedError
+	if errors.As(err, &headerErr) {
+		return &output.ErrorDetail{
+			Code:    "header_refused",
+			Message: headerErr.Headline(),
+		}
+	}
+
 	// CapabilityError — a host-restricted ability (subprocess spawn: plugins,
 	// aliases, hooks, editor, browser) was requested but not granted.
 	var capErr *CapabilityError
@@ -1246,6 +1256,11 @@ func exitCodeForError(err error) int {
 
 	var unsupportedErr *UnsupportedCommandError
 	if errors.As(err, &unsupportedErr) {
+		return client.ExitUsageError
+	}
+
+	var headerErr *HeaderRefusedError
+	if errors.As(err, &headerErr) {
 		return client.ExitUsageError
 	}
 

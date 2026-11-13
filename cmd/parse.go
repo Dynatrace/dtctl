@@ -33,6 +33,9 @@ type ParseOptions struct {
 	// BlockedCommands removes top-level commands from the surface, as
 	// RunOptions.BlockedCommands does.
 	BlockedCommands map[string]string
+	// HeaderPolicy refuses `exec api -H` headers, as RunOptions.HeaderPolicy
+	// does.
+	HeaderPolicy func(name string) string
 	// Context bounds the wait for a serialized invocation to finish. nil is
 	// context.Background().
 	Context context.Context
@@ -153,7 +156,7 @@ func parseWith(argv []string, opts ParseOptions, fsys vfs.FS, stdin io.Reader) (
 		NoDeprecated:        opts.NoDeprecated,
 		parseOnly:           true,
 	}
-	inv := &invocation{session: session, blocked: opts.BlockedCommands, concurrent: true} // no capabilities
+	inv := &invocation{session: session, blocked: opts.BlockedCommands, headerPolicy: opts.HeaderPolicy, concurrent: true} // no capabilities
 	ctx = withInvocation(ctx, inv)
 	defer inv.ended.Store(true)
 

@@ -42,6 +42,10 @@ import (
 var execAPICmd = newExecAPICmd()
 
 func newExecAPICmd() *cobra.Command {
+	// headerMap is what PreRunE parsed for this execution. The body reuses it
+	// rather than parsing again, so the host's header policy is asked about
+	// each header once.
+	var headerMap map[string]string
 	c := &cobra.Command{
 		Use:    "api <path>",
 		Short:  "Send a request to a platform API endpoint (escape hatch)",
@@ -84,7 +88,17 @@ Examples:
   dtctl describe api <name> --operation 'POST /things'
 `,
 		Args: cobra.ExactArgs(1),
-		RunE: runExecAPI,
+		// The headers are checked here rather than in the body, so that Parse,
+		// which runs no command body, refuses what Execute would.
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			headers, _ := cmd.Flags().GetStringArray("header")
+			var err error
+			headerMap, err = parseHeaderFlags(headers, currentHeaderPolicy(cmdContext(cmd)))
+			return err
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecAPI(cmd, args, headerMap)
+		},
 	}
 	c.Flags().StringP("method", "X", http.MethodGet, "HTTP method")
 	c.Flags().StringP("data", "d", "",
@@ -101,12 +115,11 @@ Examples:
 // preserved — but a multi-megabyte body would bury it.
 const maxErrorBodyBytes = 4096
 
-func runExecAPI(cmd *cobra.Command, args []string) error {
+func runExecAPI(cmd *cobra.Command, args []string, headerMap map[string]string) error {
 	requestPath := args[0]
 
 	method, _ := cmd.Flags().GetString("method")
 	data, _ := cmd.Flags().GetString("data")
-	headers, _ := cmd.Flags().GetStringArray("header")
 
 	method = strings.ToUpper(strings.TrimSpace(method))
 	if method == "" {
@@ -133,11 +146,6 @@ func runExecAPI(cmd *cobra.Command, args []string) error {
 	}
 
 	body, err := readRequestBody(cmdContext(cmd), data)
-	if err != nil {
-		return err
-	}
-
-	headerMap, err := parseHeaderFlags(headers)
 	if err != nil {
 		return err
 	}
@@ -217,6 +225,19 @@ func validateRequestPath(p string) (canonical string, err error) {
 	return resapi.CanonicalRequestPath(p)
 }
 
+// atFileName splits a curl-style flag value: "@name" names a file to read
+// ("@-" for stdin), anything else is the value itself. A bare "@" is an error
+// naming the flag as spelled. Shared by exec api -d and exec function
+// --sdk-major-versions so the two parse "@" the same way; each reads the file
+// its own way, since an empty body is valid for one and not the other.
+func atFileName(flag, value string) (name string, isPath bool, err error) {
+	name, isPath = strings.CutPrefix(value, "@")
+	if isPath && name == "" {
+		return "", false, fmt.Errorf("%s @ needs a filename, or @- to read stdin", flag)
+	}
+	return name, isPath, nil
+}
+
 // readRequestBody resolves the -d value: inline text, @file, or @- for stdin —
 // the curl idiom, because that is what a caller reaching for a raw HTTP call
 // already knows.
@@ -228,13 +249,12 @@ func readRequestBody(ctx context.Context, data string) ([]byte, error) {
 	if data == "" {
 		return nil, nil
 	}
-	if !strings.HasPrefix(data, "@") {
-		return []byte(data), nil
+	name, isPath, err := atFileName("-d", data)
+	if err != nil {
+		return nil, err
 	}
-
-	name := strings.TrimPrefix(data, "@")
-	if name == "" {
-		return nil, fmt.Errorf("-d @ needs a filename, or @- to read stdin")
+	if !isPath {
+		return []byte(data), nil
 	}
 	// ReadFileOrStdin maps "-" to the process stdin, which is the stream seam an
 	// embedded invocation swaps. Opening /dev/stdin as a path would slip past it.
@@ -251,7 +271,11 @@ func readRequestBody(ctx context.Context, data string) ([]byte, error) {
 // Auth headers are refused: the context is the identity, and dtctl attaches
 // its credentials itself. A -H that replaced them would fight the client's own
 // auth silently — whichever writes last wins, and nothing would say so.
-func parseHeaderFlags(headers []string) (map[string]string, error) {
+//
+// policy, when set, is the embedding caller's say over the rest (see
+// RunOptions.HeaderPolicy). It sees the normalized name; the name sent is the
+// caller's, canonicalized but not folded.
+func parseHeaderFlags(headers []string, policy func(name string) string) (map[string]string, error) {
 	out := make(map[string]string, len(headers))
 	for _, h := range headers {
 		name, value, found := strings.Cut(h, ":")
@@ -266,6 +290,11 @@ func parseHeaderFlags(headers []string) (map[string]string, error) {
 		if canonical == "Authorization" || canonical == "Proxy-Authorization" {
 			return nil, fmt.Errorf("refusing -H %s: dtctl sends the current context's credentials; "+
 				"to call as a different identity, switch contexts (dtctl ctx use <name>)", canonical)
+		}
+		if policy != nil {
+			if reason := policy(normalizeHeaderName(name)); reason != "" {
+				return nil, &HeaderRefusedError{Header: canonical, Reason: reason}
+			}
 		}
 		out[canonical] = strings.TrimSpace(value)
 	}

@@ -136,6 +136,11 @@ func (e *UsageError) Error() string { return e.Message }
 //
 // Experimental: Parse and its types may change until a second host uses them.
 func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
+	return parse(ctx, req, nil)
+}
+
+// parse is Parse with the Engine's header policy (WithHeaderPolicy).
+func parse(ctx context.Context, req ParseRequest, headerPolicy func(name string) string) (*Parsed, error) {
 	argv, err := commandArgv(req.Command, req.Argv)
 	if err != nil {
 		return nil, err
@@ -151,6 +156,7 @@ func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
 		NoDeprecated:        req.NoDeprecated,
 		Env:                 env,
 		BlockedCommands:     unsupportedCommands,
+		HeaderPolicy:        headerPolicy,
 		Context:             ctx,
 	})
 	var pe *cmd.ParseError
@@ -201,7 +207,8 @@ func scopeRequirementOf(name string) (ScopeRequirement, error) {
 // applies. It takes no execution slot: it does no I/O, and a host must not see
 // a parse refused because slow executions hold every slot. On an Engine built
 // without WithConcurrentExecution it still waits for a running Execute, as the
-// package-level Parse documents.
+// package-level Parse documents. It refuses the headers the Engine's
+// WithHeaderPolicy refuses.
 func (e *Engine) Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
-	return Parse(ctx, req)
+	return parse(ctx, req, e.headerPolicy)
 }

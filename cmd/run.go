@@ -62,6 +62,14 @@ type RunOptions struct {
 	// nil is the full surface (the CLI default). See applyBlockedCommands.
 	BlockedCommands map[string]string
 
+	// HeaderPolicy lets the embedding caller refuse request headers passed to
+	// `exec api -H`. It receives the normalized header name (canonicalized,
+	// "_" folded to "-") and returns why the header is refused, or "" to allow
+	// it. A refusal is a HeaderRefusedError (agent-mode code "header_refused"),
+	// returned before any request is sent and before --dry-run prints one. nil
+	// applies only the CLI's own refusals (Authorization, Proxy-Authorization).
+	HeaderPolicy func(name string) string
+
 	// Context carries the request's context into the Cobra command tree so
 	// command bodies can observe cancellation and deadlines via cmd.Context().
 	// nil defaults to context.Background(), preserving CLI behaviour.
@@ -171,10 +179,11 @@ func Run(argv []string, opts RunOptions) (code int) {
 	// every accessor below — streams, environment, capabilities, session —
 	// resolves to it rather than to the package globals.
 	inv := &invocation{
-		session:    opts.Session,
-		blocked:    opts.BlockedCommands,
-		caps:       granted,
-		concurrent: opts.Concurrent,
+		session:      opts.Session,
+		blocked:      opts.BlockedCommands,
+		headerPolicy: opts.HeaderPolicy,
+		caps:         granted,
+		concurrent:   opts.Concurrent,
 	}
 	ctx = withInvocation(ctx, inv)
 	// Registered first, so it runs last: nothing the deferred cleanups below

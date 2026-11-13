@@ -80,6 +80,7 @@ Error codes are stable identifiers that agents can match on programmatically:
 | `deprecated_surface` | The command or flag is deprecated and this context refuses deprecated surface ([`DTCTL_NO_DEPRECATED`](STABILITY.md#finding-out-early-what-a-removal-will-break)) | Don't retry; migrate to the replacement named in `suggestions` |
 | `development_disabled` | A `development`-tier feature that nobody enabled here | Don't retry; it needs `dtctl config set development.<feature> on` |
 | `unsupported_in_service` | Host-only command, unavailable in server mode | Don't retry; the suggestion says why |
+| `header_refused` | The embedding host's policy refuses a header passed to `exec api -H` | Don't retry; drop the header, the message says why |
 | `capability_disabled` | A host ability (plugin, alias, hook, editor, browser) isn't granted | Don't retry; use an in-process alternative |
 | `hook_rejected` | A pre-apply hook rejected the resource | Fix the resource, or apply with `--no-hooks` |
 | `validation_error` | Local input validation failed | Fix the file or flags |
@@ -151,7 +152,7 @@ that do not parse the envelope:
 |---|---|---|
 | `0` | Success | -- |
 | `1` | General failure | every code not listed below |
-| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, and `validation_error` for an empty flag value |
+| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, `header_refused`, and `validation_error` for an empty flag value |
 | `3` | Not authenticated (HTTP 401) | `auth_required` |
 | `4` | Resource does not exist (HTTP 404) | `not_found` |
 | `5` | Not allowed (HTTP 403) | `permission_denied`, `insufficient_scope` |

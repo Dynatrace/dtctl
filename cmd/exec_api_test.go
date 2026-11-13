@@ -178,6 +178,116 @@ func TestExecAPIRefusesCallerSuppliedAuthHeaders(t *testing.T) {
 	require.Zero(t, env.requestCount(), "the refusal must precede every request")
 }
 
+// refuseForwarded is a host header policy of the shape an embedder supplies:
+// it refuses the X-Forwarded-* family and records every name it was asked
+// about.
+type refuseForwarded struct{ seen []string }
+
+func (p *refuseForwarded) policy(name string) string {
+	p.seen = append(p.seen, name)
+	if strings.HasPrefix(name, "X-Forwarded-") {
+		return "the host states where the request came from"
+	}
+	return ""
+}
+
+// TestExecAPIHeaderPolicyRefusesBeforeAnyRequest pins that a header the host's
+// policy refuses fails the invocation before anything is sent, --dry-run
+// included, with the policy's reason and the agent-mode code a host maps to a
+// client error.
+func TestExecAPIHeaderPolicyRefusesBeforeAnyRequest(t *testing.T) {
+	env := newMockEnvironmentAt(t, "readonly")
+	p := &refuseForwarded{}
+
+	for _, extra := range [][]string{nil, {"--dry-run"}} {
+		argv := append([]string{"exec", "api", "/platform/widget/v1/widgets", "-H", "X-Forwarded-For: 203.0.113.7"}, extra...)
+		code, _, errOut := runAPI(t, argv, RunOptions{HeaderPolicy: p.policy})
+		require.Equal(t, 2, code, "args %v: %s", extra, errOut)
+		require.Contains(t, errOut, "refusing -H X-Forwarded-For: the host states where the request came from")
+	}
+
+	code, out, _ := runAPI(t, []string{
+		"exec", "api", "/platform/widget/v1/widgets", "-H", "X-Forwarded-For: 203.0.113.7", "--agent",
+	}, RunOptions{HeaderPolicy: p.policy})
+	require.Equal(t, 2, code)
+	var resp struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &resp), out)
+	require.Equal(t, "header_refused", resp.Error.Code)
+
+	require.Zero(t, env.requestCount(), "the refusal must precede every request")
+}
+
+// TestExecAPIHeaderPolicyIsAskedOnce pins that an allowed header reaches the
+// host's policy once per execution, so a policy that audits or counts sees
+// each header once and cannot answer differently for the check and the send.
+func TestExecAPIHeaderPolicyIsAskedOnce(t *testing.T) {
+	env := newMockEnvironmentAt(t, "readonly")
+	env.respond(http.MethodGet, "/platform/widget/v1/widgets", mockResponse{
+		status: 200, contentType: "application/json", body: `{}`,
+	})
+	p := &refuseForwarded{}
+
+	code, _, errOut := runAPI(t, []string{
+		"exec", "api", "/platform/widget/v1/widgets", "-H", "X-Request-Id: abc",
+	}, RunOptions{HeaderPolicy: p.policy})
+	require.Zero(t, code, errOut)
+	require.Equal(t, []string{"X-Request-Id"}, p.seen)
+}
+
+// TestExecAPIHeaderPolicySeesOneSpelling pins the normalization a policy can
+// rely on: every spelling of a name reaches it canonicalized with "_" folded to
+// "-", so it never has to list the variants. The header sent is not folded.
+func TestExecAPIHeaderPolicySeesOneSpelling(t *testing.T) {
+	for _, header := range []string{"X-Forwarded-For: x", "x-forwarded-for: x", "x_forwarded_for: x", "X_Forwarded-for: x"} {
+		p := &refuseForwarded{}
+		_, err := parseHeaderFlags([]string{header}, p.policy)
+		var refused *HeaderRefusedError
+		require.ErrorAs(t, err, &refused, "header %q", header)
+		require.Equal(t, []string{"X-Forwarded-For"}, p.seen, "header %q", header)
+	}
+
+	got, err := parseHeaderFlags([]string{"x_request_id: abc"}, (&refuseForwarded{}).policy)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"X_request_id": "abc"}, got, "the wire keeps the caller's spelling")
+}
+
+// TestExecAPIWithoutAHeaderPolicySendsHeaders pins that nothing changes unless
+// a host opts in: without a policy, embedded or not, -H sends what it is given
+// apart from the credential headers.
+func TestExecAPIWithoutAHeaderPolicySendsHeaders(t *testing.T) {
+	env := newMockEnvironmentAt(t, "readonly")
+	env.respond(http.MethodGet, "/platform/widget/v1/widgets", mockResponse{
+		status: 200, contentType: "application/json", body: `{}`,
+	})
+	session := &Session{EnvironmentURL: env.server.URL, Token: "t", SafetyLevel: "readonly"}
+
+	for _, opts := range []RunOptions{{}, {Session: session}} {
+		code, _, errOut := runAPI(t, []string{
+			"exec", "api", "/platform/widget/v1/widgets", "-H", "X-Forwarded-For: 203.0.113.7",
+		}, opts)
+		require.Zero(t, code, errOut)
+	}
+}
+
+// TestParseAppliesTheHeaderPolicy pins that Parse refuses the command line
+// Run would, though it runs no command body.
+func TestParseAppliesTheHeaderPolicy(t *testing.T) {
+	argv := []string{"exec", "api", "/platform/widget/v1/widgets", "-H", "x_forwarded_host: other.example.invalid"}
+
+	_, err := Parse(argv, ParseOptions{HeaderPolicy: (&refuseForwarded{}).policy})
+	var pe *ParseError
+	require.ErrorAs(t, err, &pe)
+	require.Equal(t, "header_refused", pe.Code)
+	require.Equal(t, 2, pe.ExitCode)
+
+	_, err = Parse(argv, ParseOptions{})
+	require.NoError(t, err)
+}
+
 // TestExecAPIRefusesToInferAMethod pins that a body does not promote a request to
 // POST the way curl does. Inferring the method would infer the safety operation,
 // which is the one thing this command must never do.
