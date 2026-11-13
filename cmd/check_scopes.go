@@ -100,16 +100,34 @@ func installScopePreflight(cmd *cobra.Command) {
 	if orig == nil {
 		return
 	}
-	cmd.RunE = func(c *cobra.Command, args []string) error {
-		skip, err := scopePreflight(c, args)
-		if err != nil {
-			return err
-		}
-		if skip {
-			return nil
-		}
-		return orig(c, args)
+	if sameFunc(orig, requireSubcommand) {
+		cmd.RunE = requireSubcommandAfterPreflight
+		return
 	}
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		return runAfterPreflight(c, args, orig)
+	}
+}
+
+// requireSubcommandAfterPreflight is requireSubcommand behind the scope
+// preflight. It is a named function and not a closure, so that isRefusal
+// (called by nestedScopesIn inside the preflight) still recognises a
+// refusal-only group.
+func requireSubcommandAfterPreflight(c *cobra.Command, args []string) error {
+	return runAfterPreflight(c, args, requireSubcommand)
+}
+
+// runAfterPreflight runs the scope preflight, then body unless the preflight
+// stops the command.
+func runAfterPreflight(c *cobra.Command, args []string, body func(*cobra.Command, []string) error) error {
+	skip, err := scopePreflight(c, args)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
+	}
+	return body(c, args)
 }
 
 // scopePreflight implements the --check-scopes verdict and the agent-mode
@@ -331,6 +349,9 @@ func scopesForInvocation(c *cobra.Command, verb, resource string) ([]string, sco
 		return nil, scopeRequirementInputDependent
 	}
 	required, req := requiredScopesIn(c.Root(), verb, resource)
+	if req == scopeRequirementNone {
+		required, req = nestedScopesIn(c, verb)
+	}
 	extra := flagContributedScopes(c, verb, resource)
 	if len(extra) == 0 || req != scopeRequirementKnown {
 		// Augmenting anything but a known requirement would invent one: a per-call
@@ -486,10 +507,7 @@ func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, sco
 	if perCallScopeCommands[verb+" "+resource] {
 		return nil, scopeRequirementPerCall
 	}
-	v, ok := scopeCatalog()[verb]
-	if !ok && root != nil && attachedDevelopmentVerb(root, verb) {
-		v, ok = commands.BuildVerbs(root)[verb]
-	}
+	v, ok := catalogVerb(root, verb)
 	if !ok {
 		return nil, scopeRequirementNone
 	}
@@ -513,6 +531,43 @@ func attachedDevelopmentVerb(root *cobra.Command, verb string) bool {
 		}
 	}
 	return false
+}
+
+// catalogVerb returns verb's entry in the scope catalog, and looks a
+// development-tier verb up in root's own catalog (see requiredScopesIn).
+func catalogVerb(root *cobra.Command, verb string) (*commands.Verb, bool) {
+	v, ok := scopeCatalog()[verb]
+	if !ok && root != nil && attachedDevelopmentVerb(root, verb) {
+		v, ok = commands.BuildVerbs(root)[verb]
+	}
+	return v, ok
+}
+
+// nestedScopesIn looks c up in the catalog by its whole path below the verb,
+// for a command the verb's resources do not list: one nested below a resource
+// (exec copilot nl2dql), or a group that runs something itself (exec
+// copilot). It reports the scopes of c's own node only: an ancestor's entry is
+// not c's requirement. A group that only asks for a subcommand (create aws)
+// calls no API, so it needs no scope, whatever its name maps to.
+func nestedScopesIn(c *cobra.Command, verb string) ([]string, scopeRequirement) {
+	if isRefusal(c) {
+		return nil, scopeRequirementNone
+	}
+	var path []string
+	for n := c; n.HasParent() && n.Parent().HasParent(); n = n.Parent() {
+		path = append([]string{n.Name()}, path...)
+	}
+	node, ok := catalogVerb(c.Root(), verb)
+	for _, name := range path {
+		if !ok {
+			return nil, scopeRequirementNone
+		}
+		node, ok = node.Subcommands[name]
+	}
+	if ok && len(node.RequiredScopes) > 0 {
+		return node.RequiredScopes, scopeRequirementKnown
+	}
+	return nil, scopeRequirementNone
 }
 
 // resolvePerCallScopes resolves the scopes this specific invocation needs, for a
