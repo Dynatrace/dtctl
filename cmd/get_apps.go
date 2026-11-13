@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -95,6 +97,68 @@ Examples:
 			return printer.Print(versions)
 		},
 	}
+	stability.MarkStable(c)
+	return c
+}
+
+// getRuntimeTypeDefinitionsCmd retrieves the TypeScript type definitions of an SDK package
+var getRuntimeTypeDefinitionsCmd = newGetRuntimeTypeDefinitionsCmd()
+
+func newGetRuntimeTypeDefinitionsCmd() *cobra.Command {
+	var packageName string
+	var majorVersion int
+	c := &cobra.Command{
+		Use:     "runtime-type-definitions",
+		Aliases: []string{"runtime-type-definition"},
+		Short:   "Get the TypeScript type definitions of an SDK package",
+		Long: `Get the TypeScript type definitions (.d.ts) of a package available in the
+function executor runtime, for a given major version.
+
+Examples:
+  dtctl get runtime-type-definitions --package-name @dynatrace-sdk/client-automation --major-version 8
+`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(packageName) == "" {
+				return fmt.Errorf("--package-name must not be empty")
+			}
+			if majorVersion < 0 {
+				return fmt.Errorf("--major-version must be a non-negative integer, got %d", majorVersion)
+			}
+
+			_, c, printer, err := setup(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+
+			handler := appengine.NewFunctionHandler(c)
+
+			defs, err := handler.GetRuntimeTypeDefinitions(packageName, majorVersion)
+			if err != nil {
+				return err
+			}
+
+			// The default view is the declaration itself: it is what the command
+			// exists to return, and a table cell cannot hold a multi-line .d.ts.
+			// Agent mode leaves the format at "table", so it is excluded here and
+			// gets the structured envelope.
+			ctx := cmdContext(cmd)
+			if !agentMode(ctx) && (outputFormat(ctx) == "" || outputFormat(ctx) == "table") {
+				text := defs.TypeDefinitions
+				if !strings.HasSuffix(text, "\n") {
+					text += "\n"
+				}
+				_, err := io.WriteString(currentStdoutOr(ctx, cmd.OutOrStdout()), text)
+				return err
+			}
+
+			return printer.Print(defs)
+		},
+	}
+	c.Flags().StringVar(&packageName, "package-name", "", "SDK package name, e.g. @dynatrace-sdk/client-automation (required)")
+	c.Flags().IntVar(&majorVersion, "major-version", 0, "major version of the package, e.g. 8 (required)")
+	_ = c.MarkFlagRequired("package-name")
+	_ = c.MarkFlagRequired("major-version")
 	stability.MarkStable(c)
 	return c
 }

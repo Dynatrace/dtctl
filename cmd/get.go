@@ -46,6 +46,7 @@ Supported resources:
   notifications               users                   groups
   edgeconnect (ec)            sdk-versions            analyzers
   copilot-skills              lookup-tables (lu)      trash
+  runtime-type-definitions
   workflow-executions (wfe)   wfe-task-result         extensions (ext)
   extension-configs (extcfg)  documents (doc)         anomaly-detectors (ad)
   hub-extensions              hub-extension-releases  apis
@@ -155,6 +156,7 @@ func init() {
 	getCmd.AddCommand(getUsersCmd)
 	getCmd.AddCommand(getGroupsCmd)
 	getCmd.AddCommand(getSDKVersionsCmd)
+	getCmd.AddCommand(getRuntimeTypeDefinitionsCmd)
 	getCmd.AddCommand(getAnalyzersCmd)
 	getCmd.AddCommand(getCopilotSkillsCmd)
 	getCmd.AddCommand(getSettingsSchemasCmd)

@@ -62,6 +62,7 @@
 | query |
 | refresh |
 | reset |
+| runtime-type-definition |
 | sdk-version |
 | set |
 | set-context |

@@ -159,6 +159,9 @@ var ResourceScopes = map[string]AccessScopes{
 	// runtime SDK metadata from the function executor
 	// (/platform/app-engine/function-executor/v1/sdk-versions).
 	"sdk-version": {Read: []string{"app-engine:apps:run"}},
+	// TypeScript declarations of a runtime SDK package
+	// (/platform/app-engine/function-executor/v1/runtime-type-definitions).
+	"runtime-type-definition": {Read: []string{"app-engine:functions:run"}},
 
 	// Davis AI
 	"analyzer": {Read: []string{"davis:analyzers:read"}, Run: []string{"davis:analyzers:execute"}},

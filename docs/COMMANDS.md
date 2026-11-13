@@ -348,6 +348,7 @@ _read-only | access: read_
 | lookups | `storage:files:read` |
 | notebooks | `document:documents:read` |
 | notifications | `notification:notifications:read` |
+| runtime-type-definitions | `app-engine:functions:run` |
 | scheduling-rules | `automation:rules:read` |
 | sdk-versions | `app-engine:apps:run` |
 | segments | `storage:filter-segments:read` |

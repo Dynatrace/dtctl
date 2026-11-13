@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/go-resty/resty/v2"
@@ -71,6 +72,15 @@ type FunctionExecutorResponse struct {
 type SDKVersionsResponse struct {
 	LayerVersion string              `json:"layerVersion"`
 	Packages     map[string][]string `json:"packages"`
+}
+
+// RuntimeTypeDefinitions is the TypeScript declaration (.d.ts) of one package
+// version available in the function executor runtime.
+type RuntimeTypeDefinitions struct {
+	PackageName     string `json:"packageName"`
+	Version         string `json:"version"`
+	FileName        string `json:"fileName"`
+	TypeDefinitions string `json:"typeDefinitions"`
 }
 
 // escapeFunctionName escapes a function name for the "/api/" portion of an
@@ -240,6 +250,31 @@ func (h *FunctionHandler) GetSDKVersions(ctx context.Context) (*SDKVersionsRespo
 	}
 	if result.Packages == nil {
 		return nil, fmt.Errorf("parse SDK versions response: unexpected structure: missing \"packages\" object")
+	}
+
+	return &result, nil
+}
+
+// GetRuntimeTypeDefinitions returns the TypeScript type definitions of a
+// package available in the runtime, resolved for the given major version.
+func (h *FunctionHandler) GetRuntimeTypeDefinitions(ctx context.Context, packageName string, majorVersion int) (*RuntimeTypeDefinitions, error) {
+	resp, err := h.client.HTTP().R().SetContext(ctx).
+		SetQueryParam("packageName", packageName).
+		SetQueryParam("majorVersion", strconv.Itoa(majorVersion)).
+		Get("/platform/app-engine/function-executor/v1/runtime-type-definitions")
+	if err != nil {
+		return nil, fmt.Errorf("get runtime type definitions: %w", err)
+	}
+	if err := httpclient.CheckResponse(resp); err != nil {
+		return nil, fmt.Errorf("get runtime type definitions for %s (major version %d): %w", packageName, majorVersion, err)
+	}
+
+	var result RuntimeTypeDefinitions
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, fmt.Errorf("parse runtime type definitions response: unexpected structure: %w", err)
+	}
+	if result.PackageName == "" || result.TypeDefinitions == "" {
+		return nil, fmt.Errorf("parse runtime type definitions response: unexpected structure: missing \"packageName\" or \"typeDefinitions\"")
 	}
 
 	return &result, nil
