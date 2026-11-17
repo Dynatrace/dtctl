@@ -81,13 +81,16 @@ type Document struct {
 // DocumentMetadata represents detailed document metadata.
 // Fields after Access are only populated when requested via DocumentFilters.AddFields.
 type DocumentMetadata struct {
-	ID                string           `json:"id"`
-	Name              string           `json:"name"`
-	Type              string           `json:"type"`
-	Description       string           `json:"description,omitempty"`
-	Version           int              `json:"version"`
-	Owner             string           `json:"owner"`
-	IsPrivate         bool             `json:"isPrivate"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Version     int    `json:"version"`
+	Owner       string `json:"owner"`
+	IsPrivate   bool   `json:"isPrivate"`
+	// IsReshareable says whether users with write access may share the
+	// document (the UI's "Allow editors to share"). Nil when the API omits it.
+	IsReshareable     *bool            `json:"isReshareable,omitempty" yaml:"isReshareable,omitempty"`
 	ModificationInfo  ModificationInfo `json:"modificationInfo"`
 	Access            []string         `json:"access,omitempty"`
 	OriginAppID       string           `json:"originAppId,omitempty" yaml:"originAppId,omitempty"`
@@ -858,7 +861,7 @@ type CreateEnvironmentShareRequest struct {
 }
 
 // ErrShareConflict is returned when creating an environment share fails because
-// one already exists for the document (HTTP 409). Callers can use errors.Is to
+// one already exists at that access level (HTTP 409). Callers can use errors.Is to
 // detect this case without fragile string matching.
 var ErrShareConflict = fmt.Errorf("environment share conflict")
 

@@ -113,7 +113,7 @@ func newShareCmd() *cobra.Command {
 	return c
 }
 
-// shareDocumentCmd shares a document with users/groups
+// shareDocumentCmd shares a document with users/groups or the environment
 var shareDocumentCmd = newShareDocumentCmd()
 
 func newShareDocumentCmd() *cobra.Command {
@@ -463,6 +463,9 @@ func runShareDocument(cmd *cobra.Command, args []string) error {
 	}
 
 	if !environment.none() {
+		if err := checkEnvironmentPermission(metadata, ownership, environment, false); err != nil {
+			return err
+		}
 		return shareWithEnvironment(cmd, cfg, handler, c.BaseURL(), metadata, access, environment)
 	}
 
@@ -581,19 +584,24 @@ func runUnshareDocument(cmd *cobra.Command, args []string) error {
 	if err := checkSafety(cmdContext(cmd), cfg, safety.OperationUpdate, ownership); err != nil {
 		return err
 	}
+	if err := checkEnvironmentPermission(metadata, ownership, environment, true); err != nil {
+		return err
+	}
 
 	stdout, stderr := currentStdout(cmdContext(cmd)), currentStderr(cmdContext(cmd))
 
 	// Private first: isPrivate=false lets everyone read the document, a link
 	// only those who claim it, so a failure partway leaves the narrower of the
 	// two.
+	// :makePrivate is owner-only even when it would change nothing, so it is
+	// sent only when the document is public.
 	if environment.public {
-		if err := handler.SetPrivate(documentID, true); err != nil {
-			return fmt.Errorf("failed to make document %q private: %w", documentID, err)
-		}
 		if metadata.IsPrivate {
 			fmt.Fprintf(stdout, "Document %q is already private\n", documentID)
 		} else {
+			if err := handler.SetPrivate(documentID, true); err != nil {
+				return visibilityError(err, documentID, "private")
+			}
 			output.FprintSuccess(stderr, "Document %q is private again", documentID)
 		}
 	}
@@ -689,13 +697,17 @@ func shareWithEnvironment(cmd *cobra.Command, cfg *config.Config, handler *docum
 		}
 	}
 
+	// :makePublic is owner-only even when it would change nothing, so it is
+	// sent only when the document is private.
 	if modes.public {
-		if err := handler.SetPrivate(documentID, false); err != nil {
-			if result.Link != nil {
-				return fmt.Errorf("created the environment share link %s, but failed to make document %q public: %w",
-					result.Link.URL, documentID, err)
+		if metadata.IsPrivate {
+			if err := handler.SetPrivate(documentID, false); err != nil {
+				err = visibilityError(err, documentID, "public")
+				if result.Link != nil {
+					return fmt.Errorf("created the environment share link %s, but: %w", result.Link.URL, err)
+				}
+				return err
 			}
-			return fmt.Errorf("failed to make document %q public: %w", documentID, err)
 		}
 		result.Visibility = &environmentVisibilityResult{Public: true, Changed: metadata.IsPrivate}
 	}
@@ -734,9 +746,68 @@ var environmentShareWriteScopes = []string{"document:environment-shares:read", "
 // :delete at login do not carry it.
 var environmentShareDeleteScopes = []string{"document:environment-shares:read", "document:environment-shares:delete"}
 
+// checkEnvironmentPermission refuses, before anything is sent, an
+// --environment change the Document API reserves to someone other than the
+// caller, instead of letting it fail with a bare 403 halfway through:
+//
+//   - :makePublic/:makePrivate are owner-only (admins may also call them on
+//     ready-made documents, which come from an app or extension).
+//   - Creating an environment share is open to the owner, and to users with
+//     write access when the owner allows editors to share (isReshareable).
+//
+// It only refuses when the metadata settles it: a visibility already in the
+// requested state sends no call, and an unknown owner or caller is left to the
+// API.
+func checkEnvironmentPermission(metadata *document.DocumentMetadata, ownership safety.ResourceOwnership,
+	modes environmentModes, unshare bool) error {
+	if ownership != safety.OwnershipShared {
+		return nil
+	}
+	readyMade := metadata.OriginAppID != "" || metadata.OriginExtensionID != ""
+	if modes.public && metadata.IsPrivate != unshare && !readyMade {
+		state := "public"
+		if unshare {
+			state = "private"
+		}
+		return &diagnostic.Error{
+			Operation: fmt.Sprintf("make document %q %s", metadata.ID, state),
+			Message: fmt.Sprintf("only the document's owner (%s) can make it %s; nothing was changed",
+				metadata.Owner, state),
+			Suggestions: []string{"Ask the owner to run this command, or to transfer ownership to you"},
+		}
+	}
+	if modes.link && !unshare && metadata.IsReshareable != nil && !*metadata.IsReshareable {
+		return &diagnostic.Error{
+			Operation: fmt.Sprintf("create an environment share for document %q", metadata.ID),
+			Message: fmt.Sprintf("the owner (%s) has not allowed editors to share this document; nothing was changed",
+				metadata.Owner),
+			Suggestions: []string{`Ask the owner to share it, or to turn on "Allow editors to share"`},
+		}
+	}
+	return nil
+}
+
+// visibilityError explains a 403 from :makePublic/:makePrivate, which is about
+// ownership rather than scopes: only the owner may call them (admins also on
+// ready-made documents).
+func visibilityError(err error, documentID, state string) error {
+	var apiErr *httpclient.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 403 {
+		return fmt.Errorf("failed to make document %q %s: %w", documentID, state, err)
+	}
+	return &diagnostic.Error{
+		Operation:   fmt.Sprintf("make document %q %s", documentID, state),
+		StatusCode:  apiErr.StatusCode,
+		Message:     "access denied: " + err.Error(),
+		Err:         err,
+		Suggestions: []string{"Only the document's owner can make it public or private (an admin also on ready-made documents)"},
+	}
+}
+
 // environmentShareScopeError turns a 403 from the environment-shares API into
-// an error that names the scopes and how to get them. Any other error is
-// wrapped with the operation.
+// an error that names both possible causes: a missing scope, or a caller who is
+// neither the owner nor an editor allowed to share. The response does not say
+// which. Any other error is wrapped with the operation.
 func environmentShareScopeError(err error, cfg *config.Config, operation string, scopes []string) error {
 	var apiErr *httpclient.APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 403 {
@@ -749,6 +820,7 @@ func environmentShareScopeError(err error, cfg *config.Config, operation string,
 		Err:        err,
 		Suggestions: append(loginScopeAdvice(cfg, scopes),
 			"Platform token: create it with "+strings.Join(scopes, ", "),
-			"Check the scope gate: re-run the same command with --check-scopes"),
+			"Check the scope gate: re-run the same command with --check-scopes",
+			`If the scopes are there: only the owner, or an editor when the owner allows editors to share, can manage the document's environment shares`),
 	}
 }

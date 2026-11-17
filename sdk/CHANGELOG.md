@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - `sdk/api/document` — `Handler.MakeDocumentPublic` and `Handler.MakeDocumentPrivate` set a document's visibility through the Document API's `:makePublic` / `:makePrivate` actions, which take no locking version and are a no-op when the document is already in that state.
 
+- `sdk/api/document` — `DocumentMetadata.IsReshareable` (`*bool`, nil when the API omits it) says whether users with write access may share the document.
+
 ### Deprecated
 
 - `sdk/api/document` — `Handler.SetDocumentPublic`: use `MakeDocumentPublic`. It now calls `:makePublic` and ignores its version argument, instead of sending the deprecated `isPrivate` field of `PATCH /documents/{id}`, so it no longer returns `ErrVersionConflict`.

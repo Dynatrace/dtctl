@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,11 +19,14 @@ import (
 // read environment share. Every mutating request is recorded as
 // "METHOD path [detail]" in call order.
 type envShareServer struct {
-	mu           sync.Mutex
-	mutations    []string
-	isPrivate    bool
-	deleteStatus int // non-zero: deleting an environment share fails with this status
-	shares       []map[string]any
+	mu               sync.Mutex
+	mutations        []string
+	isPrivate        bool
+	deleteStatus     int // non-zero: deleting an environment share fails with this status
+	visibilityStatus int // non-zero: :makePublic/:makePrivate fail with this status
+	shares           []map[string]any
+	currentUser      string         // non-empty: /platform/metadata/v1/user returns it
+	metadata         map[string]any // merged into the document's metadata
 }
 
 func newEnvShareServer(t *testing.T) (*envShareServer, *httptest.Server) {
@@ -39,10 +43,22 @@ func newEnvShareServer(t *testing.T) (*envShareServer, *httptest.Server) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/platform/document/v1/documents/lp-1/metadata", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		metadata := map[string]any{
 			"id": "lp-1", "name": "Team launchpad", "type": "launchpad",
 			"owner": "owner-1", "version": 4, "isPrivate": s.isPrivate,
-		})
+		}
+		for k, v := range s.metadata {
+			metadata[k] = v
+		}
+		_ = json.NewEncoder(w).Encode(metadata)
+	})
+	mux.HandleFunc("/platform/metadata/v1/user", func(w http.ResponseWriter, r *http.Request) {
+		if s.currentUser == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"userId": s.currentUser})
 	})
 	for action, private := range map[string]bool{"makePublic": false, "makePrivate": true} {
 		mux.HandleFunc("/platform/document/v1/documents/lp-1:"+action, func(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +67,12 @@ func newEnvShareServer(t *testing.T) (*envShareServer, *httptest.Server) {
 				return
 			}
 			record("POST " + action)
+			if s.visibilityStatus != 0 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(s.visibilityStatus)
+				_, _ = w.Write([]byte(`{"error":{"code":403,"message":"Forbidden"}}`))
+				return
+			}
 			s.mu.Lock()
 			s.isPrivate = private
 			s.mu.Unlock()
@@ -375,7 +397,8 @@ func TestUnshareDocument_EnvironmentLinkForbidden(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, want := range []string{"document:environment-shares:delete", "dtctl auth login", "--check-scopes"} {
+	for _, want := range []string{"document:environment-shares:delete", "dtctl auth login", "--check-scopes",
+		"only the owner, or an editor"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
@@ -459,6 +482,127 @@ func TestUnshareDocument_AllLeavesEnvironment(t *testing.T) {
 				t.Fatalf("unshare document: %v", err)
 			}
 			assertCalls(t, s, tt.want)
+		})
+	}
+}
+
+// TestShareUnshareDocument_EnvironmentVisibilityAlreadyInPlace: :makePublic
+// and :makePrivate are owner-only even as a no-op, so they are not sent when
+// the document is already in the requested state. A non-owner editor can then
+// add a link to an already-public document without a 403.
+func TestShareUnshareDocument_EnvironmentVisibilityAlreadyInPlace(t *testing.T) {
+	t.Run("share public on a public document", func(t *testing.T) {
+		s, srv := newEnvShareServer(t)
+		s.currentUser = "editor-1"
+		setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+
+		_, stderr, err := runShareCmd(t, shareDocumentCmd, map[string]string{"environment": "link,public", "access": "read-write"})
+		if err != nil {
+			t.Fatalf("share document --environment link,public: %v", err)
+		}
+		assertCalls(t, s, "POST environment-share lp-1 read-write")
+		if !strings.Contains(stderr, "already public") {
+			t.Errorf("stderr %q does not say the document is already public", stderr)
+		}
+	})
+
+	t.Run("unshare public on a private document", func(t *testing.T) {
+		s, srv := newEnvShareServer(t)
+		s.isPrivate = true
+		s.currentUser = "editor-1"
+		setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+
+		stdout, _, err := runShareCmd(t, unshareDocumentCmd, map[string]string{"environment": "public"})
+		if err != nil {
+			t.Fatalf("unshare document --environment public: %v", err)
+		}
+		assertCalls(t, s, "")
+		if !strings.Contains(stdout, "already private") {
+			t.Errorf("stdout %q does not say the document is already private", stdout)
+		}
+	})
+}
+
+// TestShareUnshareDocument_EnvironmentVisibilityNeedsOwner: changing
+// visibility is owner-only, so a known non-owner is refused before anything
+// is sent, including the link of link,public. A ready-made document is left
+// to the API, since an admin may change it.
+func TestShareUnshareDocument_EnvironmentVisibilityNeedsOwner(t *testing.T) {
+	for _, tc := range []struct {
+		c         *cobra.Command
+		isPrivate bool
+	}{{shareDocumentCmd, true}, {unshareDocumentCmd, false}} {
+		t.Run(tc.c.Parent().Name(), func(t *testing.T) {
+			s, srv := newEnvShareServer(t)
+			s.isPrivate = tc.isPrivate
+			s.shares = nil
+			s.currentUser = "editor-1"
+			setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+
+			_, _, err := runShareCmd(t, tc.c, map[string]string{"environment": "link,public"})
+			if err == nil || !strings.Contains(err.Error(), "only the document's owner (owner-1)") {
+				t.Fatalf("error = %v, want the owner-only refusal", err)
+			}
+			assertCalls(t, s, "")
+		})
+	}
+
+	t.Run("ready-made document", func(t *testing.T) {
+		s, srv := newEnvShareServer(t)
+		s.isPrivate = true
+		s.currentUser = "admin-1"
+		s.metadata = map[string]any{"originAppId": "dynatrace.example"}
+		setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+
+		if _, _, err := runShareCmd(t, shareDocumentCmd, map[string]string{"environment": "public"}); err != nil {
+			t.Fatalf("share document --environment public: %v", err)
+		}
+		assertCalls(t, s, "POST makePublic")
+	})
+}
+
+// TestShareDocument_EnvironmentVisibilityForbidden: a 403 from :makePublic
+// is about ownership, not scopes, and the error says so instead of sending
+// the caller to log in again.
+func TestShareDocument_EnvironmentVisibilityForbidden(t *testing.T) {
+	s, srv := newEnvShareServer(t)
+	s.isPrivate = true
+	s.visibilityStatus = http.StatusForbidden
+	setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+
+	_, _, err := runShareCmd(t, shareDocumentCmd, map[string]string{"environment": "public"})
+	if err == nil || !strings.Contains(err.Error(), "Only the document's owner") {
+		t.Fatalf("error = %v, want the owner-only explanation", err)
+	}
+	if strings.Contains(err.Error(), "auth login") {
+		t.Errorf("error %q sends the caller to log in again", err)
+	}
+}
+
+// TestShareDocument_EnvironmentLinkNotReshareable: an editor may create an
+// environment share only when the owner allows editors to share; when the
+// metadata says they don't, the command refuses before sending anything.
+func TestShareDocument_EnvironmentLinkNotReshareable(t *testing.T) {
+	for _, reshareable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("isReshareable=%t", reshareable), func(t *testing.T) {
+			s, srv := newEnvShareServer(t)
+			s.shares = nil
+			s.currentUser = "editor-1"
+			s.metadata = map[string]any{"isReshareable": reshareable}
+			setupDocumentCmdTest(t, srv.URL, config.SafetyLevelReadWriteAll)
+
+			_, _, err := runShareCmd(t, shareDocumentCmd, map[string]string{"environment": "link"})
+			if reshareable {
+				if err != nil {
+					t.Fatalf("share document --environment link: %v", err)
+				}
+				assertCalls(t, s, "POST environment-share lp-1 read")
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "has not allowed editors to share") {
+				t.Fatalf("error = %v, want the reshare refusal", err)
+			}
+			assertCalls(t, s, "")
 		})
 	}
 }
