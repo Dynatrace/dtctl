@@ -87,7 +87,7 @@ _mutating | access: write | safety: OperationCreate_
 | --- | --- |
 | anomaly-detector | `settings:objects:write` |
 | breakpoint | `dev-obs:breakpoints:set` |
-| bucket | `storage:buckets:write` |
+| bucket | `storage:bucket-definitions:write` |
 | dashboard | `document:documents:write` |
 | document | `document:documents:write` |
 | edgeconnect | `app-engine:edge-connects:write` |
@@ -135,7 +135,7 @@ _mutating | access: delete | safety: OperationDelete_
 | anomaly-detector | `settings:objects:write` |
 | app | `app-engine:apps:delete` |
 | breakpoint | `dev-obs:breakpoints:set` |
-| bucket | `storage:buckets:write` |
+| bucket | `storage:bucket-definitions:delete`, `storage:bucket-definitions:read` |
 | dashboard | `document:documents:delete` |
 | document | `document:documents:delete` |
 | edgeconnect | `app-engine:edge-connects:delete` |
@@ -171,7 +171,7 @@ _read-only | access: read_
 | api | _(none declared)_ |
 | app | `app-engine:apps:run` |
 | breakpoint | `dev-obs:breakpoints:set` |
-| bucket | `storage:buckets:read` |
+| bucket | `storage:bucket-definitions:read` |
 | dashboard | `document:documents:read` |
 | document | `document:documents:read` |
 | edgeconnect | `app-engine:edge-connects:read` |
@@ -296,7 +296,7 @@ _mutating | access: run | safety: OperationCreate_
 | api | _(none declared)_ |
 | function | `app-engine:functions:run` |
 | preview-processor | `openpipeline:configurations:read` |
-| slo | `slo:slos:read`, `slo:objective-templates:read` |
+| slo | `slo:slos:read` |
 | workflow | `automation:workflows:run` |
 
 Subcommands:
@@ -330,7 +330,7 @@ _read-only | access: read_
 | apis | _(none declared)_ |
 | apps | `app-engine:apps:run` |
 | breakpoints | `dev-obs:breakpoints:set` |
-| buckets | `storage:buckets:read` |
+| buckets | `storage:bucket-definitions:read` |
 | copilot-skills | `davis-copilot:conversations:execute` |
 | dashboards | `document:documents:read` |
 | documents | `document:documents:read` |
@@ -466,9 +466,9 @@ _mutating | access: write | safety: OperationUpdate_
 
 | Resource | Required scopes |
 | --- | --- |
-| dashboard | `document:documents:write` |
-| document | `document:documents:write` |
-| notebook | `document:documents:write` |
+| dashboard | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
+| document | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
+| notebook | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
 
 
 ## skills
@@ -504,9 +504,9 @@ _mutating | access: write | safety: OperationUpdate_
 
 | Resource | Required scopes |
 | --- | --- |
-| dashboard | `document:documents:write` |
-| document | `document:documents:write` |
-| notebook | `document:documents:write` |
+| dashboard | `document:documents:read`, `document:direct-shares:read` |
+| document | `document:documents:read`, `document:direct-shares:read` |
+| notebook | `document:documents:read`, `document:direct-shares:read` |
 
 
 ## update
@@ -550,7 +550,7 @@ _read-only | access: read_
 
 | Resource | Required scopes |
 | --- | --- |
-| analyzer | `davis:analyzers:read` |
+| analyzer | `davis:analyzers:execute` |
 | openpipeline-dql-processor | `openpipeline:configurations:read` |
 | openpipeline-matcher | `openpipeline:configurations:read` |
 | query | _(none declared)_ |

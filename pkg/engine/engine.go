@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -166,6 +167,9 @@ type Engine struct {
 	limits     Limits
 	adm        *admission
 	concurrent bool
+	transport  http.RoundTripper
+	// headerPolicy is the host's `exec api -H` policy (WithHeaderPolicy).
+	headerPolicy func(name string) string
 }
 
 // Option configures an Engine at construction.
@@ -174,6 +178,8 @@ type Option func(*engineOptions)
 type engineOptions struct {
 	concurrent    bool
 	maxConcurrent int
+	transport     http.RoundTripper
+	headerPolicy  func(name string) string
 }
 
 // WithConcurrentExecution opts an Engine into running up to maxConcurrent
@@ -187,6 +193,42 @@ func WithConcurrentExecution(maxConcurrent int) Option {
 		o.concurrent = true
 		o.maxConcurrent = max(maxConcurrent, 1)
 	}
+}
+
+// WithTransport sends every platform request of this Engine's invocations
+// through rt instead of the process-wide connection pool. It is the seam a
+// host uses to run requests against a stand-in environment — typically an
+// httptest.Server, passing its URL as Request.EnvironmentURL and
+// srv.Client().Transport here, which also trusts the server's TLS
+// certificate — or to give the engine a TLS configuration of its own (an
+// *http.Transport with TLSClientConfig set).
+//
+// Only the transport changes: the request still names the environment and
+// carries the token, the safety level and the command surface, and dtctl
+// still adds its User-Agent, retries and request-path checks above rt, so the
+// Result is what the same command line would produce against a real
+// environment. rt is shared by every invocation of the Engine and must be
+// safe for concurrent use. nil keeps the default pool.
+func WithTransport(rt http.RoundTripper) Option {
+	return func(o *engineOptions) { o.transport = rt }
+}
+
+// WithHeaderPolicy lets the host refuse request headers a caller passes to
+// `exec api -H`. policy receives the normalized header name (canonicalized,
+// "_" folded to "-", so x_forwarded_for arrives as X-Forwarded-For) and
+// returns why it is refused, or "" to allow it. Without it, only the CLI's
+// own refusals (Authorization, Proxy-Authorization) apply.
+//
+// Which headers matter is the host's decision, not dtctl's: it depends on
+// where the host runs and what the proxies in front of its upstream trust
+// (Host, Forwarded, X-Forwarded-*, a reserved prefix, ...). A refusal is
+// returned before any request is sent and before --dry-run prints one, with
+// the stable agent-mode error code "header_refused" and exit code 2, and
+// Engine.Parse refuses the same command line. The header sent on the wire is
+// the caller's spelling, not the normalized one. policy is shared by every
+// invocation of the Engine and must be safe for concurrent use.
+func WithHeaderPolicy(policy func(name string) string) Option {
+	return func(o *engineOptions) { o.headerPolicy = policy }
 }
 
 // New builds an Engine with the given budget. Without WithConcurrentExecution
@@ -205,9 +247,11 @@ func New(limits Limits, opts ...Option) *Engine {
 		l.MaxQueued = o.maxConcurrent
 	}
 	return &Engine{
-		limits:     l,
-		adm:        &admission{slot: make(chan struct{}, o.maxConcurrent)},
-		concurrent: o.concurrent,
+		limits:       l,
+		adm:          &admission{slot: make(chan struct{}, o.maxConcurrent)},
+		concurrent:   o.concurrent,
+		transport:    o.transport,
+		headerPolicy: o.headerPolicy,
 	}
 }
 
@@ -218,14 +262,14 @@ func (e *Engine) MaxConcurrent() int { return cap(e.adm.slot) }
 // Execute runs one invocation against this engine's budget. Its Result and
 // error read as the package-level Execute documents.
 func (e *Engine) Execute(ctx context.Context, req Request) (*Result, error) {
-	return executeInner(ctx, req, e.limits, e.adm, e.concurrent)
+	return executeInner(ctx, req, e.limits, e.adm, e.concurrent, e.transport, e.headerPolicy)
 }
 
 // Limits reports the budget this engine was built with, after defaults.
 func (e *Engine) Limits() Limits { return e.limits }
 
 // executeInner is the shared implementation called by ExecuteWithLimits.
-func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, concurrent bool) (*Result, error) {
+func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, concurrent bool, transport http.RoundTripper, headerPolicy func(name string) string) (*Result, error) {
 	argv, err := req.argv()
 	if err != nil {
 		return nil, err
@@ -304,6 +348,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 			MinStability:        config.StabilityLevel(req.MinStability),
 			StabilityExceptions: req.StabilityExceptions,
 			NoDeprecated:        req.NoDeprecated,
+			Transport:           transport,
 		},
 		Env:             env,
 		FS:              files,
@@ -311,6 +356,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 		Stdout:          stdout,
 		Stderr:          stderr,
 		BlockedCommands: unsupportedCommands,
+		HeaderPolicy:    headerPolicy,
 		Context:         timeoutCtx,
 
 		// Overlapping invocations only when the engine was built with
@@ -443,7 +489,7 @@ func contextEnded(ctx context.Context) error {
 // deadline cut off returns its Result together with the context's error (see
 // Execute).
 func (e *Engine) ExecuteWithLimits(ctx context.Context, req Request, limits Limits) (*Result, error) {
-	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.concurrent)
+	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.concurrent, e.transport, e.headerPolicy)
 }
 
 // effectiveLimits is the budget one ExecuteWithLimits call runs under: the

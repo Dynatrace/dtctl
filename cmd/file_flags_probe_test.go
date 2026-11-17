@@ -109,7 +109,8 @@ func fileFlagProbes(root *cobra.Command) []fileFlagProbe {
 							p.argv = append(p.argv, "--"+r+"="+requiredValue(flags[r], p.sentinel("", r)))
 						}
 					}
-					p.argv = append(append(p.argv, fileFlagProbeHints[command]...), "--agent")
+					p.argv = append(p.argv, fileFlagProbeHints[command]...)
+					p.argv = append(append(p.argv, fileFlagProbeFlagHints[command+" --"+name]...), "--agent")
 					probes = append(probes, p)
 				}
 			}

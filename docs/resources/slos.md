@@ -31,6 +31,7 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | Safety level | Scopes |
 | --- | --- |
 | read | `slo:objective-templates:read`, `slo:slos:read` |
+| run | `slo:slos:read` |
 | write | `slo:slos:write` |
 <!-- GENERATED:slos:end -->
 

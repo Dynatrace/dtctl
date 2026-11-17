@@ -20,6 +20,7 @@ type AppAction struct {
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Stateful    bool   `json:"stateful,omitempty"`
+	Approval    bool   `json:"approval,omitempty"`
 	FullName    string `json:"fullName"`
 
 	// Extra holds the action's manifest attributes with no field above, such
@@ -36,6 +37,7 @@ var modelledActionKeys = map[string]bool{
 	"title":       true,
 	"description": true,
 	"stateful":    true,
+	"approval":    true,
 }
 
 // actionRecord is the wire shape of one action in GET /actions and of the
@@ -53,9 +55,10 @@ type actionListResponse struct {
 }
 
 // listActionFields widens GET /actions beyond its default fields (app.id,
-// action.name, action.title, action.description) with the other field
-// AppAction models. The prefix is required: a bare "stateful" is a 400.
-const listActionFields = "action.stateful"
+// action.name, action.title, action.description) with the other fields
+// AppAction models, comma-separated. The prefix is required: a bare
+// "stateful" is a 400.
+const listActionFields = "action.stateful,action.approval"
 
 // MaxActionQueryLength is the longest search string the endpoint accepts.
 const MaxActionQueryLength = 256
@@ -212,6 +215,7 @@ func newAppAction(appID string, entry map[string]interface{}, mode extraMode) (A
 	title, _ := entry["title"].(string)
 	description, _ := entry["description"].(string)
 	stateful, _ := entry["stateful"].(bool)
+	approval, _ := entry["approval"].(bool)
 
 	var extra map[string]interface{}
 	if mode == withExtra {
@@ -232,6 +236,7 @@ func newAppAction(appID string, entry map[string]interface{}, mode extraMode) (A
 		Title:       title,
 		Description: description,
 		Stateful:    stateful,
+		Approval:    approval,
 		FullName:    FormatActionID(appID, name),
 		Extra:       extra,
 	}, true

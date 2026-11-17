@@ -317,14 +317,12 @@ var flagScopeRequirements = map[string]map[string][]string{
 
 	// --environment link (alone or in link,public) works on environment
 	// shares, a second API next to the documents one: share lists and creates
-	// them, unshare lists and deletes them. --environment public only calls the
-	// document's :makePublic/:makePrivate, which the documents scopes cover.
-	"share document":    {"environment=link": environmentShareWriteScopes},
-	"share dashboard":   {"environment=link": environmentShareWriteScopes},
-	"share notebook":    {"environment=link": environmentShareWriteScopes},
-	"unshare document":  {"environment=link": environmentShareDeleteScopes},
-	"unshare dashboard": {"environment=link": environmentShareDeleteScopes},
-	"unshare notebook":  {"environment=link": environmentShareDeleteScopes},
+	// them, unshare lists and deletes them (see unshareFlagScopes). --environment
+	// public only calls the document's :makePublic/:makePrivate, which the
+	// documents scopes cover.
+	"share document":  {"environment=link": environmentShareWriteScopes},
+	"share dashboard": {"environment=link": environmentShareWriteScopes},
+	"share notebook":  {"environment=link": environmentShareWriteScopes},
 
 	// Activating a version touches extension *definitions*;
 	// --with-configurations additionally reads every monitoring configuration of
@@ -335,6 +333,20 @@ var flagScopeRequirements = map[string]map[string][]string{
 	"update extensions": {"with-configurations": {
 		"extensions:configurations:read", "extensions:configurations:write",
 	}},
+
+	// Removing recipients writes a direct share; --all deletes it;
+	// --environment link deletes environment shares.
+	"unshare document":  unshareFlagScopes,
+	"unshare dashboard": unshareFlagScopes,
+	"unshare notebook":  unshareFlagScopes,
+}
+
+var unshareFlagScopes = map[string][]string{
+	"all":   {"document:direct-shares:delete"},
+	"user":  {"document:direct-shares:write"},
+	"group": {"document:direct-shares:write"},
+
+	"environment=link": environmentShareDeleteScopes,
 }
 
 // scopesForInvocation is requiredScopesFor plus the scopes that the flags set on

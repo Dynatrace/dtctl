@@ -43,6 +43,10 @@ type invocation struct {
 	blocked map[string]string
 	caps    Capabilities
 
+	// headerPolicy is the embedding caller's `exec api -H` policy
+	// (RunOptions.HeaderPolicy); nil refuses nothing beyond the CLI's own.
+	headerPolicy func(name string) string
+
 	// env overlays the process environment. A key present with ok==false was
 	// scrubbed for this invocation and must read as empty even though the host
 	// process still has it set.

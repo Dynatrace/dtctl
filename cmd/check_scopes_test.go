@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/commands"
 	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // withScopeState overrides grantedScopesFunc and the relevant global flags for a
@@ -137,6 +139,67 @@ func TestRequiredScopesFor(t *testing.T) {
 	require.Equal(t, scopeRequirementPerCall, req)
 }
 
+// TestBucketCommandsRequireBucketDefinitionScopes holds the bucket commands to
+// the scopes their endpoints declare: /platform/storage/management/v1/
+// bucket-definitions takes storage:bucket-definitions:*, not the
+// storage:buckets:* scopes a query or an ingest needs for a bucket's data.
+// delete bucket also reads, because it gets the bucket before it deletes it.
+func TestBucketCommandsRequireBucketDefinitionScopes(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"get", "buckets"}, []string{"storage:bucket-definitions:read"}},
+		{[]string{"describe", "bucket"}, []string{"storage:bucket-definitions:read"}},
+		{[]string{"create", "bucket"}, []string{"storage:bucket-definitions:write"}},
+		{[]string{"delete", "bucket"}, []string{"storage:bucket-definitions:delete", "storage:bucket-definitions:read"}},
+	} {
+		cmd, _, err := rootCmd.Find(c.args)
+		require.NoError(t, err, "find %v", c.args)
+		got, req := requiredScopesFor(verbResource(cmd))
+		require.Equal(t, scopeRequirementKnown, req, "%v", c.args)
+		require.Equal(t, c.want, got, "%v", c.args)
+	}
+}
+
+// TestBucketCommandsFitTheLoginScopesOfEveryLevelThatAllowsThem holds login to
+// the bucket commands: for every safety level, a bucket command the level
+// allows must find all its required scopes in the scopes that level's login
+// requests. Otherwise the safety check lets the command run and the API
+// refuses it. create and delete use the operation each passes to
+// setupWithSafety; get and describe run without a safety check, so
+// OperationRead stands for "allowed at every level".
+func TestBucketCommandsFitTheLoginScopesOfEveryLevelThatAllowsThem(t *testing.T) {
+	bucketCommands := []struct {
+		args []string
+		op   safety.Operation
+	}{
+		{[]string{"get", "buckets"}, safety.OperationRead},
+		{[]string{"describe", "bucket"}, safety.OperationRead},
+		{[]string{"create", "bucket"}, safety.OperationCreate},
+		{[]string{"delete", "bucket"}, safety.OperationDeleteBucket},
+	}
+	for _, level := range config.ValidSafetyLevels() {
+		checker := safety.NewCheckerWithLevel("test", level)
+		login := map[string]bool{}
+		for _, s := range auth.GetScopesForSafetyLevel(level) {
+			login[s] = true
+		}
+		for _, c := range bucketCommands {
+			if !checker.Check(c.op, safety.OwnershipUnknown).Allowed {
+				continue
+			}
+			cmd, _, err := rootCmd.Find(c.args)
+			require.NoError(t, err, "find %v", c.args)
+			required, req := requiredScopesFor(verbResource(cmd))
+			require.Equal(t, scopeRequirementKnown, req, "%v", c.args)
+			for _, s := range required {
+				assert.True(t, login[s], "%s allows %v, but its login does not request %s", level, c.args, s)
+			}
+		}
+	}
+}
+
 func TestComputeScopeVerdict(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		withScopeState(t, true, false, "json", []string{"automation:workflows:write", "x"}, true)
@@ -249,6 +312,15 @@ func TestScopesForInvocation_InputDependentCommands(t *testing.T) {
 			require.Equal(t, scopeStatusUnknown, envelope.Result.Status)
 		})
 	}
+}
+
+// TestExecSLORequiresSLORead holds exec slo to the scope its endpoints
+// declare: evaluation:start and evaluation:poll take slo:slos:read and read
+// no objective template.
+func TestExecSLORequiresSLORead(t *testing.T) {
+	got, req := requiredScopesFor("exec", "slo")
+	require.Equal(t, scopeRequirementKnown, req)
+	require.Equal(t, []string{"slo:slos:read"}, got)
 }
 
 func TestScopePreflight_CheckScopes_OKSkipsAndPrints(t *testing.T) {
@@ -549,5 +621,99 @@ func TestFlagScopesAreRequestedAtLogin(t *testing.T) {
 					"%q --%s needs %q, but no safety level requests it at login", key, name, scope)
 			}
 		}
+	}
+}
+
+// TestCommandScopesAreWellFormed holds auth.CommandScopes: every key names a
+// command of the tree, and every safety level that allows the command's
+// operation requests all of its scopes and its flags' scopes at login.
+// Otherwise a user of that level logs in, runs the command, and the scope
+// check refuses it. No key may name a resource with alternative scopes: an
+// alternative stands in for the resource's scopes, which such a command does
+// not require, so alternativesForInvocation would accept it wrongly.
+func TestCommandScopesAreWellFormed(t *testing.T) {
+	root := newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root
+	paths := map[string]bool{}
+	walkCommands(root, func(c *cobra.Command) {
+		if verb, resource := verbResource(c); resource != "" {
+			paths[verb+" "+resource] = true
+			paths[verb+" "+strings.TrimSuffix(resource, "s")] = true
+		}
+	})
+	operations := map[string]safety.Operation{
+		"":                safety.OperationRead,
+		"OperationCreate": safety.OperationCreate,
+		"OperationUpdate": safety.OperationUpdate,
+		"OperationDelete": safety.OperationDelete,
+	}
+	levels := []config.SafetyLevel{
+		config.SafetyLevelReadOnly,
+		config.SafetyLevelReadWriteMine,
+		config.SafetyLevelReadWriteAll,
+		config.SafetyLevelDangerouslyUnrestricted,
+	}
+	for key, scopes := range auth.CommandScopes {
+		require.True(t, paths[key], "auth.CommandScopes names %q, which is not a command", key)
+		verb, resource, _ := strings.Cut(key, " ")
+		op, ok := operations[commands.MutatingVerbs[verb]]
+		require.True(t, ok, "%q: no operation for verb %q", key, verb)
+		require.Empty(t, auth.AlternativeScopesForResource(resource, auth.AccessForVerb(verb, commands.MutatingVerbs[verb])),
+			"%q: its resource has alternative scopes, which would satisfy the command in place of its own", key)
+		for _, flagScopes := range flagScopeRequirements[key] {
+			scopes = append(slices.Clone(scopes), flagScopes...)
+		}
+		for _, level := range levels {
+			if !safety.NewCheckerWithLevel("test", level).Check(op, safety.OwnershipOwn).Allowed {
+				continue
+			}
+			requested := map[string]bool{}
+			for _, s := range auth.GetScopesForSafetyLevel(level) {
+				requested[s] = true
+			}
+			for _, scope := range scopes {
+				require.True(t, requested[scope], "%q is allowed at %s and needs %q, but login at %s does not request it", key, level, scope, level)
+			}
+		}
+	}
+}
+
+// TestCommandScopesReachTheCatalog holds that a command with an
+// auth.CommandScopes entry reports that entry as its requirement, in the
+// catalog and so in --check-scopes, in place of its resource's scopes.
+func TestCommandScopesReachTheCatalog(t *testing.T) {
+	for _, c := range []struct {
+		verb, resource string
+		want           []string
+	}{
+		{"verify", "analyzer", []string{"davis:analyzers:execute"}},
+		{"share", "dashboard", []string{"document:direct-shares:read", "document:direct-shares:write", "document:documents:read"}},
+		{"unshare", "notebook", []string{"document:direct-shares:read", "document:documents:read"}},
+	} {
+		got, req := requiredScopesFor(c.verb, c.resource)
+		require.Equal(t, scopeRequirementKnown, req, "%s %s", c.verb, c.resource)
+		require.ElementsMatch(t, c.want, got, "%s %s", c.verb, c.resource)
+	}
+}
+
+// TestUnshareScopesFollowItsFlags holds that unshare requires the direct-share
+// scope its flags use: removing recipients writes the share, --all deletes it.
+// The agent-mode preflight refuses a mutating command on a missing required
+// scope, so requiring both would refuse a call that needs only one.
+func TestUnshareScopesFollowItsFlags(t *testing.T) {
+	base := []string{"document:direct-shares:read", "document:documents:read"}
+	for _, c := range []struct {
+		flag, value, extra string
+	}{
+		{"all", "true", "document:direct-shares:delete"},
+		{"user", "user-id", "document:direct-shares:write"},
+		{"group", "group-id", "document:direct-shares:write"},
+	} {
+		root := newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root
+		cmd, _, err := root.Find([]string{"unshare", "notebook"})
+		require.NoError(t, err)
+		require.NoError(t, cmd.Flags().Set(c.flag, c.value))
+		got, req := scopesForInvocation(cmd, "unshare", "notebook")
+		require.Equal(t, scopeRequirementKnown, req, "--%s", c.flag)
+		require.ElementsMatch(t, append(slices.Clone(base), c.extra), got, "--%s", c.flag)
 	}
 }

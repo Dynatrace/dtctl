@@ -17,6 +17,7 @@ type (
 	DeferredExecutionRequest = sdkae.DeferredExecutionRequest
 	FunctionExecutorRequest  = sdkae.FunctionExecutorRequest
 	FunctionExecutorResponse = sdkae.FunctionExecutorResponse
+	SDKVersionsResponse      = sdkae.SDKVersionsResponse
 )
 
 // DeferredExecutionResponse represents a deferred execution response (CLI version with table tags).
@@ -24,25 +25,9 @@ type DeferredExecutionResponse struct {
 	ID string `json:"id" table:"ID"`
 }
 
-// SDKVersion represents an SDK version (CLI version with table tags).
-type SDKVersion struct {
-	Version string `json:"version" table:"VERSION"`
-	Default bool   `json:"default" table:"DEFAULT"`
-}
-
-// SDKVersionsResponse represents SDK versions response.
-type SDKVersionsResponse struct {
-	Versions []SDKVersion `json:"versions"`
-}
-
 // fromSDKDeferredExecutionResponse converts an SDK DeferredExecutionResponse to CLI.
 func fromSDKDeferredExecutionResponse(s *sdkae.DeferredExecutionResponse) *DeferredExecutionResponse {
 	return &DeferredExecutionResponse{ID: s.ID}
-}
-
-// fromSDKVersion converts an SDK SDKVersion to CLI.
-func fromSDKVersion(s *sdkae.SDKVersion) SDKVersion {
-	return SDKVersion{Version: s.Version, Default: s.Default}
 }
 
 // ReadFileOrStdin reads content from a file (through the vfs seam, so
@@ -88,20 +73,12 @@ func (h *FunctionHandler) DeferExecution(req *DeferredExecutionRequest) (*Deferr
 	return fromSDKDeferredExecutionResponse(sdkResult), nil
 }
 
-// ExecuteCode executes ad-hoc JavaScript code using the function executor
-func (h *FunctionHandler) ExecuteCode(sourceCode, payload string) (*FunctionExecutorResponse, error) {
-	return h.sdk.ExecuteCode(context.Background(), sourceCode, payload)
+// ExecuteRequest executes a prepared ad-hoc function executor request
+func (h *FunctionHandler) ExecuteRequest(req *FunctionExecutorRequest) (*FunctionExecutorResponse, error) {
+	return h.sdk.ExecuteRequest(context.Background(), req)
 }
 
-// GetSDKVersions lists available SDK versions
+// GetSDKVersions lists available SDK versions as returned by the function executor
 func (h *FunctionHandler) GetSDKVersions() (*SDKVersionsResponse, error) {
-	sdkResult, err := h.sdk.GetSDKVersions(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	versions := make([]SDKVersion, len(sdkResult.Versions))
-	for i := range sdkResult.Versions {
-		versions[i] = fromSDKVersion(&sdkResult.Versions[i])
-	}
-	return &SDKVersionsResponse{Versions: versions}, nil
+	return h.sdk.GetSDKVersions(context.Background())
 }

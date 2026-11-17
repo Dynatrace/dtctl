@@ -838,6 +838,16 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// HeaderRefusedError — the embedding caller's header policy refused an
+	// `exec api -H` header.
+	var headerErr *HeaderRefusedError
+	if errors.As(err, &headerErr) {
+		return &output.ErrorDetail{
+			Code:    "header_refused",
+			Message: headerErr.Headline(),
+		}
+	}
+
 	// CapabilityError — a host-restricted ability (subprocess spawn: plugins,
 	// aliases, hooks, editor, browser) was requested but not granted.
 	var capErr *CapabilityError
@@ -918,6 +928,16 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 	// right, so unknown_command's advice ("follow the did-you-mean") would
 	// mislead; the fix is in the caller's input.
 	if errors.Is(err, errEmptyFlagValue) {
+		return &output.ErrorDetail{
+			Code:    "validation_error",
+			Message: err.Error(),
+		}
+	}
+
+	// A value the command itself found invalid, typed so the code does not
+	// depend on how the message happens to be worded.
+	var invalidInput *invalidInputError
+	if errors.As(err, &invalidInput) {
 		return &output.ErrorDetail{
 			Code:    "validation_error",
 			Message: err.Error(),
@@ -1249,6 +1269,11 @@ func exitCodeForError(err error) int {
 		return client.ExitUsageError
 	}
 
+	var headerErr *HeaderRefusedError
+	if errors.As(err, &headerErr) {
+		return client.ExitUsageError
+	}
+
 	var stabilityErr *StabilityError
 	if errors.As(err, &stabilityErr) {
 		return client.ExitUsageError
@@ -1275,6 +1300,13 @@ func exitCodeForError(err error) int {
 	}
 
 	if errors.Is(err, errEmptyFlagValue) {
+		return client.ExitUsageError
+	}
+
+	// A bad value the caller passed: the same exit as any other usage error,
+	// to match the validation_error code agent mode reports for it.
+	var invalidInput *invalidInputError
+	if errors.As(err, &invalidInput) {
 		return client.ExitUsageError
 	}
 
@@ -1702,6 +1734,12 @@ func newClientFromConfig(ctx context.Context, cfg *config.Config) (*client.Clien
 	c, err := client.NewFromConfig(cfg)
 	if err != nil {
 		return nil, err
+	}
+	// A session that brings its own transport (a host's stand-in environment,
+	// a private TLS configuration) replaces the shared pool for this client
+	// only; see Session.Transport.
+	if s := currentSession(ctx); s != nil && s.Transport != nil {
+		c.HTTP().SetTransport(s.Transport)
 	}
 	// If --debug flag is set, force verbosity to 2 (full debug mode)
 	if debugMode(ctx) {

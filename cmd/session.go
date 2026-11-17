@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
@@ -66,6 +67,20 @@ type Session struct {
 	// passes any floor, it merely has a removal date. Off by default, because
 	// a host that has not asked to be broken early should not be.
 	NoDeprecated bool
+
+	// Transport, when non-nil, carries every platform request this invocation
+	// sends, in place of the process-wide connection pool. It is how a host
+	// points a session at a stand-in environment — an httptest server's
+	// Client().Transport, or an *http.Transport with its own TLS
+	// configuration — without the invocation knowing it is not talking to
+	// Dynatrace. Everything above the transport (base URL, bearer token,
+	// User-Agent, retries, request-path guard) is unchanged, so the bytes a
+	// command prints are the bytes it would print against a real environment.
+	//
+	// The RoundTripper is shared by every client the invocation builds, and,
+	// when the host reuses it, by overlapping invocations: it must be safe for
+	// concurrent use, as http.RoundTripper requires.
+	Transport http.RoundTripper
 
 	// parseOnly marks the session Parse runs under: it has no environment and
 	// no token, and newClientFromConfig refuses it, so a command line analysed

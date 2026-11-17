@@ -30,7 +30,7 @@ export DTCTL_INTEGRATION_TOKEN="dt0s16.YOUR_PLATFORM_TOKEN"
 Your platform token needs scopes for:
 - Workflows: `automation:workflows:*`
 - Documents: `document:documents:*`
-- Storage: `storage:buckets:*`, `storage:logs:read`
+- Storage: `storage:bucket-definitions:read`, `storage:bucket-definitions:write`, `storage:bucket-definitions:delete`, `storage:buckets:read`, `storage:logs:read`
 - Settings: `settings:objects:*`, `settings:schemas:read`
 - SLOs: `slo:*`
 - EdgeConnect: `app-engine:edge-connects:*`

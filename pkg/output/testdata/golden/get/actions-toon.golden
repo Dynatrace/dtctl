@@ -12,6 +12,7 @@
     title: List things
   - actionName: create-thing
     appId: example.connector
+    approval: true
     description: Creates a thing
     fullName: "example.connector:create-thing"
     title: Create thing

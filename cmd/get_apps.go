@@ -92,7 +92,7 @@ Examples:
 				return err
 			}
 
-			return printer.PrintList(versions.Versions)
+			return printer.Print(versions)
 		},
 	}
 	stability.MarkStable(c)

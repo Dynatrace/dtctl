@@ -80,6 +80,7 @@ Error codes are stable identifiers that agents can match on programmatically:
 | `deprecated_surface` | The command or flag is deprecated and this context refuses deprecated surface ([`DTCTL_NO_DEPRECATED`](STABILITY.md#finding-out-early-what-a-removal-will-break)) | Don't retry; migrate to the replacement named in `suggestions` |
 | `development_disabled` | A `development`-tier feature that nobody enabled here | Don't retry; it needs `dtctl config set development.<feature> on` |
 | `unsupported_in_service` | Host-only command, unavailable in server mode | Don't retry; the suggestion says why |
+| `header_refused` | The embedding host's policy refuses a header passed to `exec api -H` | Don't retry; drop the header, the message says why |
 | `capability_disabled` | A host ability (plugin, alias, hook, editor, browser) isn't granted | Don't retry; use an in-process alternative |
 | `hook_rejected` | A pre-apply hook rejected the resource | Fix the resource, or apply with `--no-hooks` |
 | `validation_error` | Local input validation failed | Fix the file or flags |
@@ -151,7 +152,7 @@ that do not parse the envelope:
 |---|---|---|
 | `0` | Success | -- |
 | `1` | General failure | every code not listed below |
-| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, and `validation_error` for an empty flag value |
+| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, `header_refused`, and `validation_error` for an empty flag value |
 | `3` | Not authenticated (HTTP 401) | `auth_required` |
 | `4` | Resource does not exist (HTTP 404) | `not_found` |
 | `5` | Not allowed (HTTP 403) | `permission_denied`, `insufficient_scope` |
@@ -750,6 +751,15 @@ dtctl inventory --budget-seconds 300     # max cumulative query seconds (default
 dtctl inventory --scan-limit-gbytes 25   # scan cap applied to every probe (default 25)
 ```
 
+The scan cap bounds how much a probe reads, not how much it returns. To also cap the size of each probe's response, pass `--max-result-bytes` (default 0, the platform default; the record cap does not bound the size of one row, so a custom probe can return a large body without it):
+
+```bash
+dtctl inventory --max-result-bytes 1000000
+dtctl inventory arrivals --scope 'k8s.namespace.name == "payments"' --since 15m --max-result-bytes 1000000
+```
+
+A probe cut by that limit is reported like any other limit cut: with no matching row it stays `unknown`, not absent; a cut probe that still returned a matching row stays present.
+
 The default battery is 4 queries: data-object catalog, buckets, entity census, and the metric catalog (only when a `metricKey` definition needs it, and filtered to the globs those definitions actually use -- a `metricKey` pattern with `?` or `[a-z]` character classes cannot be pushed into the query, so it falls back to reading the whole catalog). Probe-shaped definitions cost one query each. A consumption receipt (`discovery: {queries, seconds}`) is attached to every inventory.
 
 `--budget-seconds` is a hard bound, not a running tally: a query is issued with the budget still unspent as its deadline, so a single slow query is cut off at the budget instead of overrunning it. Whatever it would have answered degrades to `unknown` with its evidence, exactly like any other skipped check. Callers running `inventory` under an outer timeout should still leave headroom -- client setup and the segment fetch happen before the first query and are not part of the query budget.
@@ -813,6 +823,22 @@ dtctl apply -f workflow.yaml --dry-run
 ```
 
 `--dry-run` is not a global flag: each command that can preview its own mutation declares it. Most `apply`, `create`, `update`, `delete`, `restore`, `share`/`unshare` and `enable`/`disable` commands do, as does `exec api`; `dtctl <verb> <resource> --help` is the authoritative list. A command that has no dry run, such as `exec workflow` or `query`, rejects the flag with a usage error (exit code 2) and does nothing — for a DQL statement, `dtctl verify query` is the check-without-running command.
+
+### Pinning SDK versions for ad-hoc JavaScript
+
+To run ad-hoc code against specific SDK major versions, pass
+`--sdk-major-versions` to `exec function` rather than building the request by
+hand with `exec api`:
+
+```bash
+dtctl exec function -f script.js --sdk-major-versions '{"@dynatrace-sdk/adhoc-utils":"1"}' --agent
+dtctl exec function -f script.js --sdk-major-versions @sdk-versions.json --agent
+```
+
+The value is a JSON object of SDK package name to major version (a string),
+given inline, as `@file`, or as `@-` for stdin. It applies only to ad-hoc code
+(`--code` or `-f`); without one of them the command fails before sending
+anything, with a `validation_error`. `dtctl get sdk-versions` lists what is available.
 
 ### Diff
 

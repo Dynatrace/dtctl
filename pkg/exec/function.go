@@ -41,6 +41,12 @@ type FunctionExecuteOptions struct {
 	// For ad-hoc execution
 	SourceCode     string
 	SourceCodeFile string
+	// SDKMajorVersions pins SDK packages for ad-hoc execution. nil leaves
+	// sdkMajorVersions out of the request; a non-nil empty map sends {}. The
+	// function executor accepts pins only for ad-hoc code, so the option is
+	// not used for an app function; the command rejects that combination
+	// before it gets here.
+	SDKMajorVersions map[string]string
 
 	// For deferred execution
 	Defer bool
@@ -85,7 +91,11 @@ func (e *FunctionExecutor) executeCode(opts FunctionExecuteOptions) (*appengine.
 		payload = content
 	}
 
-	return e.handler.ExecuteCode(sourceCode, payload)
+	return e.handler.ExecuteRequest(&appengine.FunctionExecutorRequest{
+		SourceCode:       sourceCode,
+		Payload:          payload,
+		SDKMajorVersions: opts.SDKMajorVersions,
+	})
 }
 
 // executeAppFunction executes a function from an installed app

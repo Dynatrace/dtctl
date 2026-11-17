@@ -3517,6 +3517,7 @@ func actionFixtures() []appengine.AppAction {
 			ActionName:  "create-thing",
 			Title:       "Create thing",
 			Description: "Creates a thing",
+			Approval:    true,
 			FullName:    "example.connector:create-thing",
 		},
 	}
@@ -3532,9 +3533,9 @@ func actionWithExtraFixture() appengine.AppAction {
 		ActionName:  "create-thing",
 		Title:       "Create thing",
 		Description: "Creates a thing",
+		Approval:    true,
 		FullName:    "example.connector:create-thing",
 		Extra: map[string]json.RawMessage{
-			"approval":             json.RawMessage(`true`),
 			"widget":               json.RawMessage(`"/actions/create-thing"`),
 			"expressionValidation": json.RawMessage(`{"owner":{"pattern":"^[A-Za-z0-9-]+$"}}`),
 			"docs":                 json.RawMessage(`{"inputSchema":{"type":"object","required":["owner"]}}`),

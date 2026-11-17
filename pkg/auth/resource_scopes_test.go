@@ -11,8 +11,10 @@ import (
 // TestGetScopesForSafetyLevelBaseline asserts the refactor is behavior-
 // preserving: login must request exactly the same scopes as before. Update this
 // table only with an intentional, reviewed change to login behavior.
+// readwrite-mine and readwrite-all request storage:bucket-definitions:write,
+// because both levels allow create bucket.
 var baselineScopes = map[config.SafetyLevel][]string{
-	config.SafetyLevelReadOnly: { // 43 scopes
+	config.SafetyLevelReadOnly: { // 44 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -50,6 +52,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"iam:users:read",
 		"iam:groups:read",
 		"davis:analyzers:read",
+		"davis:analyzers:execute",
 		"app-engine:apps:run",
 		"app-engine:edge-connects:read",
 		"notification:notifications:read",
@@ -57,7 +60,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"openpipeline:configurations:read",
 		"environment-api:dashboard-3rdgen-migration:execute",
 	},
-	config.SafetyLevelReadWriteMine: { // 57 scopes
+	config.SafetyLevelReadWriteMine: { // 61 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -107,10 +110,14 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"extensions:configurations:write",
 		"storage:files:write",
 		"storage:filter-segments:write",
+		"storage:bucket-definitions:write",
 		"iam:service-users:use",
 		"davis:analyzers:execute",
 		"davis-copilot:conversations:execute",
 		"app-engine:functions:run",
+		"document:environment-shares:read",
+		"document:environment-shares:write",
+		"document:environment-shares:delete",
 		"document:environment-shares:claim",
 		"email:emails:send",
 		"dev-obs:breakpoints:set",
@@ -173,6 +180,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"extensions:configurations:write",
 		"storage:files:write",
 		"storage:filter-segments:write",
+		"storage:bucket-definitions:write",
 		"iam:service-users:use",
 		"davis:analyzers:execute",
 		"davis-copilot:conversations:execute",
@@ -197,7 +205,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"app-engine:edge-connects:write",
 		"notification:notifications:write",
 	},
-	config.SafetyLevelDangerouslyUnrestricted: { // 87 scopes
+	config.SafetyLevelDangerouslyUnrestricted: { // 90 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -244,6 +252,9 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"document:documents:delete",
 		"document:environment-shares:write",
 		"document:environment-shares:delete",
+		"document:direct-shares:read",
+		"document:direct-shares:write",
+		"document:direct-shares:delete",
 		"document:environment-shares:claim",
 		"document:documents:admin",
 		"document:trash.documents:restore",
