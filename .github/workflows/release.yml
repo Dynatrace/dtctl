@@ -273,6 +273,10 @@ jobs:
   sign-windows-amd64:
     name: Sign Windows amd64
     needs: build
+    # !cancelled(): with republish_tag set, release-please is skipped, and the
+    # implicit success() treats a skipped ancestor as a failure, so without this
+    # the signing (and then GoReleaser) jobs would be skipped on a republish.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     permissions:
       contents: read
       id-token: write # Federates into the cloud signing service
@@ -295,6 +299,10 @@ jobs:
   sign-windows-arm64:
     name: Sign Windows arm64
     needs: build
+    # !cancelled(): with republish_tag set, release-please is skipped, and the
+    # implicit success() treats a skipped ancestor as a failure, so without this
+    # the signing (and then GoReleaser) jobs would be skipped on a republish.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     permissions:
       contents: read
       id-token: write # Federates into the cloud signing service
