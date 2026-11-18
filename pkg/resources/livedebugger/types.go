@@ -14,6 +14,7 @@ type (
 type BreakpointRule struct {
 	ID            string                 `json:"id" table:"ID"`
 	ImmutableID   string                 `json:"immutableId,omitempty"`
+	RevisionUUID  string                 `json:"revisionUuid,omitempty"`
 	IsDisabled    bool                   `json:"is_disabled" table:"ACTIVE"`
 	DisableReason string                 `json:"disable_reason,omitempty"`
 	AugJSON       map[string]interface{} `json:"aug_json"`
@@ -25,6 +26,7 @@ func fromSDKBreakpointRule(s *sdkld.BreakpointRule) BreakpointRule {
 	return BreakpointRule{
 		ID:            s.ID,
 		ImmutableID:   s.ImmutableID,
+		RevisionUUID:  s.RevisionUUID,
 		IsDisabled:    s.IsDisabled,
 		DisableReason: s.DisableReason,
 		AugJSON:       s.AugJSON,

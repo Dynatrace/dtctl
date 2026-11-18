@@ -102,6 +102,7 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 	if err != nil {
 		return err
 	}
+	attachWorkspaceRulesRetryNotice(cmdContext(cmd), handler)
 
 	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
 	if err != nil {
@@ -293,6 +294,32 @@ func formatFilters(parsed map[string][]string) string {
 		}
 	}
 	return strings.Join(pairs, ",")
+}
+
+// snapshotBreakpointID returns the breakpoint.id used to query snapshots.
+// Newer facades key snapshots by the rule's revisionUuid (32 hex chars). Older
+// facades, and legacy rules (revisionUuid is an empty string), key them by the
+// zero-padded immutableId. Returns "" when neither is available.
+func snapshotBreakpointID(rule livedebugger.BreakpointRule) string {
+	if rule.RevisionUUID != "" {
+		return rule.RevisionUUID
+	}
+	if rule.ImmutableID == "" {
+		return ""
+	}
+	return padBreakpointID(rule.ImmutableID)
+}
+
+// attachWorkspaceRulesRetryNotice makes the handler report, on stderr and only
+// when verbose/debug is on, that GetWorkspaceRules retried without revisionUuid.
+func attachWorkspaceRulesRetryNotice(ctx context.Context, handler *livedebugger.Handler) {
+	if !isDebugVerbose(ctx) {
+		return
+	}
+	stderr := currentStderr(ctx)
+	handler.SetRetryNotice(func(err error) {
+		fmt.Fprintf(stderr, "Note: getWorkspaceRules failed (%v); retrying without revisionUuid (older facade)\n", err)
+	})
 }
 
 // padBreakpointID zero-pads a numeric immutable breakpoint ID to 32 characters,

@@ -69,6 +69,7 @@ Use -o json / -o yaml for structured output.`,
 			if err != nil {
 				return err
 			}
+			attachWorkspaceRulesRetryNotice(cmdContext(cmd), handler)
 
 			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
 			if err != nil {
@@ -98,10 +99,10 @@ Use -o json / -o yaml for structured output.`,
 			}
 
 			rule := matchedRules[0]
-			if rule.ImmutableID == "" {
+			dqlID := snapshotBreakpointID(rule)
+			if dqlID == "" {
 				return fmt.Errorf("breakpoint %q has no snapshot ID", identifier)
 			}
-			dqlID := padBreakpointID(rule.ImmutableID)
 			dqlQuery := fmt.Sprintf(`fetch application.snapshots | filter breakpoint.id == toUid("%s")`, dqlID)
 			if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 				dqlQuery += fmt.Sprintf(" | limit %d", limit)

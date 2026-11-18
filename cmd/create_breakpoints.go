@@ -97,6 +97,7 @@ Examples:
 			if err != nil {
 				return err
 			}
+			attachWorkspaceRulesRetryNotice(cmdContext(cmd), handler)
 
 			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
 			if err != nil {
