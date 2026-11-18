@@ -3,7 +3,7 @@ module github.com/Dynatrace/dtctl
 go 1.26.11
 
 require (
-	github.com/Dynatrace/dtctl/sdk v0.45.0 // x-release-please-version
+	github.com/Dynatrace/dtctl/sdk v0.46.0 // x-release-please-version
 	github.com/adrg/xdg v0.5.3
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
