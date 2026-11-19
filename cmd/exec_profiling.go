@@ -13,7 +13,7 @@ import (
 
 	"github.com/Dynatrace/dtctl/pkg/diagnostic"
 	"github.com/Dynatrace/dtctl/pkg/output"
-	"github.com/Dynatrace/dtctl/pkg/resources/profile"
+	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 	"github.com/Dynatrace/dtctl/pkg/safety"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
@@ -179,7 +179,7 @@ func newProfilingHotspotsCmd() *cobra.Command {
 		},
 	}
 	addProfilingCommonFlags(c, f)
-	c.Flags().StringVar(&f.leafType, "leaf-type", profile.LeafTypeTotal, "CPU sample scope: total, service, or background")
+	c.Flags().StringVar(&f.leafType, "leaf-type", profiling.LeafTypeTotal, "CPU sample scope: total, service, or background")
 	c.Flags().BoolVar(&f.showWaiting, "show-waiting", false, "include waiting (non-running) samples")
 	c.Flags().StringVar(&f.view, "view", "stacks", "stacks (one row per call stack) or functions (one row per function, self and total)")
 	c.Flags().StringVar(&f.focus, "focus", "", "show this function's callers and callees (an exact frame, or a substring of exactly one)")
@@ -236,7 +236,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return fmt.Errorf("invalid entity %q: profiling takes a process id, PROCESS-xxx (classic PROCESS_GROUP-xxx and PROCESS_GROUP_INSTANCE-xxx ids work too; SERVICE ids do not).\nFind a process id:\n  %s", entityID, profilingFindIDsHint)
 	}
 	switch f.leafType {
-	case "", profile.LeafTypeTotal, profile.LeafTypeService, profile.LeafTypeBackground:
+	case "", profiling.LeafTypeTotal, profiling.LeafTypeService, profiling.LeafTypeBackground:
 	default:
 		return fmt.Errorf("invalid --leaf-type %q: use total, service, or background", f.leafType)
 	}
@@ -254,9 +254,9 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return err
 	}
 
-	apiKind := profile.Kind[kind]
+	apiKind := profiling.Kind[kind]
 	stopSpinner := startSpinner(ctx, fmt.Sprintf("running %s analysis", kind))
-	resp, err := profile.NewHandler(c).Run(cmd.Context(), profile.Payload{
+	resp, err := profiling.NewHandler(c).Run(cmd.Context(), profiling.Payload{
 		Kind:          apiKind,
 		EntityID:      entityID,
 		From:          from,
@@ -303,8 +303,8 @@ func validateProfilingView(f *profilingFlags) error {
 		return fmt.Errorf("--focus prints its own view (callers and callees); drop --view functions")
 	}
 	perFunction := f.focus != "" || f.view == "functions"
-	if f.state != "" && !profile.ValidState(f.state) {
-		return fmt.Errorf("invalid --state %q: use %s", f.state, strings.Join(profile.States, ", "))
+	if f.state != "" && !profiling.ValidState(f.state) {
+		return fmt.Errorf("invalid --state %q: use %s", f.state, strings.Join(profiling.States, ", "))
 	}
 	if f.state != "" && f.state != "running" && !perFunction {
 		return fmt.Errorf("--state applies to --view functions and --focus; the stack view always carries all five thread-state counts")
@@ -324,7 +324,7 @@ func validateProfilingView(f *profilingFlags) error {
 // renderProfilingFunctions prints the functions view: rows through the standard
 // printer, so a table, -o json/csv/yaml, --jq and the agent envelope all work.
 func renderProfilingFunctions(ctx context.Context, result interface{}, f *profilingFlags) error {
-	t := profile.HotspotFunctions(result, f.appOnly, f.state, f.sortBy)
+	t := profiling.HotspotFunctions(result, f.appOnly, f.state, f.sortBy)
 	if t == nil {
 		return printProfilingNote(ctx, noProfilingFunctionsNote(result, f))
 	}
@@ -358,9 +358,9 @@ func renderProfilingFocus(ctx context.Context, result interface{}, f *profilingF
 	if !f.limitSet {
 		limit = profilingFocusDefaultLimit
 	}
-	rows, fn, nCallers, nCallees, err := profile.HotspotFocus(result, f.appOnly, f.state, f.focus, limit)
+	rows, fn, nCallers, nCallees, err := profiling.HotspotFocus(result, f.appOnly, f.state, f.focus, limit)
 	if err != nil {
-		if profile.HotspotFunctions(result, f.appOnly, f.state, "self") == nil {
+		if profiling.HotspotFunctions(result, f.appOnly, f.state, "self") == nil {
 			return printProfilingNote(ctx, noProfilingFunctionsNote(result, f))
 		}
 		return err
@@ -473,7 +473,7 @@ func profilingAPIError(err error) error {
 func renderProfiling(ctx context.Context, apiKind string, result interface{}, limit int, appOnly bool) error {
 	printValue := func(v interface{}) error {
 		p := newPrinterCtx(ctx)
-		if ap := enrichAgent(p, "exec", "profiling"); ap != nil && apiKind == profile.Kind["hotspots"] {
+		if ap := enrichAgent(p, "exec", "profiling"); ap != nil && apiKind == profiling.Kind["hotspots"] {
 			if _, folded := v.(string); folded {
 				ap.SetSuggestions([]string{"one row per call stack: to rank functions, summed over every stack they appear in, use --view functions; for one function's callers, --focus <function>"})
 			}
@@ -489,7 +489,7 @@ func renderProfiling(ctx context.Context, apiKind string, result interface{}, li
 	}
 
 	// table (the -o default), wide, folded, or unset -> folded stacks
-	s := profile.ToCollapsed(apiKind, result, limit, appOnly)
+	s := profiling.ToCollapsed(apiKind, result, limit, appOnly)
 	if s == "" {
 		// No folded output. Say why in one line rather than dumping the raw
 		// result (hundreds of lines of render metadata with nothing in it);
@@ -511,7 +511,7 @@ func noProfilingStacksNote(apiKind string, result interface{}, appOnly bool) str
 		entity, _ = m["entityId"].(string)
 		status, _ = m["status"].(string)
 	}
-	if appOnly && profile.ToCollapsed(apiKind, result, 1, false) != "" {
+	if appOnly && profiling.ToCollapsed(apiKind, result, 1, false) != "" {
 		return fmt.Sprintf("# no stacks for %s: --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only", entity)
 	}
 	return fmt.Sprintf("# no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or -o json for the raw result", entity, status)
