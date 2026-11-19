@@ -42,7 +42,7 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | read | `document:documents:read`, `document:trash.documents:read` |
 | write | `document:documents:write`, `document:trash.documents:restore` |
 
-These commands call other endpoints than the resource's, so they need these scopes instead of the ones for their access level.
+These commands call other endpoints than the resource's, so they need these scopes instead of the ones for their access level. Some flags add a scope; see [Flags that need an extra scope](../TOKEN_SCOPES.md#flags-that-need-an-extra-scope).
 
 | Command | Scopes |
 | --- | --- |
