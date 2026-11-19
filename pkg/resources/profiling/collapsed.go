@@ -186,7 +186,26 @@ func memoryCollapsed(raw interface{}, top int, appOnly bool) string {
 		allocSize, survSize   int
 		allocCount, survCount int
 	}
-	var all []line
+	var all []*line
+	byPath := map[string]*line{}
+
+	// The values are cumulative: a node holds its whole subtree, so a root is
+	// the allocation site's total. Each node therefore contributes its own
+	// share, node minus children, clamped at zero, the same way the hotspots
+	// fold does. Most of a tree's bytes sit on its leaves (one line per full
+	// path), but an interior node can allocate in its own frame too, and a
+	// leaf-only fold would drop that. Summed over the tree, the shares add
+	// back up to the roots. Paths that coincide (recursion, or --app-only
+	// dropping the frames that told them apart) are merged into one line.
+	selfOf := func(n *mnode, key string) int {
+		v := intVal(n.ai, key)
+		for _, cid := range n.children {
+			if c := nodeMap[cid]; c != nil {
+				v -= intVal(c.ai, key)
+			}
+		}
+		return max(v, 0)
+	}
 
 	visited := make(map[string]bool, len(nodeMap))
 	var dfs func(id string, stack []string)
@@ -201,18 +220,26 @@ func memoryCollapsed(raw interface{}, top int, appOnly bool) string {
 			// Clipped, so append copies and siblings never share a backing array.
 			path = append(slices.Clip(stack), n.name)
 		}
-		if len(n.children) == 0 {
-			if len(path) == 0 {
-				return
+		if len(path) > 0 {
+			self := line{
+				allocSize:  selfOf(n, "allocationSize"),
+				survSize:   selfOf(n, "survivorSize"),
+				allocCount: selfOf(n, "allocationCount"),
+				survCount:  selfOf(n, "survivorCount"),
 			}
-			all = append(all, line{
-				path:       strings.Join(path, ";"),
-				allocSize:  intVal(n.ai, "allocationSize"),
-				survSize:   intVal(n.ai, "survivorSize"),
-				allocCount: intVal(n.ai, "allocationCount"),
-				survCount:  intVal(n.ai, "survivorCount"),
-			})
-			return
+			if self.allocSize > 0 || self.allocCount > 0 || self.survSize > 0 || self.survCount > 0 {
+				key := strings.Join(path, ";")
+				l := byPath[key]
+				if l == nil {
+					l = &line{path: key}
+					byPath[key] = l
+					all = append(all, l)
+				}
+				l.allocSize += self.allocSize
+				l.survSize += self.survSize
+				l.allocCount += self.allocCount
+				l.survCount += self.survCount
+			}
 		}
 		for _, cid := range n.children {
 			dfs(cid, path)

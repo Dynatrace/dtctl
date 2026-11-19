@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -283,5 +284,73 @@ func TestToCollapsed_AppOnlyNodeJSKeepsOwnFiles(t *testing.T) {
 	want := "/app/build/server.js:handler running=10 lock=0 net_io=0 disk_io=0 wait=0\n"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
+	}
+}
+
+// memnode is a memory-tree node: the tree is inverted (the allocation site is
+// the root, its callers below it) and allocationInfo is cumulative.
+func memnode(id float64, name string, app bool, alloc, count int, children ...interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "name": name, "childIds": children,
+		"apiInfo":        map[string]interface{}{"systemApi": app},
+		"allocationInfo": map[string]interface{}{"allocationSize": float64(alloc), "allocationCount": float64(count)},
+	}
+}
+
+func memEnvelope(roots []interface{}, nodes ...interface{}) map[string]interface{} {
+	return map[string]interface{}{"result": map[string]interface{}{"analysisResult": map[string]interface{}{
+		"stacktreeRootIds": roots, "stacktreeNodes": nodes,
+	}}}
+}
+
+// Values live on every level: Site.alloc (1000) is reached through Svc.get
+// (700, of which 100 is allocated with Svc.get as the outermost frame) and
+// Job.run (300). Each line carries its own share, so the lines add up to the
+// root's total, and the interior share is not lost.
+func TestMemoryCollapsed_ValuesOnRootsAndDescendants(t *testing.T) {
+	raw := memEnvelope([]interface{}{float64(1)},
+		memnode(1, "Site.alloc", true, 1000, 10, float64(2), float64(3)),
+		memnode(2, "Svc.get", true, 700, 7, float64(4)),
+		memnode(3, "Job.run", true, 300, 3),
+		memnode(4, "Thread.run", false, 600, 6),
+	)
+	out := ToCollapsed("memoryAllocation", raw, 0, false)
+	for _, want := range []string{
+		"Site.alloc;Svc.get;Thread.run alloc=600 ",
+		"Site.alloc;Job.run alloc=300 ",
+		"Site.alloc;Svc.get alloc=100 ",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	sum := 0
+	for _, l := range strings.Split(out, "\n") {
+		if i := strings.Index(l, " alloc="); i >= 0 {
+			var n int
+			_, _ = fmt.Sscanf(l[i:], " alloc=%d", &n)
+			sum += n
+		}
+	}
+	if sum != 1000 {
+		t.Errorf("lines add up to %d, want the root's 1000:\n%s", sum, out)
+	}
+}
+
+// --app-only drops Thread.run, so its line and Svc.get's own share land on the
+// same path and are merged into one line.
+func TestMemoryCollapsed_AppOnlyMergesCollidingPaths(t *testing.T) {
+	raw := memEnvelope([]interface{}{float64(1)},
+		memnode(1, "Site.alloc", true, 1000, 10, float64(2), float64(3)),
+		memnode(2, "Svc.get", true, 700, 7, float64(4)),
+		memnode(3, "Job.run", true, 300, 3),
+		memnode(4, "Thread.run", false, 600, 6),
+	)
+	out := ToCollapsed("memoryAllocation", raw, 0, true)
+	if n := strings.Count(out, "Site.alloc;Svc.get "); n != 1 {
+		t.Errorf("Site.alloc;Svc.get printed %d times, want once:\n%s", n, out)
+	}
+	if !strings.Contains(out, "Site.alloc;Svc.get alloc=700 ") {
+		t.Errorf("want the merged 600+100:\n%s", out)
 	}
 }
