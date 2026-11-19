@@ -105,6 +105,7 @@ type funcWalk struct {
 
 	funcs   map[string]*funcAcc
 	onPath  map[string]int
+	visited map[string]bool // node ids walked; a repeat means a malformed (cyclic) result
 	callers map[string]int
 	callees map[string]int
 	ownSelf int // samples with the focused function running (its innermost call on top)
@@ -124,9 +125,10 @@ type funcWalk struct {
 // the function spends its time on. Both splits add up to the function's total.
 func (w *funcWalk) walk(id, nearest string, key uint64, inFocus bool, callee string) int {
 	n := w.nodes[id]
-	if n == nil {
+	if n == nil || w.visited[id] {
 		return 0
 	}
+	w.visited[id] = true
 	kept := n.label != "" && (!w.appOnly || n.isApp)
 	label, caller := nearest, nearest
 	outermost := false
@@ -213,6 +215,7 @@ func newFuncWalk(raw interface{}, appOnly bool, state, focus string) (*funcWalk,
 		focus:   focus,
 		funcs:   map[string]*funcAcc{},
 		onPath:  map[string]int{},
+		visited: map[string]bool{},
 		callers: map[string]int{},
 		callees: map[string]int{},
 	}, root

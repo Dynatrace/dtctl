@@ -2,6 +2,7 @@ package profile
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -58,17 +59,23 @@ func ToCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
 	agg := make(map[string]map[string]int)
 	var order []string
 
+	visited := make(map[string]bool, len(nodeMap))
 	var dfs func(id string, stack []string)
 	dfs = func(id string, stack []string) {
 		n := nodeMap[id]
-		if n == nil {
+		if n == nil || visited[id] {
+			// visited: the API's childIds form a tree, so a node reached twice
+			// means a malformed result (a cycle would recurse until the
+			// goroutine's stack overflows, which no recover catches).
 			return
 		}
+		visited[id] = true
 		path := stack
 		if n.label != "" && (!appOnly || n.isApp) {
-			// Copy before extending: sibling recursions must not alias one
-			// backing array, or a later sibling's frame corrupts an earlier path.
-			path = append(append(make([]string, 0, len(stack)+1), stack...), n.label)
+			// Clip before extending: append then copies, so sibling recursions
+			// never alias one backing array (a later sibling's frame would
+			// corrupt an earlier path).
+			path = append(slices.Clip(stack), n.label)
 		}
 		self := n.self(nodeMap)
 		if len(path) > 0 && sampleTotal(self) > 0 {
@@ -181,18 +188,18 @@ func memoryCollapsed(raw interface{}, top int, appOnly bool) string {
 	}
 	var all []line
 
+	visited := make(map[string]bool, len(nodeMap))
 	var dfs func(id string, stack []string)
 	dfs = func(id string, stack []string) {
 		n := nodeMap[id]
-		if n == nil {
-			return
+		if n == nil || visited[id] {
+			return // a node reached twice: malformed result, see ToCollapsed
 		}
+		visited[id] = true
 		path := stack
 		if n.name != "" && (!appOnly || n.isApp) {
-			// A fresh slice, so siblings never share (and overwrite) a backing array.
-			path = make([]string, len(stack)+1)
-			copy(path, stack)
-			path[len(stack)] = n.name
+			// Clipped, so append copies and siblings never share a backing array.
+			path = append(slices.Clip(stack), n.name)
 		}
 		if len(n.children) == 0 {
 			if len(path) == 0 {
