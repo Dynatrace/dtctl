@@ -47,7 +47,7 @@ Each resource type has its own page under [`resources/`](resources/), pairing ge
 - **[COOKBOOK.md](COOKBOOK.md)**: Recipes, tips, and troubleshooting
 - **[OBSERVABILITY.md](OBSERVABILITY.md)**: Distributed tracing, OTLP span export, CI/CD integration
 - **[USAGE_TRACKING.md](USAGE_TRACKING.md)**: Opt-in local tally of the DQL queries dtctl runs and the data they scan (`dtctl usage`)
-- **[EXTENSIONS.md](EXTENSIONS.md)**, **[LIVE_DEBUGGER.md](LIVE_DEBUGGER.md)**, **[SERVE.md](SERVE.md)**: Feature guides (SERVE is experimental)
+- **[EXTENSIONS.md](EXTENSIONS.md)**, **[LIVE_DEBUGGER.md](LIVE_DEBUGGER.md)**, **[PROFILING.md](PROFILING.md)**, **[SERVE.md](SERVE.md)**: Feature guides (PROFILING and SERVE are experimental)
 
 ## Generated vs. authored content
 

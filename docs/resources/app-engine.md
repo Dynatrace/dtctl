@@ -17,7 +17,7 @@ Dynatrace App Engine lets you extend the platform with custom and built-in appli
 | describe | app | `dtctl describe app` | Show details of a specific resource | no | read |
 | get | apps | `dtctl get apps` | Display one or many resources | no | read |
 | describe | function | `dtctl describe function` | Show details of a specific resource | no | read |
-| exec | function | `dtctl exec function` | Execute queries, workflows, or functions | yes | run |
+| exec | function | `dtctl exec function` | Execute workflows, functions, analyzers, SLOs, and code-level profiling | yes | run |
 | get | functions | `dtctl get functions` | Display one or many resources | no | read |
 | describe | intent | `dtctl describe intent` | Show details of a specific resource | no | read |
 | find | intents | `dtctl find intents` | Find resources based on criteria | no | read |

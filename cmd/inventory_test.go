@@ -267,3 +267,16 @@ func TestInventoryMaxResultBytesFlag(t *testing.T) {
 		t.Errorf("inventoryMaxResultBytes = %d, %v; want 5000000, nil", got, err)
 	}
 }
+
+func TestProfilingInventoryNote(t *testing.T) {
+	withProcs := &inventory.Inventory{EntityTypes: map[string]int64{"PROCESS": 3}}
+	if n := profilingInventoryNote(withProcs); !strings.Contains(n, "dtctl exec profiling hotspots") || !strings.Contains(n, "lock") {
+		t.Errorf("note = %q", n)
+	}
+	if n := profilingInventoryNote(&inventory.Inventory{}); n == "" {
+		t.Error("census unknown: the note must stay")
+	}
+	if n := profilingInventoryNote(&inventory.Inventory{EntityTypes: map[string]int64{"HOST": 2}}); n != "" {
+		t.Errorf("no processes: want no note, got %q", n)
+	}
+}

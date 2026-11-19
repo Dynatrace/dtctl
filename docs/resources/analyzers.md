@@ -14,7 +14,7 @@ Analyzers perform statistical computations on your observability data: forecasti
 | Operation | Resource | Command syntax | Description | Mutating | Access |
 | --- | --- | --- | --- | --- | --- |
 | describe | analyzer | `dtctl describe analyzer` | Show details of a specific resource | no | read |
-| exec | analyzer | `dtctl exec analyzer` | Execute queries, workflows, or functions | yes | run |
+| exec | analyzer | `dtctl exec analyzer` | Execute workflows, functions, analyzers, SLOs, and code-level profiling | yes | run |
 | get | analyzers | `dtctl get analyzers` | Display one or many resources | no | read |
 | verify | analyzer | `dtctl verify analyzer` | Verify resources without executing them | no | read |
 

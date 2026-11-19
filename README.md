@@ -20,6 +20,7 @@ dtctl query "fetch logs | limit 10"           # Run DQL queries
 dtctl apply -f workflow.yaml --set env=prod   # Declarative configuration
 dtctl get dashboards -o json                  # Structured output for automation
 dtctl exec copilot nl2dql "error logs from last hour"
+dtctl exec profiling hotspots PROCESS-ABC123    # Code-level profiling (experimental)
 ```
 
 ![dtctl dashboard workflow demo](docs/assets/dtctl-1.gif)
@@ -88,6 +89,7 @@ Token-based authentication and multi-environment configuration are covered in th
 | Extensions 2.0 | get, describe, apply monitoring configs |
 | Hub Extensions | get, describe, list releases, filter by keyword |
 | App Functions & Intents | get, describe, execute, find, open (deep linking) |
+| Code Profiling | hotspots, memory — folded stacks via `dtctl exec profiling` (experimental); see [docs/PROFILING.md](docs/PROFILING.md) |
 | Analyzers & CoPilot | statistical analyzers, CoPilot chat, NL-to-DQL, document search |
 | Cloud Integrations | AWS, Azure & GCP connections and monitoring (get, describe, create, delete, apply, update, enable) |
 | EdgeConnect | get, describe, create, delete |
