@@ -19,6 +19,9 @@ const (
 	basePath        = "/platform-reserved/codelevelanalysis/v0.1"
 	pollInterval    = 1500 * time.Millisecond
 	maxPollAttempts = 40
+	// maxPollTransportErrors bounds consecutive transport errors (no HTTP
+	// response at all) while polling. See poll.
+	maxPollTransportErrors = 5
 	// maxThrottledSubmits bounds how often a throttled (429) submit is sent;
 	// maxThrottleWait caps one wait between them. See submit.
 	maxThrottledSubmits = 4
@@ -238,6 +241,7 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 	// serverId is fixed for the whole call: the node chosen at submit owns the
 	// async task, so every poll must be routed back to it.
 	resultPath := fmt.Sprintf("%s/result?token=%s&serverId=%d", basePath, url.QueryEscape(token), serverID)
+	transportErrors := 0
 
 	for attempt := 1; attempt <= maxPollAttempts; attempt++ {
 		select {
@@ -248,8 +252,20 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 
 		resp, err := h.client.HTTP().R().SetContext(ctx).Get(resultPath)
 		if err != nil {
-			return nil, fmt.Errorf("codelevelanalysis: poll (token %s): %w", token, err)
+			// No response at all (a dropped connection, a timeout), after the
+			// shared client's own retries. The poll is a GET and the task keeps
+			// running on the server, so poll again, within the poll budget and at
+			// most maxPollTransportErrors times in a row.
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			transportErrors++
+			if transportErrors >= maxPollTransportErrors {
+				return nil, fmt.Errorf("codelevelanalysis: poll failed %d times in a row (token %s): %w", transportErrors, token, err)
+			}
+			continue
 		}
+		transportErrors = 0
 
 		switch sc := resp.StatusCode(); sc {
 		case http.StatusOK:
@@ -262,9 +278,10 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 			// not abort an otherwise-healthy analysis, so keep polling the same
 			// node. These are the only statuses that are polled again.
 		default:
-			// Anything else is terminal: an expired or unknown task (404), a
+			// Any other status is terminal: an expired or unknown task (404), a
 			// missing scope (403), a server error. Report it as the API's own
-			// error right away rather than polling it out.
+			// error right away rather than polling it out. Only a missing
+			// response (above) or 202/429 is polled again.
 			if err := httpclient.CheckResponse(resp); err != nil {
 				return nil, fmt.Errorf("codelevelanalysis: poll (token %s): %w", token, err)
 			}

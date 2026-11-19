@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -383,6 +384,74 @@ func TestPollFailsFastOnTerminalStatus(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "task gone") {
 				t.Errorf("err = %v, want the API's message", err)
+			}
+		})
+	}
+}
+
+// dropConn closes the connection without a response: a transport error.
+func dropConn(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		t.Fatal("response writer cannot hijack")
+	}
+	conn, _, err := hj.Hijack()
+	if err != nil {
+		t.Fatalf("hijack: %v", err)
+	}
+	_ = conn.Close()
+}
+
+// TestPollRidesOutTransportErrors: a poll that gets no response at all is
+// polled again (the GET is safe, the task keeps running); persistent failure
+// gives up after maxPollTransportErrors in a row.
+func TestPollRidesOutTransportErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		drops   int32 // requests answered by a dropped connection before a 200
+		wantErr bool
+	}{
+		{"one drop recovers", 1, false},
+		{"persistent drops give up", 1000, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/methodhotspots/"):
+					w.WriteHeader(http.StatusAccepted)
+					_, _ = w.Write([]byte(`{"token":"tok-drop"}`))
+				case strings.Contains(r.URL.Path, "/result"):
+					if hits.Add(1) <= tc.drops {
+						dropConn(t, w)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"ok":true}`))
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, 0, 0))
+			if err != nil {
+				t.Fatalf("httpclient.New: %v", err)
+			}
+			resp, err := NewHandler(c).Run(context.Background(), Payload{
+				Kind: "methodHotspots", EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2,
+			})
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if !tc.wantErr && resp.Status != "completed" {
+				t.Errorf("status = %q, want completed", resp.Status)
+			}
+			// Go's transport may resend a GET once on a dropped reused
+			// connection, so the server can see up to two hits per poll.
+			if n := hits.Load(); tc.wantErr && (n < maxPollTransportErrors || n > 2*maxPollTransportErrors) {
+				t.Errorf("server saw %d requests, want %d polls' worth: give up after %d in a row", n, maxPollTransportErrors, maxPollTransportErrors)
 			}
 		})
 	}
