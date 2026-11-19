@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -337,5 +338,52 @@ func TestSubmitGivesUpOnPersistentThrottle(t *testing.T) {
 	}
 	if submits != maxThrottledSubmits {
 		t.Errorf("submits = %d, want %d", submits, maxThrottledSubmits)
+	}
+}
+
+// TestPollFailsFastOnTerminalStatus: only 202 and 429 are polled again. A
+// terminal status (an expired task, a missing scope, a server error) is
+// returned on the first poll as the API's own error, not polled out.
+func TestPollFailsFastOnTerminalStatus(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var resultCalls int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/methodhotspots/"):
+					w.WriteHeader(http.StatusAccepted)
+					_, _ = w.Write([]byte(`{"token":"tok-terminal"}`))
+				case strings.Contains(r.URL.Path, "/result"):
+					resultCalls++
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_, _ = w.Write([]byte(`{"error":{"code":` + strconv.Itoa(status) + `,"message":"task gone"}}`))
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, 0, 0))
+			if err != nil {
+				t.Fatalf("httpclient.New: %v", err)
+			}
+			_, err = NewHandler(c).Run(context.Background(), Payload{
+				Kind: "methodHotspots", EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2,
+			})
+			if err == nil {
+				t.Fatal("Run: want an error")
+			}
+			if resultCalls != 1 {
+				t.Errorf("polled %d times, want 1: a terminal status must not be retried", resultCalls)
+			}
+			var apiErr *httpclient.APIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != status {
+				t.Errorf("err = %v, want an APIError with status %d", err, status)
+			}
+			if !strings.Contains(err.Error(), "task gone") {
+				t.Errorf("err = %v, want the API's message", err)
+			}
+		})
 	}
 }

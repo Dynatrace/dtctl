@@ -19,7 +19,6 @@ const (
 	basePath        = "/platform-reserved/codelevelanalysis/v0.1"
 	pollInterval    = 1500 * time.Millisecond
 	maxPollAttempts = 40
-	maxPollErrors   = 40
 	// maxThrottledSubmits bounds how often a throttled (429) submit is sent;
 	// maxThrottleWait caps one wait between them. See submit.
 	maxThrottledSubmits = 4
@@ -239,7 +238,6 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 	// serverId is fixed for the whole call: the node chosen at submit owns the
 	// async task, so every poll must be routed back to it.
 	resultPath := fmt.Sprintf("%s/result?token=%s&serverId=%d", basePath, url.QueryEscape(token), serverID)
-	errCount := 0
 
 	for attempt := 1; attempt <= maxPollAttempts; attempt++ {
 		select {
@@ -250,36 +248,28 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 
 		resp, err := h.client.HTTP().R().SetContext(ctx).Get(resultPath)
 		if err != nil {
-			errCount++
-			if errCount >= maxPollErrors {
-				return nil, fmt.Errorf("codelevelanalysis: poll failed %d times (token %s): %w", maxPollErrors, token, err)
-			}
-			continue
+			return nil, fmt.Errorf("codelevelanalysis: poll (token %s): %w", token, err)
 		}
 
-		sc := resp.StatusCode()
-		if sc == 429 {
-			// Rate limited (the shared client already retried a few times at the
-			// transport layer). Just keep polling — a burst of 429s must not
-			// exhaust the error budget and abort an otherwise-healthy analysis.
-			continue
-		}
-		if sc != 200 && sc != 202 && sc != 204 {
-			errCount++
-			if errCount >= maxPollErrors {
-				return nil, fmt.Errorf("codelevelanalysis: poll returned %d %d times (token %s)", sc, maxPollErrors, token)
-			}
-			continue
-		}
-
-		if sc == 204 {
-			return &Response{Status: "no-data", Kind: p.Kind, EntityID: p.EntityID, PollCount: attempt}, nil
-		}
-		if sc == 200 {
+		switch sc := resp.StatusCode(); sc {
+		case http.StatusOK:
 			return parseResult(p, attempt, resp.Body())
+		case http.StatusNoContent:
+			return &Response{Status: "no-data", Kind: p.Kind, EntityID: p.EntityID, PollCount: attempt}, nil
+		case http.StatusAccepted, http.StatusTooManyRequests:
+			// 202: still running. 429: rate limited (the shared client already
+			// retried a few times at the transport layer); a burst of 429s must
+			// not abort an otherwise-healthy analysis, so keep polling the same
+			// node. These are the only statuses that are polled again.
+		default:
+			// Anything else is terminal: an expired or unknown task (404), a
+			// missing scope (403), a server error. Report it as the API's own
+			// error right away rather than polling it out.
+			if err := httpclient.CheckResponse(resp); err != nil {
+				return nil, fmt.Errorf("codelevelanalysis: poll (token %s): %w", token, err)
+			}
+			return nil, fmt.Errorf("codelevelanalysis: poll (token %s): unexpected status %d", token, sc)
 		}
-		// 202: still running. serverId is fixed for the lifetime of the call —
-		// the node chosen at submit owns the task — so we keep polling the same one.
 	}
 
 	return nil, fmt.Errorf("codelevelanalysis: analysis did not complete within %ds (token %s)",
@@ -320,7 +310,7 @@ func buildSubmitPath(p Payload) string {
 	params := url.Values{}
 	params.Set("from", fmt.Sprintf("%d", p.From))
 	params.Set("to", fmt.Sprintf("%d", p.To))
-	entity := url.PathEscape(normalizeEntityID(p.EntityID))
+	entity := httpclient.PathSegment(normalizeEntityID(p.EntityID))
 
 	setIfTrue := func(key string, v bool) {
 		if v {
@@ -348,7 +338,7 @@ func buildSubmitPath(p Payload) string {
 		if p.Kind == "threadAnalysis" {
 			path = "threadanalysis"
 		}
-		return fmt.Sprintf("%s/%s/%s?%s", basePath, path, entity, params.Encode())
+		return fmt.Sprintf("%s/%s/%s", basePath, path, entity) + "?" + params.Encode()
 
 	case "memoryAllocation":
 		setIfSet("problemId", p.ProblemID)
@@ -356,7 +346,7 @@ func buildSubmitPath(p Payload) string {
 		setIfSet("typeFilter", p.TypeFilter)
 		setIfSet("apiFilter", p.APIFilter)
 		setIfSet("methodFqnFilter", p.MethodFQNFilter)
-		return fmt.Sprintf("%s/memoryallocation/%s?%s", basePath, entity, params.Encode())
+		return fmt.Sprintf("%s/memoryallocation/%s", basePath, entity) + "?" + params.Encode()
 
 	case "memoryAllocationDetails":
 		setIfSet("problemId", p.ProblemID)
@@ -366,7 +356,7 @@ func buildSubmitPath(p Payload) string {
 		setIfSet("typeFilter", p.TypeFilter)
 		setIfSet("apiFilter", p.APIFilter)
 		setIfSet("methodFqnFilter", p.MethodFQNFilter)
-		return fmt.Sprintf("%s/memoryallocationdetails/%s?%s", basePath, entity, params.Encode())
+		return fmt.Sprintf("%s/memoryallocationdetails/%s", basePath, entity) + "?" + params.Encode()
 	}
 
 	panic(fmt.Sprintf("codelevelanalysis: unsupported kind %q", p.Kind))
