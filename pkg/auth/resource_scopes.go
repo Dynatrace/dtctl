@@ -412,7 +412,8 @@ const DashboardMigrationScope = "environment-api:dashboard-3rdgen-migration:exec
 
 // grailExtendedReadScopes are additional Grail read scopes granted at the
 // readonly, readwrite-all and dangerously-unrestricted levels. readwrite-mine
-// intentionally omits them (it focuses on write access to one's own resources).
+// intentionally omits them (it focuses on write access to one's own resources),
+// except ProfilesReadScope, which a command it allows needs.
 var grailExtendedReadScopes = []string{
 	"storage:application.snapshots:read",
 	"storage:user.events:read",
@@ -420,11 +421,15 @@ var grailExtendedReadScopes = []string{
 	"storage:user.replays:read",
 	"storage:fieldsets:read",
 	"storage:fieldset-definitions:read",
-	// Code-level profiling samples, read by `exec profiling`. Requesting the
-	// scope at login also lets `exec api` and dtctl-* plugins that reuse the
-	// dtctl session reach them.
-	"storage:profiles:read",
+	// Listed here for its place in the extended levels' order; addReadTier
+	// also requests it at readwrite-mine (see ProfilesReadScope).
+	ProfilesReadScope,
 }
+
+// ProfilesReadScope reads code-level profiling samples, which `exec profiling`
+// needs. Requesting it at login also lets `exec api` and dtctl-* plugins that
+// reuse the dtctl session reach them. Every safety level requests it.
+const ProfilesReadScope = "storage:profiles:read"
 
 // scopeSet collects scopes preserving first-seen order and de-duplicating.
 type scopeSet struct {
@@ -469,6 +474,10 @@ func (s *scopeSet) addReadTier(extended bool) {
 	if extended {
 		s.add(grailExtendedReadScopes...)
 	}
+	// `exec profiling` is a read every level allows, readwrite-mine included,
+	// so every read tier requests its scope. The extended levels already have
+	// it from grailExtendedReadScopes; the set keeps the first occurrence.
+	s.add(ProfilesReadScope)
 	s.add("storage:buckets:read", "storage:bucket-definitions:read")
 	s.addResource("lookup", AccessRead)
 	s.addResource("segment", AccessRead)
