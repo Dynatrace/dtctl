@@ -202,6 +202,129 @@ func TestExecuteGraphQL(t *testing.T) {
 	})
 }
 
+func TestGetWorkspaceRulesRevisionUuidFallback(t *testing.T) {
+	const okBody = `{"data":{"org":{"workspace":{"rules":[]}}}}`
+
+	newHandler := func(t *testing.T, serverURL string) *Handler {
+		t.Helper()
+		c, err := httpclient.New(serverURL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, time.Millisecond, time.Millisecond))
+		if err != nil {
+			t.Fatalf("httpclient.New failed: %v", err)
+		}
+		return &Handler{client: c, graphqlURL: serverURL + "/platform/dob/graphql", orgID: "test-org"}
+	}
+
+	t.Run("new facade: single request with revisionUuid", func(t *testing.T) {
+		var queries []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			queries = append(queries, body["query"].(string))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(okBody))
+		}))
+		defer server.Close()
+
+		if _, err := newHandler(t, server.URL).GetWorkspaceRules(context.Background(), "ws"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(queries) != 1 || !strings.Contains(queries[0], "revisionUuid") {
+			t.Fatalf("expected one query with revisionUuid, got %d: %v", len(queries), queries)
+		}
+		if strings.Contains(queries[0], revisionUuidPlaceholder) {
+			t.Fatal("placeholder left in query")
+		}
+	})
+
+	t.Run("old facade: retries without revisionUuid silently", func(t *testing.T) {
+		var queries []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			q := body["query"].(string)
+			queries = append(queries, q)
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(q, "revisionUuid") {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"errors":[{"message":"Cannot query field \"revisionUuid\" on type \"Rule\"."}]}`))
+				return
+			}
+			w.Write([]byte(okBody))
+		}))
+		defer server.Close()
+
+		h := newHandler(t, server.URL)
+		if _, err := h.GetWorkspaceRules(context.Background(), "ws"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(queries) != 2 || strings.Contains(queries[1], "revisionUuid") {
+			t.Fatalf("expected retry without revisionUuid, got: %v", queries)
+		}
+	})
+
+	t.Run("retry notice receives the first error", func(t *testing.T) {
+		calls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if strings.Contains(body["query"].(string), "revisionUuid") {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.Write([]byte(okBody))
+		}))
+		defer server.Close()
+
+		h := newHandler(t, server.URL)
+		h.SetRetryNotice(func(err error) {
+			if err == nil {
+				t.Error("expected non-nil error in notice")
+			}
+			calls++
+		})
+		if _, err := h.GetWorkspaceRules(context.Background(), "ws"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if calls != 1 {
+			t.Fatalf("expected 1 notice, got %d", calls)
+		}
+	})
+
+	t.Run("both attempts fail: returns error", func(t *testing.T) {
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		if _, err := newHandler(t, server.URL).GetWorkspaceRules(context.Background(), "ws"); err == nil {
+			t.Fatal("expected error")
+		}
+		if requests != 2 {
+			t.Fatalf("expected exactly 2 requests, got %d", requests)
+		}
+	})
+
+	t.Run("cancelled context does not retry", func(t *testing.T) {
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			w.Write([]byte(okBody))
+		}))
+		defer server.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := newHandler(t, server.URL).GetWorkspaceRules(ctx, "ws"); err == nil {
+			t.Fatal("expected error")
+		}
+		if requests != 0 {
+			t.Fatalf("expected no requests, got %d", requests)
+		}
+	})
+}
+
 func TestWorkspaceHasFilters(t *testing.T) {
 	workspaceResp := func(filterSets interface{}) map[string]interface{} {
 		ws := map[string]interface{}{"id": "ws-1"}
