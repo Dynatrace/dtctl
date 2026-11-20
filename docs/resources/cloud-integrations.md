@@ -64,7 +64,7 @@ There is no dedicated `aws`/`azure`/`gcp` resource type in the command catalog. 
 
 ## Flags
 
-Resource commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`, `-v`, ...). Cloud-integration commands add their own noun-specific flags, such as `--name`, `--regions`, `--featureSets`, `--credentials`, `--roleArn` (AWS), `--type`, `--directoryId`, `--applicationId`, `--clientSecret`, `--locationFiltering` (Azure), and `--serviceAccountId` (GCP connections), plus `--credentials`, `--locationFiltering`, and `--featureSets` (GCP monitoring). See the examples below for their usage in context.
+Resource commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`, `-v`, ...). Cloud-integration commands add their own noun-specific flags, such as `--name`, `--regions`, `--featureSets`, `--credentials`, `--roleArn` (AWS), `--type`, `--directoryId`, `--applicationId`, `--clientSecret`, `--locationFiltering` (Azure), and `--serviceAccountId` (GCP connections), plus `--credentials`, `--locationFiltering`, and `--featureSets` (GCP monitoring). `create aws|azure|gcp monitoring` also takes `--central-enrichment` (see [Central enrichment](#central-enrichment)). See the examples below for their usage in context.
 
 ## Required token scopes
 
@@ -235,6 +235,10 @@ dtctl delete gcp connection my-gcp-connection
 ```
 
 ## Notes
+
+### Central enrichment
+
+`dtctl create aws|azure|gcp monitoring` creates the configuration with central enrichment (`useIngestEnrichmentConfig: true`). Pass `--central-enrichment=false` to keep legacy enrichment. Some environments enforce central enrichment on every write, and there the stored configuration is central regardless of the flag. `update` and `enable` resend the stored value, and `apply` sends `useIngestEnrichmentConfig` only if the file sets it.
 
 ### AWS: IAM role deployment script
 

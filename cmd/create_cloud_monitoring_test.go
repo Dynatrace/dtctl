@@ -12,7 +12,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/gcpmonitoringconfig"
 )
 
-func TestCloudMonitoringCentralEnrichmentFlagsAreHiddenAndDisabledByDefault(t *testing.T) {
+func TestCloudMonitoringCentralEnrichmentFlagsAreVisibleAndEnabledByDefault(t *testing.T) {
 	commands := []struct {
 		name string
 		cmd  *cobra.Command
@@ -28,11 +28,11 @@ func TestCloudMonitoringCentralEnrichmentFlagsAreHiddenAndDisabledByDefault(t *t
 			if flag == nil {
 				t.Fatal("central-enrichment flag is not registered")
 			}
-			if !flag.Hidden {
-				t.Error("central-enrichment flag must remain hidden before customer release")
+			if flag.Hidden {
+				t.Error("central-enrichment flag must be visible so the legacy opt-out is discoverable")
 			}
-			if flag.DefValue != "false" {
-				t.Errorf("central-enrichment default = %q, want false", flag.DefValue)
+			if flag.DefValue != "true" {
+				t.Errorf("central-enrichment default = %q, want true", flag.DefValue)
 			}
 		})
 	}
@@ -46,9 +46,10 @@ func TestCentralEnrichmentIntent(t *testing.T) {
 		return cmd
 	}
 
-	t.Run("untouched flag is omitted", func(t *testing.T) {
-		if intent := centralEnrichmentIntent(newCmd(), centralEnrichmentDefault); intent != nil {
-			t.Errorf("intent = %v, want nil so the backend keeps its own default", *intent)
+	t.Run("untouched flag sends central", func(t *testing.T) {
+		intent := centralEnrichmentIntent(newCmd(), centralEnrichmentDefault)
+		if intent == nil || !*intent {
+			t.Errorf("intent = %v, want true", intent)
 		}
 	})
 
@@ -63,9 +64,8 @@ func TestCentralEnrichmentIntent(t *testing.T) {
 		}
 	})
 
-	// The rollout switch documented in create.go flips the default to true. An
-	// explicit --central-enrichment=false has to stay a working opt-out at that
-	// point, which it only does if "false" is distinguishable from "unset".
+	// With the default on, an explicit --central-enrichment=false is the only
+	// way to ask for legacy enrichment, so it must be sent rather than omitted.
 	t.Run("explicit false is sent", func(t *testing.T) {
 		cmd := newCmd()
 		if err := cmd.Flags().Set("central-enrichment", "false"); err != nil {
