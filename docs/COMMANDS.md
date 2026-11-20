@@ -460,7 +460,7 @@ _mutating | access: write | safety: OperationUpdate_
 
 ## share
 
-Share documents with users or groups
+Share documents with users, groups, or the environment
 
 _mutating | access: write | safety: OperationUpdate_
 

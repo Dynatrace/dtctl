@@ -60,7 +60,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"openpipeline:configurations:read",
 		"environment-api:dashboard-3rdgen-migration:execute",
 	},
-	config.SafetyLevelReadWriteMine: { // 58 scopes
+	config.SafetyLevelReadWriteMine: { // 61 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -115,6 +115,9 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"davis:analyzers:execute",
 		"davis-copilot:conversations:execute",
 		"app-engine:functions:run",
+		"document:environment-shares:read",
+		"document:environment-shares:write",
+		"document:environment-shares:delete",
 		"document:environment-shares:claim",
 		"email:emails:send",
 		"dev-obs:breakpoints:set",
@@ -187,6 +190,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"environment-api:dashboard-3rdgen-migration:execute",
 		"document:environment-shares:read",
 		"document:environment-shares:write",
+		"document:environment-shares:delete",
 		"document:environment-shares:claim",
 		"document:documents:admin",
 		"storage:logs:write",
@@ -201,7 +205,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"app-engine:edge-connects:write",
 		"notification:notifications:write",
 	},
-	config.SafetyLevelDangerouslyUnrestricted: { // 89 scopes
+	config.SafetyLevelDangerouslyUnrestricted: { // 90 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -247,6 +251,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"document:documents:write",
 		"document:documents:delete",
 		"document:environment-shares:write",
+		"document:environment-shares:delete",
 		"document:direct-shares:read",
 		"document:direct-shares:write",
 		"document:direct-shares:delete",

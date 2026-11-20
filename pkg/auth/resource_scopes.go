@@ -504,14 +504,16 @@ func (s *scopeSet) addMineWrites() {
 	s.add("davis-copilot:conversations:execute")
 	s.addResource("function", AccessRun)
 	s.addResource("environment-share", AccessClaim)
+	// `share|unshare --environment link` on one's own document lists, creates
+	// and deletes its environment shares.
+	s.add("document:environment-shares:read", "document:environment-shares:write", "document:environment-shares:delete")
 	s.add("email:emails:send", "dev-obs:breakpoints:set")
 }
 
 // addAllExtras adds the scopes that readwrite-all grants on top of
-// readwrite-mine: environment sharing, Grail record writes, CoPilot
+// readwrite-mine: document admin access, Grail record writes, CoPilot
 // generation, and app/EdgeConnect lifecycle.
 func (s *scopeSet) addAllExtras() {
-	s.add("document:environment-shares:read", "document:environment-shares:write")
 	s.add(DocumentAdminScope)
 	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write", "storage:buckets:write")
 	s.add("davis-copilot:nl2dql:execute", "davis-copilot:dql2nl:execute", "davis-copilot:document-search:execute")
@@ -555,7 +557,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.add(DashboardMigrationScope)
 	// writes / destructive
 	s.addResource("dashboard", AccessWrite, AccessDelete)
-	s.add("document:environment-shares:write")
+	s.add("document:environment-shares:write", "document:environment-shares:delete")
 	s.add(shareScopes...)
 	s.add("document:direct-shares:delete")
 	s.addResource("environment-share", AccessClaim)
