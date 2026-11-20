@@ -28,7 +28,7 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | Safety level | Scopes |
 | --- | --- |
 | read | `davis-copilot:conversations:execute` |
-| run | `davis-copilot:conversations:execute` |
+| run | `davis-copilot:conversations:execute`, `davis-copilot:document-search:execute`, `davis-copilot:dql2nl:execute`, `davis-copilot:nl2dql:execute` |
 <!-- GENERATED:copilot:end -->
 
 ## Output
