@@ -84,6 +84,17 @@ homebrew_casks:
       owner: dynatrace-oss
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      # The tap's main branch requires a pull request, so a direct push is refused
+      # (409 Repository rule violations). Push the cask to a per-release branch and
+      # open a PR instead; a tap maintainer merges it. The token needs
+      # contents and pull-requests write on the tap.
+      branch: "dtctl-{{ .Version }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: dynatrace-oss
+          name: homebrew-tap
+          branch: main
     homepage: https://github.com/Dynatrace/dtctl
     description: "kubectl-inspired CLI for Dynatrace - manage workflows, dashboards, SLOs, queries, and more from your terminal"
     skip_upload: auto

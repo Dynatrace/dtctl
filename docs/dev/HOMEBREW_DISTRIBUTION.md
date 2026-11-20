@@ -53,7 +53,9 @@ GoReleaser will create `Casks/dtctl.rb` automatically on the first release.
 
 ### Step 2: Create a GitHub App for tap pushes
 
-GoReleaser needs a token with write access to `dynatrace-oss/homebrew-tap`.
+GoReleaser needs a token with write access to `dynatrace-oss/homebrew-tap`
+(**Contents** and **Pull requests**: it pushes a `dtctl-<version>` branch and
+opens a PR, because the tap's `main` does not accept direct pushes).
 The default `GITHUB_TOKEN` from GitHub Actions is scoped to the current repo
 only, so a separate token is required.
 
@@ -189,7 +191,7 @@ brew untap local/tap
 2. Tag a new release: `git tag v0.X.0 && git push origin v0.X.0`
 3. Verify:
    - GitHub Release is created with binaries
-   - `dynatrace-oss/homebrew-tap` has a new commit with `Casks/dtctl.rb`
+   - `dynatrace-oss/homebrew-tap` has a new PR (branch `dtctl-<version>`) updating `Casks/dtctl.rb`; merge it
    - `brew install dynatrace-oss/tap/dtctl` works on a clean machine
 
 ## Generated Cask
@@ -218,8 +220,10 @@ end
 
 ## Maintenance
 
-- **Cask updates are automatic** -- every tagged release triggers GoReleaser,
-  which pushes an updated cask.
+- **Cask updates need a merge** -- every tagged release triggers GoReleaser,
+  which opens a PR on the tap with the updated cask. The cask only reaches
+  users once a tap maintainer merges it. GoReleaser logs, but does not fail
+  on, an error opening the PR, so check the tap after each release.
 - **Pre-releases are skipped** -- `skip_upload: auto` ensures only stable
   releases are published.
 - **No manual cask editing** -- The cask is fully generated. Don't edit
