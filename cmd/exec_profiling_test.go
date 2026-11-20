@@ -3,7 +3,6 @@ package cmd
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestParseProfileTimestamp(t *testing.T) {
@@ -32,18 +31,30 @@ func TestParseProfileTimestamp(t *testing.T) {
 
 func TestParseProfilingTime_NowRelative(t *testing.T) {
 	const now = int64(1_700_000_000_000)
+	const h = int64(3600_000)
 	cases := []struct {
 		input   string
 		want    int64
 		wantErr bool
 	}{
 		{"now()", now, false},
-		{"now()-1h", now - 3600_000, false},
-		{"now()-30min", now - 1800_000, false},
-		{"now()+15m", now + 900_000, false},
+		{"now()-1h", now - h, false},
+		{"now()-30min", now - h/2, false},
+		{"now()+15m", now + h/4, false},
+		// what dtctl query takes: days, weeks, compound and fractional durations
+		{"now()-1d", now - 24*h, false},
+		{"now()-1w", now - 7*24*h, false},
+		{"now()-1h30m", now - 3*h/2, false},
+		{"now()-1.5h", now - 3*h/2, false},
+		{"now() - 2h", now - 2*h, false},
 		{"1700000000000", now, false},
+		{"2023-11-14T22:13:20Z", now, false},
+		{"2023-11-14T22:13:20.000+00:00", now, false},
+		{"2023-11-14T22:13:20", now, false}, // no zone: UTC
 		{"now()-", 0, true},
 		{"now()*5m", 0, true},
+		{"now()-1y", 0, true},
+		{"now()-1h-", 0, true},
 	}
 	for _, tc := range cases {
 		got, err := parseProfilingTime(tc.input, now)
@@ -58,40 +69,38 @@ func TestParseProfilingTime_NowRelative(t *testing.T) {
 }
 
 func TestResolveProfilingTimeframe(t *testing.T) {
-	// Defaults: empty start/end -> a ~2h window ending about now.
-	from, to, err := resolveProfilingTimeframe("", "")
-	if err != nil {
-		t.Fatalf("default timeframe errored: %v", err)
+	const now = int64(1_700_100_000_000)
+	const h = int64(3600_000)
+	cases := []struct {
+		name, start, end string
+		from, to         int64
+		wantErr          string
+	}{
+		{name: "default: the last 2h", from: now - 2*h, to: now},
+		{name: "explicit window", start: "1700000000000", end: "1700003600000", from: 1700000000000, to: 1700003600000},
+		{name: "start alone: the 2h after it", start: "now()-1d", from: now - 24*h, to: now - 22*h},
+		{name: "start alone, near now: ends now", start: "now()-1h", from: now - h, to: now},
+		{name: "end alone: the 2h before it", end: "now()-1d", from: now - 26*h, to: now - 24*h},
+		{name: "exactly 2h, far back", start: "now()-21h", end: "now()-19h", from: now - 21*h, to: now - 19*h},
+		{name: "end before start", start: "1700003600000", end: "1700000000000", wantErr: "end must be after the start"},
+		{name: "wider than 2h", start: "now()-3h", end: "now()", wantErr: "must not exceed 2h"},
+		{name: "start in the future", start: "now()+5m", end: "now()+10m", wantErr: "start is in the future"},
+		{name: "end in the future", start: "now()-1h", end: "now()+1h", wantErr: "end is in the future"},
+		{name: "unknown unit", start: "now()-1y", wantErr: "invalid --default-timeframe-start"},
 	}
-	if d := to - from; d != 2*60*60*1000 {
-		t.Errorf("default window = %dms, want 2h", d)
-	}
-	if delta := time.Now().UnixMilli() - to; delta < 0 || delta > 5000 {
-		t.Errorf("default end should be ~now, off by %dms", delta)
-	}
-
-	// Explicit epoch window is honored.
-	from, to, err = resolveProfilingTimeframe("1700000000000", "1700003600000")
-	if err != nil || from != 1700000000000 || to != 1700003600000 {
-		t.Errorf("explicit window = (%d,%d,%v), want (1700000000000,1700003600000,nil)", from, to, err)
-	}
-
-	// end <= start is rejected.
-	if _, _, err := resolveProfilingTimeframe("1700003600000", "1700000000000"); err == nil {
-		t.Error("expected error when end precedes start")
-	}
-
-	// Exactly 2h is allowed, however far back it lies; anything wider is not.
-	if _, _, err := resolveProfilingTimeframe("now()-21h", "now()-19h"); err != nil {
-		t.Errorf("an earlier 2h window errored: %v", err)
-	}
-	if _, _, err := resolveProfilingTimeframe("now()-3h", ""); err == nil {
-		t.Error("expected error for window > 2h")
-	}
-
-	// A start in the future is rejected client-side.
-	if _, _, err := resolveProfilingTimeframe("now()+5m", "now()+10m"); err == nil {
-		t.Error("expected error for a start in the future")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			from, to, err := resolveProfilingTimeframe(tc.start, tc.end, now)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || from != tc.from || to != tc.to {
+				t.Fatalf("got (%d, %d, %v), want (%d, %d)", from, to, err, tc.from, tc.to)
+			}
+		})
 	}
 }
 
@@ -103,14 +112,17 @@ func TestRunProfiling_RejectsBadInputBeforeAnyAPICall(t *testing.T) {
 	}{
 		{"service entity", []string{"hotspots", "SERVICE-0000000000000000"}, "invalid entity"},
 		{"bad leaf type", []string{"hotspots", "PROCESS_GROUP-0000000000000000", "--leaf-type", "nope"}, "invalid --leaf-type"},
-		{"window too wide", []string{"memory", "PROCESS_GROUP-0000000000000000", "--default-timeframe-start", "now()-3h"}, "must not exceed 2h"},
+		{"window too wide", []string{"allocations", "PROCESS_GROUP-0000000000000000", "--default-timeframe-start", "now()-3h", "--default-timeframe-end", "now()"}, "must not exceed 2h"},
+		{"future end", []string{"hotspots", "PROCESS_GROUP-0000000000000000", "--default-timeframe-end", "now()+1h"}, "end is in the future"},
+		{"raw with a view", []string{"hotspots", "PROCESS-0000000000000000", "--raw", "--view", "functions"}, "drop --view/--focus"},
 		{"bad view", []string{"hotspots", "PROCESS-0000000000000000", "--view", "flame"}, "invalid --view"},
 		{"focus with functions view", []string{"hotspots", "PROCESS-0000000000000000", "--view", "functions", "--focus", "f"}, "drop --view functions"},
 		{"bad state", []string{"hotspots", "PROCESS-0000000000000000", "--view", "functions", "--state", "sleeping"}, "invalid --state"},
 		{"state on stack view", []string{"hotspots", "PROCESS-0000000000000000", "--state", "lock"}, "--state applies to --view functions and --focus"},
 		{"sort on stack view", []string{"hotspots", "PROCESS-0000000000000000", "--sort", "total"}, "--sort applies to --view functions"},
 		{"bad sort", []string{"hotspots", "PROCESS-0000000000000000", "--view", "functions", "--sort", "name"}, "invalid --sort"},
-		{"view on memory", []string{"memory", "PROCESS-0000000000000000", "--view", "functions"}, "unknown flag: --view"},
+		{"view on allocations", []string{"allocations", "PROCESS-0000000000000000", "--view", "functions"}, "unknown flag: --view"},
+		{"memory alias", []string{"memory", "PROCESS-0000000000000000", "--view", "functions"}, "unknown flag: --view"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,13 +148,13 @@ func TestNoProfilingStacksNote(t *testing.T) {
 }
 
 // Node.js frames carry their file in fileName/filePath (className is empty), so
-// compactResult must keep those when set; it drops them only when empty (Java).
-func TestCompactResult_KeepsFileOnlyWhenSet(t *testing.T) {
+// compactProfilingResult must keep those when set; it drops them only when empty (Java).
+func TestCompactProfilingResult_KeepsFileOnlyWhenSet(t *testing.T) {
 	in := map[string]interface{}{"dataNodes": []interface{}{
 		map[string]interface{}{"methodName": "Socket", "fileName": "node:net", "filePath": "", "color": "#fff"},
 		map[string]interface{}{"methodName": "run", "fileName": nil, "filePath": nil},
 	}}
-	nodes := compactResult(in).(map[string]interface{})["dataNodes"].([]interface{})
+	nodes := compactProfilingResult(in).(map[string]interface{})["dataNodes"].([]interface{})
 	js, java := nodes[0].(map[string]interface{}), nodes[1].(map[string]interface{})
 	if js["fileName"] != "node:net" {
 		t.Errorf("Node.js fileName dropped: %v", js)

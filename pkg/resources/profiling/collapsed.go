@@ -7,6 +7,27 @@ import (
 	"strings"
 )
 
+// StackRow is one row of the hotspots stack view: a unique call stack with its
+// own (self) samples in each thread state.
+type StackRow struct {
+	Running int    `json:"running" table:"RUNNING"`
+	Lock    int    `json:"lock" table:"LOCK"`
+	NetIO   int    `json:"net_io" table:"NET_IO"`
+	DiskIO  int    `json:"disk_io" table:"DISK_IO"`
+	Wait    int    `json:"wait" table:"WAIT"`
+	Stack   string `json:"stack" table:"STACK"`
+}
+
+// AllocationRow is one row of the allocations stack view: an allocation path,
+// allocation site first, with its own share of the window's allocations.
+type AllocationRow struct {
+	AllocBytes    int    `json:"alloc_bytes" table:"ALLOC_BYTES"`
+	SurvivedBytes int    `json:"survived_bytes" table:"SURVIVED_BYTES"`
+	AllocCount    int    `json:"alloc_count" table:"ALLOC_COUNT"`
+	SurvivedCount int    `json:"survived_count" table:"SURVIVED_COUNT"`
+	Stack         string `json:"stack" table:"STACK"`
+}
+
 // ToCollapsed renders collapsed (folded) stacks: one line per unique stack,
 // `frame1;frame2;...;frameN running=.. lock=.. net_io=.. disk_io=.. wait=..`,
 // sorted by RUNNING descending. Unlike single-metric folded output it keeps all
@@ -19,17 +40,56 @@ import (
 func ToCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
 	switch kind {
 	case "memoryAllocation", "memoryAllocationDetails":
-		return memoryCollapsed(raw, top, appOnly)
+		return FoldAllocations(capRows(AllocationStacks(raw, appOnly, false), top), false)
 	case "methodHotspots", "threadAnalysis":
-		// handled below
-	default:
+		return FoldStacks(capRows(HotspotStacks(raw, appOnly), top))
+	}
+	return ""
+}
+
+func capRows[T any](rows []T, top int) []T {
+	if top > 0 && len(rows) > top {
+		return rows[:top]
+	}
+	return rows
+}
+
+// FoldStacks renders stack rows as folded lines carrying all five counters.
+func FoldStacks(rows []StackRow) string {
+	var sb strings.Builder
+	for _, r := range rows {
+		fmt.Fprintf(&sb, "%s running=%d lock=%d net_io=%d disk_io=%d wait=%d\n",
+			r.Stack, r.Running, r.Lock, r.NetIO, r.DiskIO, r.Wait)
+	}
+	return sb.String()
+}
+
+// FoldAllocations renders allocation rows as folded lines weighted by bytes,
+// under a header that names the sort key.
+func FoldAllocations(rows []AllocationRow, bySurvivors bool) string {
+	if len(rows) == 0 {
 		return ""
 	}
+	key := "alloc"
+	if bySurvivors {
+		key = "surv"
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "# ALLOCATIONS (bytes, sorted by %s; surv = survived >=1 GC in window, not live heap)\n", key)
+	for _, l := range rows {
+		fmt.Fprintf(&sb, "%s alloc=%d surv=%d alloc_count=%d surv_count=%d\n",
+			l.Stack, l.AllocBytes, l.SurvivedBytes, l.AllocCount, l.SurvivedCount)
+	}
+	return sb.String()
+}
+
+// HotspotStacks folds a hotspots result into one row per unique stack, sorted
+// by running samples, descending. Returns nil for missing data.
+func HotspotStacks(raw interface{}, appOnly bool) []StackRow {
 	nodeMap, rootID := hotspotTree(raw)
 	if nodeMap == nil {
-		return ""
+		return nil
 	}
-
 	// Emit one folded line per unique stack. Two corrections over a naive
 	// leaf-only fold, both load-bearing:
 	//
@@ -53,9 +113,6 @@ func ToCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
 	//     and sum, so each stack prints exactly once with correct totals instead of
 	//     as several partial duplicates.
 	//
-	// The shape is one stable schema regardless of top/limit: one line per unique
-	// stack carrying all five thread-state counters, sorted by RUNNING descending.
-	// top only caps how many rows print — it never restructures the output.
 	agg := make(map[string]map[string]int)
 	var order []string
 
@@ -97,24 +154,18 @@ func ToCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
 
 	dfs(rootID, nil)
 	if len(agg) == 0 {
-		return ""
+		return nil
 	}
 
 	sort.SliceStable(order, func(i, j int) bool {
 		return agg[order[i]]["RUNNING"] > agg[order[j]]["RUNNING"]
 	})
-	if top > 0 && len(order) > top {
-		order = order[:top]
+	rows := make([]StackRow, len(order))
+	for i, key := range order {
+		c := agg[key]
+		rows[i] = StackRow{Running: c["RUNNING"], Lock: c["LOCK"], NetIO: c["NET_IO"], DiskIO: c["DISK_IO"], Wait: c["WAIT"], Stack: key}
 	}
-
-	var sb strings.Builder
-	for _, key := range order {
-		s := agg[key]
-		fmt.Fprintf(&sb, "%s running=%d lock=%d net_io=%d disk_io=%d wait=%d\n",
-			key, s["RUNNING"], s["LOCK"], s["NET_IO"], s["DISK_IO"], s["WAIT"],
-		)
-	}
-	return sb.String()
+	return rows
 }
 
 // sampleTotal sums a node's per-state sample counts; a node with zero total
@@ -127,10 +178,9 @@ func sampleTotal(s map[string]int) int {
 	return t
 }
 
-// memoryCollapsed folds a memory allocation result into Brendan-Gregg-style leaf
-// stacks weighted by bytes, sorted by allocation size:
-//
-//	frame1;frame2;...;frameN alloc=<bytes> surv=<bytes> alloc_count=<n> surv_count=<n>
+// AllocationStacks folds a memory allocation result into one row per unique
+// allocation path, weighted by bytes and sorted by allocated bytes (by survived
+// bytes when bySurvivors), descending.
 //
 // It walks the flat call tree in analysisResult.stacktreeNodes (nodes keyed by id,
 // linked via childIds, rooted at stacktreeRootIds). Note: analysisResult also carries
@@ -142,21 +192,21 @@ func sampleTotal(s map[string]int) int {
 // totals live on the roots, not the leaves. Aggregating by leaf here gives Thread.run.
 // alloc/surv are allocation pressure and GC-survivors within the window, not live
 // retained heap. appOnly keeps only profiler-classified application frames
-// (apiInfo.systemApi; see nodeIsApp) in each path; top limits rows.
-func memoryCollapsed(raw interface{}, top int, appOnly bool) string {
+// (apiInfo.systemApi; see nodeIsApp) in each path. Returns nil for missing data.
+func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRow {
 	envelope, ok := raw.(map[string]interface{})
 	if !ok {
-		return ""
+		return nil
 	}
 	result, _ := envelope["result"].(map[string]interface{})
 	ar, _ := result["analysisResult"].(map[string]interface{})
 	if ar == nil {
-		return ""
+		return nil
 	}
 	nodesRaw, _ := ar["stacktreeNodes"].([]interface{})
 	rootIDs, _ := ar["stacktreeRootIds"].([]interface{})
 	if len(nodesRaw) == 0 || len(rootIDs) == 0 {
-		return ""
+		return nil
 	}
 
 	type mnode struct {
@@ -249,19 +299,18 @@ func memoryCollapsed(raw interface{}, top int, appOnly bool) string {
 		dfs(nodeIDStr(rid), nil)
 	}
 	if len(all) == 0 {
-		return ""
+		return nil
 	}
 
-	sort.SliceStable(all, func(i, j int) bool { return all[i].allocSize > all[j].allocSize })
-	if top > 0 && len(all) > top {
-		all = all[:top]
+	sort.SliceStable(all, func(i, j int) bool {
+		if bySurvivors {
+			return all[i].survSize > all[j].survSize
+		}
+		return all[i].allocSize > all[j].allocSize
+	})
+	rows := make([]AllocationRow, len(all))
+	for i, l := range all {
+		rows[i] = AllocationRow{AllocBytes: l.allocSize, SurvivedBytes: l.survSize, AllocCount: l.allocCount, SurvivedCount: l.survCount, Stack: l.path}
 	}
-
-	var sb strings.Builder
-	sb.WriteString("# ALLOCATIONS (bytes, sorted by alloc; surv = survived >=1 GC in window, not live heap)\n")
-	for _, l := range all {
-		fmt.Fprintf(&sb, "%s alloc=%d surv=%d alloc_count=%d surv_count=%d\n",
-			l.path, l.allocSize, l.survSize, l.allocCount, l.survCount)
-	}
-	return sb.String()
+	return rows
 }

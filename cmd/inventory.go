@@ -42,7 +42,7 @@ This is about the data in the environment, not the resources you manage —
 for dashboards, workflows, SLOs, and the rest, use 'dtctl get <resource>'.
 Code-level profiling data (method CPU hotspots, lock/IO waits, memory
 allocations per process) is not in Grail and not probed here: use
-'dtctl exec profiling hotspots|memory PROCESS-xxx'.
+'dtctl exec profiling hotspots|allocations PROCESS-xxx'.
 
 Discovery is read-only and budgeted: it runs a small battery of DQL queries
 (data-object catalog, buckets, entity census, metric catalog when needed,
@@ -401,5 +401,5 @@ func profilingInventoryNote(inv *inventory.Inventory) string {
 	if inv.EntityTypes != nil && inv.EntityTypes["PROCESS"] == 0 && inv.EntityTypes["PROCESS_GROUP_INSTANCE"] == 0 {
 		return ""
 	}
-	return "code-level profiling (per-method CPU hotspots, lock/IO/wait time, memory allocations of a process) is not in Grail, so this inventory does not probe it — run dtctl exec profiling hotspots|memory PROCESS-xxx (experimental; see dtctl exec profiling --help)"
+	return "code-level profiling (per-method CPU hotspots, lock/IO/wait time, memory allocations of a process) is not in Grail, so this inventory does not probe it — run dtctl exec profiling hotspots|allocations PROCESS-xxx (experimental; see dtctl exec profiling --help)"
 }

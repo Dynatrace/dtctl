@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -142,30 +143,192 @@ func TestExecProfiling_FunctionsViewEmptyState(t *testing.T) {
 	require.Contains(t, out, "# no disk_io samples for")
 }
 
-// In agent mode the per-function view rides in the envelope, with the note and
-// hints as suggestions instead of trailing # lines.
+// In agent mode the per-function view rides in the envelope: the hints as
+// suggestions, the analysis as context.profile fields, no trailing # lines.
 func TestExecProfiling_FunctionsViewAgent(t *testing.T) {
 	newProfilingAPI(t, http.StatusOK, profilingTree)
 
-	code, out := runProfilingCmd(t, "hotspots", testProcess, "--view", "functions", "-A")
-	require.Zero(t, code, out)
-	var env map[string]interface{}
-	require.NoError(t, json.Unmarshal([]byte(out), &env), out)
-	ctx, _ := env["context"].(map[string]interface{})
-	require.Contains(t, fmt.Sprint(ctx["suggestions"]), "4 of 4 functions", out)
-	require.NotContains(t, out, "\n# ")
+	env := runProfilingAgent(t, "hotspots", testProcess, "--view", "functions")
+	require.Contains(t, fmt.Sprint(env.Context.Suggestions), "--focus 'lib.Util.wrap'")
+	require.Equal(t, "functions", env.Context.Profile.View)
+	require.Equal(t, 100, *env.Context.Profile.Samples)
+	require.Equal(t, 4, *env.Context.Total)
+	require.False(t, env.Context.HasMore)
+	require.Empty(t, env.Context.Warnings)
 }
 
-// The structured stack view keeps the envelope.
+type profilingEnvelope struct {
+	OK      bool                     `json:"ok"`
+	Result  []map[string]interface{} `json:"result"`
+	Context struct {
+		Total       *int     `json:"total"`
+		HasMore     bool     `json:"has_more"`
+		Warnings    []string `json:"warnings"`
+		Suggestions []string `json:"suggestions"`
+		Window      *struct {
+			From, To, Span, Note string
+		} `json:"window"`
+		Profile *struct {
+			Entity         string `json:"entity"`
+			APIEntity      string `json:"api_entity"`
+			Kind           string `json:"kind"`
+			View           string `json:"view"`
+			LeafType       string `json:"leaf_type"`
+			State          string `json:"state"`
+			Status         string `json:"status"`
+			Samples        *int   `json:"samples"`
+			AllocatedBytes *int64 `json:"allocated_bytes"`
+		} `json:"profile"`
+	} `json:"context"`
+}
+
+func runProfilingAgent(t *testing.T, args ...string) profilingEnvelope {
+	t.Helper()
+	code, out := runProfilingCmd(t, append(args, "-A", "-o", "json")...)
+	require.Zero(t, code, out)
+	var env profilingEnvelope
+	require.NoError(t, json.Unmarshal([]byte(out), &env), out)
+	require.True(t, env.OK, out)
+	return env
+}
+
+// -o json prints the stack view's rows (the five counts and the stack), ranked
+// by running samples and capped by --limit like the table, not the API's
+// payload.
 func TestExecProfiling_StackViewJSON(t *testing.T) {
 	newProfilingAPI(t, http.StatusOK, profilingTree)
 
-	code, out := runProfilingCmd(t, "hotspots", testProcess, "-o", "json")
+	code, out := runProfilingCmd(t, "hotspots", testProcess, "-o", "json", "--limit", "3")
+	require.Zero(t, code, out)
+	var rows []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(out), &rows), out)
+	require.Len(t, rows, 3)
+	require.Equal(t, "app.Main.main;lib.Loader.load", rows[0]["stack"])
+	require.EqualValues(t, 30, rows[0]["running"])
+	require.Equal(t, "app.Main.main;app.Main.handle;lib.Util.wrap", rows[2]["stack"])
+	require.EqualValues(t, 5, rows[2]["lock"])
+	for _, k := range []string{"running", "lock", "net_io", "disk_io", "wait", "stack"} {
+		require.Contains(t, rows[0], k)
+	}
+}
+
+// -o csv prints the same rows as columns, not a dump of a Go map.
+func TestExecProfiling_StackViewCSV(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	code, out := runProfilingCmd(t, "hotspots", testProcess, "-o", "csv")
+	require.Zero(t, code, out)
+	require.NotContains(t, out, "map[")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	require.Len(t, lines, 6, out) // header + 5 stacks
+	require.Contains(t, strings.ToLower(lines[0]), "running")
+	require.Contains(t, strings.ToLower(lines[0]), "stack")
+}
+
+// A truncated table says how many stacks there are and how to see them all.
+func TestExecProfiling_StackViewTruncatedTable(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	code, out := runProfilingCmd(t, "hotspots", testProcess, "--limit", "1")
+	require.Zero(t, code, out)
+	require.Contains(t, out, "# showing 1 of 5 stacks, by running samples; --limit 0 lists them all")
+}
+
+// In agent mode the stack view's rows ride in the envelope with the analysis
+// as fields, the PROCESS- rewrite disclosed, and truncation as a warning with
+// total and has_more.
+func TestExecProfiling_StackViewAgent(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	env := runProfilingAgent(t, "hotspots", "PROCESS-0000000000000001", "--limit", "1")
+	require.Len(t, env.Result, 1)
+	require.Equal(t, 5, *env.Context.Total)
+	require.True(t, env.Context.HasMore)
+	require.Contains(t, fmt.Sprint(env.Context.Warnings), "showing 1 of 5 stacks")
+	p := env.Context.Profile
+	require.Equal(t, "PROCESS-0000000000000001", p.Entity)
+	require.Equal(t, "PROCESS_GROUP_INSTANCE-0000000000000001", p.APIEntity)
+	require.Equal(t, "hotspots", p.Kind)
+	require.Equal(t, "stacks", p.View)
+	require.Equal(t, "total", p.LeafType)
+	require.Equal(t, 100, *p.Samples)
+	require.Equal(t, "2h", env.Context.Window.Span)
+	require.NotEmpty(t, env.Context.Window.Note, "the default window says so")
+}
+
+// An agent gets fewer stacks by default than a table, and is told so.
+func TestExecProfiling_StackViewAgentDefaultLimit(t *testing.T) {
+	var nodes []string
+	var ids []string
+	for i := 0; i < profilingStacksAgentDefaultLimit+5; i++ {
+		id := fmt.Sprintf("n%d", i)
+		ids = append(ids, fmt.Sprintf("%q", id))
+		nodes = append(nodes, fmt.Sprintf(`{"id":%q,"className":"app.C","methodName":"m%d","apiInfo":{"systemApi":true},"samples":{"RUNNING":%d},"childIds":[]}`, id, i, i+1))
+	}
+	tree := fmt.Sprintf(`{"dataRootNodeId":"0","dataNodes":[{"id":"0","className":"","methodName":"","samples":{"RUNNING":0},"childIds":[%s]},%s]}`,
+		strings.Join(ids, ","), strings.Join(nodes, ","))
+	newProfilingAPI(t, http.StatusOK, tree)
+
+	env := runProfilingAgent(t, "hotspots", testProcess)
+	require.Len(t, env.Result, profilingStacksAgentDefaultLimit)
+	require.True(t, env.Context.HasMore)
+	require.Equal(t, profilingStacksAgentDefaultLimit+5, *env.Context.Total)
+}
+
+// An empty view is an empty result, with the explanation in context.warnings.
+func TestExecProfiling_EmptyAgent(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, `{"dataRootNodeId":"0","dataNodes":[]}`)
+
+	env := runProfilingAgent(t, "hotspots", testProcess)
+	require.Empty(t, env.Result)
+	require.Equal(t, 0, *env.Context.Total)
+	require.Contains(t, fmt.Sprint(env.Context.Warnings), "no profiling samples in the window")
+}
+
+// --raw prints the API's whole result.
+func TestExecProfiling_Raw(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	code, out := runProfilingCmd(t, "hotspots", testProcess, "--raw")
 	require.Zero(t, code, out)
 	var env map[string]interface{}
 	require.NoError(t, json.Unmarshal([]byte(out), &env), out)
 	require.Equal(t, "completed", env["status"])
 	require.Equal(t, testProcess, env["entityId"])
+}
+
+// allocations runs the memory analysis; memory is its alias.
+func TestExecProfiling_AllocationsAlias(t *testing.T) {
+	api := newProfilingAPI(t, http.StatusOK, `{"stacktreeRootIds":[],"stacktreeNodes":[]}`)
+
+	for _, kind := range []string{"allocations", "memory"} {
+		code, out := runProfilingCmd(t, kind, testProcess)
+		require.Zero(t, code, out)
+	}
+	require.Len(t, api.paths, 2)
+	for _, p := range api.paths {
+		require.Contains(t, p, "/memoryallocation/")
+	}
+}
+
+// --check-scopes answers for a profiling leaf with the group's catalog scopes,
+// rather than "ok, no scopes".
+func TestExecProfiling_CheckScopes(t *testing.T) {
+	for _, kind := range []string{"hotspots", "allocations"} {
+		c := findProfilingCmd(t, kind)
+		verb, resource := verbResource(c)
+		require.Equal(t, "profiling", resource, kind)
+		got, req := scopesForInvocation(c, verb, resource)
+		require.Equal(t, scopeRequirementKnown, req, kind)
+		require.ElementsMatch(t, []string{"storage:entities:read", "storage:profiles:read"}, got, kind)
+	}
+}
+
+func findProfilingCmd(t *testing.T, kind string) *cobra.Command {
+	t.Helper()
+	c, _, err := rootCmd.Find([]string{"exec", "profiling", kind})
+	require.NoError(t, err)
+	return c
 }
 
 // An API failure fails the command.

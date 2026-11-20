@@ -354,3 +354,23 @@ func TestMemoryCollapsed_AppOnlyMergesCollidingPaths(t *testing.T) {
 		t.Errorf("want the merged 600+100:\n%s", out)
 	}
 }
+
+// --survivors-only ranks the rows by survived bytes, not allocated bytes.
+func TestAllocationStacks_BySurvivors(t *testing.T) {
+	churn := memnode(1, "Churn.alloc", true, 1000, 10)
+	keep := memnode(2, "Keep.alloc", true, 100, 1)
+	churn["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(10)
+	keep["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(90)
+	raw := memEnvelope([]interface{}{float64(1), float64(2)}, churn, keep)
+
+	if rows := AllocationStacks(raw, false, false); rows[0].Stack != "Churn.alloc" {
+		t.Errorf("by allocated bytes, Churn.alloc first: %+v", rows)
+	}
+	rows := AllocationStacks(raw, false, true)
+	if rows[0].Stack != "Keep.alloc" || rows[0].SurvivedBytes != 90 {
+		t.Errorf("by survived bytes, Keep.alloc first: %+v", rows)
+	}
+	if out := FoldAllocations(rows, true); !strings.Contains(out, "sorted by surv;") {
+		t.Errorf("header should name the survivors sort:\n%s", out)
+	}
+}

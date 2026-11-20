@@ -103,8 +103,8 @@ func TestNormalizeEntityID(t *testing.T) {
 		{"", ""},
 	}
 	for _, tc := range cases {
-		if got := normalizeEntityID(tc.in); got != tc.want {
-			t.Errorf("normalizeEntityID(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := NormalizeEntityID(tc.in); got != tc.want {
+			t.Errorf("NormalizeEntityID(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

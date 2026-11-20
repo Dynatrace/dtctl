@@ -18,6 +18,11 @@ const (
 	LeafTypeBackground = sdkcla.LeafTypeBackground
 )
 
+// APIEntityID is the id the API is asked about for entityID: PROCESS-<id>
+// becomes PROCESS_GROUP_INSTANCE-<id> (the same entity), classic ids pass
+// through.
+func APIEntityID(entityID string) string { return sdkcla.NormalizeEntityID(entityID) }
+
 // Payload is the analysis request; re-exported from the SDK for CLI use.
 type Payload = sdkcla.Payload
 

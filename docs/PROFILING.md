@@ -6,13 +6,17 @@
 > re-pointed if the API changes.
 
 `dtctl exec profiling` runs a code-level profiling analysis on a monitored process
-and returns **collapsed (folded) stacks** — the representation an agent (or a human)
-can read directly, rather than the API's UI render tree.
+and returns one row per unique call stack — in a table as **collapsed (folded)
+stacks**, the representation an agent (or a human) can read directly, rather than
+the API's UI render tree.
 
 ```
-dtctl exec profiling hotspots <entity> [flags]
-dtctl exec profiling memory   <entity> [flags]
+dtctl exec profiling hotspots    <entity> [flags]
+dtctl exec profiling allocations <entity> [flags]   # alias: memory
 ```
+
+`allocations` (alias `memory`) shows where memory is allocated and what survived GC
+in the window: allocation pressure, not what occupies the heap now.
 
 ## Entities
 
@@ -20,7 +24,8 @@ Pass a **process** id, `PROCESS-xxx`. `SERVICE` ids are **not** eligible.
 
 The API speaks the classic entity vocabulary, so dtctl rewrites `PROCESS-xxx` to its
 `PROCESS_GROUP_INSTANCE-xxx` form (same entity, same id suffix; the API 404s on the
-`PROCESS-` prefix). Classic ids work as well: `PROCESS_GROUP_INSTANCE-xxx`, and
+`PROCESS-` prefix). The agent envelope names the rewritten id in
+`context.profile.api_entity`. Classic ids work as well: `PROCESS_GROUP_INSTANCE-xxx`, and
 `PROCESS_GROUP-xxx` for a whole process group.
 
 Find process ids:
@@ -52,12 +57,27 @@ com.example.ManufacturerController.issueCreditCard;...reserveSlot  running=2   l
 - This is deliberately **not** single-metric folded, so it does not feed
   `flamegraph.pl`/`speedscope` directly; the multi-counter line keeps lock/IO/wait
   visible, which is what makes off-CPU and lock-contention cases diagnosable.
-- `--limit N` caps the number of rows (default 100; `0` = all); it never changes the
-  shape.
-- Pass `-o json` for the raw compacted result; `--jq` and `-A` (agent envelope)
-  compose as usual.
+- `--limit N` caps the number of rows (default 100, 20 in agent mode; `0` = all); it
+  never changes the shape. A capped table ends with a `# showing N of M stacks` line.
+- `-o json`, `-o yaml`, `-o csv` and `--jq` print the **same rows** as fields
+  (`running`, `lock`, `net_io`, `disk_io`, `wait`, `stack`; for `allocations`:
+  `alloc_bytes`, `survived_bytes`, `alloc_count`, `survived_count`, `stack`), capped
+  by `--limit` like the table. `--raw` prints the API's whole compacted result instead
+  (megabytes for a busy process).
 - An empty result prints one `# no stacks for …` line saying why: no samples in
   the window, or `--app-only` removed every frame.
+
+### Agent envelope
+
+With `-A` (or in an agent session) the rows ride in `result`, and `context` carries:
+
+- `total` (all rows), `has_more` and a `warnings` entry when `--limit` cut rows;
+- `window` (`from`, `to`, `span`, and a `note` when the default window was used);
+- `profile`: `entity`, `api_entity` (when rewritten), `kind`, `view`, `leaf_type`,
+  `state`, `status`, and the totals the rows are shares of (`samples`, or
+  `allocated_bytes`/`survived_bytes`).
+
+An empty result is an empty `result` with the reason in `context.warnings`.
 
 ### Per-function views (hotspots)
 
@@ -114,16 +134,17 @@ time to the nearest application frame above it, as in the stack view.
 
 | Flag | Kinds | Meaning |
 |------|-------|---------|
-| `--default-timeframe-start` / `--default-timeframe-end` | all | Window — ISO-8601/RFC3339, epoch millis, or `now()`-relative (e.g. `now()-6h`). Defaults to the last 2h. The window is at most 2h long but can lie anywhere in the past; a start in the future is rejected. |
+| `--default-timeframe-start` / `--default-timeframe-end` | all | Window — what `dtctl query` takes: ISO-8601/RFC3339, epoch millis, or `now()`-relative (`now()-1d`, `now()-90m`, `now()-1h30m`). Defaults to the last 2h; a start alone covers the 2h after it, an end alone the 2h before it. The window is at most 2h long but can lie anywhere in the past; an end in the future is rejected. |
 | `--app-only` | all | Show only application frames, stripping runtime, library and OneAgent frames. The base is the profiler's `apiInfo.systemApi` (JRE, Spring, Apache are off). dtctl also drops the OneAgent's own frames (`com.dynatrace.agent.*`, `Dynatrace.OneAgent.*`), which the profiler counts as app code. On Node.js it drops npm packages and the `node:` runtime. |
-| `--limit N` | all | Cap output to the top N rows (`0` = all): stacks by running samples (default 100), functions (default 30), or callers and callees each with `--focus` (default 10). |
+| `--limit N` | all | Cap output to the top N rows (`0` = all): stacks (default 100, 20 in agent mode), functions (default 30), or callers and callees each with `--focus` (default 10). |
+| `--raw` | all | Print the API's whole compacted result instead of rows (`-o json` or `yaml`). |
 | `--leaf-type total\|service\|background` | hotspots | Which CPU samples to attribute. `service` = inside a traced request context (reach for this to localize an endpoint); `background` = ambient (GC, JIT, pools); `total` = everything (default). |
 | `--show-waiting` | hotspots | Include waiting (non-running) samples. |
 | `--view stacks\|functions` | hotspots | One row per call stack (default), or one row per function with self and total samples. |
 | `--focus <function>` | hotspots | One function's callers and callees, with shares of its total. |
 | `--state <state>` | hotspots | What `--view functions` and `--focus` count: `running` (default), `lock`, `net_io`, `disk_io`, `wait`, `offcpu` or `all`. |
 | `--sort self\|total` | hotspots | Order of `--view functions` (default `self`). |
-| `--survivors-only` | memory | Restrict to allocations that survived at least one GC in the window. |
+| `--survivors-only` | allocations | Restrict to allocations that survived at least one GC in the window, ranked by survived bytes. |
 
 ## Examples
 
@@ -131,9 +152,9 @@ time to the nearest application frame above it, as in the stack view.
 # CPU hotspots for a process, application frames only, last hour
 dtctl exec profiling hotspots PROCESS-ABC123 --app-only --default-timeframe-start 'now()-1h'
 
-# An earlier 2h window (yesterday's incident)
-dtctl exec profiling hotspots PROCESS-ABC123 \
-  --default-timeframe-start 'now()-21h' --default-timeframe-end 'now()-19h'
+# The same hour yesterday
+dtctl exec profiling hotspots PROCESS-ABC123 --default-timeframe-start 'now()-1d' \
+  --default-timeframe-end 'now()-23h'
 
 # Which functions use the most CPU, summed over every stack, and who calls the top one
 dtctl exec profiling hotspots PROCESS-ABC123 --view functions
@@ -146,10 +167,13 @@ dtctl exec profiling hotspots PROCESS-ABC123 --view functions --state lock
 dtctl exec profiling hotspots PROCESS-ABC123 --leaf-type service --limit 5
 
 # Memory allocation pressure, only survivors (the leak tell)
-dtctl exec profiling memory PROCESS-DEF456 --survivors-only
+dtctl exec profiling allocations PROCESS-DEF456 --survivors-only
 
-# Raw result for scripting
-dtctl exec profiling hotspots PROCESS-ABC123 -o json --jq '.result.dataNodes | length'
+# The top 5 stacks as JSON rows, for a script
+dtctl exec profiling hotspots PROCESS-ABC123 --limit 5 -o json
+
+# The API's whole result
+dtctl exec profiling hotspots PROCESS-ABC123 --raw --jq '.result.dataNodes | length'
 ```
 
 ## Auth

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,10 +25,12 @@ import (
 const profilingSince = "0.47.0"
 
 const (
-	// profilingDefaultWindowMs is the window used when no start is given.
+	// profilingDefaultWindowMs is the window used when a bound is missing.
 	profilingDefaultWindowMs = 2 * 60 * 60 * 1000
 	// profilingMaxWindowMs caps the window length. The API itself accepts up to
-	// 24h, but a wider window costs the server proportionally more, and 2h is
+	// 24h, but an analysis reads every sample in its window and holds the
+	// result in memory on the server, so its cost grows with the window, and
+	// the server only runs a few analyses per environment at a time. 2h is
 	// enough to localize a hotspot; how far back the window lies is not limited.
 	profilingMaxWindowMs = 2 * 60 * 60 * 1000
 )
@@ -48,8 +51,8 @@ ways between releases.`
 var execProfilingCmd = newExecProfilingCmd()
 
 // newExecProfilingCmd builds `exec profiling` with its kind subcommands. The
-// kind is a subcommand (hotspots/memory) so each declares only the flags it
-// accepts and cobra rejects nonsensical combinations; the entity is a
+// kind is a subcommand (hotspots/allocations) so each declares only the flags
+// it accepts and cobra rejects nonsensical combinations; the entity is a
 // positional argument.
 func newExecProfilingCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -60,14 +63,15 @@ func newExecProfilingCmd() *cobra.Command {
 ` + profilingExperimentalNotice + `
 
 The analysis is asynchronous server-side; the command polls until it completes.
-Output is collapsed (folded) stacks — one line per unique stack, carrying all
-five thread-state counts so a single read shows whether a stack is CPU-bound or
-blocked (this is not single-metric folded, so it does not feed flamegraph tools
-directly):
+The default view is one row per unique call stack. In a table it prints as
+collapsed (folded) stacks carrying all five thread-state counts, so a single
+read shows whether a stack is CPU-bound or blocked (this is not single-metric
+folded, so it does not feed flamegraph tools directly):
   frame1;frame2;...;frameN running=16 lock=0 net_io=0 disk_io=0 wait=0
-Each frame's own (self) samples are attributed to its stack, so the counts
-reconcile with the analysis totals. --limit caps the number of rows; it never
-changes the shape. Pass -o json for the compacted structured result.
+-o json/yaml/csv print the same rows as fields (the five counts and the stack),
+capped by --limit like the table. Each frame's own (self) samples are attributed
+to its stack, so the counts reconcile with the analysis totals. --raw prints the
+API's whole result instead (large: megabytes for a busy process).
 
 Which function uses the most CPU? A function reached through many call paths is
 split over many stack rows, so don't sum rows yourself; hotspots does it:
@@ -77,27 +81,33 @@ split over many stack rows, so don't sum rows yourself; hotspots does it:
 (--state lock|offcpu|... counts other thread states; see hotspots --help.)
 
 Kinds:
-  hotspots  Method CPU hotspots (per-stack thread-state counts include lock/IO/wait)
-  memory    Memory allocation analysis (allocation pressure, not live heap)
+  hotspots     Method CPU hotspots (per-stack thread-state counts include lock/IO/wait)
+  allocations  Where memory is allocated, and what survived GC, in the window
+               (alias: memory). Allocation pressure, not live heap.
 
 Entities: pass a process id, PROCESS-xxx. SERVICE ids are not accepted. The API
 speaks the classic entity vocabulary, so dtctl rewrites PROCESS-xxx to its
-PROCESS_GROUP_INSTANCE-xxx form (same entity, same id suffix). Classic ids work
-as well: PROCESS_GROUP_INSTANCE-xxx, and PROCESS_GROUP-xxx for a whole process
-group.
+PROCESS_GROUP_INSTANCE-xxx form (same entity, same id suffix; the agent envelope
+names it in context.profile.api_entity). Classic ids work as well:
+PROCESS_GROUP_INSTANCE-xxx, and PROCESS_GROUP-xxx for a whole process group.
 
 Find process ids:
   ` + profilingFindIDsHint + `
 
-Timeframe: --default-timeframe-start/--default-timeframe-end (ISO-8601/RFC3339,
-epoch millis, or now()-relative). Defaults to the last 2h. The window must not
-exceed 2h, but it can lie anywhere in the past.
+Timeframe: --default-timeframe-start/--default-timeframe-end take what dtctl
+query takes: ISO-8601/RFC3339, epoch millis, or now()-relative (now()-1d,
+now()-90m, now()-1h30m). Without either, the last 2h. A start alone covers the 2h
+after it, an end alone the 2h before it. The window must not exceed 2h, must not
+end in the future, and can lie anywhere in the past.
 
 Required token scopes: storage:entities:read, storage:profiles:read.`,
 		RunE: requireSubcommand,
 	}
 	stability.Mark(c, stability.Experimental, profilingSince)
-	c.AddCommand(newProfilingHotspotsCmd(), newProfilingMemoryCmd())
+	// The scope catalog lists `exec profiling`, not each kind: its leaves take
+	// the group's scopes, so --check-scopes answers for them.
+	markScopeGroup(c)
+	c.AddCommand(newProfilingHotspotsCmd(), newProfilingAllocationsCmd())
 	return c
 }
 
@@ -115,6 +125,7 @@ type profilingFlags struct {
 	limit         int
 	limitSet      bool // --limit given explicitly; each view has its own default
 	appOnly       bool
+	raw           bool
 	leafType      string
 	showWaiting   bool
 	survivorsOnly bool
@@ -124,18 +135,25 @@ type profilingFlags struct {
 	sortBy        string // hotspots functions: self or total
 }
 
-// Default row caps of the per-function views when --limit is not given: the
-// functions table is read top-down and its tail is noise, and the focus view
-// caps its callers and its callees separately.
+// Default row caps when --limit is not given. The stack view's rows run to a
+// few kB each, so an agent gets fewer of them by default (the envelope says
+// how many there are and how to get the rest). The functions table is read
+// top-down and its tail is noise, and the focus view caps its callers and its
+// callees separately.
 const (
-	profilingFunctionsDefaultLimit = 30
-	profilingFocusDefaultLimit     = 10
+	profilingStacksDefaultLimit      = 100
+	profilingStacksAgentDefaultLimit = 20
+	profilingFunctionsDefaultLimit   = 30
+	profilingFocusDefaultLimit       = 10
 )
 
+const profilingLimitHelp = "cap the rows (0 = all). Default: 100 stacks (20 in agent mode); --view functions 30; --focus 10 callers and 10 callees"
+
 const profilingViewsHelp = `
-Views. The default prints one row per unique call stack. A function reached
-through many paths is then split over many rows, so it can be among the hottest
-without any single row showing it. Two views sum the stacks per function:
+Views. The default prints one row per unique call stack, ranked by running
+samples. A function reached through many paths is then split over many rows, so
+it can be among the hottest without any single row showing it. Two views sum the
+stacks per function:
   --view functions   one row per function: SELF (samples with the function
                      running, i.e. on top of the stack), TOTAL (samples with it
                      anywhere on the stack), their shares of all samples, and
@@ -163,9 +181,11 @@ func newProfilingHotspotsCmd() *cobra.Command {
   dtctl exec profiling hotspots PROCESS-ABC123 --leaf-type service --limit 5
   dtctl exec profiling hotspots PROCESS-ABC123 --app-only \
     --default-timeframe-start 'now()-1h'
-  # an earlier 2h window
+  # the same hour yesterday
   dtctl exec profiling hotspots PROCESS-ABC123 \
-    --default-timeframe-start 'now()-21h' --default-timeframe-end 'now()-19h'
+    --default-timeframe-start 'now()-25h' --default-timeframe-end 'now()-24h'
+  # the top 5 stacks as JSON rows
+  dtctl exec profiling hotspots PROCESS-ABC123 --limit 5 -o json
   # which functions use the most CPU, summed over every stack
   dtctl exec profiling hotspots PROCESS-ABC123 --view functions
   # who calls a hot function, and where its time goes
@@ -189,41 +209,94 @@ func newProfilingHotspotsCmd() *cobra.Command {
 	return c
 }
 
-func newProfilingMemoryCmd() *cobra.Command {
+func newProfilingAllocationsCmd() *cobra.Command {
 	f := &profilingFlags{}
 	c := &cobra.Command{
-		Use:   "memory <entity>",
-		Short: "Memory allocation analysis for a process",
-		Long: `Memory allocation analysis for a process (PROCESS-xxx).
+		Use:     "allocations <entity>",
+		Aliases: []string{"memory"},
+		Short:   "Memory allocation analysis for a process (alias: memory)",
+		Long: `Memory allocation analysis for a process (PROCESS-xxx). Alias: memory.
 
 ` + profilingExperimentalNotice + `
 
 Shows where allocations happen and what survived GC within the window —
-allocation pressure, not live retained heap. It does not prove a leak or predict
-OOM; confirm that with a heap/RSS trend and pod restart/OOM state. The leak tell
-is survived/allocated: a frame whose survivors far exceed its in-window
+allocation pressure, not live retained heap. It cannot say which objects take
+up the heap now, does not prove a leak and does not predict OOM; confirm those
+with a heap/RSS trend and pod restart/OOM state. The leak tell is
+survived/allocated: a frame whose survivors far exceed its in-window
 allocations is retaining, not churning (the biggest allocator is usually churn).
-NOTE the memory tree is INVERTED vs hotspots: the allocation-site method is at
-the root and its callers hang below as children.`,
-		Example: `  dtctl exec profiling memory PROCESS-DEF456
-  dtctl exec profiling memory PROCESS-DEF456 --survivors-only`,
+Rows are ranked by allocated bytes, or by survived bytes with --survivors-only.
+NOTE the allocation tree is INVERTED vs hotspots: the allocation-site method is
+at the root and its callers hang below as children, so each stack reads
+allocation site first.`,
+		Example: `  dtctl exec profiling allocations PROCESS-DEF456
+  dtctl exec profiling allocations PROCESS-DEF456 --survivors-only`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runProfiling(cmd, "memory", args[0], f)
+			f.limitSet = cmd.Flags().Changed("limit")
+			return runProfiling(cmd, "allocations", args[0], f)
 		},
 	}
 	addProfilingCommonFlags(c, f)
-	c.Flags().BoolVar(&f.survivorsOnly, "survivors-only", false, "restrict to surviving allocations")
+	c.Flags().BoolVar(&f.survivorsOnly, "survivors-only", false, "restrict to surviving allocations, ranked by survived bytes")
 	stability.Mark(c, stability.Experimental, profilingSince)
 	return c
 }
 
 func addProfilingCommonFlags(c *cobra.Command, f *profilingFlags) {
 	fl := c.Flags()
-	fl.StringVar(&f.start, "default-timeframe-start", "", "window start — ISO-8601/RFC3339, epoch millis, or now()-<dur> (default: now()-2h)")
-	fl.StringVar(&f.end, "default-timeframe-end", "", "window end — ISO-8601/RFC3339, epoch millis, or now() (default: now(); window max 2h)")
-	fl.IntVar(&f.limit, "limit", 100, "cap output to the top N stacks: hotspots by running samples, memory by allocated bytes (0 = all)")
+	fl.StringVar(&f.start, "default-timeframe-start", "", "window start — ISO-8601/RFC3339, epoch millis, or now()-<dur>, e.g. now()-1d (default: 2h before the end)")
+	fl.StringVar(&f.end, "default-timeframe-end", "", "window end — ISO-8601/RFC3339, epoch millis, or now()-<dur>; not in the future (default: 2h after the start, else now(); window max 2h)")
+	fl.IntVar(&f.limit, "limit", profilingStacksDefaultLimit, profilingLimitHelp)
 	fl.BoolVar(&f.appOnly, "app-only", false, "show only application frames, stripping runtime/library frames (JRE, Spring, npm packages, node:) and OneAgent frames")
+	fl.BoolVar(&f.raw, "raw", false, "print the API's whole (compacted) result instead of rows; large. Use with -o json or yaml")
+}
+
+// profilingAPIKinds maps a kind subcommand to the API kind it runs.
+var profilingAPIKinds = map[string]string{
+	"hotspots":    profiling.Kind["hotspots"],
+	"allocations": profiling.Kind["memory"],
+}
+
+// profilingRun is what one analysis was run on, for the agent envelope.
+type profilingRun struct {
+	kind          string // hotspots or allocations
+	entity        string
+	leafType      string
+	status        string
+	from, to      int64
+	defaultWindow bool
+}
+
+// annotate fills the envelope's window and profile fields.
+func (r *profilingRun) annotate(ap *output.AgentPrinter, view, state string) *output.ProfileContext {
+	ctx := ap.Context()
+	ctx.Window = &output.TimeWindow{
+		From: time.UnixMilli(r.from).UTC().Format(time.RFC3339),
+		To:   time.UnixMilli(r.to).UTC().Format(time.RFC3339),
+		Span: spanString(time.Duration(r.to-r.from) * time.Millisecond),
+	}
+	if r.defaultWindow {
+		ctx.Window.Note = "no window given, so the last 2h; set one with --default-timeframe-start/--default-timeframe-end"
+	}
+	p := &output.ProfileContext{
+		Entity: r.entity,
+		Kind:   r.kind,
+		View:   view,
+		State:  state,
+		Status: r.status,
+	}
+	if api := profiling.APIEntityID(r.entity); api != r.entity {
+		p.APIEntity = api
+	}
+	if r.kind == "hotspots" {
+		p.LeafType = r.leafType
+		if p.LeafType == "" {
+			p.LeafType = profiling.LeafTypeTotal
+		}
+	}
+	ctx.Profile = p
+	return p
 }
 
 // runProfiling validates the input, runs one analysis and prints it. Every
@@ -243,7 +316,16 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	if err := validateProfilingView(f); err != nil {
 		return err
 	}
-	from, to, err := resolveProfilingTimeframe(f.start, f.end)
+	if f.raw {
+		if f.focus != "" || (f.view != "" && f.view != "stacks") {
+			return fmt.Errorf("--raw prints the API's whole result; drop --view/--focus")
+		}
+		switch outputFormat(ctx) {
+		case "csv", "parquet":
+			return fmt.Errorf("--raw prints a nested document; use -o json or -o yaml")
+		}
+	}
+	from, to, err := resolveProfilingTimeframe(f.start, f.end, time.Now().UnixMilli())
 	if err != nil {
 		return err
 	}
@@ -254,8 +336,9 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return err
 	}
 
-	apiKind := profiling.Kind[kind]
-	stopSpinner := startSpinner(ctx, fmt.Sprintf("running %s analysis", kind))
+	apiKind := profilingAPIKinds[kind]
+	progress := output.NewProgressReporterTo(true, agentMode(ctx), currentStderr(ctx))
+	progress.Update(output.ProgressState{Label: fmt.Sprintf("running %s analysis", kind)})
 	resp, err := profiling.NewHandler(c).Run(cmd.Context(), profiling.Payload{
 		Kind:          apiKind,
 		EntityID:      entityID,
@@ -265,12 +348,12 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		ShowWaiting:   f.showWaiting,
 		SurvivorsOnly: f.survivorsOnly,
 	})
-	stopSpinner()
+	progress.Stop()
 	if err != nil {
 		return profilingAPIError(err)
 	}
 
-	// Round-trip through JSON so the renderers and --jq see the plain envelope
+	// Round-trip through JSON so the renderers and --raw see the plain envelope
 	// shape: {"status":..., "kind":..., "entityId":..., "result":{...}}.
 	b, err := json.Marshal(resp)
 	if err != nil {
@@ -280,14 +363,25 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	if err := json.Unmarshal(b, &result); err != nil {
 		return err
 	}
-	result = compactResult(result)
-	if f.focus != "" {
-		return renderProfilingFocus(ctx, result, f)
+	result = compactProfilingResult(result)
+	run := &profilingRun{
+		kind:          kind,
+		entity:        entityID,
+		leafType:      f.leafType,
+		status:        resp.Status,
+		from:          from,
+		to:            to,
+		defaultWindow: f.start == "" && f.end == "",
 	}
-	if f.view == "functions" {
-		return renderProfilingFunctions(ctx, result, f)
+	switch {
+	case f.raw:
+		return renderProfilingRaw(ctx, run, result)
+	case f.focus != "":
+		return renderProfilingFocus(ctx, run, result, f)
+	case f.view == "functions":
+		return renderProfilingFunctions(ctx, run, result, f)
 	}
-	return renderProfiling(ctx, apiKind, result, f.limit, f.appOnly)
+	return renderProfilingStacks(ctx, run, apiKind, result, f)
 }
 
 // validateProfilingView checks the hotspots view flags. A flag that only one
@@ -321,67 +415,201 @@ func validateProfilingView(f *profilingFlags) error {
 	return nil
 }
 
+// profilingLimit is the row cap for a view: --limit when given, else the
+// view's default.
+func profilingLimit(ctx context.Context, f *profilingFlags, def int) int {
+	if f.limitSet {
+		return f.limit
+	}
+	if def == profilingStacksDefaultLimit && agentMode(ctx) {
+		return profilingStacksAgentDefaultLimit
+	}
+	return def
+}
+
+// renderProfilingStacks prints the stack view: one row per unique stack. A
+// table (the default outside agent mode) prints the rows as folded lines; every
+// structured format, --jq and the agent envelope get the same rows as fields.
+// --limit caps every one of them the same way.
+func renderProfilingStacks(ctx context.Context, run *profilingRun, apiKind string, result interface{}, f *profilingFlags) error {
+	var rows interface{}
+	var n int
+	var folded func() string
+	unit := "stacks, by running samples"
+	var profile func(p *output.ProfileContext)
+	if run.kind == "allocations" {
+		all := profiling.AllocationStacks(result, f.appOnly, f.survivorsOnly)
+		n = len(all)
+		key := "allocated"
+		if f.survivorsOnly {
+			key = "survived"
+		}
+		unit = "allocation stacks, by " + key + " bytes"
+		limited := capProfilingRows(all, profilingLimit(ctx, f, profilingStacksDefaultLimit))
+		rows = limited
+		folded = func() string { return profiling.FoldAllocations(limited, f.survivorsOnly) }
+		profile = func(p *output.ProfileContext) {
+			var alloc, surv int64
+			for _, r := range all {
+				alloc += int64(r.AllocBytes)
+				surv += int64(r.SurvivedBytes)
+			}
+			p.AllocatedBytes, p.SurvivedBytes = &alloc, &surv
+		}
+	} else {
+		all := profiling.HotspotStacks(result, f.appOnly)
+		n = len(all)
+		limited := capProfilingRows(all, profilingLimit(ctx, f, profilingStacksDefaultLimit))
+		rows = limited
+		folded = func() string { return profiling.FoldStacks(limited) }
+		profile = func(p *output.ProfileContext) {
+			samples := 0
+			for _, r := range all {
+				samples += r.Running
+			}
+			p.Samples = &samples
+			p.State = "running"
+		}
+	}
+	shown := profilingRowCount(rows)
+
+	if n == 0 {
+		return printProfilingEmpty(ctx, run, "stacks", "", rows, noProfilingStacksNote(apiKind, result, f.appOnly))
+	}
+	truncated := ""
+	if shown < n {
+		truncated = fmt.Sprintf("showing %d of %d %s; --limit 0 lists them all", shown, n, unit)
+	}
+
+	if agentMode(ctx) {
+		p := newPrinterCtx(ctx)
+		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
+			profile(run.annotate(ap, "stacks", ""))
+			ap.SetTotal(n)
+			if truncated != "" {
+				ap.SetHasMore(true)
+				ap.SetWarnings([]string{truncated})
+			}
+			if run.kind == "hotspots" {
+				ap.SetSuggestions([]string{"one row per call stack, ranked by running samples: to rank functions, summed over every stack they appear in, use --view functions (--state lock|wait|offcpu for blocked time); for one function's callers, --focus <function>"})
+			}
+		}
+		return p.PrintList(rows)
+	}
+	if isProfilingTableFormat(ctx) && jqFilter(ctx) == "" {
+		w := currentStdout(ctx)
+		if _, err := fmt.Fprint(w, folded()); err != nil {
+			return err
+		}
+		if truncated != "" {
+			fmt.Fprintf(w, "# %s\n", truncated)
+		}
+		return nil
+	}
+	return newPrinterCtx(ctx).PrintList(rows)
+}
+
+func capProfilingRows[T any](rows []T, limit int) []T {
+	if limit > 0 && len(rows) > limit {
+		return rows[:limit]
+	}
+	if rows == nil {
+		return []T{}
+	}
+	return rows
+}
+
+func profilingRowCount(rows interface{}) int {
+	switch r := rows.(type) {
+	case []profiling.StackRow:
+		return len(r)
+	case []profiling.AllocationRow:
+		return len(r)
+	}
+	return 0
+}
+
+// isProfilingTableFormat reports whether the output format is a table, which
+// the stack view prints as folded lines.
+func isProfilingTableFormat(ctx context.Context) bool {
+	switch outputFormat(ctx) {
+	case "", "table", "wide", "folded":
+		return true
+	}
+	return false
+}
+
+// renderProfilingRaw prints the API's whole (compacted) result: JSON unless
+// another structured format was asked for.
+func renderProfilingRaw(ctx context.Context, run *profilingRun, result interface{}) error {
+	p := newPrinterCtx(ctx)
+	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
+		run.annotate(ap, "raw", "")
+	} else if isProfilingTableFormat(ctx) {
+		p = newPrinterOpts(ctx, output.PrinterOptions{Format: "json", PlainMode: plainMode(ctx), JQFilter: jqFilter(ctx)})
+	}
+	return p.Print(result)
+}
+
 // renderProfilingFunctions prints the functions view: rows through the standard
 // printer, so a table, -o json/csv/yaml, --jq and the agent envelope all work.
-func renderProfilingFunctions(ctx context.Context, result interface{}, f *profilingFlags) error {
+func renderProfilingFunctions(ctx context.Context, run *profilingRun, result interface{}, f *profilingFlags) error {
 	t := profiling.HotspotFunctions(result, f.appOnly, f.state, f.sortBy)
 	if t == nil {
-		return printProfilingNote(ctx, noProfilingFunctionsNote(result, f))
+		return printProfilingEmpty(ctx, run, "functions", f.state, []profiling.FunctionRow{}, noProfilingFunctionsNote(result, f))
 	}
-	limit := f.limit
-	if !f.limitSet {
-		limit = profilingFunctionsDefaultLimit
-	}
-	rows := t.Rows
-	if limit > 0 && len(rows) > limit {
-		rows = rows[:limit]
-	}
+	limit := profilingLimit(ctx, f, profilingFunctionsDefaultLimit)
+	rows := capProfilingRows(t.Rows, limit)
 	sortKey := f.sortBy
 	if sortKey == "" {
 		sortKey = "self"
 	}
 	note := fmt.Sprintf("%d of %d functions, by %s %s samples (%d %s samples in the window)",
 		len(rows), len(t.Rows), sortKey, f.state, t.Samples, f.state)
-	var hints []string
+	var warnings, hints []string
 	if len(rows) < len(t.Rows) {
-		hints = append(hints, "--limit 0 lists every function")
+		warnings = append(warnings, fmt.Sprintf("showing %d of %d functions, by %s %s samples; --limit 0 lists every function", len(rows), len(t.Rows), sortKey, f.state))
 	}
 	if len(rows) > 0 {
 		hints = append(hints, fmt.Sprintf("--focus '%s' shows its callers and callees", rows[0].Function))
 	}
-	return printProfilingRows(ctx, rows, len(t.Rows), note, hints)
+	samples := t.Samples
+	return printProfilingRows(ctx, run, "functions", f.state, &samples, rows, len(t.Rows), note, warnings, hints)
 }
 
 // renderProfilingFocus prints one function's callers and callees.
-func renderProfilingFocus(ctx context.Context, result interface{}, f *profilingFlags) error {
-	limit := f.limit
-	if !f.limitSet {
-		limit = profilingFocusDefaultLimit
-	}
+func renderProfilingFocus(ctx context.Context, run *profilingRun, result interface{}, f *profilingFlags) error {
+	limit := profilingLimit(ctx, f, profilingFocusDefaultLimit)
 	rows, fn, nCallers, nCallees, err := profiling.HotspotFocus(result, f.appOnly, f.state, f.focus, limit)
 	if err != nil {
 		if profiling.HotspotFunctions(result, f.appOnly, f.state, "self") == nil {
-			return printProfilingNote(ctx, noProfilingFunctionsNote(result, f))
+			return printProfilingEmpty(ctx, run, "focus", f.state, []profiling.FocusRow{}, noProfilingFunctionsNote(result, f))
 		}
 		return err
 	}
 	note := fmt.Sprintf("%s: %d callers, %d callees, shares of its total %s samples", fn, nCallers, nCallees, f.state)
-	var hints []string
+	var warnings []string
 	if limit > 0 && (nCallers > limit || nCallees > limit) {
-		hints = append(hints, fmt.Sprintf("showing up to %d callers and %d callees; --limit 0 lists them all", limit, limit))
+		warnings = append(warnings, fmt.Sprintf("showing up to %d callers and %d callees; --limit 0 lists them all", limit, limit))
 	}
-	hints = append(hints, "--focus <caller or callee> walks the call graph further")
-	return printProfilingRows(ctx, rows, len(rows), note, hints)
+	hints := []string{note, "--focus <caller or callee> walks the call graph further"}
+	return printProfilingRows(ctx, run, "focus", f.state, nil, rows, len(rows), "", warnings, hints)
 }
 
-// printProfilingRows prints a per-function view's rows. A table gets the note
-// and hints as trailing # lines; the agent envelope carries them as
-// suggestions; structured formats get the rows alone.
-func printProfilingRows(ctx context.Context, rows interface{}, total int, note string, hints []string) error {
+// printProfilingRows prints a per-function view's rows. A table gets the note,
+// warnings and hints as trailing # lines; the agent envelope carries the
+// warnings (truncation) as context.warnings and the hints as suggestions;
+// structured formats get the rows alone.
+func printProfilingRows(ctx context.Context, run *profilingRun, view, state string, samples *int, rows interface{}, total int, note string, warnings, hints []string) error {
 	p := newPrinterCtx(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
+		run.annotate(ap, view, state).Samples = samples
 		ap.SetTotal(total)
-		ap.SetSuggestions(append([]string{note}, hints...))
+		if len(warnings) > 0 {
+			ap.SetHasMore(true)
+			ap.SetWarnings(warnings)
+		}
+		ap.SetSuggestions(hints)
 	}
 	if err := p.PrintList(rows); err != nil {
 		return err
@@ -392,24 +620,40 @@ func printProfilingRows(ctx context.Context, rows interface{}, total int, note s
 	switch outputFormat(ctx) {
 	case "", "table", "wide":
 		w := currentStdout(ctx)
-		fmt.Fprintf(w, "# %s\n", note)
-		for _, h := range hints {
+		if note != "" {
+			fmt.Fprintf(w, "# %s\n", note)
+		}
+		for _, h := range append(warnings, hints...) {
+			if h == note {
+				continue
+			}
 			fmt.Fprintf(w, "# %s\n", h)
 		}
 	}
 	return nil
 }
 
-// printProfilingNote prints a one-line explanation in place of a view's output,
-// inside the envelope in agent mode.
-func printProfilingNote(ctx context.Context, note string) error {
+// printProfilingEmpty prints a view that has no rows. A table gets the note in
+// place of the rows; the agent envelope gets an empty result with the note in
+// context.warnings; structured formats get the empty list on stdout and the
+// note on stderr.
+func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state string, empty interface{}, note string) error {
+	note = strings.TrimPrefix(note, "# ")
 	if agentMode(ctx) {
 		p := newPrinterCtx(ctx)
-		enrichAgent(p, "exec", "profiling")
-		return p.Print(note)
+		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
+			run.annotate(ap, view, state)
+			ap.SetTotal(0)
+			ap.SetWarnings([]string{note})
+		}
+		return p.PrintList(empty)
 	}
-	_, err := fmt.Fprintln(currentStdout(ctx), note)
-	return err
+	if isProfilingTableFormat(ctx) && jqFilter(ctx) == "" {
+		_, err := fmt.Fprintf(currentStdout(ctx), "# %s\n", note)
+		return err
+	}
+	fmt.Fprintf(currentStderr(ctx), "# %s\n", note)
+	return newPrinterCtx(ctx).PrintList(empty)
 }
 
 // noProfilingFunctionsNote explains an empty per-function view. Running samples
@@ -466,45 +710,8 @@ func profilingAPIError(err error) error {
 	}
 }
 
-// renderProfiling routes output through the standard printer so --jq and the
-// agent envelope compose. Folded stacks are the default; a structured -o
-// (json/yaml/toon/…) or --jq prints the compacted result instead. In agent mode
-// the folded text is carried inside the envelope rather than written raw.
-func renderProfiling(ctx context.Context, apiKind string, result interface{}, limit int, appOnly bool) error {
-	printValue := func(v interface{}) error {
-		p := newPrinterCtx(ctx)
-		if ap := enrichAgent(p, "exec", "profiling"); ap != nil && apiKind == profiling.Kind["hotspots"] {
-			if _, folded := v.(string); folded {
-				ap.SetSuggestions([]string{"one row per call stack: to rank functions, summed over every stack they appear in, use --view functions; for one function's callers, --focus <function>"})
-			}
-		}
-		return p.Print(v)
-	}
-	switch outputFormat(ctx) {
-	case "json", "yaml", "yml", "toon", "csv", "jsonl", "parquet":
-		return printValue(result)
-	}
-	if jqFilter(ctx) != "" {
-		return printValue(result)
-	}
-
-	// table (the -o default), wide, folded, or unset -> folded stacks
-	s := profiling.ToCollapsed(apiKind, result, limit, appOnly)
-	if s == "" {
-		// No folded output. Say why in one line rather than dumping the raw
-		// result (hundreds of lines of render metadata with nothing in it);
-		// -o json still prints the full result.
-		s = noProfilingStacksNote(apiKind, result, appOnly) + "\n"
-	}
-	if agentMode(ctx) {
-		return printValue(s)
-	}
-	_, err := fmt.Fprint(currentStdout(ctx), s)
-	return err
-}
-
-// noProfilingStacksNote explains an empty folded result: either the window
-// holds no samples for the entity at all, or --app-only removed every frame.
+// noProfilingStacksNote explains an empty stack view: either the window holds
+// no samples for the entity at all, or --app-only removed every frame.
 func noProfilingStacksNote(apiKind string, result interface{}, appOnly bool) string {
 	entity, status := "", ""
 	if m, ok := result.(map[string]interface{}); ok {
@@ -514,36 +721,44 @@ func noProfilingStacksNote(apiKind string, result interface{}, appOnly bool) str
 	if appOnly && profiling.ToCollapsed(apiKind, result, 1, false) != "" {
 		return fmt.Sprintf("# no stacks for %s: --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only", entity)
 	}
-	return fmt.Sprintf("# no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or -o json for the raw result", entity, status)
+	return fmt.Sprintf("# no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result", entity, status)
 }
 
 // resolveProfilingTimeframe turns the --default-timeframe-start/-end values
-// into an epoch-millis window. Both accept ISO-8601/RFC3339, epoch millis, or a
-// now()-relative expression; an empty end defaults to now and an empty start to
-// two hours before the end. The window must start in the past, be positive and
-// be at most profilingMaxWindowMs, checked here so an oversized window never
-// reaches the API.
-func resolveProfilingTimeframe(startStr, endStr string) (int64, int64, error) {
-	nowMs := time.Now().UnixMilli()
-
-	to := nowMs
+// into an epoch-millis window. Both accept what `dtctl query` accepts
+// (ISO-8601/RFC3339, epoch millis, now()-relative). A missing bound is 2h from
+// the other: a start alone covers the 2h after it (but not past now), an end
+// alone the 2h before it, neither the last 2h. The window must not end in the
+// future, must be positive and must be at most profilingMaxWindowMs, checked
+// here so an invalid window never reaches the API.
+func resolveProfilingTimeframe(startStr, endStr string, nowMs int64) (int64, int64, error) {
+	var from, to int64
+	var err error
 	if endStr != "" {
-		var err error
 		if to, err = parseProfilingTime(endStr, nowMs); err != nil {
 			return 0, 0, fmt.Errorf("invalid --default-timeframe-end: %w", err)
 		}
 	}
-
-	from := to - profilingDefaultWindowMs
 	if startStr != "" {
-		var err error
 		if from, err = parseProfilingTime(startStr, nowMs); err != nil {
 			return 0, 0, fmt.Errorf("invalid --default-timeframe-start: %w", err)
 		}
 	}
+	switch {
+	case startStr == "" && endStr == "":
+		to = nowMs
+		from = to - profilingDefaultWindowMs
+	case startStr == "":
+		from = to - profilingDefaultWindowMs
+	case endStr == "":
+		to = min(from+profilingDefaultWindowMs, nowMs)
+	}
 
 	if from >= nowMs {
 		return 0, 0, fmt.Errorf("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-2h')")
+	}
+	if to > nowMs {
+		return 0, 0, fmt.Errorf("invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now")
 	}
 	if to <= from {
 		return 0, 0, fmt.Errorf("invalid timeframe: the end must be after the start")
@@ -554,8 +769,40 @@ func resolveProfilingTimeframe(startStr, endStr string) (int64, int64, error) {
 	return from, to, nil
 }
 
+// profilingDurationUnits are the duration units a now()-relative bound takes:
+// DQL's, plus Go's spellings.
+var profilingDurationUnits = map[string]time.Duration{
+	"ns": time.Nanosecond, "us": time.Microsecond, "µs": time.Microsecond, "ms": time.Millisecond,
+	"s": time.Second, "m": time.Minute, "min": time.Minute, "h": time.Hour,
+	"d": 24 * time.Hour, "w": 7 * 24 * time.Hour,
+}
+
+var profilingDurationPart = regexp.MustCompile(`^(\d+(?:\.\d+)?)(ns|us|µs|ms|min|s|m|h|d|w)`)
+
+// parseProfilingDuration parses a duration such as 1d, 90m, 1h30m or 1.5h.
+func parseProfilingDuration(s string) (time.Duration, error) {
+	s = strings.ReplaceAll(s, " ", "")
+	if s == "" {
+		return 0, fmt.Errorf("missing duration")
+	}
+	var d time.Duration
+	for s != "" {
+		m := profilingDurationPart.FindStringSubmatch(s)
+		if m == nil {
+			return 0, fmt.Errorf("unknown duration %q: use a number and a unit (ms, s, m, h, d, w), e.g. 1d or 1h30m", s)
+		}
+		n, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			return 0, err
+		}
+		d += time.Duration(n * float64(profilingDurationUnits[m[2]]))
+		s = s[len(m[0]):]
+	}
+	return d, nil
+}
+
 // parseProfilingTime parses one timeframe bound: a now()-relative expression
-// (now(), now()-90min, now()+30min), epoch millis, or RFC3339.
+// (now(), now()-1d, now()-90m, now()-1h30m), epoch millis, or ISO-8601/RFC3339.
 func parseProfilingTime(s string, nowMs int64) (int64, error) {
 	s = strings.TrimSpace(s)
 	if rest, ok := strings.CutPrefix(s, "now()"); ok {
@@ -572,8 +819,7 @@ func parseProfilingTime(s string, nowMs int64) (int64, error) {
 		default:
 			return 0, fmt.Errorf("expected now()-<duration> or now()+<duration>, got %q", s)
 		}
-		durStr := strings.ReplaceAll(strings.TrimSpace(rest[1:]), "min", "m")
-		d, err := time.ParseDuration(durStr)
+		d, err := parseProfilingDuration(rest[1:])
 		if err != nil {
 			return 0, fmt.Errorf("invalid duration in %q: %w", s, err)
 		}
@@ -593,74 +839,54 @@ func isEligibleProfilingEntity(id string) bool {
 		strings.HasPrefix(id, "PROCESS_GROUP_INSTANCE-")
 }
 
+// profilingTimeLayouts are the absolute timestamp forms a bound takes, beyond
+// epoch millis. Forms without a zone are UTC.
+var profilingTimeLayouts = []string{
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04",
+	"2006-01-02",
+}
+
 func parseProfileTimestamp(s string) (int64, error) {
 	if ms, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return ms, nil
 	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return 0, fmt.Errorf("cannot parse time %q: use RFC3339, epoch millis, or now()-<dur>", s)
-	}
-	return t.UnixMilli(), nil
-}
-
-// startSpinner writes an animated spinner to stderr while work is in progress.
-// Call the returned function to stop it and clear the line.
-// Skipped in plain/agent mode (non-TTY) to keep output machine-readable.
-func startSpinner(ctx context.Context, label string) func() {
-	if agentMode(ctx) || plainMode(ctx) || !output.ColorEnabled() {
-		return func() {}
-	}
-	stderr := currentStderr(ctx)
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	done := make(chan struct{})
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		i := 0
-		for {
-			select {
-			case <-done:
-				fmt.Fprintf(stderr, "\r\033[K") // clear line
-				return
-			case <-ticker.C:
-				fmt.Fprintf(stderr, "\r%s %s", frames[i%len(frames)], label)
-				i++
-			}
+	for _, layout := range profilingTimeLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UnixMilli(), nil
 		}
-	}()
-	// Wait for the goroutine to clear the line, so nothing it writes can land
-	// after the command's own output.
-	return func() { close(done); <-stopped }
+	}
+	return 0, fmt.Errorf("cannot parse time %q: use ISO-8601/RFC3339, epoch millis, or now()-<dur>", s)
 }
 
-// visualOnlyKeys are fields that carry UI rendering metadata with no analytical value.
-var visualOnlyKeys = map[string]bool{
+// profilingVisualOnlyKeys are fields that carry UI rendering metadata with no
+// analytical value.
+var profilingVisualOnlyKeys = map[string]bool{
 	"color": true, // hex colour for charts
 	"uuid":  true, // internal render ID
 }
 
-// emptyOnlyKeys are dropped only when they carry nothing. fileName/filePath are
-// null on Java frames, but on Node.js they are the only place a frame's file
-// lives (its className is empty), and the folded renderer labels frames from them.
-var emptyOnlyKeys = map[string]bool{
+// profilingEmptyOnlyKeys are dropped only when they carry nothing.
+// fileName/filePath are null on Java frames, but on Node.js they are the only
+// place a frame's file lives (its className is empty), and the folded renderer
+// labels frames from them.
+var profilingEmptyOnlyKeys = map[string]bool{
 	"fileName": true,
 	"filePath": true,
 }
 
-// compactResult strips timeseries dataPoints and visual-only fields so agents
-// receive signal without chart/render noise.
-func compactResult(v interface{}) interface{} {
+// compactProfilingResult strips timeseries dataPoints and visual-only fields
+// from an analysis result, so --raw carries signal without chart/render noise.
+func compactProfilingResult(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(val))
 		for k, child := range val {
-			if visualOnlyKeys[k] {
+			if profilingVisualOnlyKeys[k] {
 				continue
 			}
-			if emptyOnlyKeys[k] && (child == nil || child == "") {
+			if profilingEmptyOnlyKeys[k] && (child == nil || child == "") {
 				continue
 			}
 			if k == "dataPoints" {
@@ -669,13 +895,13 @@ func compactResult(v interface{}) interface{} {
 					continue
 				}
 			}
-			out[k] = compactResult(child)
+			out[k] = compactProfilingResult(child)
 		}
 		return out
 	case []interface{}:
 		out := make([]interface{}, len(val))
 		for i, item := range val {
-			out[i] = compactResult(item)
+			out[i] = compactProfilingResult(item)
 		}
 		return out
 	}

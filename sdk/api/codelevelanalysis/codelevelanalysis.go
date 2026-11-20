@@ -93,7 +93,7 @@ func isProcessGroupEntity(id string) bool {
 		strings.HasPrefix(id, "PROCESS-")
 }
 
-// normalizeEntityID rewrites a 3rd-gen PROCESS-<id> to its classic
+// NormalizeEntityID rewrites a 3rd-gen PROCESS-<id> to its classic
 // PROCESS_GROUP_INSTANCE-<id> form. The code-level analysis API only knows the
 // classic id and 404s on the PROCESS- prefix (parameter value: 'PROCESS-...').
 //
@@ -104,7 +104,7 @@ func isProcessGroupEntity(id string) bool {
 // PROCESS_GROUP- and PROCESS_GROUP_INSTANCE- (both already classic and accepted)
 // pass through untouched — note "PROCESS-" does not prefix-match "PROCESS_GROUP-"
 // (8th byte '-' vs '_').
-func normalizeEntityID(id string) string {
+func NormalizeEntityID(id string) string {
 	if suffix, ok := strings.CutPrefix(id, "PROCESS-"); ok {
 		return "PROCESS_GROUP_INSTANCE-" + suffix
 	}
@@ -327,7 +327,7 @@ func buildSubmitPath(p Payload) string {
 	params := url.Values{}
 	params.Set("from", fmt.Sprintf("%d", p.From))
 	params.Set("to", fmt.Sprintf("%d", p.To))
-	entity := httpclient.PathSegment(normalizeEntityID(p.EntityID))
+	entity := httpclient.PathSegment(NormalizeEntityID(p.EntityID))
 
 	setIfTrue := func(key string, v bool) {
 		if v {

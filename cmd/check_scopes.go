@@ -222,6 +222,11 @@ func verbResource(c *cobra.Command) (verb, resource string) {
 	verb = node.Name()
 	if c != node {
 		resource = c.Name()
+		// A leaf under a scope group takes the group's scopes: the catalog
+		// lists the group (`exec profiling`), not each of its leaves.
+		if inScopeGroup(c) && c.Parent() != node {
+			resource = c.Parent().Name()
+		}
 	}
 	return verb, resource
 }
@@ -267,6 +272,23 @@ const (
 	annotationScopes     = "dtctl.io/scopes"
 	scopesInputDependent = "input-dependent"
 )
+
+// annotationScopeGroup marks a command group whose subcommands share its
+// required scopes, so scope checks look the group up in the catalog rather than
+// each leaf. Opt-in per group: `exec profiling` is one, while other three-level
+// commands keep their own lookup.
+const annotationScopeGroup = "dtctl.io/scope-group"
+
+// markScopeGroup declares that cmd's subcommands take cmd's catalog scopes.
+func markScopeGroup(cmd *cobra.Command) {
+	setCommandAnnotation(cmd, annotationScopeGroup, "true")
+}
+
+// inScopeGroup reports whether c is a leaf of a scope group.
+func inScopeGroup(c *cobra.Command) bool {
+	p := c.Parent()
+	return p != nil && p.Annotations[annotationScopeGroup] != ""
+}
 
 // markScopesInputDependent declares that cmd's resource kind, and so its
 // required scopes, come from the content of its input file.
@@ -342,6 +364,16 @@ func scopesForInvocation(c *cobra.Command, verb, resource string) ([]string, sco
 		return nil, scopeRequirementInputDependent
 	}
 	required, req := requiredScopesIn(c.Root(), verb, resource)
+	if req == scopeRequirementNone && inScopeGroup(c) {
+		// The catalog indexes a verb's direct resources only, so a scope
+		// group's leaves are not in it; their scopes are the group's, from the
+		// same canonical table the catalog reads.
+		if v, ok := scopeCatalog()[verb]; ok {
+			if s := auth.ScopesForCommand(verb, resource, auth.Access(v.Access)); len(s) > 0 {
+				required, req = s, scopeRequirementKnown
+			}
+		}
+	}
 	extra := flagContributedScopes(c, verb, resource)
 	if len(extra) == 0 || req != scopeRequirementKnown {
 		// Augmenting anything but a known requirement would invent one: a per-call
