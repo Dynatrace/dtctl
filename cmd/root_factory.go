@@ -553,6 +553,8 @@ func registerRootPersistentFlags(c *cobra.Command, flags *rootFlags) {
 		_ = viper.BindPFlag("verbose", c.PersistentFlags().Lookup("verbose"))
 	}
 
+	c.SetHelpCommand(newHelpCmd())
+
 	// Cobra's default usage template with bold headers; re-diff it on a Cobra upgrade.
 	c.SetUsageTemplate(`{{bold "Usage:"}}{{if .Runnable}}
   {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}

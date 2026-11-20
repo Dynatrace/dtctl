@@ -66,6 +66,7 @@ func applyBlockedCommands(root *cobra.Command, blocked map[string]string) {
 			continue
 		}
 		walkCommands(top, func(cmd *cobra.Command) {
+			markSurfaceMasked(cmd)
 			cmd.Hidden = true
 			// Unlike the profile mask, guard even non-runnable parents: a
 			// blocked bare parent (e.g. `config`) would otherwise print its

@@ -1,8 +1,10 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // ProfileEnvVar is the environment variable that selects the active command
@@ -136,6 +138,51 @@ func (c *Config) ProfileExists(name string) bool {
 	}
 	_, ok := c.lookupProfile(name)
 	return ok
+}
+
+// Validate checks a profile a caller supplies as data (an embedding host's
+// definition) rather than through a config file. It refuses what would resolve
+// to a different surface than the one written down:
+//
+//   - a missing name, which selects no profile at all;
+//   - a name with whitespace, or the reserved name "full", which means the
+//     unrestricted tree;
+//   - a blank entry;
+//   - an entry with a flag token ("query --decode-snapshots"): entries are
+//     command paths, and Allows would read the flag as one more path segment;
+//   - an entry starting with "dtctl": paths are relative to the root, so
+//     "dtctl query" would match nothing.
+//
+// An empty Commands list is valid: it leaves only the always-available
+// commands. Validate does not check that an entry names an existing command.
+func (p *Profile) Validate() error {
+	switch {
+	case p.Name == "":
+		return errors.New("profile definition has no name")
+	case strings.IndexFunc(p.Name, unicode.IsSpace) >= 0:
+		return fmt.Errorf("profile name %q must not contain whitespace", p.Name)
+	case p.Name == ProfileFull:
+		return fmt.Errorf("profile name %q is reserved for the unrestricted command tree", p.Name)
+	}
+	for i, entry := range p.Commands {
+		segments := strings.Fields(entry)
+		if len(segments) == 0 {
+			return fmt.Errorf("profile %q: command entry %d is blank", p.Name, i)
+		}
+		if segments[0] == "dtctl" {
+			return fmt.Errorf("profile %q: command entry %q must not start with \"dtctl\"; "+
+				"entries are paths relative to the root (%q)",
+				p.Name, entry, strings.Join(segments[1:], " "))
+		}
+		for _, seg := range segments {
+			if strings.HasPrefix(seg, "-") {
+				return fmt.Errorf("profile %q: command entry %q contains the flag %q; "+
+					"entries are command paths and allow every flag of the command they name",
+					p.Name, entry, seg)
+			}
+		}
+	}
+	return nil
 }
 
 // Allows reports whether a command identified by its space-joined path (relative

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"sync"
 	"sync/atomic"
 
@@ -283,6 +284,7 @@ type pristineCommandState struct {
 	disableFlagParsing bool
 	short              string
 	long               string
+	annotations        map[string]string
 	// flags is the as-registered hidden state and usage string of every flag,
 	// keyed by flag name. Flag *values* are reset separately (resetFlagSet);
 	// these two are help-surface properties that the stability stages rewrite.
@@ -316,6 +318,7 @@ func capturePristineState(c *cobra.Command) pristineCommandState {
 		disableFlagParsing: c.DisableFlagParsing,
 		short:              c.Short,
 		long:               c.Long,
+		annotations:        maps.Clone(c.Annotations),
 		flags:              flags,
 	}
 }
@@ -352,6 +355,7 @@ func restorePristineTree(ctx context.Context) {
 		c.DisableFlagParsing = state.disableFlagParsing
 		c.Short = state.short
 		c.Long = state.long
+		c.Annotations = maps.Clone(state.annotations)
 		restoreFlagHelp(c.Flags(), state.flags)
 		restoreFlagHelp(c.PersistentFlags(), state.flags)
 		// No command sets IO writers at registration time, so pristine means
