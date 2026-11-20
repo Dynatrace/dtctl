@@ -541,10 +541,9 @@ func setContext(ctx context.Context, name string, s contextSettings) error {
 // leaves a usable credential behind, so that case is called out explicitly —
 // a silently orphaned token is what sends callers to the OS keychain tooling.
 func deleteContext(cmd *cobra.Command, name string, deleteCredential bool) error {
-	// loadRawConfig, not loadConfigRaw: this command rewrites the config file,
-	// and the expanding loader would resolve every ${VAR} in it and save the
-	// resolved values back — writing credentials into the file in plaintext.
-	// See CONFIG_CONTRACT.md, "Write rules".
+	// loadRawConfig: this command only rewrites the config file and needs no
+	// resolved value, so it reads the file as written. See CONFIG_CONTRACT.md,
+	// "Write rules".
 	cfg, err := loadRawConfig(cmdContext(cmd))
 	if err != nil {
 		return err

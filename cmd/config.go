@@ -120,8 +120,10 @@ func newConfigViewCmd() *cobra.Command {
 				return err
 			}
 
+			// A token loaded from ${VAR} is shown as the reference, never as
+			// the secret it resolved to.
 			printer := newPrinterCtx(cmdContext(cmd))
-			return printer.Print(cfg)
+			return printer.Print(cfg.TokensAsStored())
 		},
 	}
 	stability.MarkStable(c)
@@ -381,9 +383,12 @@ func newConfigSetCredentialsCmd() *cobra.Command {
 				return err
 			}
 
-			if config.IsKeyringAvailable() {
+			switch {
+			case config.IsEnvReference(token):
+				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Credentials %q set as a reference to %s, resolved from the environment at runtime", name, token)
+			case config.IsKeyringAvailable():
 				output.FprintSuccess(currentStderr(cmdContext(cmd)), "Credentials %q stored securely in %s", name, config.KeyringBackend())
-			} else {
+			default:
 				output.FprintWarning(currentStderr(cmdContext(cmd)), "Credentials %q set (stored in plaintext, keyring not available)", name)
 			}
 			if !global {
@@ -457,10 +462,9 @@ Examples:
 
 // deleteCredentials removes a stored credential and every cached derivative.
 func deleteCredentials(cmd *cobra.Command, name string) error {
-	// loadRawConfig, not loadConfigRaw: this command rewrites the config file,
-	// and the expanding loader would resolve every ${VAR} in it and save the
-	// resolved values back — writing a *different* credential's secret into the
-	// file in plaintext. See CONFIG_CONTRACT.md, "Write rules".
+	// loadRawConfig: this command only rewrites the config file and needs no
+	// resolved value, so it reads the file as written. See CONFIG_CONTRACT.md,
+	// "Write rules".
 	cfg, err := loadRawConfig(cmdContext(cmd))
 	if err != nil {
 		return err
