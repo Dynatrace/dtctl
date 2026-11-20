@@ -167,6 +167,7 @@ func TestExecReadShapedSubcommandsAllowedInReadonly(t *testing.T) {
 		{"slo", []string{"exec", "slo", "example-slo-id"}},
 		{"copilot", []string{"exec", "copilot", "hello"}},
 		{"preview-processor", []string{"exec", "preview-processor", "-f", "missing.json"}},
+		{"profiling", []string{"exec", "profiling", "hotspots", "PROCESS_GROUP-0000000000000000"}},
 	}
 
 	for _, tc := range cases {

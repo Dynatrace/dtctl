@@ -59,6 +59,7 @@
 | openpipeline-dql-processor |
 | openpipeline-matcher |
 | preview-processor |
+| profiling |
 | query |
 | refresh |
 | reset |

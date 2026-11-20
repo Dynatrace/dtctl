@@ -60,7 +60,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"openpipeline:configurations:read",
 		"environment-api:dashboard-3rdgen-migration:execute",
 	},
-	config.SafetyLevelReadWriteMine: { // 58 scopes
+	config.SafetyLevelReadWriteMine: { // 59 scopes
 		"openid",
 		"offline_access",
 		"automation:workflows:read",
@@ -84,6 +84,7 @@ var baselineScopes = map[config.SafetyLevel][]string{
 		"storage:smartscape:read",
 		"storage:system:read",
 		"storage:security.events:read",
+		"storage:profiles:read", // `exec profiling` is allowed here too
 		"storage:buckets:read",
 		"storage:bucket-definitions:read",
 		"storage:files:read",

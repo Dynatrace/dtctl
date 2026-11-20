@@ -22,7 +22,7 @@ Dynatrace Automation workflows let you orchestrate multi-step processes, from sc
 | delete | workflow | `dtctl delete workflow` | Delete resources | yes | delete |
 | describe | workflow | `dtctl describe workflow` | Show details of a specific resource | no | read |
 | edit | workflow | `dtctl edit workflow` | Edit a resource | yes | write |
-| exec | workflow | `dtctl exec workflow` | Execute queries, workflows, or functions | yes | run |
+| exec | workflow | `dtctl exec workflow` | Execute workflows, functions, analyzers, SLOs, and code-level profiling | yes | run |
 | get | workflows | `dtctl get workflows` | Display one or many resources | no | read |
 | history | workflow | `dtctl history workflow` | Show version history of resources | no | read |
 | restore | workflow | `dtctl restore workflow` | Restore resources to a previous version | yes | write |

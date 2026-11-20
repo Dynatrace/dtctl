@@ -110,6 +110,7 @@ storage:entities:read,
 storage:smartscape:read,
 storage:system:read,
 storage:security.events:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:bucket-definitions:read,
 storage:bucket-definitions:write,
@@ -432,6 +433,8 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | analyzer | `davis:analyzers:execute` |
 | copilot | `davis-copilot:conversations:execute` |
 | function | `app-engine:functions:run` |
+| profiling | `storage:entities:read` |
+| profiling | `storage:profiles:read` |
 | slo | `slo:slos:read` |
 | workflow | `automation:workflows:run` |
 
