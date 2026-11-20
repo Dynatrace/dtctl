@@ -25,11 +25,13 @@ import (
 // unmodelledCloudFixtures are monitoring configurations that carry every
 // property the da-* schemas define and dtctl's typed structs do not model
 // (issues #516 and #608), plus an unknown member inside a list element and an
-// explicit false/null where the difference to "absent" matters. Values are
-// synthetic.
+// explicit false/null where the difference to "absent" matters. The gcp
+// fixture also has a credential without a serviceAccount: the schema rejects
+// an empty one, so it must stay absent on the way back. Values are synthetic.
 //
 // preserved lists the paths every typed read-modify-write must send back
-// exactly as the server returned them.
+// exactly as the server returned them; absent lists the paths it must not
+// send at all.
 var unmodelledCloudFixtures = []struct {
 	cloud     string
 	baseAPI   string
@@ -37,6 +39,7 @@ var unmodelledCloudFixtures = []struct {
 	name      string
 	doc       string
 	preserved []string
+	absent    []string
 }{
 	{
 		cloud:   "aws",
@@ -138,7 +141,7 @@ var unmodelledCloudFixtures = []struct {
 				"dtAttributes": {"costCenter": "synthetic"},
 				"featureSets": ["compute_engine_essential"],
 				"googleCloud": {
-					"credentials": [{"description": "c", "enabled": false, "connectionId": "conn-1", "serviceAccount": "sa@example-project.iam.gserviceaccount.invalid", "futureCredentialField": "kept"}],
+					"credentials": [{"description": "c", "enabled": false, "connectionId": "conn-1", "serviceAccount": "sa@example-project.iam.gserviceaccount.invalid", "futureCredentialField": "kept"}, {"description": "c2", "enabled": true, "connectionId": "conn-2"}],
 					"locationFiltering": ["us-central1"],
 					"observabilityScopesEnabled": false,
 					"logsConfiguration": {"enabled": true, "locations": [{"location": "us-central1"}]},
@@ -157,7 +160,11 @@ var unmodelledCloudFixtures = []struct {
 			"value.googleCloud.tenantInstanceId",
 			"value.googleCloud.observabilityScopesEnabled",
 			"value.googleCloud.credentials.0.futureCredentialField",
+			"value.googleCloud.credentials.0.serviceAccount",
 			"value.googleCloud.futureRatio",
+		},
+		absent: []string{
+			"value.googleCloud.credentials.1.serviceAccount",
 		},
 	},
 }
@@ -350,6 +357,7 @@ func TestCloudMonitoringReadModifyWriteKeepsUnmodelledFields(t *testing.T) {
 
 			sent := srv.lastPut(t, fx.baseAPI+"/"+fx.id)
 			assertPreserved(t, fx.doc, sent, fx.preserved)
+			assertAbsent(t, sent, fx.absent)
 			if fx.cloud == "gcp" {
 				raw := srv.lastPutRaw(t, fx.baseAPI+"/"+fx.id)
 				if !strings.Contains(string(raw), `"futureCounter":9007199254740993`) {
@@ -420,6 +428,7 @@ func TestCloudMonitoringGetYAMLApplyKeepsUnmodelledFields(t *testing.T) {
 
 			sent := srv.lastPut(t, fx.baseAPI+"/"+fx.id)
 			assertPreserved(t, fx.doc, sent, fx.preserved)
+			assertAbsent(t, sent, fx.absent)
 			assertNoCaseDuplicates(t, "", sent)
 
 			// An integer above 2^53 must reach the API as the same token; a
@@ -431,6 +440,15 @@ func TestCloudMonitoringGetYAMLApplyKeepsUnmodelledFields(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func assertAbsent(t *testing.T, sent map[string]any, paths []string) {
+	t.Helper()
+	for _, p := range paths {
+		if got, present := jsonPath(t, sent, p); present {
+			t.Errorf("%s = %#v was sent, want it absent", p, got)
+		}
 	}
 }
 
