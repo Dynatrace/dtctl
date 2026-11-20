@@ -1958,6 +1958,35 @@ func TestGolden_DescribeGCPMonitoring(t *testing.T) {
 	}
 }
 
+// A credential may carry no service account (the schema rejects an empty
+// one), and the key is then left out rather than printed as "". Mixed with a
+// credential that has one, TOON switches from tabular rows to list form.
+func TestGolden_DescribeGCPMonitoringCredentialWithoutServiceAccount(t *testing.T) {
+	gm := describeGCPMonitoringConfigFixture()
+	gm.Value.GoogleCloud.Credentials = append(gm.Value.GoogleCloud.Credentials, gcpmonitoringconfig.Credential{
+		Description:  "Credential without service account",
+		Enabled:      true,
+		ConnectionID: "gcp-conn-a4b5c6",
+	})
+
+	formats := map[string]string{
+		"json": "json",
+		"yaml": "yaml",
+		"toon": "toon",
+	}
+
+	for name, format := range formats {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printer := NewPrinterWithWriter(format, &buf)
+			if err := printer.Print(gm); err != nil {
+				t.Fatalf("Print failed: %v", err)
+			}
+			assertGolden(t, "describe/gcp-monitoring-no-service-account-"+name, buf.String())
+		})
+	}
+}
+
 func TestGolden_DescribeExecution(t *testing.T) {
 	e := describeExecutionFixture()
 
