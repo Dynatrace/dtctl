@@ -310,6 +310,24 @@ func snapshotBreakpointID(rule livedebugger.BreakpointRule) string {
 	return padBreakpointID(rule.ImmutableID)
 }
 
+// buildSnapshotsDQL builds the snapshots query for a breakpoint, restricted to
+// the current workspace (snapshot session.id is the workspace id). A limit <= 0
+// means no limit.
+func buildSnapshotsDQL(breakpointID, workspaceID string, limit int) string {
+	query := fmt.Sprintf(`fetch application.snapshots | filter breakpoint.id == toUid("%s") and session.id == "%s"`,
+		breakpointID, escapeDQLString(workspaceID))
+	if limit > 0 {
+		query += fmt.Sprintf(" | limit %d", limit)
+	}
+	return query
+}
+
+// escapeDQLString escapes backslashes and double quotes for use inside a
+// double-quoted DQL string literal.
+func escapeDQLString(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
+}
+
 // attachWorkspaceRulesRetryNotice makes the handler report, on stderr and only
 // when verbose/debug is on, that GetWorkspaceRules retried without revisionUuid.
 func attachWorkspaceRulesRetryNotice(ctx context.Context, handler *livedebugger.Handler) {

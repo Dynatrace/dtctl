@@ -25,7 +25,9 @@ BREAKPOINT can be specified as:
   - stable rule ID e.g. dtctl-rule-5bfb45a29fce7a46
 
 The command looks up the breakpoint's internal DQL ID, then executes:
-  fetch application.snapshots | filter breakpoint.id == toUid("<id>")
+  fetch application.snapshots | filter breakpoint.id == toUid("<id>") and session.id == "<workspace-id>"
+
+Only snapshots captured in the current workspace are returned.
 
 Use --decode-snapshots to decode snapshot payloads (same as dtctl query).
 Use -o json / -o yaml for structured output.`,
@@ -103,10 +105,8 @@ Use -o json / -o yaml for structured output.`,
 			if dqlID == "" {
 				return fmt.Errorf("breakpoint %q has no snapshot ID", identifier)
 			}
-			dqlQuery := fmt.Sprintf(`fetch application.snapshots | filter breakpoint.id == toUid("%s")`, dqlID)
-			if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
-				dqlQuery += fmt.Sprintf(" | limit %d", limit)
-			}
+			limit, _ := cmd.Flags().GetInt("limit")
+			dqlQuery := buildSnapshotsDQL(dqlID, workspaceID, limit)
 
 			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: Snapshots from the latest version of the breakpoint will be shown")
 
