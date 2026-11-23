@@ -1,8 +1,10 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // ProfileEnvVar is the environment variable that selects the active command
@@ -136,6 +138,41 @@ func (c *Config) ProfileExists(name string) bool {
 	}
 	_, ok := c.lookupProfile(name)
 	return ok
+}
+
+// Validate checks a profile supplied as data (an embedding host's definition).
+// It refuses a missing name, a name with whitespace or "full", and an entry
+// that is blank, contains a flag token or starts with "dtctl": entries are
+// command paths relative to the root. An empty Commands list is valid. Entries
+// are not checked against the command tree.
+func (p *Profile) Validate() error {
+	switch {
+	case p.Name == "":
+		return errors.New("profile definition has no name")
+	case strings.IndexFunc(p.Name, unicode.IsSpace) >= 0:
+		return fmt.Errorf("profile name %q must not contain whitespace", p.Name)
+	case p.Name == ProfileFull:
+		return fmt.Errorf("profile name %q is reserved for the unrestricted command tree", p.Name)
+	}
+	for i, entry := range p.Commands {
+		segments := strings.Fields(entry)
+		if len(segments) == 0 {
+			return fmt.Errorf("profile %q: command entry %d is blank", p.Name, i)
+		}
+		if segments[0] == "dtctl" {
+			return fmt.Errorf("profile %q: command entry %q must not start with \"dtctl\"; "+
+				"entries are paths relative to the root (%q)",
+				p.Name, entry, strings.Join(segments[1:], " "))
+		}
+		for _, seg := range segments {
+			if strings.HasPrefix(seg, "-") {
+				return fmt.Errorf("profile %q: command entry %q contains the flag %q; "+
+					"entries are command paths and allow every flag of the command they name",
+					p.Name, entry, seg)
+			}
+		}
+	}
+	return nil
 }
 
 // Allows reports whether a command identified by its space-joined path (relative
