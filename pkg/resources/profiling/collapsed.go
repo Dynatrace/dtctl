@@ -18,8 +18,14 @@ type StackRow struct {
 	Stack   string `json:"stack" table:"STACK"`
 }
 
+// SurvivedNote says what the survived figures are, for every output that
+// prints them: the API sums them over each GC an object lives through, so
+// they read as a size (and as heap held) when they are not one.
+const SurvivedNote = "survived_bytes/survived_count are summed over every GC an object lived through within about a minute (10 bytes surviving 3 GCs = 30): not a size, can exceed alloc_bytes, not heap used or retained; survived/allocated ~1 = dies young, higher tracks GC frequency, not a leak signal alone"
+
 // AllocationRow is one row of the allocations stack view: an allocation path,
 // allocation site first, with its own share of the window's allocations.
+// SurvivedBytes and SurvivedCount are summed per GC survived (SurvivedNote).
 type AllocationRow struct {
 	AllocBytes    int    `json:"alloc_bytes" table:"ALLOC_BYTES"`
 	SurvivedBytes int    `json:"survived_bytes" table:"SURVIVED_BYTES"`
@@ -75,7 +81,7 @@ func FoldAllocations(rows []AllocationRow, bySurvivors bool) string {
 		key = "surv"
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "# ALLOCATIONS (bytes, sorted by %s; surv = survived >=1 GC in window, not live heap)\n", key)
+	fmt.Fprintf(&sb, "# ALLOCATIONS (bytes, sorted by %s; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n", key)
 	for _, l := range rows {
 		fmt.Fprintf(&sb, "%s alloc=%d surv=%d alloc_count=%d surv_count=%d\n",
 			l.Stack, l.AllocBytes, l.SurvivedBytes, l.AllocCount, l.SurvivedCount)
