@@ -213,32 +213,111 @@ func sampleTypes(resp *DQLQueryResponse) map[string]string {
 // uidStringCompares returns the referenced fields that the sample types as uid
 // and that a filter compares with a string literal: `f == "x"`, `"x" == f`,
 // `f != "x"` or `in(f, "x", …)` / `in(f, array("x", …))`.
+//
+// The compare only proves the cause when it necessarily drops every record, so
+// it must be a top-level conjunct of a `filter` stage. Under `filterOut`, `or`
+// or `not()` it can let records through, and the empty result has another cause.
 func uidStringCompares(stages, fields []string, types map[string]string) []string {
-	var filters []string
+	var conjuncts []string
 	for _, st := range stages[1:] {
 		cmd, rest := splitCommand(st)
 		switch strings.ToLower(cmd) {
-		case "filter", "filterout":
-			filters = append(filters, rest)
-		case "sort", "limit", "dedup":
+		case "filter":
+			conjuncts = append(conjuncts, topLevelConjuncts(maskStringLiterals(rest))...)
+		case "filterout", "sort", "limit", "dedup":
 		default:
 			goto done
 		}
 	}
 done:
-	text := strings.Join(filters, " ")
 	var out []string
 	for _, f := range fields {
 		if types[f] != "uid" {
 			continue
 		}
 		q := regexp.QuoteMeta(f)
-		re := regexp.MustCompile(`(^|[^\w.` + "`" + `])` + q + `\s*[!=]=\s*"|"\s*[!=]=\s*` + q + `($|[^\w.])|\bin\(\s*` + q + `\s*,\s*(array\(\s*)?"`)
-		if re.MatchString(text) {
-			out = append(out, f)
+		re := regexp.MustCompile(`^(` + q + `\s*[!=]=\s*""|""\s*[!=]=\s*` + q + `|in\(\s*` + q + `\s*,\s*(array\(\s*)?"".*\))$`)
+		for _, c := range conjuncts {
+			if re.MatchString(c) {
+				out = append(out, f)
+				break
+			}
 		}
 	}
 	return out
+}
+
+// maskStringLiterals empties every string literal (`"…"`, `"""…"""`) to `""`,
+// so nothing inside one is read as code, and unquotes backtick identifiers.
+func maskStringLiterals(expr string) string {
+	var b strings.Builder
+	for i := 0; i < len(expr); {
+		switch {
+		case strings.HasPrefix(expr[i:], `"""`):
+			end := strings.Index(expr[i+3:], `"""`)
+			if end < 0 {
+				end = len(expr) - i - 6
+			}
+			i += 3 + end + 3
+			b.WriteString(`""`)
+		case expr[i] == '"':
+			i = skipQuoted(expr, i)
+			b.WriteString(`""`)
+		case expr[i] == '`':
+			j := skipQuoted(expr, i)
+			b.WriteString(strings.Trim(expr[i:j], "`"))
+			i = j
+		default:
+			b.WriteByte(expr[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+// topLevelConjuncts splits a filter expression on `and` outside brackets and
+// trims each part, including parentheses that wrap the whole part.
+func topLevelConjuncts(expr string) []string {
+	var parts []string
+	depth, from := 0, 0
+	lower := strings.ToLower(expr)
+	for i := 0; i < len(expr); i++ {
+		switch c := expr[i]; {
+		case c == '(' || c == '[' || c == '{':
+			depth++
+		case c == ')' || c == ']' || c == '}':
+			depth--
+		case depth == 0 && strings.HasPrefix(lower[i:], "and") &&
+			(i == 0 || !isIdentChar(expr[i-1])) && (i+3 == len(expr) || !isIdentChar(expr[i+3])):
+			parts = append(parts, expr[from:i])
+			from = i + 3
+			i += 2
+		}
+	}
+	parts = append(parts, expr[from:])
+	for k, p := range parts {
+		parts[k] = unwrapParens(strings.TrimSpace(p))
+	}
+	return parts
+}
+
+// unwrapParens drops parentheses that enclose the whole expression.
+func unwrapParens(s string) string {
+	for len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
+		depth := 0
+		for i := 0; i < len(s); i++ {
+			if s[i] == '(' {
+				depth++
+			} else if s[i] == ')' {
+				depth--
+			}
+			if depth == 0 && i < len(s)-1 {
+				return s
+			}
+		}
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
+	return s
 }
 
 // queriedMetricKeys returns the metric keys Grail reports for a timeseries

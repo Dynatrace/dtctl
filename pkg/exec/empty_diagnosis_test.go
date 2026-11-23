@@ -427,6 +427,9 @@ func TestEmptyResultAdvice_UIDComparedToString(t *testing.T) {
 		`fetch spans, from:now()-1h | filter trace.id == "a16174edc5d3d37234855e4996d341d5" | fields span.name`,
 		`fetch spans | filter "a16174edc5d3d37234855e4996d341d5" == trace.id`,
 		`fetch spans | filter in(trace.id, array("a16174edc5d3d37234855e4996d341d5", "5b9f2740a42acf2f3b8a94e7fff925a5"))`,
+		"fetch spans | filter `trace.id` == \"a16174edc5d3d37234855e4996d341d5\"",
+		`fetch spans | filter span.name == "GET" and (trace.id == "a16174edc5d3d37234855e4996d341d5")`,
+		`fetch spans | filterOut span.name == "x" | filter trace.id == """a16174edc5d3d37234855e4996d341d5"""`,
 	} {
 		p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return spanSample(), nil }}
 		e := &DQLExecutor{probe: p.run}
@@ -451,6 +454,12 @@ func TestEmptyResultAdvice_UIDComparedRightIsNotFlagged(t *testing.T) {
 		`fetch spans | filter trace.id == toUid("a16174edc5d3d37234855e4996d341d5")`,
 		`fetch spans | filter toString(trace.id) == "a16174edc5d3d37234855e4996d341d5"`,
 		`fetch spans | filter span.name == "GET"`,
+		// The compare drops nothing here, so the empty result has another cause.
+		`fetch spans | filterOut trace.id == "a16174edc5d3d37234855e4996d341d5" | filter span.name == "missing"`,
+		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" or span.name == "GET"`,
+		`fetch spans | filter not(trace.id == "a16174edc5d3d37234855e4996d341d5")`,
+		// Text inside a string literal is not code.
+		`fetch spans | filter span.name == "trace.id == " and isNotNull(trace.id)`,
 	} {
 		p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return spanSample(), nil }}
 		e := &DQLExecutor{probe: p.run}
