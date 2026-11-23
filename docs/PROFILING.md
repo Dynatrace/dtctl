@@ -18,6 +18,13 @@ dtctl exec profiling allocations <entity> [flags]   # alias: memory
 `allocations` (alias `memory`) shows where memory is allocated and what survived GC
 in the window: allocation pressure, not what occupies the heap now.
 
+`survived_bytes` and `survived_count` are summed over every GC an object lives through until
+the agent's next report (about a minute): a 10-byte object that survives 3 GCs adds 30 bytes and
+3 to the count. So they aren't a size, they can exceed `alloc_bytes`, and they don't say how much
+memory is held. survived/allocated is how many GCs the average allocated byte saw within its
+minute. About 1 is the floor for objects that die young (the GC that frees one counts); higher
+tracks GC frequency as much as retention, so it isn't a leak signal on its own.
+
 ## Entities
 
 Pass a **process** id, `PROCESS-xxx`. `SERVICE` ids are **not** eligible.
@@ -75,7 +82,8 @@ With `-A` (or in an agent session) the rows ride in `result`, and `context` carr
 - `window` (`from`, `to`, `span`, and a `note` when the default window was used);
 - `profile`: `entity`, `api_entity` (when rewritten), `kind`, `view`, `leaf_type`,
   `state`, `status`, and the totals the rows are shares of (`samples`, or
-  `allocated_bytes`/`survived_bytes`).
+  `allocated_bytes`/`survived_bytes`);
+- for `allocations`, a `suggestions` entry saying what the survived figures are.
 
 An empty result is an empty `result` with the reason in `context.warnings`.
 
@@ -166,7 +174,7 @@ dtctl exec profiling hotspots PROCESS-ABC123 --view functions --state lock
 # Localize why a specific endpoint is hot
 dtctl exec profiling hotspots PROCESS-ABC123 --leaf-type service --limit 5
 
-# Memory allocation pressure, only survivors (the leak tell)
+# Memory allocation pressure, only frames whose objects survived a GC (long-lived, not live heap)
 dtctl exec profiling allocations PROCESS-DEF456 --survivors-only
 
 # The top 5 stacks as JSON rows, for a script

@@ -83,7 +83,8 @@ split over many stack rows, so don't sum rows yourself; hotspots does it:
 Kinds:
   hotspots     Method CPU hotspots (per-stack thread-state counts include lock/IO/wait)
   allocations  Where memory is allocated, and what survived GC, in the window
-               (alias: memory). Allocation pressure, not live heap.
+               (alias: memory). Allocation pressure, not live heap: survived
+               bytes are bytes x GCs survived, not a size (see allocations --help).
 
 Entities: pass a process id, PROCESS-xxx. SERVICE ids are not accepted. The API
 speaks the classic entity vocabulary, so dtctl rewrites PROCESS-xxx to its
@@ -222,9 +223,23 @@ func newProfilingAllocationsCmd() *cobra.Command {
 Shows where allocations happen and what survived GC within the window —
 allocation pressure, not live retained heap. It cannot say which objects take
 up the heap now, does not prove a leak and does not predict OOM; confirm those
-with a heap/RSS trend and pod restart/OOM state. The leak tell is
-survived/allocated: a frame whose survivors far exceed its in-window
-allocations is retaining, not churning (the biggest allocator is usually churn).
+with a heap/RSS trend and pod restart/OOM state.
+
+What the numbers mean:
+  alloc_bytes, alloc_count        bytes and objects allocated in the window.
+  survived_bytes, survived_count  summed over every GC an object lived through
+                                  until the agent's next report (about a
+                                  minute): a 10-byte object that survives 3 GCs
+                                  adds 30 bytes and 3 to the count. They are not
+                                  a size: they can exceed alloc_bytes, and they
+                                  say nothing about how much memory is held.
+                                  Don't report them as heap used or retained.
+  survived/allocated              GCs the average allocated byte saw within its
+                                  minute. About 1 is the floor for objects that
+                                  die young (the GC that frees one counts).
+                                  Higher means more GCs, which tracks GC
+                                  frequency as much as retention: not a leak
+                                  signal on its own.
 Rows are ranked by allocated bytes, or by survived bytes with --survivors-only.
 NOTE the allocation tree is INVERTED vs hotspots: the allocation-site method is
 at the root and its callers hang below as children, so each stack reads
@@ -489,6 +504,9 @@ func renderProfilingStacks(ctx context.Context, run *profilingRun, apiKind strin
 			if truncated != "" {
 				ap.SetHasMore(true)
 				ap.SetWarnings([]string{truncated})
+			}
+			if run.kind == "allocations" {
+				ap.SetSuggestions([]string{profiling.SurvivedNote})
 			}
 			if run.kind == "hotspots" {
 				ap.SetSuggestions([]string{"one row per call stack, ranked by running samples: to rank functions, summed over every stack they appear in, use --view functions (--state lock|wait|offcpu for blocked time); for one function's callers, --focus <function>"})

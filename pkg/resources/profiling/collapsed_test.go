@@ -374,3 +374,23 @@ func TestAllocationStacks_BySurvivors(t *testing.T) {
 		t.Errorf("header should name the survivors sort:\n%s", out)
 	}
 }
+
+// Survived bytes are summed per GC survived, so a long-lived frame's survivors
+// can exceed its allocations. The rows pass that through, and the folded header
+// says the figure is not a size, so nobody reads it as heap held.
+func TestAllocationStacks_SurvivedExceedsAllocated(t *testing.T) {
+	cache := memnode(1, "Cache.put", true, 100, 1)
+	cache["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(500)
+	raw := memEnvelope([]interface{}{float64(1)}, cache)
+
+	rows := AllocationStacks(raw, false, true)
+	if len(rows) != 1 || rows[0].AllocBytes != 100 || rows[0].SurvivedBytes != 500 {
+		t.Fatalf("want alloc 100, survived 500 as the API gives them: %+v", rows)
+	}
+	out := FoldAllocations(rows, true)
+	for _, want := range []string{"bytes x GCs survived", "not a size", "can exceed alloc"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("header should say %q:\n%s", want, out)
+		}
+	}
+}

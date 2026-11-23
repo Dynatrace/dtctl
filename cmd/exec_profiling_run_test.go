@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 )
 
 // profilingTree is a methodHotspots result with cumulative counts, the way the
@@ -309,6 +311,22 @@ func TestExecProfiling_AllocationsAlias(t *testing.T) {
 	for _, p := range api.paths {
 		require.Contains(t, p, "/memoryallocation/")
 	}
+}
+
+// In agent mode an allocations result says what the survived figures are, so
+// an agent doesn't report bytes-times-GCs as heap held. The help says it too.
+func TestExecProfiling_AllocationsSurvivedNote(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, `{"analysisResult":{"stacktreeRootIds":[1],"stacktreeNodes":[`+
+		`{"id":1,"name":"Cache.put","childIds":[],"apiInfo":{"systemApi":true},`+
+		`"allocationInfo":{"allocationSize":100,"allocationCount":1,"survivorSize":500,"survivorCount":5}}]}}`)
+
+	env := runProfilingAgent(t, "allocations", testProcess)
+	require.Contains(t, env.Context.Suggestions, profiling.SurvivedNote)
+	require.EqualValues(t, 500, env.Result[0]["survived_bytes"])
+
+	help := findProfilingCmd(t, "allocations").Long
+	require.Contains(t, help, "Don't report them as heap used or retained.")
+	require.Contains(t, findProfilingCmd(t, "allocations").Parent().Long, "bytes x GCs survived")
 }
 
 // --check-scopes answers for a profiling leaf with the group's catalog scopes,
