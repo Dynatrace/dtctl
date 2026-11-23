@@ -281,7 +281,11 @@ returns the named profile (or nil for `full`).
 The key enabling fact: **every discovery surface we care about already honors
 `cmd.Hidden`.**
 
-- Cobra's help and shell completion skip hidden commands natively.
+- Cobra's help and shell completion skip hidden commands when they *list*
+  subcommands, but not a hidden command named explicitly. So the mask also hides
+  the command's own flags and argument completion, and dtctl creates cobra's
+  `help` command before the masks run, with a `PreRunE` that refuses
+  `help <masked>` like `<masked> --help` (`prepareHelpCommand`).
 - `pkg/commands/listing.go` (which backs `dtctl commands` and `commands howto`)
   already skips hidden commands -- e.g. `listing.go:196`
   (`if hiddenCommands[name] || cmd.Hidden { continue }`) and the analogous checks
