@@ -78,7 +78,7 @@ func applyProfile(root *cobra.Command, p *config.Profile, pinned bool) {
 		if p.Allows(commandPathRelative(cmd, root)) {
 			return
 		}
-		cmd.Hidden = true
+		hideMaskedCommand(cmd)
 		if cmd.RunE != nil || cmd.Run != nil {
 			// Cobra validates Args and parses flags *before* invoking RunE, so a
 			// masked command with an arg validator (e.g. ExactArgs) or an unknown

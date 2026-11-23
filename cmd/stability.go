@@ -533,7 +533,7 @@ func sortedStringKeys(m map[string]string) []string {
 // scheduled to go as a whole, and answering `dtctl <group>` with help listing
 // subcommands this mode has already removed would be a dead end.
 func maskDeprecated(cmd *cobra.Command, blocked *DeprecatedError) {
-	cmd.Hidden = true
+	hideMaskedCommand(cmd)
 	cmd.Args = cobra.ArbitraryArgs
 	cmd.DisableFlagParsing = true
 	cmd.Run = nil
@@ -544,7 +544,7 @@ func maskDeprecated(cmd *cobra.Command, blocked *DeprecatedError) {
 // blocked. Non-runnable commands (pure groups) need only the hide: Cobra will
 // print their help, and their runnable children are masked in their own right.
 func maskBelowFloor(cmd *cobra.Command, blocked *StabilityError) {
-	cmd.Hidden = true
+	hideMaskedCommand(cmd)
 	if cmd.RunE == nil && cmd.Run == nil {
 		return
 	}

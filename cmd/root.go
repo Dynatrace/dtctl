@@ -30,6 +30,7 @@ import (
 	resapi "github.com/Dynatrace/dtctl/pkg/resources/api"
 	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
 	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/suggest"
 	"github.com/Dynatrace/dtctl/pkg/tracing"
 	"github.com/Dynatrace/dtctl/sdk/api/appengine"
@@ -446,12 +447,77 @@ var verbSynonyms = map[string]struct{ verb, hint string }{
 	"timeseries":      {"query", "timeseries is DQL — run it through query: dtctl query 'timeseries avg(dt.host.cpu.usage), from:now()-1h'"},
 }
 
+// surfaceMaskedAnnotation marks a command a surface stage masked for this run.
+// The pristine-tree restore resets annotations, so the mark ends with the run.
+const surfaceMaskedAnnotation = "dtctl.surface.masked"
+
+// hideMaskedCommand hides c from everything cobra offers, for a surface stage
+// that masks it: listings and suggestions (Hidden), completion of its own
+// flags, and completion of its arguments, so cobra's __complete never calls a
+// completion function of a command the caller cannot run. The mark is what
+// `help` reads (prepareHelpCommand). The pristine-tree restore undoes all of
+// it.
+func hideMaskedCommand(c *cobra.Command) {
+	c.Hidden = true
+	// Only c's own flags: one an ancestor declared persistent belongs to
+	// commands that may still be visible, and a run on a reused tree may have
+	// merged it into c.Flags(). c's own persistent flags reach only its
+	// subtree, which is masked with it. (Not c.LocalFlags(): it merges the
+	// ancestors' flag sets, which made a request under a narrow profile cost
+	// 2.5 times as much.)
+	own := func(f *pflag.Flag) {
+		for p := c.Parent(); p != nil; p = p.Parent() {
+			if p.PersistentFlags().Lookup(f.Name) == f {
+				return
+			}
+		}
+		f.Hidden = true
+	}
+	c.Flags().VisitAll(own)
+	c.PersistentFlags().VisitAll(own)
+	c.ValidArgs = nil
+	c.ValidArgsFunction = cobra.NoFileCompletions
+	if c.Annotations == nil {
+		c.Annotations = map[string]string{}
+	}
+	c.Annotations[surfaceMaskedAnnotation] = "true"
+}
+
+// prepareHelpCommand has cobra create its own help command now, before the
+// surface stages run, rather than inside Execute after them: it is the call
+// ExecuteC makes, and ExecuteC then re-adds the same command. Declared stable,
+// help survives every floor on every run.
+//
+// `help <command>` answers what `<command> --help` answers. Cobra's help
+// prints the target's help directly, but a masked command parses its own
+// flags, so its --help reaches the stage's guard; PreRunE hands `help` to the
+// guard too, and the caller gets the same refusal and exit code.
+func prepareHelpCommand(root *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	for _, c := range root.Commands() {
+		if c.Name() != "help" {
+			continue
+		}
+		stability.MarkStable(c)
+		c.PreRunE = func(c *cobra.Command, args []string) error {
+			target, _, err := c.Root().Find(args)
+			if err != nil || target == nil || target.RunE == nil ||
+				target.Annotations[surfaceMaskedAnnotation] == "" {
+				return nil
+			}
+			return target.RunE(target, args)
+		}
+	}
+}
+
 // applySurface masks root to the surface this invocation may reach: the
 // command profile, the blocked commands, the stability floor and the
 // deprecated surface. Execute and Parse share it, so both see the same tree. A
 // non-nil error is reported with the returned exit code, and the command does
 // not run.
 func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool) (int, error) {
+	prepareHelpCommand(root)
+
 	// --- Command profile filter ---
 	// Resolve the active profile (DTCTL_PROFILE > context binding > full) and
 	// mask out-of-profile commands before Cobra dispatches, so help, the

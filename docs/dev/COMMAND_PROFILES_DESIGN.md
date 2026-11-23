@@ -170,6 +170,10 @@ Both are pure discovery: they run no operation, read no data, and mutate nothing
 They are merged into every profile's allowlist so a minimal profile never hides
 the very catalog an agent needs to discover its surface.
 
+`help` being available does not make every command's help available:
+`help <command>` answers what `<command> --help` answers, so help on a masked
+command is that command's refusal.
+
 **Everything else is subject to the allowlist -- including `config`, `ctx`,
 `completion`, and `version`.** This is deliberate. Earlier drafts kept
 `config`/`ctx` always-available for "context management", but those verbs can
@@ -283,7 +287,16 @@ returns the named profile (or nil for `full`).
 The key enabling fact: **every discovery surface we care about already honors
 `cmd.Hidden`.**
 
-- Cobra's help and shell completion skip hidden commands natively.
+- Cobra's help and shell completion skip hidden commands natively when they
+  *list* subcommands. They do not stop at a hidden command named explicitly, so
+  the mask also covers that, through cobra's own commands:
+  - cobra creates its `help` command inside `Execute`, after the masks. dtctl
+    has it created before them (`prepareHelpCommand`), declares it stable, and
+    gives it a `PreRunE` that hands a masked target to the target's guard, so
+    `help <masked>` is refused exactly like `<masked> --help`;
+  - a masked command's own flags are hidden and its arguments complete to
+    nothing (`cobra.NoFileCompletions`), so `__complete <masked> …` offers only
+    the global flags and never calls the command's completion function.
 - `pkg/commands/listing.go` (which backs `dtctl commands` and `commands howto`)
   already skips hidden commands -- e.g. `listing.go:196`
   (`if hiddenCommands[name] || cmd.Hidden { continue }`) and the analogous checks
