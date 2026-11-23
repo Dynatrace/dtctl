@@ -126,6 +126,8 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	// timeframe flags are passed through.
 	probeOpts.DefaultTimeframeStart = opts.DefaultTimeframeStart
 	probeOpts.DefaultTimeframeEnd = opts.DefaultTimeframeEnd
+	// The column types show a uid field compared to a string (see uidStringCompares).
+	probeOpts.IncludeTypes = true
 	resp, err := probe(ctx, fmt.Sprintf("%s | limit %d", stages[0], emptyProbeSampleRecords), probeOpts)
 	// A sample cut short by a limit is skewed toward whatever was read first,
 	// so it is not used as evidence.
@@ -150,6 +152,21 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	var reason *output.EmptyReason
 	var suggestions []string
 	n := len(sample)
+	// A uid field (trace.id, span.id, …) never equals a string literal: the filter
+	// is well-formed, the field is present, and it still matches nothing. That is
+	// the one case where the sample proves the cause, so it replaces the window advice.
+	for _, f := range uidStringCompares(stages, fields, sampleTypes(resp)) {
+		suggestions = append(suggestions, fmt.Sprintf("# `%s` is a uid, not a string, so comparing it with a string literal matches nothing — compare with toUid(\"<hex>\") (e.g. `filter %s == toUid(\"…\")`), or use toString(%s)", f, f, f))
+		if reason == nil {
+			reason = &output.EmptyReason{
+				Code:       "uid_compared_to_string",
+				Field:      f,
+				DataObject: object,
+				SampleSize: n,
+				Evidence:   fmt.Sprintf("`%s` has type uid in all %d sampled `%s` records, and the query compares it with a string literal", f, n, object),
+			}
+		}
+	}
 	for _, f := range fields {
 		if seen[f] {
 			continue
@@ -172,6 +189,56 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 		}
 	}
 	return reason, suggestions
+}
+
+// sampleTypes maps each column of the probe sample to its DQL type, when every
+// typed record range agrees on it.
+func sampleTypes(resp *DQLQueryResponse) map[string]string {
+	types := map[string]string{}
+	mixed := map[string]bool{}
+	for _, g := range resp.GetTypes() {
+		for name, ct := range g.Mappings {
+			if t, ok := types[name]; ok && t != ct.Type {
+				mixed[name] = true
+			}
+			types[name] = ct.Type
+		}
+	}
+	for name := range mixed {
+		delete(types, name)
+	}
+	return types
+}
+
+// uidStringCompares returns the referenced fields that the sample types as uid
+// and that a filter compares with a string literal: `f == "x"`, `"x" == f`,
+// `f != "x"` or `in(f, "x", …)` / `in(f, array("x", …))`.
+func uidStringCompares(stages, fields []string, types map[string]string) []string {
+	var filters []string
+	for _, st := range stages[1:] {
+		cmd, rest := splitCommand(st)
+		switch strings.ToLower(cmd) {
+		case "filter", "filterout":
+			filters = append(filters, rest)
+		case "sort", "limit", "dedup":
+		default:
+			goto done
+		}
+	}
+done:
+	text := strings.Join(filters, " ")
+	var out []string
+	for _, f := range fields {
+		if types[f] != "uid" {
+			continue
+		}
+		q := regexp.QuoteMeta(f)
+		re := regexp.MustCompile(`(^|[^\w.` + "`" + `])` + q + `\s*[!=]=\s*"|"\s*[!=]=\s*` + q + `($|[^\w.])|\bin\(\s*` + q + `\s*,\s*(array\(\s*)?"`)
+		if re.MatchString(text) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // queriedMetricKeys returns the metric keys Grail reports for a timeseries

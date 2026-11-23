@@ -408,3 +408,55 @@ func TestE2E_EmptyResultCarriesEmptyReason(t *testing.T) {
 		})
 	}
 }
+
+func spanSample() *DQLQueryResponse {
+	r := recordsResponse(
+		map[string]interface{}{"trace.id": "5b9f2740a42acf2f3b8a94e7fff925a5", "span.id": "7fecf2bdb41167f8", "span.name": "GET"},
+		map[string]interface{}{"trace.id": "a16174edc5d3d37234855e4996d341d5", "span.id": "f1290efbbf4b232e", "span.name": "POST"},
+	)
+	r.Result.Types = []ColumnTypes{{IndexRange: []int{0, 1}, Mappings: map[string]ColumnType{
+		"trace.id": {Type: "uid"}, "span.id": {Type: "uid"}, "span.name": {Type: "string"},
+	}}}
+	return r
+}
+
+// A trace id pasted as a string: the field exists, the filter parses, and it
+// matches nothing. Production agents retried other windows (2026-11 query log).
+func TestEmptyResultAdvice_UIDComparedToString(t *testing.T) {
+	for _, query := range []string{
+		`fetch spans, from:now()-1h | filter trace.id == "a16174edc5d3d37234855e4996d341d5" | fields span.name`,
+		`fetch spans | filter "a16174edc5d3d37234855e4996d341d5" == trace.id`,
+		`fetch spans | filter in(trace.id, array("a16174edc5d3d37234855e4996d341d5", "5b9f2740a42acf2f3b8a94e7fff925a5"))`,
+	} {
+		p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return spanSample(), nil }}
+		e := &DQLExecutor{probe: p.run}
+		reason, sugg := e.emptyResultAdvice(query, recordsResponse(), nil, DQLExecuteOptions{})
+		if reason == nil || reason.Code != "uid_compared_to_string" || reason.Field != "trace.id" || reason.DataObject != "spans" {
+			t.Fatalf("%s: reason = %+v, suggestions=%v", query, reason, sugg)
+		}
+		if !hasSuggestion(sugg, "toUid(") {
+			t.Errorf("%s: suggestions should name toUid: %v", query, sugg)
+		}
+		if hasSuggestion(sugg, "DEFAULT query window") {
+			t.Errorf("%s: widen-the-window advice must be withheld: %v", query, sugg)
+		}
+		if !p.opts[0].IncludeTypes {
+			t.Errorf("the probe must ask for column types")
+		}
+	}
+}
+
+func TestEmptyResultAdvice_UIDComparedRightIsNotFlagged(t *testing.T) {
+	for _, query := range []string{
+		`fetch spans | filter trace.id == toUid("a16174edc5d3d37234855e4996d341d5")`,
+		`fetch spans | filter toString(trace.id) == "a16174edc5d3d37234855e4996d341d5"`,
+		`fetch spans | filter span.name == "GET"`,
+	} {
+		p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return spanSample(), nil }}
+		e := &DQLExecutor{probe: p.run}
+		reason, sugg := e.emptyResultAdvice(query, recordsResponse(), nil, DQLExecuteOptions{})
+		if reason != nil && reason.Code == "uid_compared_to_string" {
+			t.Errorf("%s: flagged a correct compare: %+v %v", query, reason, sugg)
+		}
+	}
+}
