@@ -199,6 +199,11 @@ var unadvertisedResources = map[string]bool{
 	"exec api": true,
 }
 
+// MaskedAnnotation marks a command a surface stage (profile, blocked commands,
+// stability floor, deprecated surface) masks for the current run. The catalog
+// leaves it out even when it is unadvertised.
+const MaskedAnnotation = "dtctl.surface.masked"
+
 // advertisedResources drops the unadvertised leaves of a verb, for the catalog
 // projections that are meant to be browsed rather than searched.
 func advertisedResources(verb string, resources []string) []string {
@@ -365,9 +370,9 @@ func buildVerbs(root *cobra.Command) map[string]*Verb {
 					continue
 				}
 				// A hidden leaf is normally absent from the catalog too. An
-				// unadvertised one is the exception: the full catalog is the only
-				// place it is documented.
-				if sub.Hidden && !unadvertisedResources[name+" "+sub.Name()] {
+				// unadvertised one is the exception, unless a stage masked it:
+				// the full catalog is the only place it is documented.
+				if sub.Hidden && (!unadvertisedResources[name+" "+sub.Name()] || sub.Annotations[MaskedAnnotation] != "") {
 					continue
 				}
 

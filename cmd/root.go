@@ -22,6 +22,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/apply"
 	"github.com/Dynatrace/dtctl/pkg/auth"
 	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/commands"
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/diagnostic"
 	"github.com/Dynatrace/dtctl/pkg/exec"
@@ -30,6 +31,7 @@ import (
 	resapi "github.com/Dynatrace/dtctl/pkg/resources/api"
 	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
 	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/suggest"
 	"github.com/Dynatrace/dtctl/pkg/tracing"
 	"github.com/Dynatrace/dtctl/sdk/api/appengine"
@@ -446,12 +448,60 @@ var verbSynonyms = map[string]struct{ verb, hint string }{
 	"timeseries":      {"query", "timeseries is DQL — run it through query: dtctl query 'timeseries avg(dt.host.cpu.usage), from:now()-1h'"},
 }
 
+// hideMaskedCommand hides a command a surface stage masks from everything
+// cobra offers: listings, its own flags and its argument completion. The
+// pristine-tree restore undoes it.
+func hideMaskedCommand(c *cobra.Command) {
+	c.Hidden = true
+	// Only c's non-persistent flags: a persistent one, c's or an ancestor's,
+	// also serves commands that may stay visible. (Not c.LocalFlags(): it
+	// merges the ancestors' flag sets on every call, which is slow.)
+	c.Flags().VisitAll(func(f *pflag.Flag) {
+		for p := c; p != nil; p = p.Parent() {
+			if p.PersistentFlags().Lookup(f.Name) == f {
+				return
+			}
+		}
+		f.Hidden = true
+	})
+	c.ValidArgs = nil
+	c.ValidArgsFunction = cobra.NoFileCompletions
+	if c.Annotations == nil {
+		c.Annotations = map[string]string{}
+	}
+	c.Annotations[commands.MaskedAnnotation] = "true"
+}
+
+// prepareHelpCommand creates cobra's help command before the surface stages
+// run (ExecuteC would create it after them), declares it stable, and makes
+// `help <command>` refuse a masked command through its guard, exactly like
+// `<command> --help`.
+func prepareHelpCommand(root *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	for _, c := range root.Commands() {
+		if c.Name() != "help" {
+			continue
+		}
+		stability.MarkStable(c)
+		c.PreRunE = func(c *cobra.Command, args []string) error {
+			target, _, err := c.Root().Find(args)
+			if err != nil || target == nil || target.RunE == nil ||
+				target.Annotations[commands.MaskedAnnotation] == "" {
+				return nil
+			}
+			return target.RunE(target, args)
+		}
+	}
+}
+
 // applySurface masks root to the surface this invocation may reach: the
 // command profile, the blocked commands, the stability floor and the
 // deprecated surface. Execute and Parse share it, so both see the same tree. A
 // non-nil error is reported with the returned exit code, and the command does
 // not run.
 func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool) (int, error) {
+	prepareHelpCommand(root)
+
 	// --- Command profile filter ---
 	// Resolve the active profile (DTCTL_PROFILE > context binding > full) and
 	// mask out-of-profile commands before Cobra dispatches, so help, the
