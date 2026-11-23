@@ -136,16 +136,17 @@ func (e *UsageError) Error() string { return e.Message }
 //
 // Experimental: Parse and its types may change until a second host uses them.
 func Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
-	return parse(ctx, req, nil)
+	return parse(ctx, req, engineOptions{})
 }
 
-// parse is Parse with the Engine's header policy (WithHeaderPolicy).
-func parse(ctx context.Context, req ParseRequest, headerPolicy func(name string) string) (*Parsed, error) {
+// parse is Parse with an Engine's options (WithHeaderPolicy,
+// WithProfileDefinition).
+func parse(ctx context.Context, req ParseRequest, opts engineOptions) (*Parsed, error) {
 	argv, err := commandArgv(req.Command, req.Argv)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSurface(req.SafetyLevel, req.MinStability, req.StabilityExceptions); err != nil {
+	if err := validateSurface(req.SafetyLevel, req.Profile, opts, req.Env, req.MinStability, req.StabilityExceptions); err != nil {
 		return nil, err
 	}
 	env := requestEnv(req.Env, req.Profile)
@@ -154,9 +155,10 @@ func parse(ctx context.Context, req ParseRequest, headerPolicy func(name string)
 		MinStability:        config.StabilityLevel(req.MinStability),
 		StabilityExceptions: req.StabilityExceptions,
 		NoDeprecated:        req.NoDeprecated,
+		Profile:             opts.profile,
 		Env:                 env,
 		BlockedCommands:     unsupportedCommands,
-		HeaderPolicy:        headerPolicy,
+		HeaderPolicy:        opts.headerPolicy,
 		Context:             ctx,
 	})
 	var pe *cmd.ParseError
@@ -208,7 +210,7 @@ func scopeRequirementOf(name string) (ScopeRequirement, error) {
 // a parse refused because slow executions hold every slot. On an Engine built
 // without WithConcurrentExecution it still waits for a running Execute, as the
 // package-level Parse documents. It refuses the headers the Engine's
-// WithHeaderPolicy refuses.
+// WithHeaderPolicy refuses, and runs under its WithProfileDefinition.
 func (e *Engine) Parse(ctx context.Context, req ParseRequest) (*Parsed, error) {
-	return parse(ctx, req, e.headerPolicy)
+	return parse(ctx, req, e.opts)
 }

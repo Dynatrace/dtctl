@@ -203,9 +203,8 @@ func hasSubcommand(parent, child *cobra.Command) bool {
 // Returns nil when there is no usable config, which every caller treats as "no
 // constraint": the real command surfaces the config error later, with context.
 func configForArgs(ctx context.Context, args []string) *config.Config {
-	// Session-backed invocations resolve against the synthetic config: no
-	// user-defined profiles and no context binding, but the per-request
-	// environment (RunOptions.Env) still applies.
+	// Session-backed invocations resolve against the synthetic config: one
+	// context, bound to Session.Profile if set, with RunOptions.Env on top.
 	if currentSession(ctx) != nil {
 		return withInvocationEnv(ctx, currentSession(ctx).syntheticConfig())
 	}

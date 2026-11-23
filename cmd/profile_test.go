@@ -50,7 +50,7 @@ func find(root *cobra.Command, path ...string) *cobra.Command {
 
 func TestApplyProfile_Nil_NoOp(t *testing.T) {
 	root := newTestTree()
-	applyProfile(root, nil)
+	applyProfile(root, nil, false)
 	if find(root, "auth", "login").Hidden {
 		t.Fatal("nil profile should not hide any command")
 	}
@@ -59,7 +59,7 @@ func TestApplyProfile_Nil_NoOp(t *testing.T) {
 func TestApplyProfile_MasksAndAllows(t *testing.T) {
 	root := newTestTree()
 	p := &config.Profile{Name: "query", Commands: []string{"query", "get analyzers"}}
-	applyProfile(root, p)
+	applyProfile(root, p, false)
 
 	// Allowed: query, its subtree parent chain, and the specific get child.
 	if find(root, "query").Hidden {
@@ -89,7 +89,7 @@ func TestApplyProfile_MasksAndAllows(t *testing.T) {
 func TestApplyProfile_GuardBlocksInvocation(t *testing.T) {
 	root := newTestTree()
 	p := &config.Profile{Name: "query", Commands: []string{"query"}}
-	applyProfile(root, p)
+	applyProfile(root, p, false)
 
 	blocked := find(root, "auth", "login")
 	err := blocked.RunE(blocked, nil)
@@ -120,7 +120,7 @@ func TestApplyProfile_GuardWinsOverArgValidation(t *testing.T) {
 	root.AddCommand(del)
 
 	p := &config.Profile{Name: "query", Commands: []string{"query"}}
-	applyProfile(root, p)
+	applyProfile(root, p, false)
 
 	// Wrong arg count *and* an unknown flag — both would pre-empt RunE if not
 	// neutralized. The profile block must still win.

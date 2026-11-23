@@ -512,7 +512,8 @@ func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool
 	if profErr != nil {
 		return exitCodeForError(profErr), profErr
 	}
-	applyProfile(root, prof)
+	session := currentSession(cmdContext(root))
+	applyProfile(root, prof, session != nil && session.Profile != nil)
 
 	// --- Blocked-command filter (embedded callers) ---
 	// Mask commands the embedding caller declared unsupported in its
