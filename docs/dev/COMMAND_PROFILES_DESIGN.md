@@ -52,8 +52,10 @@ many surfaces.
   unset `DTCTL_PROFILE` or edit config. For real restriction, scope the API token.
 - **Per-flag filtering.** Profiles operate at command granularity, not flag
   granularity. Hiding individual flags of a visible command is out of scope.
-- **Dynamic/remote profiles.** Profiles are defined locally in config. No
-  server-delivered profile definitions.
+- **Remote profiles.** dtctl never fetches a profile definition. A CLI profile
+  is defined locally in config; an embedding host may hand the engine a
+  definition in-process (see [Host-defined profiles](#host-defined-profiles-in-the-engine)),
+  which is still local to the process that runs dtctl.
 - **Read/write filtering.** A profile does not know or care whether a command
   mutates. "No writes" is a *safety level*, set independently on the context. A
   profile never enumerates mutating commands.
@@ -347,6 +349,72 @@ One deliberate difference: the blocked mask also guards **non-runnable parents**
 (and neutralizes their arg/flag parsing), so a masked bare `config` cannot answer
 with its own help text and exit 0. The profile mask guards only runnable nodes.
 See [SERVICE_ENGINE_DESIGN.md](SERVICE_ENGINE_DESIGN.md).
+
+### Host-defined profiles in the engine
+
+A service embedding dtctl (`pkg/engine`) often owns its allowlist: it is part
+of the service's own contract, reviewed and versioned with the service, and a
+preset in dtctl would have to change in lockstep with it. So besides selecting
+a preset by name per request (`Request.Profile`), a host can build its engine
+with the definition itself:
+
+```go
+def := engine.ProfileDefinition{
+	Name:     "my-service",
+	Commands: []string{"query", "get analyzers", "describe analyzer"},
+}
+if err := def.Validate(); err != nil {
+	return err // refuse to start
+}
+eng := engine.New(limits, engine.WithProfileDefinition(def))
+```
+
+Every `Execute` and `Parse` of that engine runs under the definition, so the
+two cannot disagree about which commands exist.
+
+The definition goes onto the session (`cmd.Session.Profile`), whose synthetic
+config carries it in `profiles:` and binds the session context to it. From
+there it is an ordinary config-file profile: the same `Allows`, the same mask,
+the same `profile_blocked` error, the same catalog metadata. The host keeps the
+list; dtctl keeps the semantics — alias resolution, parent reachability, the
+always-available floor, and composition with the stability floor and
+`BlockedCommands`.
+
+Rules that keep the definition from meaning something other than what it says:
+
+- A request on such an engine cannot set `Request.Profile`.
+- The session pins `DTCTL_PROFILE` to the definition's name for the run, so
+  nothing in the process environment selects a preset — or `full` — in its
+  place. An `Env` entry naming a different profile is an error, not silently
+  overridden: it means the host believes some other profile applies. Because
+  the host pinned the profile, a `profile_blocked` error does not suggest
+  unsetting `DTCTL_PROFILE`.
+- The name is required, has no whitespace, and is not `full`.
+- A blank entry is refused, and so is an entry that starts with `dtctl` or
+  contains a flag token (`query --dql`): entries are command paths relative to
+  the root, and allow every flag of the command they name. An empty list is
+  valid and leaves only the always-available commands.
+- The engine copies the definition when it is built, so a host that changes
+  its definition afterwards changes nothing the engine runs. An invalid
+  definition makes every `Execute` and `Parse` return the validation error,
+  never a run without a profile; `ProfileDefinition.Validate` lets the host
+  find out before it starts.
+- Entries are canonical paths. An alias a caller types (`get az`) still runs,
+  because cobra resolves it to `get analyzers` before the profile is consulted.
+  An alias or a misspelling *in the list* selects no command of its own, but
+  still allows its ancestors (`get`).
+- An entry allows every ancestor, and an ancestor that runs on its own runs its
+  own body: `apply extension-config` also allows `apply -f <any file>`. For a
+  group that only lists subcommands (`get`) that is harmless; list an entry
+  under a runnable parent only if that parent may run too.
+
+dtctl does not check that each entry names an existing command: an entry for a
+command the stability floor hides, or one added in a later release, is not an
+error. A host that wants an upgrade to fail when a listed command is renamed or
+removed checks that in its own tests: `engine.Parse` on `<entry> --help` for
+every entry, with the request's floor, and compare `Verb`/`Resource` with the
+entry. An unknown verb is a `*UsageError`, but an unknown resource is not — it
+falls back to the verb's help, with `Help` set and `Resource` empty.
 
 ### Config schema changes
 

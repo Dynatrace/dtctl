@@ -66,7 +66,8 @@ type Request struct {
 	SafetyLevel string
 	// Profile selects a built-in command profile (e.g. "query") that reduces
 	// the visible command surface for this request. Empty is the full
-	// (service-supported) surface.
+	// (service-supported) surface. An error on an Engine built with
+	// WithProfileDefinition, which already fixes the profile.
 	Profile string
 	// MinStability is the stability floor for this request: the weakest
 	// contract a command or flag may offer and still be reachable
@@ -120,8 +121,64 @@ type Request struct {
 	// DTCTL_OUTPUT). Applied after credential scrubbing, so entries here win;
 	// grant with care — the engine deliberately does not expose this in its
 	// HTTP reference wrapper. Profile, when set, overrides an Env entry for
-	// DTCTL_PROFILE.
+	// DTCTL_PROFILE. On an Engine built with WithProfileDefinition, a
+	// DTCTL_PROFILE entry naming any other profile is an error.
 	Env map[string]string
+}
+
+// ProfileDefinition is a host-defined command profile: a default-deny
+// allowlist of command paths, for a host whose allowlist is its own rather than
+// one of dtctl's presets. Set it with WithProfileDefinition. It behaves exactly
+// like a profile in a config file: matched against the real command tree (so
+// an alias of an allowed command runs like its full name), hidden from help,
+// completion and `dtctl commands`, and refused with profile_blocked. An entry allows the command it names and its
+// whole subtree, and every ancestor of it. Being an ancestor allows the
+// command itself, not only the way through to the entry: listing
+// "apply extension-config" also allows `apply -f <any file>`, because `apply`
+// runs on its own. For a group that only lists its subcommands (`get`) that is
+// harmless; for a parent that runs, list it only if it may run. `commands` and
+// `help` are always available whatever the list says.
+//
+// Entries name commands by their canonical path: "get workflows", not
+// "get wf". A caller's alias still runs, because it resolves to the canonical
+// command before the profile is consulted. An alias or a misspelling in the
+// list selects no command of its own, but still allows its ancestors.
+// Validate-time checks catch a flag token or a leading "dtctl"; whether every
+// entry names a real command is for the host's own tests.
+type ProfileDefinition struct {
+	// Name identifies the profile in the profile_blocked error and in the
+	// `dtctl commands` metadata. Required, without whitespace, and not
+	// "full" — that name means no profile at all.
+	Name string
+	// Description is a human-readable summary of the profile's purpose.
+	Description string
+	// Commands is the allowlist of space-separated command paths. Empty
+	// leaves only the always-available commands.
+	Commands []string
+}
+
+// Validate reports why the definition would resolve to a surface other than
+// the one written down: a missing name, a name with whitespace or the reserved
+// "full", a blank entry, an entry with a flag token, or one starting with
+// "dtctl". It does not check that an entry names an existing command.
+// WithProfileDefinition runs it too; calling it first lets a host refuse to
+// start on a bad definition.
+func (p ProfileDefinition) Validate() error {
+	if err := p.sessionProfile().Validate(); err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	return nil
+}
+
+// sessionProfile converts a definition into the profile a session carries,
+// copying it, so a host that changes its definition later changes nothing an
+// Engine runs.
+func (p ProfileDefinition) sessionProfile() *config.Profile {
+	return &config.Profile{
+		Name:        p.Name,
+		Description: p.Description,
+		Commands:    append([]string(nil), p.Commands...),
+	}
 }
 
 // Result is the outcome of one execution. Stdout and Stderr are byte-identical
@@ -164,22 +221,27 @@ func Execute(ctx context.Context, req Request) (*Result, error) {
 // (cmd.RunOptions.Concurrent) — see docs/dev/CONCURRENT_EXECUTION.md for what that
 // costs and what it guarantees. The zero value is not usable; build one with New.
 type Engine struct {
-	limits     Limits
-	adm        *admission
-	concurrent bool
-	transport  http.RoundTripper
-	// headerPolicy is the host's `exec api -H` policy (WithHeaderPolicy).
-	headerPolicy func(name string) string
+	limits Limits
+	adm    *admission
+	opts   engineOptions
 }
 
 // Option configures an Engine at construction.
 type Option func(*engineOptions)
 
+// engineOptions are what an Engine's options set for every invocation it runs.
+// The zero value is the package-level Execute's: serialized, the default
+// transport, no header policy and no profile definition.
 type engineOptions struct {
 	concurrent    bool
 	maxConcurrent int
 	transport     http.RoundTripper
-	headerPolicy  func(name string) string
+	// headerPolicy is the host's `exec api -H` policy (WithHeaderPolicy).
+	headerPolicy func(name string) string
+	// profile is the host's command profile (WithProfileDefinition), and
+	// profileErr why it is invalid; an Engine with an invalid one runs nothing.
+	profile    *config.Profile
+	profileErr error
 }
 
 // WithConcurrentExecution opts an Engine into running up to maxConcurrent
@@ -231,6 +293,19 @@ func WithHeaderPolicy(policy func(name string) string) Option {
 	return func(o *engineOptions) { o.headerPolicy = policy }
 }
 
+// WithProfileDefinition runs every invocation of the Engine, Execute and Parse
+// alike, under the host's command profile. The Engine copies def, so changing
+// it afterwards has no effect. The profile is pinned for every run: a request
+// cannot set Request.Profile, and a DTCTL_PROFILE entry in its Env that names
+// another profile is an error. An invalid definition (see
+// ProfileDefinition.Validate) makes every Execute and Parse return the
+// validation error instead of running without a profile.
+func WithProfileDefinition(def ProfileDefinition) Option {
+	return func(o *engineOptions) {
+		o.profile, o.profileErr = def.sessionProfile(), def.Validate()
+	}
+}
+
 // New builds an Engine with the given budget. Without WithConcurrentExecution
 // it serializes, exactly like the package-level Execute, but with an admission
 // queue of its own.
@@ -247,11 +322,9 @@ func New(limits Limits, opts ...Option) *Engine {
 		l.MaxQueued = o.maxConcurrent
 	}
 	return &Engine{
-		limits:       l,
-		adm:          &admission{slot: make(chan struct{}, o.maxConcurrent)},
-		concurrent:   o.concurrent,
-		transport:    o.transport,
-		headerPolicy: o.headerPolicy,
+		limits: l,
+		adm:    &admission{slot: make(chan struct{}, o.maxConcurrent)},
+		opts:   o,
 	}
 }
 
@@ -262,19 +335,19 @@ func (e *Engine) MaxConcurrent() int { return cap(e.adm.slot) }
 // Execute runs one invocation against this engine's budget. Its Result and
 // error read as the package-level Execute documents.
 func (e *Engine) Execute(ctx context.Context, req Request) (*Result, error) {
-	return executeInner(ctx, req, e.limits, e.adm, e.concurrent, e.transport, e.headerPolicy)
+	return executeInner(ctx, req, e.limits, e.adm, e.opts)
 }
 
 // Limits reports the budget this engine was built with, after defaults.
 func (e *Engine) Limits() Limits { return e.limits }
 
 // executeInner is the shared implementation called by ExecuteWithLimits.
-func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, concurrent bool, transport http.RoundTripper, headerPolicy func(name string) string) (*Result, error) {
+func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, opts engineOptions) (*Result, error) {
 	argv, err := req.argv()
 	if err != nil {
 		return nil, err
 	}
-	if err := req.validate(); err != nil {
+	if err := req.validate(opts); err != nil {
 		return nil, err
 	}
 	if limits.MaxFileBytes > 0 {
@@ -348,7 +421,8 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 			MinStability:        config.StabilityLevel(req.MinStability),
 			StabilityExceptions: req.StabilityExceptions,
 			NoDeprecated:        req.NoDeprecated,
-			Transport:           transport,
+			Profile:             opts.profile,
+			Transport:           opts.transport,
 		},
 		Env:             env,
 		FS:              files,
@@ -356,12 +430,12 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 		Stdout:          stdout,
 		Stderr:          stderr,
 		BlockedCommands: unsupportedCommands,
-		HeaderPolicy:    headerPolicy,
+		HeaderPolicy:    opts.headerPolicy,
 		Context:         timeoutCtx,
 
 		// Overlapping invocations only when the engine was built with
 		// WithConcurrentExecution; everything else stays serialized.
-		Concurrent: concurrent,
+		Concurrent: opts.concurrent,
 		OnStart:    func() { started = true },
 	})
 	// Only a concurrent Run gives up before starting: its context ended while a
@@ -386,7 +460,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 	// The Result still comes back, since the command may have written before it
 	// was cut off. Only a concurrent engine does this; the serialized one
 	// reports what the command returned, as it always has.
-	if concurrent {
+	if opts.concurrent {
 		if err := contextEnded(timeoutCtx); err != nil {
 			return res, err
 		}
@@ -421,19 +495,34 @@ func commandArgv(command string, argv []string) ([]string, error) {
 // surface as Go errors instead of a CLI error transcript. The same
 // constraints are enforced again inside the run (cmd.Session.validate) —
 // this is the caller-friendly first line.
-func (r *Request) validate() error {
+func (r *Request) validate(opts engineOptions) error {
 	if r.EnvironmentURL == "" {
 		return errors.New("engine: EnvironmentURL is required")
 	}
 	if r.Token == "" {
 		return errors.New("engine: Token is required")
 	}
-	return validateSurface(r.SafetyLevel, r.MinStability, r.StabilityExceptions)
+	return validateSurface(r.SafetyLevel, r.Profile, opts, r.Env, r.MinStability, r.StabilityExceptions)
 }
 
 // validateSurface checks the fields that decide a request's surface, which
 // Request and ParseRequest share.
-func validateSurface(safetyLevel, minStability string, exceptions []string) error {
+func validateSurface(safetyLevel, profile string, opts engineOptions, env map[string]string, minStability string, exceptions []string) error {
+	if opts.profileErr != nil {
+		return opts.profileErr
+	}
+	if definition := opts.profile; definition != nil {
+		// Naming a second profile is a host bug however it is spelled; picking
+		// one would leave the host believing the other applied.
+		if profile != "" {
+			return fmt.Errorf("engine: the request sets Profile %q, but the engine runs under profile %q (WithProfileDefinition)",
+				profile, definition.Name)
+		}
+		if v := env[config.ProfileEnvVar]; v != "" && v != definition.Name {
+			return fmt.Errorf("engine: Env sets %s=%q, but the engine runs under profile %q (WithProfileDefinition)",
+				config.ProfileEnvVar, v, definition.Name)
+		}
+	}
 	if safetyLevel != "" {
 		valid := false
 		for _, l := range config.ValidSafetyLevels() {
@@ -489,7 +578,7 @@ func contextEnded(ctx context.Context) error {
 // deadline cut off returns its Result together with the context's error (see
 // Execute).
 func (e *Engine) ExecuteWithLimits(ctx context.Context, req Request, limits Limits) (*Result, error) {
-	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.concurrent, e.transport, e.headerPolicy)
+	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.opts)
 }
 
 // effectiveLimits is the budget one ExecuteWithLimits call runs under: the
@@ -507,7 +596,9 @@ func (e *Engine) effectiveLimits(limits Limits) Limits {
 
 // requestEnv is the environment a request runs under: its Env, with Profile
 // (when set) overriding DTCTL_PROFILE. Execute and Parse both build it here, so
-// they cannot disagree about which profile a request resolves.
+// they cannot disagree about which profile a request resolves. An Engine's
+// ProfileDefinition is pinned by the session itself (cmd.Session.Profile), so
+// it needs nothing here.
 func requestEnv(env map[string]string, profile string) map[string]string {
 	out := make(map[string]string, len(env)+1)
 	for k, v := range env {

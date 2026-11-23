@@ -20,6 +20,11 @@ type ProfileError struct {
 	Command string
 	// Profile is the name of the active profile that masks the command.
 	Profile string
+	// Pinned is set when the profile comes from the invocation's session (an
+	// embedding host), which the caller cannot change: the error then does
+	// not suggest unsetting DTCTL_PROFILE, an instruction the caller could
+	// not follow and that would only invite it to look for a way around.
+	Pinned bool
 }
 
 // Headline is the one-line statement of the block, shared by the human-readable
@@ -31,6 +36,9 @@ func (e *ProfileError) Headline() string {
 
 // Suggestions are the remediation hints, shared with the agent-mode ErrorDetail.
 func (e *ProfileError) Suggestions() []string {
+	if e.Pinned {
+		return []string{"run 'dtctl commands' to see the available command set"}
+	}
 	return []string{
 		"run 'dtctl commands' to see the available command set",
 		"unset " + config.ProfileEnvVar + " to use the full CLI",
@@ -38,6 +46,11 @@ func (e *ProfileError) Suggestions() []string {
 }
 
 func (e *ProfileError) Error() string {
+	if e.Pinned {
+		return e.Headline() + "\n\n" +
+			"  This profile exposes a reduced command set. Run 'dtctl commands' to see\n" +
+			"  what is available."
+	}
 	return e.Headline() + "\n\n" +
 		"  This profile exposes a reduced command set. Run 'dtctl commands' to see\n" +
 		"  what is available, or unset " + config.ProfileEnvVar + " to use the full CLI."
@@ -51,9 +64,10 @@ func (e *ProfileError) Error() string {
 // runnable by name in Cobra).
 //
 // A nil profile is the full command tree (no-op), preserving today's behavior.
+// pinned marks a profile the caller cannot change (see ProfileError.Pinned).
 // The filter runs once, after the whole command tree is registered and before
 // Cobra dispatches — see executeArgs() in root.go.
-func applyProfile(root *cobra.Command, p *config.Profile) {
+func applyProfile(root *cobra.Command, p *config.Profile, pinned bool) {
 	if p == nil {
 		return
 	}
@@ -74,7 +88,7 @@ func applyProfile(root *cobra.Command, p *config.Profile) {
 			// guard always wins and the block is the only observable outcome.
 			cmd.Args = cobra.ArbitraryArgs
 			cmd.DisableFlagParsing = true
-			cmd.RunE = blockedRunE(commandPathRelative(cmd, root), p.Name)
+			cmd.RunE = blockedRunE(commandPathRelative(cmd, root), p.Name, pinned)
 			cmd.Run = nil
 		}
 	})
@@ -85,9 +99,9 @@ func applyProfile(root *cobra.Command, p *config.Profile) {
 // can return a specific "not available in profile X" message instead of a
 // generic "unknown command". applyProfile disables arg validation and flag
 // parsing on the masked command so this guard is the only observable outcome.
-func blockedRunE(path, profileName string) func(*cobra.Command, []string) error {
+func blockedRunE(path, profileName string, pinned bool) func(*cobra.Command, []string) error {
 	return func(*cobra.Command, []string) error {
-		return &ProfileError{Command: path, Profile: profileName}
+		return &ProfileError{Command: path, Profile: profileName, Pinned: pinned}
 	}
 }
 
@@ -161,10 +175,11 @@ func extractContextOverride(args []string) string {
 func resolveActiveProfile(ctx context.Context, args []string) (*config.Profile, error) {
 	// No usable config → full command tree. The real command will surface any
 	// config error later with proper context. Session-backed invocations
-	// resolve against the synthetic config: no user-defined profiles and no
-	// context binding, but DTCTL_PROFILE (set per request via RunOptions.Env)
-	// still selects a built-in preset. See configForArgs in stability.go, which
-	// the stability floor shares.
+	// resolve against the synthetic config: DTCTL_PROFILE (set per request via
+	// RunOptions.Env) selects a built-in preset, and a Session.Profile is the
+	// one user-defined profile, bound to the session context and pinned in
+	// DTCTL_PROFILE. See configForArgs in stability.go, which the stability
+	// floor shares.
 	cfg := configForArgs(ctx, args)
 	if cfg == nil {
 		return nil, nil
