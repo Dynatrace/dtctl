@@ -161,6 +161,18 @@ func (s EnvironmentShare) HasAccess(level string) bool {
 	return sdkShare.HasAccess(level)
 }
 
+// Level returns the share's access level as --access spells it ("read" or
+// "read-write"), or the raw access list for anything else.
+func (s EnvironmentShare) Level() string {
+	sdkShare := sdkdocument.EnvironmentShare{Access: s.Access}
+	for _, level := range []string{"read", "read-write"} {
+		if sdkShare.ExactAccess(level) {
+			return level
+		}
+	}
+	return strings.Join(s.Access, ",")
+}
+
 // fromSDKEnvironmentShare converts an SDK EnvironmentShare to the CLI EnvironmentShare.
 func fromSDKEnvironmentShare(s *sdkdocument.EnvironmentShare) *EnvironmentShare {
 	return &EnvironmentShare{
@@ -516,11 +528,6 @@ func (h *Handler) DeleteEnvironmentShare(shareID string) error {
 	return h.sdk.DeleteEnvironmentShare(context.Background(), shareID)
 }
 
-// SetDocumentPublic flips a document's isPrivate flag to false.
-func (h *Handler) SetDocumentPublic(id string, version int) error {
-	return h.sdk.SetDocumentPublic(context.Background(), id, version)
-}
-
 // ListSnapshots retrieves all snapshots for a document.
 func (h *Handler) ListSnapshots(documentID string) (*SnapshotList, error) {
 	l, err := h.sdk.ListSnapshots(context.Background(), documentID)
@@ -559,58 +566,26 @@ func (h *Handler) GetAtVersion(id string, version int) (*Document, error) {
 	return fromSDKDocument(d), nil
 }
 
-// EnsureEnvironmentShare idempotently ensures the document has an environment share at the given
-// access level, AND that the document itself is marked public (isPrivate=false).
-//
-// This is a CLI-specific composite operation not present in the SDK.
-func (h *Handler) EnsureEnvironmentShare(documentID, access string) (*EnvironmentShare, error) {
-	share, err := h.ensureShareAtAccess(documentID, access)
-	if err != nil {
-		return nil, err
-	}
-
-	// Flip the document to public. Fetch current version for optimistic locking.
-	meta, err := h.sdk.GetMetadata(context.Background(), documentID)
-	if err != nil {
-		return share, fmt.Errorf("share created but could not read document metadata to flip isPrivate: %w", err)
-	}
-	if meta.IsPrivate {
-		if err := h.sdk.SetDocumentPublic(context.Background(), documentID, meta.Version); err != nil {
-			if !errors.Is(err, sdkdocument.ErrVersionConflict) {
-				return share, err
-			}
-			// Retry once: re-fetch metadata and try again.
-			meta, err = h.sdk.GetMetadata(context.Background(), documentID)
-			if err != nil {
-				return share, fmt.Errorf("share created but retry metadata fetch failed: %w", err)
-			}
-			if meta.IsPrivate {
-				if err := h.sdk.SetDocumentPublic(context.Background(), documentID, meta.Version); err != nil {
-					return share, err
-				}
-			}
-		}
-	}
-	return share, nil
+// EnvironmentLinkResult is what EnsureEnvironmentLink did.
+type EnvironmentLinkResult struct {
+	// Share is the environment share the document now has at the access level.
+	Share *EnvironmentShare
+	// Created is true when Share was created by this call.
+	Created bool
 }
 
-// ensureShareAtAccess handles the share creation/replacement logic, including 409 race recovery.
-func (h *Handler) ensureShareAtAccess(documentID, access string) (*EnvironmentShare, error) {
+// EnsureEnvironmentLink idempotently ensures the document has an environment
+// share at exactly the access level: a link anyone in the environment can
+// claim. It leaves the document's isPrivate flag alone, and never touches a
+// share at another level — a document has at most one share per level, so a
+// read and a read-write link coexist and neither has to be replaced.
+func (h *Handler) EnsureEnvironmentLink(documentID, access string) (*EnvironmentLinkResult, error) {
 	existing, err := h.sdk.ListEnvironmentShares(context.Background(), documentID)
 	if err != nil {
 		return nil, err
 	}
-
-	share, toDelete := findOrCollectSDKShares(existing.Shares, access)
-	if share != nil {
-		return fromSDKEnvironmentShare(share), nil
-	}
-
-	// Delete non-matching shares and create a new one at the requested access level.
-	for _, id := range toDelete {
-		if err := h.sdk.DeleteEnvironmentShare(context.Background(), id); err != nil {
-			return nil, fmt.Errorf("failed to replace existing environment share: %w", err)
-		}
+	if match := findSDKShare(existing.Shares, access); match != nil {
+		return &EnvironmentLinkResult{Share: fromSDKEnvironmentShare(match)}, nil
 	}
 
 	created, err := h.sdk.CreateEnvironmentShare(context.Background(), CreateEnvironmentShareRequest{
@@ -618,51 +593,70 @@ func (h *Handler) ensureShareAtAccess(documentID, access string) (*EnvironmentSh
 		Access:     access,
 	})
 	if err == nil {
-		return fromSDKEnvironmentShare(created), nil
+		return &EnvironmentLinkResult{Share: fromSDKEnvironmentShare(created), Created: true}, nil
 	}
 
-	// Handle race condition: another process may have created the share
+	// A 409 means a share at this level exists: another process created it
+	// between the list and the create. Reuse it.
 	if !errors.Is(err, sdkdocument.ErrShareConflict) {
 		return nil, err
 	}
-
 	reListed, reErr := h.sdk.ListEnvironmentShares(context.Background(), documentID)
 	if reErr != nil {
 		return nil, fmt.Errorf("create returned conflict and re-list failed: %w", reErr)
 	}
-
-	share, toDelete = findOrCollectSDKShares(reListed.Shares, access)
-	if share != nil {
-		return fromSDKEnvironmentShare(share), nil
+	if match := findSDKShare(reListed.Shares, access); match != nil {
+		return &EnvironmentLinkResult{Share: fromSDKEnvironmentShare(match)}, nil
 	}
-
-	for _, id := range toDelete {
-		if err := h.sdk.DeleteEnvironmentShare(context.Background(), id); err != nil {
-			return nil, fmt.Errorf("failed to replace racing environment share: %w", err)
-		}
-	}
-	final, err := h.sdk.CreateEnvironmentShare(context.Background(), CreateEnvironmentShareRequest{
-		DocumentID: documentID,
-		Access:     access,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return fromSDKEnvironmentShare(final), nil
+	return nil, err
 }
 
-// findOrCollectSDKShares scans SDK shares for an exact access match. Returns the match (if any)
-// and a list of non-matching share IDs suitable for deletion.
-func findOrCollectSDKShares(shares []sdkdocument.EnvironmentShare, access string) (*sdkdocument.EnvironmentShare, []string) {
-	var match *sdkdocument.EnvironmentShare
+// RemoveEnvironmentLinks deletes the document's environment shares. A
+// non-empty access deletes only shares at exactly that level. The document's
+// isPrivate flag and its direct (user/group) shares are left alone. It reports
+// how many shares were deleted; a failure partway says how many were.
+func (h *Handler) RemoveEnvironmentLinks(documentID, access string) (int, error) {
+	existing, err := h.sdk.ListEnvironmentShares(context.Background(), documentID)
+	if err != nil {
+		return 0, err
+	}
+
 	var toDelete []string
-	for i := range shares {
-		s := shares[i]
-		if s.ExactAccess(access) {
-			match = &s
-		} else {
+	for _, s := range existing.Shares {
+		if access == "" || s.ExactAccess(access) {
 			toDelete = append(toDelete, s.ID)
 		}
 	}
-	return match, toDelete
+
+	deleted := 0
+	for _, id := range toDelete {
+		if err := h.sdk.DeleteEnvironmentShare(context.Background(), id); err != nil {
+			return deleted, fmt.Errorf("deleting environment share %s failed "+
+				"(%d of %d environment share(s) deleted; re-run to remove the rest): %w",
+				id, deleted, len(toDelete), err)
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
+// SetPrivate makes the document private (isPrivate=true) or public
+// (isPrivate=false) through the Document API's :makePrivate/:makePublic
+// actions. Neither takes a version, and both are a no-op when the document is
+// already in that state.
+func (h *Handler) SetPrivate(documentID string, private bool) error {
+	if private {
+		return h.sdk.MakeDocumentPrivate(context.Background(), documentID)
+	}
+	return h.sdk.MakeDocumentPublic(context.Background(), documentID)
+}
+
+// findSDKShare returns the share at exactly the access level, or nil.
+func findSDKShare(shares []sdkdocument.EnvironmentShare, access string) *sdkdocument.EnvironmentShare {
+	for i := range shares {
+		if shares[i].ExactAccess(access) {
+			return &shares[i]
+		}
+	}
+	return nil
 }

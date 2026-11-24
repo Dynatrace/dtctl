@@ -347,3 +347,67 @@ func TestRunWithSession_HostAliasesIgnored(t *testing.T) {
 	defer env.mu.Unlock()
 	require.Empty(t, env.authSeen, "no request may be sent for an unexpanded alias")
 }
+
+// TestRunWithSession_ProfileDefinition: a session profile masks the surface
+// like a config-file profile, and the config holds a copy of it.
+func TestRunWithSession_ProfileDefinition(t *testing.T) {
+	clearAgentEnvVars(t)
+	t.Setenv("DTCTL_PROFILE", "")
+
+	def := &config.Profile{Name: "host-agent", Commands: []string{"get analyzers"}}
+	session := &Session{EnvironmentURL: "https://x.example.invalid", Token: "t", Profile: def}
+
+	cfg := session.syntheticConfig()
+	def.Commands[0] = "get workflows"
+	p, err := withInvocationEnv(context.Background(), cfg).ResolveProfile()
+	require.NoError(t, err)
+	require.Equal(t, "host-agent", p.Name)
+	require.Equal(t, []string{"get analyzers"}, p.Commands)
+
+	def.Commands[0] = "get analyzers"
+	code, out := captureRun(t, []string{"get", "--help"}, RunOptions{Session: session})
+	require.Zero(t, code)
+	section := availableCommandsSection(t, out)
+	require.Contains(t, section, "analyzers")
+	require.NotContains(t, section, "workflows")
+}
+
+// TestSessionRejectsInvalidProfileDefinition: an invalid definition fails
+// session validation.
+func TestSessionRejectsInvalidProfileDefinition(t *testing.T) {
+	for _, p := range []*config.Profile{
+		{},
+		{Name: config.ProfileFull},
+		{Name: "a b"},
+		{Name: "p", Commands: []string{""}},
+		{Name: "p", Commands: []string{"query --dql"}},
+		{Name: "p", Commands: []string{"dtctl query"}},
+	} {
+		s := &Session{EnvironmentURL: "https://x.example.invalid", Token: "t", Profile: p}
+		require.Error(t, s.validate(), "profile %+v", p)
+	}
+}
+
+// TestRunWithSession_ProfileDefinitionIsPinned: Env cannot replace the
+// session's profile, and its error does not suggest unsetting DTCTL_PROFILE.
+func TestRunWithSession_ProfileDefinitionIsPinned(t *testing.T) {
+	clearAgentEnvVars(t)
+	t.Setenv("DTCTL_PROFILE", "")
+
+	session := &Session{
+		EnvironmentURL: "https://x.example.invalid",
+		Token:          "t",
+		Profile:        &config.Profile{Name: "host-agent", Commands: []string{"get analyzers"}},
+	}
+
+	_, err := Parse([]string{"get", "buckets"}, ParseOptions{
+		Profile: session.Profile,
+		Env:     map[string]string{"DTCTL_PROFILE": "full"},
+	})
+	require.ErrorContains(t, err, "DTCTL_PROFILE")
+
+	code, out := captureRun(t, []string{"get", "buckets", "--agent"}, RunOptions{Session: session})
+	require.NotZero(t, code)
+	require.Contains(t, out, "profile_blocked")
+	require.NotContains(t, out, "unset")
+}
