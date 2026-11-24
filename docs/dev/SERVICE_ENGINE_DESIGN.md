@@ -218,8 +218,11 @@ Do not conflate these; each answers a different question.
 | Environment | Which commands *make sense* here at all? | `BlockedCommands` mask | `unsupported_in_service` |
 | Capability | Which *host abilities* may this process use? | `cmd.Capabilities` gates | `capability_disabled` |
 
-The masks compose — profile, stability and environment all apply to a run. The
-environment mask additionally guards non-runnable parents, so a blocked
+The masks compose — profile, stability and environment all apply to a run. A
+request selects a preset (`Request.Profile`), or the host sets its own profile
+for the engine (`engine.WithProfileDefinition`) — see
+[COMMAND_PROFILES_DESIGN.md](COMMAND_PROFILES_DESIGN.md#host-defined-profiles-in-the-engine).
+The environment mask additionally guards non-runnable parents, so a blocked
 `config` cannot answer with its own help text and exit 0.
 
 #### The stability floor defaults *stricter* in the engine

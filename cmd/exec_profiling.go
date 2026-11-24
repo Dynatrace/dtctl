@@ -611,7 +611,9 @@ func renderProfilingFocus(ctx context.Context, run *profilingRun, result interfa
 		warnings = append(warnings, fmt.Sprintf("showing up to %d callers and %d callees; --limit 0 lists them all", limit, limit))
 	}
 	hints := []string{note, "--focus <caller or callee> walks the call graph further"}
-	return printProfilingRows(ctx, run, "focus", f.state, nil, rows, len(rows), "", warnings, hints)
+	// The total counts every row before --limit: the total and self rows plus
+	// all callers and callees, so has_more agrees with it.
+	return printProfilingRows(ctx, run, "focus", f.state, nil, rows, 2+nCallers+nCallees, "", warnings, hints)
 }
 
 // printProfilingRows prints a per-function view's rows. A table gets the note,

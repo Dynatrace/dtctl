@@ -52,8 +52,9 @@ many surfaces.
   unset `DTCTL_PROFILE` or edit config. For real restriction, scope the API token.
 - **Per-flag filtering.** Profiles operate at command granularity, not flag
   granularity. Hiding individual flags of a visible command is out of scope.
-- **Dynamic/remote profiles.** Profiles are defined locally in config. No
-  server-delivered profile definitions.
+- **Remote profiles.** dtctl never fetches a profile definition: it comes from
+  the config file, or in-process from an embedding host
+  ([Host-defined profiles](#host-defined-profiles-in-the-engine)).
 - **Read/write filtering.** A profile does not know or care whether a command
   mutates. "No writes" is a *safety level*, set independently on the context. A
   profile never enumerates mutating commands.
@@ -281,7 +282,11 @@ returns the named profile (or nil for `full`).
 The key enabling fact: **every discovery surface we care about already honors
 `cmd.Hidden`.**
 
-- Cobra's help and shell completion skip hidden commands natively.
+- Cobra's help and shell completion skip hidden commands when they *list*
+  subcommands, but not a hidden command named explicitly. So the mask also hides
+  the command's own flags and argument completion, and dtctl creates cobra's
+  `help` command before the masks run, with a `PreRunE` that refuses
+  `help <masked>` like `<masked> --help` (`prepareHelpCommand`).
 - `pkg/commands/listing.go` (which backs `dtctl commands` and `commands howto`)
   already skips hidden commands -- e.g. `listing.go:196`
   (`if hiddenCommands[name] || cmd.Hidden { continue }`) and the analogous checks
@@ -347,6 +352,45 @@ One deliberate difference: the blocked mask also guards **non-runnable parents**
 (and neutralizes their arg/flag parsing), so a masked bare `config` cannot answer
 with its own help text and exit 0. The profile mask guards only runnable nodes.
 See [SERVICE_ENGINE_DESIGN.md](SERVICE_ENGINE_DESIGN.md).
+
+### Host-defined profiles in the engine
+
+A service embedding dtctl (`pkg/engine`) often owns its allowlist, so besides
+selecting a preset per request (`Request.Profile`), a host can build its engine
+with its own definition:
+
+```go
+def := engine.ProfileDefinition{
+	Name:     "my-service",
+	Commands: []string{"query", "get analyzers", "describe analyzer"},
+}
+if err := def.Validate(); err != nil {
+	return err // refuse to start
+}
+eng := engine.New(limits, engine.WithProfileDefinition(def))
+```
+
+The definition becomes the session's profile (`cmd.Session.Profile`) and works
+like a config-file profile: the same `Allows`, mask, `profile_blocked` error and
+catalog metadata. It applies to every `Execute` and `Parse` of the engine.
+
+- **Validation:** the name is required, has no whitespace and is not `full`; no
+  entry is blank, contains a flag token or starts with `dtctl`. An empty list
+  leaves only the always-available commands. An invalid definition fails every
+  request.
+- **Pinned:** the session pins `DTCTL_PROFILE` to the definition's name, so a
+  request that sets `Request.Profile`, or an `Env` entry naming another profile,
+  is an error. The pin sits in the session, so it also holds for direct
+  `cmd.Run`/`cmd.Parse` callers, and `profile_blocked` does not suggest
+  unsetting `DTCTL_PROFILE`.
+- **Copied:** the engine keeps its own copy of the definition.
+- **Entries** are canonical paths; a caller's alias resolves to them. An entry
+  also allows its ancestors, and an ancestor that runs on its own runs too:
+  `apply extension-config` also allows `apply -f <any file>`.
+
+dtctl does not check that each entry names an existing command. A host that
+wants an upgrade to fail on a renamed or removed command compares its list
+with `dtctl commands --full -o json` run under the profile.
 
 ### Config schema changes
 
