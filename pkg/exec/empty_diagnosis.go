@@ -156,7 +156,8 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	// is well-formed, the field is present, and it still matches nothing. That is
 	// the one case where the sample proves the cause, so it replaces the window advice.
 	for _, f := range uidStringCompares(stages, fields, sampleTypes(resp)) {
-		suggestions = append(suggestions, fmt.Sprintf("# `%s` is a uid, not a string, so comparing it with a string literal matches nothing — compare with toUid(\"<hex>\") (e.g. `filter %s == toUid(\"…\")`), or use toString(%s)", f, f, f))
+		id := dqlIdentifier(f)
+		suggestions = append(suggestions, fmt.Sprintf("# `%s` is a uid, not a string, so comparing it with a string literal matches nothing — compare with toUid(\"<hex>\"), e.g. filter %s == toUid(\"…\"), or use toString(%s)", f, id, id))
 		if reason == nil {
 			reason = &output.EmptyReason{
 				Code:       "uid_compared_to_string",
@@ -215,8 +216,8 @@ func sampleTypes(resp *DQLQueryResponse) map[string]string {
 // `f != "x"` or `in(f, "x", …)` / `in(f, array("x", …))`.
 //
 // The compare only proves the cause when it necessarily drops every record, so
-// it must be a top-level conjunct of a `filter` stage. Under `filterOut`, `or`
-// or `not()` it can let records through, and the empty result has another cause.
+// it must be a top-level conjunct of a `filter` stage. Under `filterOut`, `or`,
+// `xor` or `not()` it can let records through, and the empty result has another cause.
 func uidStringCompares(stages, fields []string, types map[string]string) []string {
 	var conjuncts []string
 	for _, st := range stages[1:] {
@@ -236,7 +237,8 @@ done:
 			continue
 		}
 		q := regexp.QuoteMeta(f)
-		re := regexp.MustCompile(`^(` + q + `\s*[!=]=\s*""|""\s*[!=]=\s*` + q + `|in\(\s*` + q + `\s*,\s*(array\(\s*)?"".*\))$`)
+		id := `(?:` + q + "|`" + q + "`)"
+		re := regexp.MustCompile(`^(` + id + `\s*[!=]=\s*""|""\s*[!=]=\s*` + id + `|in\(\s*` + id + `\s*,\s*(array\(\s*)?"".*\))$`)
 		for _, c := range conjuncts {
 			if re.MatchString(c) {
 				out = append(out, f)
@@ -248,7 +250,7 @@ done:
 }
 
 // maskStringLiterals empties every string literal (`"…"`, `"""…"""`) to `""`,
-// so nothing inside one is read as code, and unquotes backtick identifiers.
+// so nothing inside one is read as code. Backtick identifiers stay as they are.
 func maskStringLiterals(expr string) string {
 	var b strings.Builder
 	for i := 0; i < len(expr); {
@@ -265,7 +267,7 @@ func maskStringLiterals(expr string) string {
 			b.WriteString(`""`)
 		case expr[i] == '`':
 			j := skipQuoted(expr, i)
-			b.WriteString(strings.Trim(expr[i:j], "`"))
+			b.WriteString(expr[i:j])
 			i = j
 		default:
 			b.WriteByte(expr[i])
@@ -275,30 +277,65 @@ func maskStringLiterals(expr string) string {
 	return b.String()
 }
 
-// topLevelConjuncts splits a filter expression on `and` outside brackets and
-// trims each part, including parentheses that wrap the whole part.
+// topLevelConjuncts returns the parts of a filter expression that every
+// matching record must satisfy: its `and` operands, recursively through
+// enclosing parentheses, each trimmed and unwrapped. `and` binds tighter than
+// `or`/`xor`, so an expression with a top-level `or` or `xor` has none.
 func topLevelConjuncts(expr string) []string {
+	expr = unwrapParens(strings.TrimSpace(expr))
+	if len(splitTopLevelWord(expr, "or")) > 1 || len(splitTopLevelWord(expr, "xor")) > 1 {
+		return nil
+	}
+	parts := splitTopLevelWord(expr, "and")
+	if len(parts) == 1 {
+		return parts
+	}
+	var out []string
+	for _, p := range parts {
+		out = append(out, topLevelConjuncts(p)...)
+	}
+	return out
+}
+
+// splitTopLevelWord splits expr on the keyword word (ASCII, any case) where it
+// stands outside brackets and quoted runs.
+func splitTopLevelWord(expr, word string) []string {
 	var parts []string
 	depth, from := 0, 0
-	lower := strings.ToLower(expr)
 	for i := 0; i < len(expr); i++ {
 		switch c := expr[i]; {
+		case c == '"' || c == '`':
+			i = skipQuoted(expr, i) - 1
 		case c == '(' || c == '[' || c == '{':
 			depth++
 		case c == ')' || c == ']' || c == '}':
 			depth--
-		case depth == 0 && strings.HasPrefix(lower[i:], "and") &&
-			(i == 0 || !isIdentChar(expr[i-1])) && (i+3 == len(expr) || !isIdentChar(expr[i+3])):
+		case depth == 0 && isWordAt(expr, i, word):
 			parts = append(parts, expr[from:i])
-			from = i + 3
-			i += 2
+			from = i + len(word)
+			i += len(word) - 1
 		}
 	}
-	parts = append(parts, expr[from:])
-	for k, p := range parts {
-		parts[k] = unwrapParens(strings.TrimSpace(p))
+	return append(parts, expr[from:])
+}
+
+// isWordAt reports whether the lowercase ASCII keyword word starts at s[i] as
+// a whole word. It compares bytes in place, so the offsets stay those of s.
+func isWordAt(s string, i int, word string) bool {
+	if i+len(word) > len(s) {
+		return false
 	}
-	return parts
+	for k := 0; k < len(word); k++ {
+		c := s[i+k]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != word[k] {
+			return false
+		}
+	}
+	inWord := func(c byte) bool { return isIdentChar(c) || c == '.' }
+	return (i == 0 || !inWord(s[i-1])) && (i+len(word) == len(s) || !inWord(s[i+len(word)]))
 }
 
 // unwrapParens drops parentheses that enclose the whole expression.
@@ -306,9 +343,12 @@ func unwrapParens(s string) string {
 	for len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
 		depth := 0
 		for i := 0; i < len(s); i++ {
-			if s[i] == '(' {
+			switch s[i] {
+			case '"', '`':
+				i = skipQuoted(s, i) - 1
+			case '(':
 				depth++
-			} else if s[i] == ')' {
+			case ')':
 				depth--
 			}
 			if depth == 0 && i < len(s)-1 {
@@ -319,6 +359,17 @@ func unwrapParens(s string) string {
 	}
 	return s
 }
+
+// dqlIdentifier renders a field name as DQL source: bare when it is a plain
+// (dotted) identifier, backtick-quoted otherwise.
+func dqlIdentifier(name string) string {
+	if plainIdentifierRe.MatchString(name) && !dqlKeywords[strings.ToLower(name)] {
+		return name
+	}
+	return "`" + name + "`"
+}
+
+var plainIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
 
 // queriedMetricKeys returns the metric keys Grail reports for a timeseries
 // query, in order and without duplicates.

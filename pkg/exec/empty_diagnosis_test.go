@@ -430,6 +430,10 @@ func TestEmptyResultAdvice_UIDComparedToString(t *testing.T) {
 		"fetch spans | filter `trace.id` == \"a16174edc5d3d37234855e4996d341d5\"",
 		`fetch spans | filter span.name == "GET" and (trace.id == "a16174edc5d3d37234855e4996d341d5")`,
 		`fetch spans | filterOut span.name == "x" | filter trace.id == """a16174edc5d3d37234855e4996d341d5"""`,
+		`fetch spans | filter (trace.id == "a16174edc5d3d37234855e4996d341d5" and span.name == "GET")`,
+		`fetch spans | filter (span.name == "GET" or span.name == "POST") AND trace.id == "a16174edc5d3d37234855e4996d341d5"`,
+		// Unicode case folding changes byte lengths (K → k): offsets must stay those of the query.
+		"fetch spans | filter `\u212a` == \"x\" and trace.id == \"a16174edc5d3d37234855e4996d341d5\"",
 	} {
 		p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return spanSample(), nil }}
 		e := &DQLExecutor{probe: p.run}
@@ -458,6 +462,10 @@ func TestEmptyResultAdvice_UIDComparedRightIsNotFlagged(t *testing.T) {
 		`fetch spans | filterOut trace.id == "a16174edc5d3d37234855e4996d341d5" | filter span.name == "missing"`,
 		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" or span.name == "GET"`,
 		`fetch spans | filter not(trace.id == "a16174edc5d3d37234855e4996d341d5")`,
+		// `and` binds tighter than `or`: this is (trace.id == … and …) or span.name == "POST".
+		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" and span.name == "GET" or span.name == "POST"`,
+		`fetch spans | filter (trace.id == "a16174edc5d3d37234855e4996d341d5" or span.name == "GET")`,
+		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" xor span.name == "GET"`,
 		// Text inside a string literal is not code.
 		`fetch spans | filter span.name == "trace.id == " and isNotNull(trace.id)`,
 	} {
@@ -467,5 +475,27 @@ func TestEmptyResultAdvice_UIDComparedRightIsNotFlagged(t *testing.T) {
 		if reason != nil && reason.Code == "uid_compared_to_string" {
 			t.Errorf("%s: flagged a correct compare: %+v %v", query, reason, sugg)
 		}
+	}
+}
+
+// A quoted field name may hold spaces or keywords: it is matched as one
+// identifier, and the suggested DQL keeps its quotes.
+func TestEmptyResultAdvice_UIDComparedToString_QuotedField(t *testing.T) {
+	sample := func() *DQLQueryResponse {
+		r := recordsResponse(map[string]interface{}{"trace and id": "5b9f2740a42acf2f3b8a94e7fff925a5", "span.name": "GET"})
+		r.Result.Types = []ColumnTypes{{IndexRange: []int{0, 0}, Mappings: map[string]ColumnType{
+			"trace and id": {Type: "uid"}, "span.name": {Type: "string"},
+		}}}
+		return r
+	}
+	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return sample(), nil }}
+	e := &DQLExecutor{probe: p.run}
+	query := "fetch spans | filter `trace and id` == \"5b9f2740a42acf2f3b8a94e7fff925a5\" and span.name == \"GET\""
+	reason, sugg := e.emptyResultAdvice(query, recordsResponse(), nil, DQLExecuteOptions{})
+	if reason == nil || reason.Code != "uid_compared_to_string" || reason.Field != "trace and id" {
+		t.Fatalf("reason = %+v, suggestions=%v", reason, sugg)
+	}
+	if !hasSuggestion(sugg, "filter `trace and id` == toUid(") || !hasSuggestion(sugg, "toString(`trace and id`)") {
+		t.Errorf("suggested DQL must keep the identifier quoted: %v", sugg)
 	}
 }
