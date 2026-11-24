@@ -14,7 +14,7 @@
 | Operation | Resource | Command syntax | Description | Mutating | Access |
 | --- | --- | --- | --- | --- | --- |
 | describe | api | `dtctl describe api` | Show details of a specific resource | no | read |
-| exec | api | `dtctl exec api` | Execute queries, workflows, or functions | yes | run |
+| exec | api | `dtctl exec api` | Execute workflows, functions, analyzers, SLOs, and code-level profiling | yes | run |
 | get | apis | `dtctl get apis` | Display one or many resources | no | read |
 
 

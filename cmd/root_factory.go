@@ -298,6 +298,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 		newExecSLOCmd(),
 		newExecPreviewProcessorCmd(),
 		newExecAPICmd(),
+		newExecProfilingCmd(),
 	)
 
 	// --- enable ---

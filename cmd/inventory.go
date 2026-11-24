@@ -40,6 +40,9 @@ probe, exhausted budget) is reported as unknown, never as absent.
 
 This is about the data in the environment, not the resources you manage —
 for dashboards, workflows, SLOs, and the rest, use 'dtctl get <resource>'.
+Code-level profiling data (method CPU hotspots, lock/IO waits, memory
+allocations per process) is not in Grail and not probed here: use
+'dtctl exec profiling hotspots|allocations PROCESS-xxx'.
 
 Discovery is read-only and budgeted: it runs a small battery of DQL queries
 (data-object catalog, buckets, entity census, metric catalog when needed,
@@ -111,6 +114,9 @@ an instrumentation change or an ingest — use 'dtctl inventory arrivals'.
 			}
 			if segNote != "" {
 				inv.Notes = append(inv.Notes, segNote)
+			}
+			if n := profilingInventoryNote(inv); n != "" {
+				inv.Notes = append(inv.Notes, n)
 			}
 
 			if outputFormat(cmdContext(cmd)) == "table" && !agentMode(cmdContext(cmd)) {
@@ -381,4 +387,19 @@ func init() {
 	// stability.Effective takes the weakest level along the path. Promoting
 	// this line promotes the subcommands with it; check them before you do.
 	inventoryCmd.AddCommand(inventoryArrivalsCmd)
+}
+
+// profilingInventoryNote points at code-level profiling, which the inventory
+// cannot see: its data is not in Grail, so no capability probe covers it. Agents
+// learn the environment from this command, and without the note they grepped it
+// for profiling, found nothing, and told the user there was no profiling data.
+// Omitted only when the census shows no processes at all.
+func profilingInventoryNote(inv *inventory.Inventory) string {
+	if inv == nil {
+		return ""
+	}
+	if inv.EntityTypes != nil && inv.EntityTypes["PROCESS"] == 0 && inv.EntityTypes["PROCESS_GROUP_INSTANCE"] == 0 {
+		return ""
+	}
+	return "code-level profiling (per-method CPU hotspots, lock/IO/wait time, memory allocations of a process) is not in Grail, so this inventory does not probe it — run dtctl exec profiling hotspots|allocations PROCESS-xxx (experimental; see dtctl exec profiling --help)"
 }

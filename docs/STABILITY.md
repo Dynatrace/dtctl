@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 19 experimental, 16 development
+- commands: 269 stable, 22 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 959
+- entries below (commands + flags): 979
 
 ## Surface
 
@@ -723,6 +723,26 @@ exec function                        stable
 exec preview-processor               stable
   --config-id                        stable
   --file                             stable
+exec profiling                       experimental  since 0.47.0
+exec profiling allocations           experimental  since 0.47.0
+  --app-only                         experimental
+  --default-timeframe-end            experimental
+  --default-timeframe-start          experimental
+  --limit                            experimental
+  --raw                              experimental
+  --survivors-only                   experimental
+exec profiling hotspots              experimental  since 0.47.0
+  --app-only                         experimental
+  --default-timeframe-end            experimental
+  --default-timeframe-start          experimental
+  --focus                            experimental
+  --leaf-type                        experimental
+  --limit                            experimental
+  --raw                              experimental
+  --show-waiting                     experimental
+  --sort                             experimental
+  --state                            experimental
+  --view                             experimental
 exec slo                             stable
   --timeout                          experimental  since 0.39.0  (declared)
 exec workflow                        experimental  since 0.39.0

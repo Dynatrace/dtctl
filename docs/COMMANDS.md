@@ -286,7 +286,7 @@ Subcommands:
 
 ## exec
 
-Execute queries, workflows, or functions
+Execute workflows, functions, analyzers, SLOs, and code-level profiling
 
 _mutating | access: run | safety: OperationCreate_
 
@@ -304,6 +304,7 @@ Subcommands:
 | Subcommand | Description |
 | --- | --- |
 | copilot | Chat with Davis CoPilot |
+| profiling | [Experimental] Run a code-level profiling analysis on a process |
 
 
 ## find

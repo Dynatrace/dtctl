@@ -12,10 +12,12 @@ var execCmd = newExecCmd()
 func newExecCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "exec",
-		Short: "Execute queries, workflows, or functions",
+		Short: "Execute workflows, functions, analyzers, SLOs, and code-level profiling",
 		Long: `Execute operations on the Dynatrace platform: run workflows, invoke
-serverless functions, evaluate SLOs, chat with Davis CoPilot, or preview
-OpenPipeline processor definitions against sample records.
+serverless functions, evaluate SLOs, chat with Davis CoPilot, preview
+OpenPipeline processor definitions against sample records, or profile a
+process at code level (which methods burn CPU, wait on locks or I/O, or
+allocate memory).
 
 For DQL queries, use 'dtctl query' instead (exec dql is deprecated).
 
@@ -25,7 +27,8 @@ Available operations:
   analyzer (az)           Run a Davis AI analyzer
   slo                     Evaluate a service-level objective
   copilot (cp, chat)      Chat with Davis CoPilot interactively
-  preview-processor       Preview an OpenPipeline processor against sample records`,
+  preview-processor       Preview an OpenPipeline processor against sample records
+  profiling               Run a code-level profiling analysis (hotspots, memory; experimental)`,
 		Example: `  # Execute a workflow and wait for completion
   dtctl exec workflow <workflow-id>
 
@@ -60,6 +63,7 @@ func init() {
 	execCmd.AddCommand(execSLOCmd)
 	execCmd.AddCommand(execPreviewProcessorCmd)
 	execCmd.AddCommand(execAPICmd)
+	execCmd.AddCommand(execProfilingCmd)
 }
 
 // Declared stable: the invocation and output contract of this command is
