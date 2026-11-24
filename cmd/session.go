@@ -5,10 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
 
+	"golang.org/x/net/http/httpguts"
+
+	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/vfs"
@@ -87,6 +91,19 @@ type Session struct {
 	// concurrent use, as http.RoundTripper requires.
 	Transport http.RoundTripper
 
+	// Headers are extra HTTP headers sent on every platform request this
+	// invocation makes, whichever command it runs and however many requests
+	// that command sends. They are how a host passes per-request context that
+	// the platform reads from headers (a correlation id, a caller hint)
+	// through to the APIs a command calls.
+	//
+	// They never replace one of dtctl's own headers. A name dtctl sets itself
+	// (User-Agent, Content-Type, dt-client-context, ...), a credential or Host
+	// is refused before the run, as is a name RunOptions.HeaderPolicy refuses
+	// (see ValidateSessionHeaders), and an `exec api -H` that repeats one of
+	// them is refused too. Which other headers to send is the host's decision.
+	Headers http.Header
+
 	// parseOnly marks the session Parse runs under: it has no environment and
 	// no token, and newClientFromConfig refuses it, so a command line analysed
 	// without running can never reach the platform or fall back to the host's
@@ -117,7 +134,9 @@ func newSessionTokenRef() string {
 	return "session-" + hex.EncodeToString(buf[:])
 }
 
-func (s *Session) validate() error {
+// validate checks the session's shape. headerPolicy is the invocation's
+// RunOptions.HeaderPolicy, which applies to the session's Headers too.
+func (s *Session) validate(headerPolicy func(name string) string) error {
 	if s.EnvironmentURL == "" && !s.parseOnly {
 		return fmt.Errorf("session: EnvironmentURL is required")
 	}
@@ -161,7 +180,96 @@ func (s *Session) validate() error {
 			return fmt.Errorf("session: %w", err)
 		}
 	}
+	if err := ValidateSessionHeaders(s.Headers, headerPolicy); err != nil {
+		return fmt.Errorf("session: %w", err)
+	}
 	return nil
+}
+
+// reservedSessionHeaders are the names a session's Headers may not carry, by
+// normalized name, with the reason a refusal gives. The session already
+// decides the first three, and dtctl sets the rest itself: a session header
+// of the same name would either be overridden without a word or change a
+// request dtctl built, depending on which layer wrote last.
+//
+// TestReservedSessionHeadersCoverDtctlsOwn keeps the list in step with the
+// header names dtctl's code sets on requests.
+var reservedSessionHeaders = map[string]string{
+	"Authorization":       "the session's Token is the credential",
+	"Proxy-Authorization": "the session's Token is the credential",
+	"Host":                "requests go to the session's EnvironmentURL",
+
+	"Accept":             dtctlSetsIt,
+	"Accept-Encoding":    dtctlSetsIt,
+	"Content-Type":       dtctlSetsIt,
+	"Dt-Client-Context":  dtctlSetsIt,
+	"Dt-External-Source": dtctlSetsIt,
+	"If-Match":           dtctlSetsIt,
+	"Traceparent":        dtctlSetsIt,
+	"Tracestate":         dtctlSetsIt,
+	"User-Agent":         dtctlSetsIt,
+}
+
+const dtctlSetsIt = "dtctl sets it itself"
+
+// ValidateSessionHeaders reports why headers cannot be a session's Headers,
+// or nil when they can. Every check runs before the invocation starts, so a
+// refused header fails the run before any request is sent:
+//
+//   - a name or value that is not valid on the wire;
+//   - a name in reservedSessionHeaders: a credential, Host, or a header dtctl
+//     sets itself;
+//   - a name policy refuses, as a *HeaderRefusedError. policy is the
+//     embedding caller's RunOptions.HeaderPolicy and sees the normalized name,
+//     exactly as for `exec api -H`; nil refuses nothing more.
+//
+// The reserved names and the policy are matched on the normalized name, so a
+// spelling with "_" for "-" is refused like the name it folds to.
+func ValidateSessionHeaders(headers http.Header, policy func(name string) string) error {
+	for _, name := range slices.Sorted(maps.Keys(headers)) {
+		if !httpguts.ValidHeaderFieldName(name) {
+			return fmt.Errorf("invalid header name %q", name)
+		}
+		canonical := http.CanonicalHeaderKey(name)
+		normalized := normalizeHeaderName(name)
+		if reason, reserved := reservedSessionHeaders[normalized]; reserved {
+			return fmt.Errorf("refusing header %s: %s", canonical, reason)
+		}
+		for _, value := range headers[name] {
+			if !httpguts.ValidHeaderFieldValue(value) {
+				return fmt.Errorf("invalid value for header %s", canonical)
+			}
+		}
+		if policy != nil {
+			if reason := policy(normalized); reason != "" {
+				return &HeaderRefusedError{Header: canonical, Reason: reason, Session: true}
+			}
+		}
+	}
+	return nil
+}
+
+// sendsHeader reports whether the session's Headers carry name, compared by
+// normalized name.
+func (s *Session) sendsHeader(name string) bool {
+	want := normalizeHeaderName(name)
+	for key := range s.Headers {
+		if normalizeHeaderName(key) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// applySessionHeaders adds headers to every request c sends, as client-level
+// headers. ValidateSessionHeaders has already refused every name dtctl sets
+// itself, so none of them collides with one of dtctl's own.
+func applySessionHeaders(c *client.Client, headers http.Header) {
+	own := c.HTTP().Header
+	for name, values := range headers {
+		key := http.CanonicalHeaderKey(name)
+		own[key] = append(own[key], values...)
+	}
 }
 
 // syntheticConfig materializes the session as a single-context in-memory
@@ -274,7 +382,7 @@ var sessionScrubbedEnvVars = []string{
 // caller can explicitly re-grant a variable the scrub removed.
 func applyRunEnvironment(ctx context.Context, opts RunOptions) (cleanup func(), err error) {
 	if opts.Session != nil {
-		if err := opts.Session.validate(); err != nil {
+		if err := opts.Session.validate(opts.HeaderPolicy); err != nil {
 			return nil, err
 		}
 		if p := opts.Session.Profile; p != nil {

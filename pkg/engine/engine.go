@@ -124,6 +124,19 @@ type Request struct {
 	// DTCTL_PROFILE. On an Engine built with WithProfileDefinition, an entry
 	// naming another profile is an error.
 	Env map[string]string
+
+	// Headers are extra HTTP headers sent on every platform request of this
+	// invocation, whichever command it runs (cmd.Session.Headers). They are
+	// how a host forwards per-request context the platform reads from
+	// headers (one its own caller sent it, say) to the APIs a command calls.
+	//
+	// They never replace one of dtctl's own headers. A name dtctl sets itself
+	// (User-Agent, Content-Type, dt-client-context, ...), a credential, Host,
+	// a malformed name or value, or a name the Engine's WithHeaderPolicy
+	// refuses fails the request before it runs, and so does an `exec api -H`
+	// that repeats one of them. A policy refusal is a *cmd.HeaderRefusedError
+	// (errors.As). Which other headers to forward is the host's decision.
+	Headers http.Header
 }
 
 // ProfileDefinition is a host-defined command profile, set with
@@ -217,7 +230,8 @@ type engineOptions struct {
 	concurrent    bool
 	maxConcurrent int
 	transport     http.RoundTripper
-	// headerPolicy is the host's `exec api -H` policy (WithHeaderPolicy).
+	// headerPolicy is the host's header policy for `exec api -H` and
+	// Request.Headers (WithHeaderPolicy).
 	headerPolicy func(name string) string
 	// profile is set by WithProfileDefinition; profileErr, if the definition
 	// is invalid, fails every request.
@@ -257,19 +271,23 @@ func WithTransport(rt http.RoundTripper) Option {
 }
 
 // WithHeaderPolicy lets the host refuse request headers a caller passes to
-// `exec api -H`. policy receives the normalized header name (canonicalized,
-// "_" folded to "-", so x_forwarded_for arrives as X-Forwarded-For) and
-// returns why it is refused, or "" to allow it. Without it, only the CLI's
-// own refusals (Authorization, Proxy-Authorization) apply.
+// `exec api -H`, and names in a Request's own Headers. policy receives the
+// normalized header name (canonicalized, "_" folded to "-", so
+// x_forwarded_for arrives as X-Forwarded-For) and returns why it is refused,
+// or "" to allow it. Without it, only the CLI's own refusals (Authorization,
+// Proxy-Authorization, and for Request.Headers the rest of
+// cmd.ValidateSessionHeaders) apply.
 //
 // Which headers matter is the host's decision, not dtctl's: it depends on
 // where the host runs and what the proxies in front of its upstream trust
-// (Host, Forwarded, X-Forwarded-*, a reserved prefix, ...). A refusal is
+// (Host, Forwarded, X-Forwarded-*, a reserved prefix, ...). A refused -H is
 // returned before any request is sent and before --dry-run prints one, with
 // the stable agent-mode error code "header_refused" and exit code 2, and
-// Engine.Parse refuses the same command line. The header sent on the wire is
-// the caller's spelling, not the normalized one. policy is shared by every
-// invocation of the Engine and must be safe for concurrent use.
+// Engine.Parse refuses the same command line. A refused Request.Headers name
+// fails Execute with a *cmd.HeaderRefusedError and no Result. The header sent
+// on the wire is the caller's spelling, not the normalized one. policy is
+// shared by every invocation of the Engine and must be safe for concurrent
+// use.
 func WithHeaderPolicy(policy func(name string) string) Option {
 	return func(o *engineOptions) { o.headerPolicy = policy }
 }
@@ -402,6 +420,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 			NoDeprecated:        req.NoDeprecated,
 			Profile:             opts.profile,
 			Transport:           opts.transport,
+			Headers:             req.Headers,
 		},
 		Env:             env,
 		FS:              files,
@@ -480,6 +499,9 @@ func (r *Request) validate(opts engineOptions) error {
 	}
 	if r.Token == "" {
 		return errors.New("engine: Token is required")
+	}
+	if err := cmd.ValidateSessionHeaders(r.Headers, opts.headerPolicy); err != nil {
+		return fmt.Errorf("engine: %w", err)
 	}
 	return validateSurface(r.SafetyLevel, r.Profile, opts, r.Env, r.MinStability, r.StabilityExceptions)
 }

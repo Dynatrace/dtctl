@@ -65,7 +65,11 @@
 // Request headers: an Engine built with New(limits, WithHeaderPolicy(policy))
 // lets the host refuse headers a caller passes to `exec api -H` (Host, the
 // X-Forwarded-* family, ...). Which headers matter is the host's decision;
-// without the option only the credential headers are refused.
+// without the option only the credential headers are refused. Separately,
+// Request.Headers lets the host send headers of its own on every platform
+// request of one invocation (a correlation id its caller sent it, say). A
+// name dtctl sets itself, or one the policy refuses, fails the request before
+// it runs.
 //
 // Admission and resource limits: ExecuteWithLimits (which Execute calls with
 // DefaultLimits) bounds how many requests may queue for an execution slot

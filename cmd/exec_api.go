@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -94,7 +95,10 @@ Examples:
 			headers, _ := cmd.Flags().GetStringArray("header")
 			var err error
 			headerMap, err = parseHeaderFlags(headers, currentHeaderPolicy(cmdContext(cmd)))
-			return err
+			if err != nil {
+				return err
+			}
+			return refuseSessionHeaderRepeats(cmdContext(cmd), headerMap)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runExecAPI(cmd, args, headerMap)
@@ -299,6 +303,22 @@ func parseHeaderFlags(headers []string, policy func(name string) string) (map[st
 		out[canonical] = strings.TrimSpace(value)
 	}
 	return out, nil
+}
+
+// refuseSessionHeaderRepeats refuses a -H that names a header the session
+// already sends (Session.Headers). The request would carry two values for one
+// name, and which of them the server reads is up to the server.
+func refuseSessionHeaderRepeats(ctx context.Context, headerMap map[string]string) error {
+	s := currentSession(ctx)
+	if s == nil {
+		return nil
+	}
+	for _, name := range slices.Sorted(maps.Keys(headerMap)) {
+		if s.sendsHeader(name) {
+			return &HeaderRefusedError{Header: name, Reason: "the session already sends it"}
+		}
+	}
+	return nil
 }
 
 // warnAboutTarget prints the two notices that make the escape hatch

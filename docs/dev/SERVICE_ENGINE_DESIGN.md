@@ -131,6 +131,34 @@ per-`Engine`, not per-`Request`, and `dtctl serve http` does not expose it — a
 caller of the reference server must not choose where the server's requests go.
 The package-level `Execute` keeps the default pool.
 
+### Forwarding request headers
+
+`Request.Headers` (`Session.Headers`) are sent on every platform request of
+one invocation, whichever command it runs — a `query`, a `get`, an `apply` that
+makes several calls. They exist so a host can forward per-request context the
+platform reads from headers, typically one its own caller sent it, to the APIs
+the command calls. Unlike the transport they are per-`Request`, because the
+context they carry is.
+
+They never replace one of dtctl's own headers, and nothing is decided by which
+layer happens to write last: every check runs before the invocation starts,
+and a refused header fails the request before anything is sent.
+
+- A name dtctl sets on requests itself (`User-Agent`, `Accept`,
+  `Accept-Encoding`, `Content-Type`, `If-Match`, `dt-client-context`,
+  `dt-external-source`, `traceparent`, `tracestate`) is refused.
+  `TestReservedSessionHeadersCoverDtctlsOwn` reads the source of both modules
+  and fails when dtctl starts setting a header the list does not name.
+- `Authorization`, `Proxy-Authorization` and `Host` are refused: the session's
+  token and environment already decide them.
+- A name or value that is not valid on the wire is refused.
+- The host's `WithHeaderPolicy` sees each name, normalized as for
+  `exec api -H`, and a refusal is a `*cmd.HeaderRefusedError`.
+- An `exec api -H` that repeats a session header is refused with the agent-mode
+  code `header_refused`, since the request would carry two values for one name.
+
+`dtctl serve http` does not expose them.
+
 ### Analysing a command line without running it (`Parse`)
 
 `engine.Parse` reports what a command line means without running it: its verb
