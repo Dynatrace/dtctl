@@ -135,6 +135,18 @@ func TestExecProfiling_Focus(t *testing.T) {
 	require.Contains(t, out, "--focus <caller or callee> walks the call graph further")
 }
 
+// A --limit that cuts the focus callers reports the full row count as the
+// envelope total, not the rows returned.
+func TestExecProfiling_FocusAgentTotal(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	env := runProfilingAgent(t, "hotspots", testProcess, "--focus", "wrap", "--limit", "1")
+	require.Len(t, env.Result, 3)
+	require.Equal(t, 4, *env.Context.Total)
+	require.True(t, env.Context.HasMore)
+	require.NotEmpty(t, env.Context.Warnings)
+}
+
 // A --state with no samples in the window explains itself rather than printing
 // an empty table.
 func TestExecProfiling_FunctionsViewEmptyState(t *testing.T) {
