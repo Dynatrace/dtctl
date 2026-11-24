@@ -176,6 +176,7 @@ Examples:
 		RunE:    runShareDocument,
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addShareFlags(c)
 	return c
 }
@@ -246,6 +247,7 @@ Examples:
 		RunE:    runUnshareDocument,
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addUnshareFlags(c)
 	return c
 }
@@ -262,6 +264,7 @@ func newShareNotebookCmd() *cobra.Command {
 		RunE:    runShareDocument,
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addShareFlags(c)
 	return c
 }
@@ -278,6 +281,7 @@ func newShareDashboardCmd() *cobra.Command {
 		RunE:    runShareDocument,
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addShareFlags(c)
 	return c
 }
@@ -294,6 +298,7 @@ func newUnshareNotebookCmd() *cobra.Command {
 		RunE:    runUnshareDocument,
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addUnshareFlags(c)
 	return c
 }
@@ -310,6 +315,7 @@ func newUnshareDashboardCmd() *cobra.Command {
 		RunE:    runUnshareDocument,
 	}
 	stability.MarkStable(c)
+	markResolvesUser(c)
 	addUnshareFlags(c)
 	return c
 }

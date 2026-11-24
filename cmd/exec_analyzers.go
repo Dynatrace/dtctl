@@ -104,6 +104,7 @@ default: summary in agent mode`)
 	stability.MarkFlag(c, "precision", stability.Experimental, analyzerSeriesSince)
 	stability.MarkStable(c)
 	addAnalyzerInputFlags(c)
+	markScopesAny(c)
 	return c
 }
 

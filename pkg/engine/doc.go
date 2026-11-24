@@ -31,17 +31,18 @@
 //
 // Analysis without running: Parse reports what a command line means — its
 // verb and resource, the files it reads and writes, whether it reads the
-// request's input, and its required scopes with how certain they are — without
-// running it. It needs no token, reads no file, calls no platform API and
-// takes no execution slot, and it applies the same surface and validation as
-// Execute, so a command line Execute would refuse is a *UsageError carrying
-// Execute's error. A host uses it as a preflight, to know which files to
-// attach before it runs a command. Parse is experimental until a second host
-// uses it.
+// request's input, and its scope bounds: the exact scopes it cannot run
+// without, and patterns of the scopes it can use — without running it. It
+// needs no token, reads no file, calls no platform API and takes no execution
+// slot, and it applies the same surface and validation as Execute, so a command
+// line Execute would refuse is a *UsageError carrying Execute's error. A host
+// uses it as a preflight, to know which files to attach before it runs a
+// command. Parse is experimental until a second host uses it.
 //
 //	p, err := engine.Parse(ctx, engine.ParseRequest{Command: `apply -f workflow.yaml --write-id`})
 //	// p.InputFiles and p.OutputFiles are ["workflow.yaml"];
-//	// p.Scopes is ScopesInputDependent: the file decides the resource kind.
+//	// p.MinimumScopes is [] and p.MaximumScopes ["*"]: the file decides the
+//	// resource kind, so apply can use any scope the user holds.
 //
 // Concurrency: Execute is safe to call from multiple goroutines, but by
 // default executions serialize on an internal lock (the command tree is process

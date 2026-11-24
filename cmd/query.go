@@ -690,6 +690,7 @@ default: never for a bare command, auto in agent mode`)
 	registerFlagCompletion(c, "spill-format", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{"jsonl", "json", "csv", "parquet"}, cobra.ShellCompDirectiveNoFileComp
 	})
+	markScopesDQL(c)
 	return c
 }
 

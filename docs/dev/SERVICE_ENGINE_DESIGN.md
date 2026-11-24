@@ -136,12 +136,10 @@ The package-level `Execute` keeps the default pool.
 `engine.Parse` reports what a command line means without running it: its verb
 and resource, the files it reads and writes (as `Request.Files` names them),
 whether it reads `Request.Stdin` (as data, or to answer a confirmation prompt
-the command line does not skip), and its required scopes with how certain they
-are (`none`, `known`, `per_call` for `exec api`, `input_dependent` for `apply`
-and `diff`), and the flags and positional arguments it recognized (flags by long
-name, only those the command line set). A host uses it as a preflight: to attach
-the files a command needs, or to tell a caller which scopes it will need, before
-it runs anything.
+the command line does not skip), its scope bounds, and the flags and positional
+arguments it recognized (flags by long name, only those the command line set).
+A host uses it as a preflight: to attach the files a command needs, or to
+decide the token a command gets, before it runs anything.
 
 It runs Execute's pipeline and stops where the command body would start. It
 builds a fresh tree, applies the same surface masks (`applySurface`: profile,
@@ -175,9 +173,51 @@ same command lines through both and holds Parse to every file Execute reads.
 Only the literal `-` (and `@-`) means stdin: `./-` and `/-` name a file called
 `-`, which Execute opens through the filesystem, so Parse reports it as one.
 
-`Scopes: none` means the catalog names no scopes for the command. For the local
-commands that is the answer; for a command the catalog is still missing scopes
-for, it under-reports.
+**Scope bounds.** `MinimumScopes` are the exact scopes a command cannot run
+without; `MaximumScopes` are patterns of the scopes it can use, where `*`
+matches any text (`auth.ScopeMatches`). A host denies a command whose minimum
+the user lacks, and restricts its token to the user's scopes that match the
+maximum. Both are always non-nil, every minimum scope matches a maximum
+pattern, and both come from fixed lists in dtctl, never from a DQL statement or
+a payload:
+
+| Command | Minimum | Maximum |
+|---|---|---|
+| local (`markLocal`: `commands`, `version`, `ctx`, ...), or `--help` | `[]` | `[]` |
+| `query`, `exec dql`, `verify query`, `wait query`, `inventory` (`markScopesDQL`: calls only Grail storage APIs, DQL and filter segments, whose scopes all match `storage:*:read`) | `[]` | `["storage:*:read"]` |
+| `apply`, `diff` (input file decides), `exec api` (per call) | `[]` | `["*"]` |
+| `exec function`, `exec analyzer`, `create`/`edit anomaly-detector` (`markScopesAny`: the payload or target decides what is called, with the caller's token) | its catalog scope | `["*"]` |
+| any other command | its catalog entry at the verb's access level, plus what a set flag adds | the minimum plus the resource's read scopes, plus `storage:*:read` for a `markRunsDQL` command (one that runs DQL itself or through the server: `exec slo`, `get lookups`), plus `app-engine:apps:run` for a `markResolvesUser` command (one that finds the current user: an ownership check, `--mine`) |
+
+When the catalog entry accepts other scope sets in place of its list
+(`auth.AccessScopes.Alternatives`: `get environment` runs with any one of
+`app-engine:apps:run`, `app-engine:functions:run` and
+`platform-management:environments:read`), none of them is in the minimum, and
+all of them are in the maximum.
+
+A nested command (`create aws connection`) without an entry of its own takes the
+entry of its nearest catalogued ancestor as its maximum and reports minimum
+`[]`, because that entry joins two APIs the command may not both use. This
+applies only below a group that runs no body of its own: the entry of a runnable
+ancestor (`exec copilot`) is that command's own requirement, so a nested command
+below it (`exec copilot nl2dql`) needs an entry of its own. A command with no
+catalog entry reports `["*"]`, never `[]`: `[]` means "no platform access" and
+is only for a command declared local. `TestScopeBoundsOverTheTree` pins the four
+commands that reach the platform without a catalog entry: `describe api` and
+`get apis` read the environment's API index, which needs a valid token but no
+scope; `auth whoami` and `doctor` resolve the current user, which needs
+`app-engine:apps:run` with a platform token. `TestPinnedBounds` pins the bounds
+of the commands whose calls the server carries out with the caller's token, and
+of the lookup commands, which read through DQL. A maximum that is too narrow
+breaks a working command; one that is too wide only gives the command scopes the
+user holds. So when the payload or the target decides what a command calls, its
+maximum is `["*"]`.
+
+The bounds are only as correct as the scope catalog (`auth.ResourceScopes`).
+A catalog entry that names the wrong scope gives a wrong minimum, and a
+maximum without the scope the command calls: a host that restricts the token
+to that maximum turns the catalog error into a failed command. Fix such an
+entry in the catalog, not in Parse.
 
 ### Upstream connections are pooled across requests
 

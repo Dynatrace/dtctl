@@ -151,6 +151,7 @@ Examples:
 	markFileFlag(c, "sdk-major-versions", fileValueAtPath)
 	stability.MarkStable(c)
 	stability.MarkFlagStable(c, "sdk-major-versions")
+	markScopesAny(c)
 	return c
 }
 

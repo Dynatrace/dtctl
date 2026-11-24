@@ -134,6 +134,7 @@ your preferred local analytics tooling.`,
 	}
 	stability.MarkStable(c)
 	addInspectFlags(c)
+	markLocal(c)
 	return c
 }
 

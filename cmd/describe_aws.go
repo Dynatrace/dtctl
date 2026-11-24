@@ -141,6 +141,7 @@ func newDescribeAWSMonitoringConfigCmd() *cobra.Command {
 		},
 	}
 	stability.MarkStable(c)
+	markRunsDQL(c)
 	return c
 }
 

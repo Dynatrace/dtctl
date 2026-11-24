@@ -70,6 +70,7 @@ Examples:
 		},
 	}
 	stability.MarkStable(c)
+	markRunsDQL(c)
 	return c
 }
 
