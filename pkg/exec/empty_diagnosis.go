@@ -238,7 +238,11 @@ done:
 		}
 		q := regexp.QuoteMeta(f)
 		id := `(?:` + q + "|`" + q + "`)"
-		re := regexp.MustCompile(`^(` + id + `\s*[!=]=\s*""|""\s*[!=]=\s*` + id + `|in\(\s*` + id + `\s*,\s*(array\(\s*)?"".*\))$`)
+		// The in() form must be the whole conjunct and list only string literals
+		// (masked to ""), so `in(f, "x") == …` or `in(f, "x", toUid("y"))` is not read as one.
+		strs := `""(?:\s*,\s*"")*`
+		re := regexp.MustCompile(`^(?:` + id + `\s*[!=]=\s*""|""\s*[!=]=\s*` + id +
+			`|in\(\s*` + id + `\s*,\s*(?:` + strs + `|array\(\s*` + strs + `\s*\))\s*\))$`)
 		for _, c := range conjuncts {
 			if re.MatchString(c) {
 				out = append(out, f)

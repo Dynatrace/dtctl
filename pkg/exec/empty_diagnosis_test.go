@@ -427,6 +427,7 @@ func TestEmptyResultAdvice_UIDComparedToString(t *testing.T) {
 		`fetch spans, from:now()-1h | filter trace.id == "a16174edc5d3d37234855e4996d341d5" | fields span.name`,
 		`fetch spans | filter "a16174edc5d3d37234855e4996d341d5" == trace.id`,
 		`fetch spans | filter in(trace.id, array("a16174edc5d3d37234855e4996d341d5", "5b9f2740a42acf2f3b8a94e7fff925a5"))`,
+		`fetch spans | filter in(trace.id, "a16174edc5d3d37234855e4996d341d5", "5b9f2740a42acf2f3b8a94e7fff925a5") and span.name == "GET"`,
 		"fetch spans | filter `trace.id` == \"a16174edc5d3d37234855e4996d341d5\"",
 		`fetch spans | filter span.name == "GET" and (trace.id == "a16174edc5d3d37234855e4996d341d5")`,
 		`fetch spans | filterOut span.name == "x" | filter trace.id == """a16174edc5d3d37234855e4996d341d5"""`,
@@ -466,6 +467,10 @@ func TestEmptyResultAdvice_UIDComparedRightIsNotFlagged(t *testing.T) {
 		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" and span.name == "GET" or span.name == "POST"`,
 		`fetch spans | filter (trace.id == "a16174edc5d3d37234855e4996d341d5" or span.name == "GET")`,
 		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" xor span.name == "GET"`,
+		// The in() call is only part of the conjunct, or lists a value that can match.
+		`fetch spans | filter (in(trace.id, "x") == isNull(span.name) and span.name == "missing")`,
+		`fetch spans | filter in(trace.id, "a16174edc5d3d37234855e4996d341d5", toUid("5b9f2740a42acf2f3b8a94e7fff925a5"))`,
+		`fetch spans | filter in(trace.id, array("a16174edc5d3d37234855e4996d341d5", toUid("5b9f2740a42acf2f3b8a94e7fff925a5")))`,
 		// Text inside a string literal is not code.
 		`fetch spans | filter span.name == "trace.id == " and isNotNull(trace.id)`,
 	} {
