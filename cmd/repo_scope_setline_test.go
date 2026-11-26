@@ -198,3 +198,33 @@ func TestRepoScopeNamesClaim(t *testing.T) {
 	third := claim(long, "api")
 	require.NotContains(t, []string{long, second}, third)
 }
+
+// The line that selects every candidate reporting a service name is an entry
+// for that service, not for whichever candidate ranked first: it is named
+// after the service name, and covers the directory discovery ran for only
+// when that directory's name matched every candidate it selects.
+func TestRepoScopeSelectAllLineIsNamedAfterTheServiceName(t *testing.T) {
+	candidates := func(secondMatchedDir bool) []reposcope.Candidate {
+		return []reposcope.Candidate{
+			{Rank: 1, Name: "web", Workload: "web", ServiceName: "Checkout_API", ServiceNameShared: true, Tier: "exact", Spans: 10, MatchedDir: true},
+			{Rank: 2, Name: "jobs", Workload: "jobs", ServiceName: "Checkout_API", ServiceNameShared: true, Tier: "exact", Spans: 5, MatchedDir: secondMatchedDir},
+		}
+	}
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: "services/checkout", Sent: []string{"Checkout_API"}, Verdict: reposcope.VerdictAmbiguous,
+		Candidates: candidates(true)}
+	p := newRepoScopeProposal(r, nil, repoScopeNames{})
+	require.Len(t, p.selectAll, 1)
+	require.Equal(t, "dtctl repo-scope set checkout-api --service-name Checkout_API --path services/checkout", p.selectAll[0].line)
+
+	r.Candidates = candidates(false)
+	p = newRepoScopeProposal(r, nil, repoScopeNames{})
+	require.Equal(t, "dtctl repo-scope set checkout-api --service-name Checkout_API", p.selectAll[0].line,
+		"one of the candidates is tied to the repository, not to the directory")
+
+	// Another unit of the run has a line under that name.
+	names := repoScopeNames{}
+	names.claim("checkout-api", "admin")
+	r.Unit, r.Dir = "web", "web"
+	p = newRepoScopeProposal(r, nil, names)
+	require.Equal(t, "dtctl repo-scope set web-checkout-api --service-name Checkout_API --path web", p.selectAll[0].line)
+}

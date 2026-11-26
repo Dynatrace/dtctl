@@ -258,14 +258,16 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	}
 
 	reports := make([]*reposcope.DiscoveryReport, len(plans))
+	proposals := make([]repoScopeProposal, len(plans))
 	for i, plan := range plans {
 		var elapsed time.Duration
 		reports[i], elapsed, err = discover(plan)
+		proposals[i] = newRepoScopeProposal(reports[i], selectors, names)
 		if table {
 			if i > 0 {
 				fmt.Fprintln(currentStdout(ctx))
 			}
-			printRepoScopeDiscovery(currentStdout(ctx), reports[i], newRepoScopeProposal(reports[i], selectors), elapsed)
+			printRepoScopeDiscovery(currentStdout(ctx), reports[i], proposals[i], elapsed)
 		}
 	}
 	if table {
@@ -277,8 +279,8 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	printer := newPrinterCtx(ctx)
 	if ap := enrichAgent(printer, "discover", "repo-scope"); ap != nil {
 		var suggestions []string
-		for _, r := range reports {
-			for _, s := range repoScopeDiscoverySuggestions(r, selectors) {
+		for i, r := range reports {
+			for _, s := range repoScopeDiscoverySuggestions(r, proposals[i]) {
 				if len(reports) > 1 {
 					s = r.Unit + ": " + s
 				}
@@ -673,8 +675,9 @@ type repoScopeSelectAll struct {
 }
 
 // newRepoScopeProposal works out what r proposes beyond its candidates'
-// lines, which must already be set.
-func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repoScopeProposal {
+// lines, which must already be set. names are the entry names the run's
+// lines have taken so far; a line proposed here takes its own.
+func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string, names repoScopeNames) repoScopeProposal {
 	p := repoScopeProposal{lineNotes: append(repoScopeNoLineNotes(r), repoScopeClusterNotes(r)...)}
 	lines := 0
 	for _, c := range r.Candidates {
@@ -686,7 +689,7 @@ func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repo
 	case len(r.Candidates) == 0, r.Verdict == reposcope.VerdictMatch && lines == 0:
 		p.handLinks, p.dirHint = repoScopeHandLinks(r, selectors)
 	case lines == 0:
-		p.selectAll = repoScopeSelectAllLines(r, selectors)
+		p.selectAll = repoScopeSelectAllLines(r, selectors, names)
 		if len(p.selectAll) == 0 {
 			p.handLinks, p.dirHint = repoScopeHandLinks(r, selectors)
 		}
@@ -712,25 +715,33 @@ func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]str
 }
 
 // repoScopeSelectAllLines is a line for each service name more than one
-// candidate reports, in rank order.
-func repoScopeSelectAllLines(r *reposcope.DiscoveryReport, selectors []string) []repoScopeSelectAll {
+// candidate reports, in rank order. The line is an entry for the service
+// name, not for one of the candidates: it is named after the service name,
+// and it covers the directory discovery ran for only when that directory's
+// name matched every candidate it selects (see repoScopeDir).
+func repoScopeSelectAllLines(r *reposcope.DiscoveryReport, selectors []string, names repoScopeNames) []repoScopeSelectAll {
 	var out []repoScopeSelectAll
 	for _, c := range r.Candidates {
 		if !c.ServiceNameShared || slices.ContainsFunc(out, func(s repoScopeSelectAll) bool { return s.serviceName == c.ServiceName }) {
 			continue
 		}
-		reporting := 0
+		reporting, matchedDir := 0, true
 		for _, o := range r.Candidates {
 			if o.ServiceName == c.ServiceName {
 				reporting++
+				matchedDir = matchedDir && o.MatchedDir
 			}
 		}
-		c.ServiceNameShared = false
-		c.ClusterUID, c.Namespace, c.Workload, c.Services, c.ProcessGroups = "", "", "", nil, nil
-		// A sampled candidate's service name is never proposed alone.
-		if line := repoScopeSetCommand(r, c, selectors); line != "" {
-			out = append(out, repoScopeSelectAll{serviceName: c.ServiceName, all: reporting == len(r.Candidates), line: line})
+		// The service name of every candidate that reports it, and nothing
+		// of this one. A sampled candidate's service name, or one of a
+		// partial result, is never proposed alone.
+		all := reposcope.Candidate{Rank: c.Rank, Name: reposcope.EntryName(c.ServiceName), ServiceName: c.ServiceName,
+			Sampled: c.Sampled, MatchedDir: matchedDir}
+		if repoScopeSetCommand(r, all, selectors) == "" {
+			continue
 		}
+		all.Name, _ = names.claim(all.Name, r.Unit)
+		out = append(out, repoScopeSelectAll{serviceName: c.ServiceName, all: reporting == len(r.Candidates), line: repoScopeSetCommand(r, all, selectors)})
 	}
 	return out
 }
@@ -833,8 +844,7 @@ func repoScopeClusterNotes(r *reposcope.DiscoveryReport) []string {
 // repoScopeDiscoverySuggestions are the next steps an agent reading a
 // discovery report can take. Saving is the user's call, so a line is offered
 // for confirmation rather than as something to run.
-func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, selectors []string) []string {
-	p := newRepoScopeProposal(r, selectors)
+func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, p repoScopeProposal) []string {
 	var s []string
 	switch {
 	case len(p.handLinks) > 0:

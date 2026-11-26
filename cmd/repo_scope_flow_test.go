@@ -316,7 +316,7 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 			chdirCheckoutRepo(t)
 			report, _ := discoverReport(t)
 			var out strings.Builder
-			printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil), 600*time.Millisecond)
+			printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), 600*time.Millisecond)
 			testutil.AssertGolden(t, "repo-scope/"+tc.golden, out.String())
 		})
 	}
@@ -1125,7 +1125,7 @@ func TestRepoScopeDiscoverSharedServiceName(t *testing.T) {
 	require.Contains(t, suggestions, notes[0])
 
 	var out strings.Builder
-	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil), time.Second)
+	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), time.Second)
 	require.Equal(t, 1, strings.Count(out.String(), "Note: "+notes[0]+"\n"), out.String())
 
 	// The saved entry selects payments alone.

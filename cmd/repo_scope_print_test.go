@@ -21,7 +21,7 @@ func TestRepoScopeDiscoveryLimitsProposedLines(t *testing.T) {
 		report.Candidates = append(report.Candidates, c)
 	}
 	var out bytes.Buffer
-	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil), 0)
+	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), 0)
 	require.Contains(t, out.String(), "(+2 more in -o json)")
 	require.Contains(t, out.String(), "--path services/checkout")
 	for i, c := range report.Candidates {
@@ -37,14 +37,14 @@ func TestRepoScopeDiscoveryAmbiguousWithoutBindings(t *testing.T) {
 			{Rank: 2, Name: "ledger", Workload: "ledger", Tier: "exact"},
 		},
 	}
-	proposal := newRepoScopeProposal(report, nil)
+	proposal := newRepoScopeProposal(report, nil, repoScopeNames{})
 	require.Len(t, proposal.handLinks, 3)
 	require.Empty(t, proposal.selectAll)
 	var out bytes.Buffer
 	printRepoScopeDiscovery(&out, report, proposal, 0)
 	require.Contains(t, out.String(), "No binding selects any candidate alone.")
 	require.Contains(t, out.String(), "add --path internal/checkout")
-	suggestions := repoScopeDiscoverySuggestions(report, nil)
+	suggestions := repoScopeDiscoverySuggestions(report, proposal)
 	require.Contains(t, strings.Join(suggestions, "\n"), "link by hand:")
 }
 
@@ -57,7 +57,7 @@ func TestRepoScopeDiscoveryExplainsIncompleteNoMatch(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil), 0)
+	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), 0)
 	require.Contains(t, out.String(), "skipped")
 	require.Contains(t, out.String(), "failed (auth)")
 	require.Contains(t, out.String(), "200 matched, capped")
@@ -154,7 +154,7 @@ func TestRepoScopeDiscoveryOneAmbiguousCandidate(t *testing.T) {
 				Candidates: []reposcope.Candidate{{Rank: 1, Name: "checkout", Services: []string{flowService}, ServiceCount: 1, Tier: tc.tier}}}
 			report.Candidates[0].SetCommand = repoScopeSetCommand(report, report.Candidates[0], nil)
 			var out bytes.Buffer
-			printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil), 0)
+			printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), 0)
 			require.Contains(t, out.String(), tc.verdict)
 			require.Contains(t, out.String(), tc.offer)
 		})
