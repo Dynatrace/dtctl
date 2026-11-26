@@ -643,3 +643,27 @@ func TestExecProfiling_FoldedFormatOfAFunctionView(t *testing.T) {
 		})
 	}
 }
+
+// With --app-only the functions view counts the samples that application
+// frames carry, and its percentages are shares of those. A thread that never
+// enters application code is not among them, so the note must not call the
+// count the samples "in the window".
+func TestExecProfiling_AppOnlyNoteNamesWhatItCounts(t *testing.T) {
+	// A library root with 100 running samples, 10 of them under its one
+	// application frame.
+	newProfilingAPI(t, http.StatusOK, `{"dataRootNodeId":"0","dataNodes":[
+ {"id":"0","className":"","methodName":"","samples":{"RUNNING":0},"childIds":["L"]},
+ {"id":"L","className":"lib.Pool","methodName":"run","apiInfo":{"systemApi":false},"samples":{"RUNNING":100},"childIds":["A"]},
+ {"id":"A","className":"app.Job","methodName":"work","apiInfo":{"systemApi":true},"samples":{"RUNNING":10},"childIds":[]}]}`)
+
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--view", "functions", "--app-only")
+	require.Zero(t, code, stderr)
+	require.Equal(t, "SELF   SELF%   TOTAL   TOTAL%   PATHS   FUNCTION       \n"+
+		"10     100     10      100      1       app.Job.work   \n"+
+		"# 1 of 1 functions, by self running samples (10 running samples on application frames)\n"+
+		"# --focus 'app.Job.work' shows its callers and callees\n", stdout)
+
+	code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--view", "functions")
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "# 2 of 2 functions, by self running samples (100 running samples in the window)\n")
+}

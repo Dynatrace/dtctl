@@ -128,8 +128,11 @@ type FunctionView struct {
 	// Rows has one row per function, by the samples of the sort key,
 	// descending.
 	Rows []FunctionRow
-	// Samples is the number of counted samples in the window, the base of the
-	// percentages.
+	// Samples is the number of counted samples, the base of the percentages:
+	// the samples of the state in the window, or with appOnly those of them
+	// that an application frame carries. A stack without an application
+	// frame is then not counted, so the percentages are shares of the
+	// application's part of the process, not of the process.
 	Samples int
 	// Empty says why there are no rows, and is empty when there are some.
 	Empty EmptyReason

@@ -682,8 +682,14 @@ func renderProfilingFunctions(ctx context.Context, run *profilingRun, h *profili
 	}
 	limit := profilingLimit(ctx, f, profilingFunctionsDefaultLimit)
 	rows := capProfilingRows(view.Rows, limit)
-	note := fmt.Sprintf("%d of %d functions, by %s %s samples (%d %s samples in the window)",
-		len(rows), len(view.Rows), sortKey, state, view.Samples, state)
+	// With --app-only the view counts what application frames carry: a
+	// thread that never enters application code has no row and no share.
+	counted := "in the window"
+	if f.appOnly {
+		counted = "on application frames"
+	}
+	note := fmt.Sprintf("%d of %d functions, by %s %s samples (%d %s samples %s)",
+		len(rows), len(view.Rows), sortKey, state, view.Samples, state, counted)
 	var warnings, hints []string
 	if len(rows) < len(view.Rows) {
 		warnings = append(warnings, fmt.Sprintf("showing %d of %d functions, by %s %s samples; --limit 0 lists every function", len(rows), len(view.Rows), sortKey, state))

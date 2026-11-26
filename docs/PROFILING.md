@@ -141,7 +141,10 @@ Both views count running (CPU) samples. `--state lock`, `net_io`, `disk_io`,
 `wait`, `offcpu` (all four non-running states) or `all` counts others instead;
 waiting threads are only sampled with `--show-waiting`. With `-o json`, `-o csv`,
 `--jq` or `-A` they print their rows, and `--app-only` gives a hidden frame's
-time to the nearest application frame above it, as in the stack view.
+time to the nearest application frame above it, as in the stack view. A stack
+without an application frame is then not counted at all, so with `--app-only`
+the percentages are shares of the samples on application frames (the trailing
+`#` line says how many), not of every sample in the window.
 
 ## Flags
 
