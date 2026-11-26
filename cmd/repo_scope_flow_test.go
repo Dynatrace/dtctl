@@ -79,9 +79,10 @@ func cappedThenSampled(rows map[string]string) func(*http.Request, string) (int,
 }
 
 // manyIDRows is a workload that runs as 200 service ids, of which the record
-// query lists 50.
+// query collects 51: one more than discovery reads, which is how it shows
+// that there are more.
 func manyIDRows() map[string]string {
-	ids := make([]string, 50)
+	ids := make([]string, 51)
 	for i := range ids {
 		ids[i] = fmt.Sprintf(`"SERVICE-%016X"`, 0xC000+i)
 	}
@@ -178,8 +179,8 @@ func recordQuery(object string) string {
 	return "fetch " + object + ", from:now()-24h, scanLimitGBytes:5\n" +
 		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")` + "\n" +
 		"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" +
-		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
-		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
+		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n" +
+		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n" +
 		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n" +
 		`| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),` + "\n" +
 		`    nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)` + "\n" +

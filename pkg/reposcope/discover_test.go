@@ -117,8 +117,8 @@ func TestPlan(t *testing.T) {
 	assert.Equal(t, []string{"checkout", "checkout-service", "checkout.service", "checkout_service", "checkoutservice"}, p.Sent)
 
 	list := `"checkout", "checkout-service", "checkout.service", "checkout_service", "checkoutservice"`
-	ids := "    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
-		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
+	ids := "    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n" +
+		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n" +
 		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n"
 	// Only "checkout" is looked for inside a workload name: every other
 	// value holds it, so a name holding one of them holds it too, except
@@ -641,10 +641,11 @@ func TestDiscover_ManyIDsAreOneCandidate(t *testing.T) {
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"], "200 services, whatever the list shows")
 	assert.Equal(t, VerdictMatch, r.Verdicts["workload"])
 
-	// The count, not the list, is the tally: one id listed of two is two.
+	// Every id read is tallied, also one a scope file would refuse and so
+	// does not list: one id listed of two is two.
 	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
 		"spans": {{records: []map[string]interface{}{
-			{fieldServiceName: "checkout", fieldServiceCount: "2", fieldServices: collected(svcID), fieldRecords: float64(1)},
+			{fieldServiceName: "checkout", fieldServiceCount: "2", fieldServices: collected(svcID, "SERVICE-1"), fieldRecords: float64(1)},
 		}}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
@@ -896,7 +897,7 @@ func TestDiscover_ProcessGroupArrays(t *testing.T) {
 	require.Len(t, r.Candidates, 1)
 	c := r.Candidates[0]
 	assert.Equal(t, []string{pg2, pgID}, c.ProcessGroups, "an id the scope file would refuse is dropped")
-	assert.Equal(t, int64(2), c.ProcessGroupCount, "never fewer than the ids listed")
+	assert.Equal(t, int64(3), c.ProcessGroupCount, "the ids the arrays flatten to, the refused one among them")
 	assert.False(t, c.ProcessGroupsCapped, "one distinct array is not a cut list")
 	assert.Equal(t, int64(14), c.Logs)
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["processGroup"], "two process groups")
@@ -906,11 +907,10 @@ func TestDiscover_ProcessGroupArrays(t *testing.T) {
 	assert.Equal(t, `in(dt.entity.process_group, array("PROCESS_GROUP-0123456789ABCDEF", "PROCESS_GROUP-FEDCBA9876543210"))`, f.Expr)
 }
 
-// For an array field Grail counts and collects distinct arrays. 60 arrays
-// counted against 50 collected is a cut list, however many ids the 50
-// flatten to.
+// For an array field Grail collects distinct arrays. One array more than a
+// row is read for is a cut list, however many ids the others flatten to.
 func TestDiscover_ProcessGroupArraysCut(t *testing.T) {
-	arrays, next := make([]interface{}, 50), 0
+	arrays, next := make([]interface{}, 51), 0
 	for i := range arrays {
 		size := 2
 		if i < 20 {
@@ -930,8 +930,9 @@ func TestDiscover_ProcessGroupArraysCut(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 1)
 	c := r.Candidates[0]
-	assert.Len(t, c.ProcessGroups, 120)
-	assert.True(t, c.ProcessGroupsCapped, "10 arrays were cut, and their ids with them")
+	assert.Len(t, c.ProcessGroups, 120, "the ids of the first 50 arrays")
+	assert.True(t, c.ProcessGroupsCapped, "arrays were cut, and their ids with them")
+	assert.Equal(t, int64(120), c.ProcessGroupCount, "never fewer than the ids listed")
 }
 
 // Selecting prod's checkout must carry neither staging's nor the canary
@@ -1228,6 +1229,15 @@ func TestDiscover_RanksSampledCandidatesByHits(t *testing.T) {
 
 // pgLogs is the process-group lookup's answer: one row per value of the
 // field, a string or, for a log several processes wrote, an array.
+// processGroups is n process group ids, as a record query collects them.
+func processGroups(n int) []interface{} {
+	ids := make([]interface{}, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("PROCESS_GROUP-%016X", 0xA000+i)
+	}
+	return ids
+}
+
 func pgLogs(n int, group interface{}) map[string]interface{} {
 	return map[string]interface{}{fieldProcessGroup: group, fieldRecords: fmt.Sprint(n)}
 }
@@ -1301,7 +1311,7 @@ func TestDiscover_LogsLookupNeedsWholeIDs(t *testing.T) {
 		note    string
 	}{
 		"more process groups than listed": {
-			answers: map[string][]answer{"spans": {{records: spans(func(row map[string]interface{}) { row[fieldProcessGroupCount] = "51" })}}},
+			answers: map[string][]answer{"spans": {{records: spans(func(row map[string]interface{}) { row[fieldProcessGroups] = processGroups(51) })}}},
 			sent:    2, note: unchecked,
 		},
 		"no process group": {

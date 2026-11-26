@@ -315,8 +315,11 @@ func sampledRecordQuery(object, purpose, stages string, rung samplingRung) Query
 
 // recordStages is a record query after its fetch line. It groups by identity rather than by entity id: one workload can run
 // as hundreds of service ids, and one row per id would fill the page with a
-// single candidate. Each id field is counted, which is the true total, and
-// collected up to discoveryIDLimit, which is what a binding can use.
+// single candidate. Each id field is collected up to one id more than
+// discoveryIDLimit, which is what a binding can use: the extra one is how a
+// cut list is told from a whole one. The distinct count beside it is an
+// estimate in DQL, so it only says roughly how many ids a cut list stands
+// for.
 //
 // The cluster uid is part of the identity: the same namespace and workload
 // name in two clusters are two workloads, and one row for both would propose
@@ -364,7 +367,7 @@ func recordStages(values []string) string {
 		}
 	}
 	ids := func(count, collected, field, end string) string {
-		return fmt.Sprintf("    %s = countDistinct(%s), %s = collectDistinct(%s, maxLength:%d)%s", count, field, collected, field, discoveryIDLimit, end)
+		return fmt.Sprintf("    %s = countDistinct(%s), %s = collectDistinct(%s, maxLength:%d)%s", count, field, collected, field, discoveryIDLimit+1, end)
 	}
 	lines := []string{
 		"| filter " + exact + inside,
@@ -641,7 +644,7 @@ func (r *DiscoveryReport) checkLogs(ctx context.Context, runner inventory.Runner
 	}
 	for _, c := range checked {
 		for _, rec := range res.Records {
-			rowIDs, _ := idsField(rec, fieldProcessGroup, processGroupRe)
+			rowIDs, _, _ := idsField(rec, fieldProcessGroup, processGroupRe)
 			if slices.ContainsFunc(rowIDs, func(id string) bool { return slices.Contains(c.ProcessGroups, id) }) {
 				c.LogsByProcessGroup += countField(rec, fieldRecords)
 			}

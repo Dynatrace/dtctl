@@ -101,8 +101,8 @@ A run sends at most eleven queries: two record queries, three sampled retries of
 fetch spans, from:now()-24h, scanLimitGBytes:5
 | filter in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>)) or contains(k8s.workload.name, "<value>")
 | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
     by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
 | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
     nameTier = if(in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>)), 0, else:1)
@@ -112,7 +112,7 @@ fetch spans, from:now()-24h, scanLimitGBytes:5
 | fieldsRemove workloadSegments, nameTier
 ```
 
-and the same over `logs`. Each row is one cluster, namespace, workload and service name. Its entity ids are counted exactly and listed up to 50, so a workload that runs as hundreds of service ids is one candidate, not a page of them.
+and the same over `logs`. Each row is one cluster, namespace, workload and service name. Its entity ids are listed up to 50, so a workload that runs as hundreds of service ids is one candidate, not a page of them. The query collects one id more than that, which is how discovery knows a list was cut; the count beside it is DQL's estimate of how many ids such a list stands for.
 
 The `contains` clause and the stages after the aggregation are how a workload named with a prefix is found in the same query: the first filter keeps records whose workload name holds a sent name, and the second keeps, of the aggregated rows, those where it is a whole run of segments. Rows named exactly sort first (`nameTier`), so when a page fills, the 200-row limit cuts the looser matches and not the workload the repository names. They are there only when a sent name has at least five letters and digits; without one the query sorts by `records` and has neither field. Looking inside workload names costs nothing where no workload holds the name. Where many do, their records are read as well, and the query can scan many times what the exact comparison alone would; it stays under the same 5 GB cap, and is retried sampled when it reaches it. A name whose words a workload joins with both `-` and `.` (`billing.engine-v2` for `billing-engine-v2`) is not found this way.
 
@@ -381,5 +381,5 @@ In agent mode `discover` returns its report as the envelope `result`, with each 
 - Discovery looks at the last 24 hours, or the last hour when it has to sample, and says so in its notes. A service that has been quiet longer, quieter than a sample's floor, or that runs under a name the repository does not spell out, needs `--term` or a `set` by hand. So does a workload that only holds a name shorter than five letters and digits (`shop-cart` for `cart`), and a `service.name` that is longer than the repository's name: service names are compared whole.
 - Discovery reads at most 2000 build files, Dockerfiles and manifests of a repository, each up to 1 MiB, and does not go more than six directories deep except on the way to the directory it runs for. In a larger repository the unit is still found from the directory's own build file, but names in the files left unread are not sent: a note says so, the result is partial, and `--term` adds a name.
 - One discovery sends at most 200 values. A unit whose files name more, such as a repository root that holds the manifests of many services, is refused with the count rather than cut down to some of them: run `discover` for one service with `--path`, or link by hand. A string longer than 253 characters is not read as a name.
-- Entity ids per candidate are counted exactly and listed up to 50; `-o json` has the list and the count (`serviceCount`, `servicesCapped`).
+- Entity ids per candidate are listed up to 50 per row. `-o json` has the list, whether it was cut (`servicesCapped`) and the count (`serviceCount`): the ids listed when the list is whole, and an estimate of at least 51 when it was cut.
 - `inventory arrivals --scope` does not use the repo scope.

@@ -35,8 +35,9 @@ const (
 	// The columns the record queries compute. records counts what the query
 	// matched, every record or a sample's hits. clusterName is the name the
 	// records of one cluster uid carry, taken from any of them: it is shown,
-	// never compared. Each id field is counted and collected: the count says
-	// how many there are, the collection lists up to discoveryIDLimit of them.
+	// never compared. Each id field is counted and collected: the collection
+	// lists up to discoveryIDLimit of them and shows whether there are more,
+	// and the count estimates how many.
 	fieldRecords        = "records"
 	fieldAnyClusterName = "clusterName"
 	// workloadSegments is the workload name as the record queries compare
@@ -50,8 +51,9 @@ const (
 	fieldProcessGroupCount = "processGroupCount"
 	fieldProcessGroups     = "processGroups"
 
-	// discoveryIDLimit is how many ids a record query collects per candidate
-	// per field; the count says how many there are.
+	// discoveryIDLimit is how many ids discovery reads per row and field,
+	// the most a proposed binding lists. A record query collects one more,
+	// which is how a cut list shows.
 	discoveryIDLimit = 50
 
 	objectLogs          = "logs"

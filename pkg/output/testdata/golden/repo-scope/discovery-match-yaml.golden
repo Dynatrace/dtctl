@@ -37,8 +37,8 @@ queries:
       fetch spans, from:now()-24h, scanLimitGBytes:5
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)
@@ -53,8 +53,8 @@ queries:
       fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)
@@ -71,8 +71,8 @@ queries:
       fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)
@@ -89,8 +89,8 @@ queries:
       fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)
@@ -107,8 +107,8 @@ queries:
       fetch logs, from:now()-24h, scanLimitGBytes:5
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)
@@ -123,8 +123,8 @@ queries:
       fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)
@@ -141,8 +141,8 @@ queries:
       fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)
@@ -159,8 +159,8 @@ queries:
       fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")
       | summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
-          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
+          serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},
           by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
       | fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
           nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)

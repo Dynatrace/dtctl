@@ -2,6 +2,7 @@ package reposcope
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -333,4 +334,52 @@ func TestDiscover_InterruptionAfterTheRecordQueries(t *testing.T) {
 		"discovery was interrupted before it looked for logs by process group",
 		"candidate 1 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group",
 	}, r.Notes)
+}
+
+// Whether a row's id list is whole is decided from the list: the query
+// collects one id more than a binding takes, so a list that long was cut.
+// The distinct count beside it is an estimate in DQL, and for an array field
+// counts arrays, so it cannot tell, and is used only as how many ids a cut
+// list stands for.
+func TestDiscover_IDListCutIsReadFromTheList(t *testing.T) {
+	services := func(n int) []interface{} {
+		ids := make([]interface{}, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("SERVICE-%016X", 0xC000+i)
+		}
+		return ids
+	}
+	for name, tc := range map[string]struct {
+		count  string
+		list   []interface{}
+		listed int
+		total  int64
+		capped bool
+	}{
+		"a whole list the estimate overshoots":  {"60", services(50), 50, 50, false},
+		"a whole list the estimate undershoots": {"3", services(5), 5, 5, false},
+		"a cut list":                            {"200", services(51), 50, 200, true},
+		"a cut list the estimate undershoots":   {"40", services(51), 50, 51, true},
+		"overlapping arrays": {"3", []interface{}{
+			[]interface{}{"SERVICE-000000000000000A", "SERVICE-000000000000000B"},
+			[]interface{}{"SERVICE-000000000000000A"},
+			[]interface{}{"SERVICE-000000000000000B"},
+		}, 2, 2, false},
+		"an id a file would refuse still counts": {"2", []interface{}{"SERVICE-000000000000000A", "SERVICE-1"}, 1, 2, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+				"spans": {{records: []map[string]interface{}{
+					{fieldServiceName: "checkout", fieldServiceCount: tc.count, fieldServices: tc.list, fieldRecords: float64(1)},
+				}}},
+			}}, singleGo(t), prodHost)
+			require.NoError(t, err)
+			require.Len(t, r.Candidates, 1)
+			c := r.Candidates[0]
+			assert.Len(t, c.Services, tc.listed)
+			assert.Equal(t, tc.total, c.ServiceCount)
+			assert.Equal(t, tc.capped, c.ServicesCapped)
+		})
+	}
+	assert.Contains(t, singleGo(t).Queries[0].DQL, "services = collectDistinct(dt.entity.service, maxLength:51),")
 }

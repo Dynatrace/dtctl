@@ -48,13 +48,12 @@ type Candidate struct {
 	// service-name binding would select that candidate's records too.
 	ServiceNameShared bool `json:"serviceNameShared,omitempty" yaml:"serviceNameShared,omitempty"`
 	// ProcessGroups and Services are the ids the records carried, up to
-	// discoveryIDLimit of each per row. ProcessGroupCount and ServiceCount
-	// are how many there are: the largest distinct count any one row
-	// reported, since the spans and logs rows of one candidate report
-	// overlapping sets and a sum would count an id twice. That makes it a
-	// lower bound on the union, never below the ids listed. A Capped flag
-	// says a row had more ids than it listed, so the list is not all of
-	// them.
+	// discoveryIDLimit of each per row. A Capped flag says a row had more
+	// ids than that, so the list is not all of them. ProcessGroupCount and
+	// ServiceCount are how many there are: the ids listed when no row was
+	// cut, and otherwise at least the largest distinct count a cut row
+	// reported, which Grail estimates. The spans and logs rows of one
+	// candidate report overlapping sets, so the counts are never summed.
 	ProcessGroups       []string `json:"processGroups,omitempty" yaml:"processGroups,omitempty"`
 	ProcessGroupCount   int64    `json:"processGroupCount,omitempty" yaml:"processGroupCount,omitempty"`
 	ProcessGroupsCapped bool     `json:"processGroupsCapped,omitempty" yaml:"processGroupsCapped,omitempty"`
@@ -202,15 +201,19 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 		{&c.Services, &c.ServiceCount, &c.ServicesCapped, fieldServices, fieldServiceCount, serviceIDRe},
 		{&c.ProcessGroups, &c.ProcessGroupCount, &c.ProcessGroupsCapped, fieldProcessGroups, fieldProcessGroupCount, processGroupRe},
 	} {
-		// For a field that is itself an array, Grail counts and collects
-		// distinct arrays, so the count is compared with the arrays
-		// collected, not with the ids they flatten to.
-		ids, collected := idsField(rec, f.idsKey, f.valid)
-		n := countField(rec, f.countKey)
+		ids, distinct, cut := idsField(rec, f.idsKey, f.valid)
 		for _, id := range ids {
 			*f.ids = addSorted(*f.ids, id)
 		}
-		*f.capped = *f.capped || n > int64(collected)
+		// A whole list is its own count. The row's distinct count is an
+		// estimate, and for a field that is itself an array it counts
+		// arrays, which overlap; it stands only for a list that was cut,
+		// as how many ids there are beyond the ones listed.
+		n := int64(distinct)
+		if cut {
+			n = max(countField(rec, f.countKey), discoveryIDLimit+1)
+		}
+		*f.capped = *f.capped || cut
 		*f.count = max(*f.count, n, int64(len(*f.ids)))
 	}
 	spans, logs, n := &c.Spans, &c.Logs, countField(rec, fieldRecords)
@@ -922,13 +925,12 @@ func stringField(rec map[string]interface{}, key string) string {
 
 // idsField reads a collected id column: an array of ids, nested once more
 // when the field is itself an array (a log written by several processes
-// carries its process groups as one), so it is flattened. An id the scope
-// file would refuse is dropped: it could never be saved. collected is how
-// many elements the column held at its top level, valid or not: the values
-// collectDistinct kept, distinct ids or distinct arrays of them, which is
-// what the row's countDistinct counts too, so comparing the two tells a cut
-// list from a whole one.
-func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids []string, collected int) {
+// carries its process groups as one), so it is flattened. The query collects
+// one element more than discoveryIDLimit, so a column that long was cut: cut
+// says so, and only the first discoveryIDLimit elements are read. ids are
+// the ones a scope file can hold, since no other could be saved; distinct
+// counts every id read, those included.
+func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids []string, distinct int, cut bool) {
 	seen := map[string]bool{}
 	var walk func(v interface{})
 	walk = func(v interface{}) {
@@ -946,14 +948,12 @@ func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids
 			}
 		}
 	}
-	switch v := rec[key].(type) {
-	case []interface{}:
-		collected = len(v)
-	case string:
-		collected = 1
+	collected := rec[key]
+	if list, ok := collected.([]interface{}); ok && len(list) > discoveryIDLimit {
+		collected, cut = list[:discoveryIDLimit], true
 	}
-	walk(rec[key])
-	return ids, collected
+	walk(collected)
+	return ids, len(seen), cut
 }
 
 // countField reads a count, which Grail sends as a number or, for a long, as
