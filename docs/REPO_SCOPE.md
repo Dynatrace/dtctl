@@ -219,7 +219,7 @@ The scope is applied only where dtctl is sure of the result. The query runs exac
 
 - it does not start with `fetch logs` or `fetch spans`
 - the entry binds nothing that data object is filtered by (an entry with only `--service` cannot filter logs)
-- a `filter` or `filterOut` stage already compares a field the scope filters on: your own filter wins. Grouping or projecting by such a field (`summarize … by:`, `fields`) is not an override
+- a `filter` or `filterOut` stage already compares a field the scope filters on: your own filter wins. Grouping or projecting by such a field (`summarize … by:`, `fields`) is not an override, and neither is naming it inside square brackets, in a subquery or as an index
 - the data object is fetched again inside a subquery (`append`, `join`, `lookup`), which the inserted filter cannot reach
 - dtctl cannot read the text safely: an unterminated string or comment, unbalanced brackets, a single quote, a `#` outside a string or comment, or a fourth quote right after a triple-quoted string (`"""a""""`)
 

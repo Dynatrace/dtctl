@@ -106,6 +106,15 @@ var insertFilterTests = []struct {
 	{"a comment before the filter command", `fetch logs | /* c */ filter k8s.workload.name == "x"`, UserFilter, "logs", ""},
 	{"a capitalised filter command", `fetch logs | Filter k8s.workload.name == "x"`, UserFilter, "logs", ""},
 	{"an upper-case filterOut", `fetch logs | FILTEROUT k8s.workload.name == "x"`, UserFilter, "logs", ""},
+	{"a bound field beside an index is still the user's filter", `fetch logs | filter enrichment[0] == "x" and k8s.workload.name == "y"`, UserFilter, "logs", ""},
+	// Inside square brackets a bound field's name is a subquery's own field
+	// or an index into another one, not a condition on the fetched record.
+	{"a bound field named in a subquery of a filter", `fetch logs | filter loglevel in [data record(k8s.workload.name="ERROR") | fields k8s.workload.name]`, Applied, "logs",
+		"fetch logs " + logsStage + "\n" + `| filter loglevel in [data record(k8s.workload.name="ERROR") | fields k8s.workload.name]`},
+	{"a bound field as an index", `fetch logs | filter enrichment[k8s.workload.name] == "x"`, Applied, "logs",
+		"fetch logs " + logsStage + "\n" + `| filter enrichment[k8s.workload.name] == "x"`},
+	{"a backtick-quoted bound field as an index", "fetch logs | filter enrichment[(`k8s.workload.name`)] == \"x\"", Applied, "logs",
+		"fetch logs " + logsStage + "\n| filter enrichment[(`k8s.workload.name`)] == \"x\""},
 	// Field names, unlike commands, are case-sensitive: this is another field.
 	{"a bound field in another case", `fetch logs | filter K8S.Workload.Name == "x"`, Applied, "logs",
 		"fetch logs " + logsStage + "\n" + `| filter K8S.Workload.Name == "x"`},

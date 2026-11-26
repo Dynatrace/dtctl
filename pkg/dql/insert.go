@@ -201,12 +201,17 @@ func asciiLower(s string) string {
 
 // userFilterField returns the first of fields that a filtering stage names,
 // bare or as a backtick identifier.
+//
+// A name inside square brackets is not the stage's: there it is a field of a
+// subquery's records or an index into another field, and neither is a
+// condition on the fetched record. Taking it for one would drop the scope
+// for a filter the user never wrote.
 func userFilterField(q string, m Masked, fields []string) (field string, found bool) {
 	for _, seg := range m.Segments {
 		if !filteringCommands[asciiLower(seg.Command)] {
 			continue
 		}
-		code := m.Code[seg.Start:seg.End]
+		code := outsideSquareBrackets(m.Code[seg.Start:seg.End])
 		for _, f := range fields {
 			if containsWholeWord(code, f) || hasBacktickName(q[seg.Start:seg.End], code, f) {
 				return f, true
@@ -214,6 +219,25 @@ func userFilterField(q string, m Masked, fields []string) (field string, found b
 		}
 	}
 	return "", false
+}
+
+// outsideSquareBrackets returns a masked stage with everything between a [
+// and its ] blanked, at any nesting, so offsets stay offsets. Scan has
+// already balanced the brackets.
+func outsideSquareBrackets(code string) string {
+	out := []byte(code)
+	square := 0
+	for i, c := range out {
+		switch {
+		case c == '[':
+			square++
+		case c == ']':
+			square--
+		case square > 0:
+			out[i] = ' '
+		}
+	}
+	return string(out)
 }
 
 // hasBacktickName reports whether a `…` identifier in text spells name.
