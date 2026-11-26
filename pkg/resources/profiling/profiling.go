@@ -6,7 +6,9 @@
 // Handler.Hotspots or Handler.Allocations runs the analysis, and the methods of
 // the returned Hotspots or Allocations read it as rows (Stacks, Functions,
 // Focus) or whole (Raw). Each kind of analysis has its own result type, so a
-// view is only there for the kind it reads.
+// view is only there for the kind it reads. HotspotsFromRaw and
+// AllocationsFromRaw rebuild a result from a Raw document that was kept, with
+// no environment to ask.
 //
 // What went wrong is reported as a value, not as text to match: ResolveWindow
 // and the views return typed errors, ClassifyError names the reason an
