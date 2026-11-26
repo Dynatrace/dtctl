@@ -275,3 +275,29 @@ func TestDeleteBreakpoint_DryRunOnlyReads(t *testing.T) {
 		})
 	}
 }
+
+// A deletion that is declined deletes nothing, for all the breakpoints of a
+// workspace, for the several at one location, and for one.
+func TestDeleteBreakpoint_DeclinedDeletesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		argv   []string
+		prompt string
+	}{
+		{"all", []string{"delete", "breakpoint", "--all"}, "Delete ALL 2 breakpoint(s) in workspace "},
+		{"several at one location", []string{"delete", "breakpoint", "A.java:1"}, "Delete 2 breakpoint(s) at A.java:1?"},
+		{"one", []string{"delete", "breakpoint", "dtctl-rule-0001"}, "You are about to delete the following breakpoint:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readwrite-all")
+			srv.rules = []interface{}{ruleAt("A.java", 1, ""), ruleAt("A.java", 1, "")}
+			chdirTestRepo(t, breakpointScope)
+
+			code, stdout, stderr := runRepoScoped(append(tc.argv, "--no-agent"), RunOptions{Stdin: strings.NewReader("n\n")})
+			require.Zero(t, code, stderr)
+			require.Contains(t, stdout, tc.prompt)
+			require.Contains(t, stdout, "Deletion cancelled")
+			require.Empty(t, srv.mutations())
+		})
+	}
+}
