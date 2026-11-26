@@ -67,6 +67,10 @@ func TestInsertFilter(t *testing.T) {
 			"fetch logs " + logsStage + "\n" + `| filter dt.entity.process_group.name == "x"`},
 		{"a subquery over an unscoped object", "fetch logs | filter x in [fetch dt.system.data_objects | fields name]", Applied, "logs",
 			"fetch logs " + logsStage + "\n| filter x in [fetch dt.system.data_objects | fields name]"},
+		{"a nested fetch of an unscoped backtick identifier", "fetch logs | append [fetch `logs archive`]", Applied, "logs",
+			"fetch logs " + logsStage + "\n| append [fetch `logs archive`]"},
+		{"a field named fetch inside brackets", "fetch logs | filter (fetch == logs)", Applied, "logs",
+			"fetch logs " + logsStage + "\n| filter (fetch == logs)"},
 		// An identifier escapes its backticks, so what follows one is still
 		// inside it: neither a stage nor a filter.
 		{"an escaped backtick in an identifier", "fetch logs | fields `field\\`name`", Applied, "logs",
@@ -110,6 +114,15 @@ func TestInsertFilter(t *testing.T) {
 		{"subquery in append", `fetch logs | append [fetch logs | filter loglevel == "ERROR"]`, Subquery, "logs", ""},
 		{"a comment between fetch and the object", "fetch logs | join [fetch /*x*/ logs], on:{a}", Subquery, "logs", ""},
 		{"a subquery in another case", "fetch logs | append [Fetch Spans | limit 1]", Subquery, "logs", ""},
+		// What separates a nested fetch from its object is Grail's to define.
+		// Anything that is not printable ASCII may be white space to it, and
+		// missing the subquery would report environment-wide rows as scoped.
+		{"a form feed after a nested fetch", "fetch logs | append [fetch\flogs]", Subquery, "logs", ""},
+		{"a vertical tab after a nested fetch", "fetch logs | append [fetch\vspans]", Subquery, "logs", ""},
+		{"a no-break space after a nested fetch", "fetch logs | append [fetch\u00a0logs]", Subquery, "logs", ""},
+		{"a line separator after a nested fetch", "fetch logs | append [fetch\u2028logs | limit 1]", Subquery, "logs", ""},
+		{"a nested object as a backtick identifier", "fetch logs | append [fetch `logs`]", Subquery, "logs", ""},
+		{"a nested object as a backtick identifier in another case", "fetch logs | append [fetch /* c */ `Spans`]", Subquery, "logs", ""},
 
 		// Not a leading fetch.
 		{"timeseries", "timeseries avg(x)", NotFetch, "", ""},

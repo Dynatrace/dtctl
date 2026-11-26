@@ -92,7 +92,7 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 		return refuse(UnsupportedObject, object,
 			fmt.Sprintf("repo scope has no filter for %s (it filters %s)", object, filteredObjects(filters)))
 	}
-	if sub, found := nestedFetch(m, filters); found {
+	if sub, found := nestedFetch(query, m, filters); found {
 		return refuse(Subquery, object,
 			fmt.Sprintf("the query fetches %s again in a subquery, which the scope cannot reach", sub))
 	}
@@ -146,7 +146,12 @@ func leadingFetch(stage string) (object string, ok bool) {
 
 // nestedFetch finds a `fetch <object>` inside brackets for an object filters
 // names, with or without a condition.
-func nestedFetch(m Masked, filters map[string]Filter) (object string, found bool) {
+//
+// It errs towards finding one: a subquery it misses is reported as scoped
+// over rows the filter never saw. So the object may follow the word after
+// anything Grail could take for white space, not only what dtctl knows to be
+// (see isBlank), and may be spelled as a backtick identifier.
+func nestedFetch(query string, m Masked, filters map[string]Filter) (object string, found bool) {
 	code := asciiLower(m.Code)
 	for off := 0; ; {
 		i := strings.Index(code[off:], "fetch")
@@ -158,12 +163,22 @@ func nestedFetch(m Masked, filters map[string]Filter) (object string, found bool
 		if m.Depth[i] == 0 || !isWholeWord(code, i, "fetch") {
 			continue
 		}
-		name := skipSpaceAndComments(code, off)
-		if name == off {
+		start := off
+		for start < len(code) && isBlank(code[start]) {
+			start++
+		}
+		if start == off || start == len(code) {
 			continue
 		}
-		if _, scoped := filters[code[name:nameEnd(code, name)]]; scoped {
-			return code[name:nameEnd(code, name)], true
+		name := code[start:nameEnd(code, start)]
+		if code[start] == '`' {
+			// Scan masked the identifier's contents and kept its backticks,
+			// so the next one closes it.
+			closing := start + 1 + strings.IndexByte(code[start+1:], '`')
+			name = asciiLower(query[start+1 : closing])
+		}
+		if _, scoped := filters[name]; scoped {
+			return name, true
 		}
 	}
 }
@@ -289,6 +304,14 @@ func isWholeWord(s string, at int, word string) bool {
 
 func isSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// isBlank reports a byte that may separate two words for Grail: white space,
+// masked text, a control character, or part of a character outside ASCII
+// (a no-break space, a line separator). Which of those Grail accepts is not
+// known here, so the subquery check, which must not miss, takes them all.
+func isBlank(b byte) bool {
+	return b <= ' ' || b == mask || b >= 0x7f
 }
 
 func isNameStart(b byte) bool {
