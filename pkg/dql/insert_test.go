@@ -181,23 +181,48 @@ func assertOnlyInserted(t *testing.T, input, got string) {
 	assert.Equal(t, input, got[:at]+got[at+added:])
 }
 
-// Only a parameter of the fetch stage itself bounds the scan; the word in a
-// comment, a literal or a later stage does not, and neither does
-// scanLimitGBytes: -1, which lifts the limit.
+// Only a parameter of the fetch stage itself bounds the scan, and only with
+// a value that does: the word in a comment, a literal or a later stage does
+// not, nor does a sampling ratio of 1 or a scan limit of 0, and
+// scanLimitGBytes: -1 lifts the limit.
 func TestInsertFilter_ScanBounded(t *testing.T) {
-	for query, want := range map[string]bool{
-		"fetch logs | limit 5":                                false,
-		"fetch logs,\n  scanLimitGBytes: 10 | limit 5":        true,
-		"fetch spans, samplingRatio: 100":                     true,
-		"fetch logs /* scanLimitGBytes: 10 */ | limit 5":      false,
-		`fetch logs | filter content == "samplingRatio: 100"`: false,
-		"fetch logs | fieldsAdd scanLimitGBytes = 1":          false,
-		"fetch logs, scanLimitGBytes: -1 | limit 5":           false,
-	} {
-		t.Run(query, func(t *testing.T) {
-			got := InsertFilter(query, testFilters)
+	tests := []struct {
+		query           string
+		bounded, lifted bool
+	}{
+		{"fetch logs | limit 5", false, false},
+		{"fetch logs,\n  scanLimitGBytes: 10 | limit 5", true, false},
+		{"fetch logs, scanLimitGBytes:0.5", true, false},
+		{"fetch spans, samplingRatio: 100", true, false},
+		{"fetch logs /* scanLimitGBytes: 10 */ | limit 5", false, false},
+		{`fetch logs | filter content == "samplingRatio: 100"`, false, false},
+		{"fetch logs | fieldsAdd scanLimitGBytes = 1", false, false},
+		{"fetch logs, scanLimitGBytes: -1 | limit 5", false, true},
+		// A value that bounds nothing.
+		{"fetch spans, samplingRatio: 1", false, false},
+		{"fetch spans, samplingRatio: 1.0", false, false},
+		{"fetch logs, scanLimitGBytes: 0", false, false},
+		// A comment between the name and the value hides neither.
+		{"fetch logs, scanLimitGBytes:/*x*/-1", false, true},
+		{"fetch logs, scanLimitGBytes /*x*/ : // y\n 10", true, false},
+		// Grail reads names without regard to case; whether that holds for
+		// parameter names is not verified, and reading them so costs nothing.
+		{"fetch logs, scanlimitgbytes: 10", true, false},
+		{"fetch logs, SamplingRatio: 1", false, false},
+		// A value dtctl cannot read may bound the scan, so nothing is said.
+		{"fetch logs, scanLimitGBytes: $limit", true, false},
+		{"fetch logs, samplingRatio: toLong(100)", true, false},
+		{"fetch logs, samplingRatio: 1e5", true, false},
+		// Each parameter is judged by itself.
+		{"fetch logs, scanLimitGBytes: -1, samplingRatio: 100", true, true},
+		{"fetch logs, myscanLimitGBytes: 10", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			got := InsertFilter(tt.query, testFilters)
 			require.Equal(t, Applied, got.Outcome)
-			assert.Equal(t, want, got.ScanBounded)
+			assert.Equal(t, tt.bounded, got.ScanBounded, "bounded")
+			assert.Equal(t, tt.lifted, got.ScanLimitLifted, "lifted")
 		})
 	}
 }

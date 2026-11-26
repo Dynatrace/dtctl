@@ -2,8 +2,9 @@ package dql
 
 import (
 	"fmt"
-	"slices"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -39,14 +40,14 @@ type Rewrite struct {
 	Filter     string
 	Reason     string // one sentence for a person, when not applied
 	// ScanBounded reports that the fetch stage itself bounds what Grail
-	// scans, with samplingRatio or a scanLimitGBytes that is not negative
-	// (-1 lifts the limit). The inserted filter does not, so a caller can say
-	// so before sending.
+	// scans: a scanLimitGBytes above 0, a samplingRatio above 1, or either
+	// with a value that is not a plain number and so may be one. The
+	// inserted filter does not, so a caller can say so before sending.
 	ScanBounded bool
+	// ScanLimitLifted reports a negative scanLimitGBytes on the fetch stage,
+	// which removes the scan limit, the environment's default included.
+	ScanLimitLifted bool
 }
-
-// scanBounds are the fetch parameters that bound what a fetch scans.
-var scanBounds = []string{"scanLimitGBytes", "samplingRatio"}
 
 // filteringCommands are the stages that drop records by a condition, in lower
 // case. A user's condition on a bound field in one of them wins over the
@@ -107,14 +108,15 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 	if len(m.Segments) == 1 {
 		at, insert = len(query), "\n| filter ("+f.Expr+")"
 	}
+	stage := asciiLower(m.Code[first.Start:first.End])
+	limit, sampling := scanParameter(stage, "scanlimitgbytes", 0), scanParameter(stage, "samplingratio", 1)
 	return Rewrite{
-		Query:      query[:at] + insert + query[at:],
-		Outcome:    Applied,
-		DataObject: object,
-		Filter:     f.Expr,
-		ScanBounded: slices.ContainsFunc(scanBounds, func(p string) bool {
-			return boundsScan(m.Code[first.Start:first.End], p)
-		}),
+		Query:           query[:at] + insert + query[at:],
+		Outcome:         Applied,
+		DataObject:      object,
+		Filter:          f.Expr,
+		ScanBounded:     limit == scanBound || sampling == scanBound,
+		ScanLimitLifted: limit == scanLifted,
 	}
 }
 
@@ -259,22 +261,49 @@ func nameEnd(code string, i int) int {
 	return i
 }
 
-// boundsScan reports whether the masked fetch stage sets param to a value
-// that bounds the scan: any, except a negative scanLimitGBytes.
-func boundsScan(stage, param string) bool {
+// scanEffect is what one fetch parameter does to the scan.
+type scanEffect int
+
+const (
+	scanUnbounded scanEffect = iota // absent, or a value that bounds nothing
+	scanBound                       // a value above the neutral one, or one that is not a plain number
+	scanLifted                      // a negative value, which for scanLimitGBytes removes the limit
+)
+
+// numberRe reads a plain decimal number at the start of a parameter's value.
+var numberRe = regexp.MustCompile(`^-?(?:\d+\.?\d*|\.\d+)`)
+
+// scanParameter reads param from a masked, lower-cased fetch stage and says
+// what its value does to the scan. neutral is the value that changes
+// nothing: a scan limit of 0 and a sampling ratio of 1. Comments between the
+// name, the colon and the value are skipped.
+func scanParameter(stage, param string, neutral float64) scanEffect {
 	for off := 0; ; {
 		i := strings.Index(stage[off:], param)
 		if i < 0 {
-			return false
+			return scanUnbounded
 		}
 		at := off + i
 		off = at + 1
 		if !isWholeWord(stage, at, param) {
 			continue
 		}
-		v := strings.TrimLeft(stage[at+len(param):], " \t\n\r")
-		v = strings.TrimLeft(strings.TrimPrefix(v, ":"), " \t\n\r")
-		return param != "scanLimitGBytes" || !strings.HasPrefix(v, "-")
+		colon := skipSpaceAndComments(stage, at+len(param))
+		if colon == len(stage) || stage[colon] != ':' {
+			continue
+		}
+		value := stage[skipSpaceAndComments(stage, colon+1):]
+		number := numberRe.FindString(value)
+		n, err := strconv.ParseFloat(number, 64)
+		switch rest := value[len(number):]; {
+		case err != nil || (rest != "" && isNameByte(rest[0])):
+			return scanBound
+		case n < 0:
+			return scanLifted
+		case n > neutral:
+			return scanBound
+		}
+		return scanUnbounded
 	}
 }
 
