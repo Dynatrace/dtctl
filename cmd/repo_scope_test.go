@@ -217,6 +217,22 @@ func rowsByObject(rows map[string]string) func(*http.Request, string) (int, stri
 	}
 }
 
+// spansByName answers a spans query with the rows whose key is a value the
+// query carries, in the order of the keys, and every other query with
+// nothing. Unlike rowsByObject it returns what was asked for, so two units
+// discovered in one run get different answers.
+func spansByName(rows map[string]string) func(*http.Request, string) (int, string) {
+	return func(_ *http.Request, query string) (int, string) {
+		var found []string
+		for _, name := range slices.Sorted(maps.Keys(rows)) {
+			if strings.HasPrefix(query, "fetch spans") && strings.Contains(query, `"`+name+`"`) {
+				found = append(found, rows[name])
+			}
+		}
+		return http.StatusOK, fmt.Sprintf(`{"state":"SUCCEEDED","result":{"records":[%s]}}`, strings.Join(found, ","))
+	}
+}
+
 // requests is every request the server was sent, whole: a test that claims
 // nothing travels beside the query compares these, not the query text.
 func (s *dqlRecorder) requests() []string {

@@ -221,3 +221,26 @@ func TestDiscover_ScanCapWinsOverAnotherLimit(t *testing.T) {
 		})
 	}
 }
+
+// A row the query kept that discovery cannot explain is not an exact match.
+// in() on an array-valued service.name keeps the row of an unrelated
+// workload, and the tier used to fall back to exact, which made it a match
+// with no evidence line naming a file.
+func TestDiscover_UnexplainedRowIsNotExact(t *testing.T) {
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{{
+			fieldNamespace: "batch", fieldWorkload: "totally-unrelated",
+			fieldServiceName: []interface{}{"checkout", "nightly"}, fieldRecords: float64(40),
+		}}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	require.Len(t, r.Candidates, 1)
+	c := r.Candidates[0]
+	assert.Equal(t, "substring", c.Tier)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Equal(t, []string{
+		"neither its k8s.workload.name nor its service.name is a name discovery sent",
+		"40 spans in 24h",
+	}, c.Evidence)
+}

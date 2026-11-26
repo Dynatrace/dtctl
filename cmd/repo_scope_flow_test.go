@@ -730,8 +730,9 @@ func TestRepoScopeDiscoverDryRunNamesHeldBackNames(t *testing.T) {
 // directory, discovers each deployable.
 func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 	fixture := gradleMultiRepo(t)
-	srv := newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
-		"spans": `{"k8s.namespace.name":"edge","k8s.workload.name":"webproxy","service.name":"webproxy","records":"100"}`,
+	srv := newDQLRecorder(t, "readonly", spansByName(map[string]string{
+		"admin":    `{"k8s.namespace.name":"edge","k8s.workload.name":"admin","service.name":"admin","records":"40"}`,
+		"webproxy": `{"k8s.namespace.name":"edge","k8s.workload.name":"webproxy","service.name":"webproxy","records":"100"}`,
 	}))
 	repo := chdirTestRepo(t, "")
 	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
@@ -755,7 +756,7 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 		resp := agentResult(t, stdout, &reports)
 		require.Equal(t, 2, *resp.Context.Total)
 		require.Len(t, reports, 2)
-		require.Equal(t, "dtctl repo-scope set webproxy --namespace edge --workload webproxy --service-name webproxy --path admin", reports[0].Candidates[0].SetCommand)
+		require.Equal(t, "dtctl repo-scope set admin --namespace edge --workload admin --service-name admin --path admin", reports[0].Candidates[0].SetCommand)
 		require.Equal(t, line, reports[1].Candidates[0].SetCommand)
 		require.Equal(t, "admin: confirm with the user, then: "+reports[0].Candidates[0].SetCommand, resp.Context.Suggestions[0])
 		require.Contains(t, resp.Context.Suggestions, "webproxy: confirm with the user, then: "+line)

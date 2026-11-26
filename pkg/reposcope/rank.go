@@ -368,10 +368,12 @@ func (c *Candidate) absorb(o *Candidate) {
 	}
 }
 
-// recordTier says which of the record query's two conditions kept a row: a
-// segment match when a sent name is a run of the workload name's segments
-// and neither the workload nor the service name is a sent value, exact
-// otherwise, since in() is equality.
+// recordTier says which of the record query's two conditions kept a row:
+// exact when its workload or service name is a sent value, a segment match
+// when a sent name is a run of the workload name's segments. A row that is
+// neither is one discovery cannot explain, whatever Grail's in() saw in it
+// (an array-valued service.name holding a sent name, for one), and gets the
+// loosest tier: an exact match is one a reader can check against a file.
 func (d *discovery) recordTier(key recordKey) tier {
 	for _, m := range d.matchers {
 		if m.value == key.workload || m.value == key.serviceName {
@@ -381,7 +383,7 @@ func (d *discovery) recordTier(key recordKey) tier {
 	if _, ok := d.workloadSegment(key.workload); ok {
 		return tierSegment
 	}
-	return tierExact
+	return tierSubstring
 }
 
 // workloadSegment is the sent name that is a run of workload's segments, the
@@ -505,6 +507,9 @@ func (d *discovery) explain(c *Candidate) {
 			c.sources[m.token.file] = true
 			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(m.token), tierSegment))
 		}
+	}
+	if c.tier == tierSubstring {
+		c.Evidence = append(c.Evidence, fmt.Sprintf("neither its %s nor its %s is a name discovery sent", fieldWorkload, fieldServiceName))
 	}
 	if counts := d.counts(c); counts != "" {
 		c.Evidence = append(c.Evidence, counts)
