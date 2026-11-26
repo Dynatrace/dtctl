@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -114,9 +115,17 @@ var stricter = regexp.MustCompile(strings.Join([]string{
 	`^unknown keys? .*"(|[^"]*\\n[^"]*)" on line \d+, in `,
 }, "|"))
 
-// unseenKey is a document key the legacy reader's pattern could not see, as
-// Warning names it. decode reports it; the legacy reader let Save drop it.
-var unseenKey = regexp.MustCompile(`^"(|.*\\n.*)" on line \d+$`)
+// unseenKey reports whether key, as Warning names it, is a document key the
+// legacy reader's pattern could not see: an empty one, or one of more than
+// one line. decode reports it; the legacy reader let Save drop it.
+func unseenKey(key string) bool {
+	m := regexp.MustCompile(`^(".*") on line \d+$`).FindStringSubmatch(key)
+	if m == nil {
+		return false
+	}
+	name, err := strconv.Unquote(m[1])
+	return err == nil && (name == "" || strings.Contains(name, "\n"))
+}
 
 // compareWithLegacy holds decode to the legacy reader on one input.
 func compareWithLegacy(t *testing.T, doc string) (bothRead bool) {
@@ -127,7 +136,7 @@ func compareWithLegacy(t *testing.T, doc string) (bothRead bool) {
 	case oldErr == nil && err == nil:
 		var seen []string
 		for _, key := range got.unknown {
-			if !unseenKey.MatchString(key) {
+			if !unseenKey(key) {
 				seen = append(seen, key)
 			}
 		}
