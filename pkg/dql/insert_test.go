@@ -75,6 +75,12 @@ func TestInsertFilter(t *testing.T) {
 			"fetch logs " + logsStage + "\n| fields `field\\` | filter k8s.workload.name \\`name`"},
 		{"CRLF line endings are kept", "fetch logs\r\n| limit 1", Applied, "logs",
 			"fetch logs\r\n" + logsStage + "\n| limit 1"},
+		// Bytes that are not UTF-8 are Grail's to reject. The rewrite reads
+		// bytes, so offsets stay offsets whatever the text holds.
+		{"invalid UTF-8 before a word the subquery check reads", "fetch logs \xff\xff\xff fetch", Applied, "logs",
+			"fetch logs \xff\xff\xff fetch\n" + logsStage},
+		{"invalid UTF-8 inside a subquery", "fetch logs | append [\xff\xfe fetch\xff bizevents]", Applied, "logs",
+			"fetch logs " + logsStage + "\n| append [\xff\xfe fetch\xff bizevents]"},
 
 		// Grail reads command and data object names without regard to case,
 		// so `fetch Spans` is the scoped object, reported under its own name.

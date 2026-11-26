@@ -168,15 +168,18 @@ func nestedFetch(m Masked, filters map[string]Filter) (object string, found bool
 	}
 }
 
-// asciiLower lower-cases the ASCII letters of s and nothing else, so offsets
-// into the result are offsets into s.
+// asciiLower lower-cases the ASCII letters of s byte by byte and changes
+// nothing else, so offsets into the result are offsets into s whatever s
+// holds. Folding by rune would not keep them: a byte that is not UTF-8
+// decodes to U+FFFD, which is three bytes long.
 func asciiLower(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r >= 'A' && r <= 'Z' {
-			return r + 'a' - 'A'
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
 		}
-		return r
-	}, s)
+	}
+	return string(b)
 }
 
 // userFilterField returns the first of fields that a filtering stage names,
