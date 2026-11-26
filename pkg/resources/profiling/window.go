@@ -3,6 +3,7 @@ package profiling
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,9 +30,17 @@ type Window struct {
 	Default bool
 }
 
-// Span is the window's length.
+// Span is the window's length. A window longer than a Duration can express
+// has the longest one.
 func (w Window) Span() time.Duration {
-	return time.Duration(w.To-w.From) * time.Millisecond
+	ms := satSub(w.To, w.From)
+	switch {
+	case ms > math.MaxInt64/int64(time.Millisecond):
+		return math.MaxInt64
+	case ms < math.MinInt64/int64(time.Millisecond):
+		return math.MinInt64
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 // The errors of ResolveWindow for a window that was read but cannot be
@@ -115,9 +124,13 @@ func ResolveWindow(start, end string, now time.Time) (Window, error) {
 		to = nowMs
 		from = to - def
 	case start == "":
+		if to < math.MinInt64+def {
+			// No time lies DefaultWindow before this one.
+			return Window{}, &WindowBoundError{Bound: BoundEnd, Value: end, Err: fmt.Errorf("time %q is out of range", end)}
+		}
 		from = to - def
 	case end == "":
-		to = min(from+def, nowMs)
+		to = min(satAdd(from, def), nowMs)
 	}
 
 	if from >= nowMs {
@@ -136,6 +149,31 @@ func ResolveWindow(start, end string, now time.Time) (Window, error) {
 	return w, nil
 }
 
+// satAdd and satSub are a+b and a-b, held at the nearest int64 where the exact
+// result is none. A bound is whatever epoch millisecond the caller wrote, so
+// arithmetic on one must not wrap around into a valid-looking window.
+func satAdd(a, b int64) int64 {
+	switch {
+	case b > 0 && a > math.MaxInt64-b:
+		return math.MaxInt64
+	case b < 0 && a < math.MinInt64-b:
+		return math.MinInt64
+	}
+	return a + b
+}
+
+func satAddInt(a, b int) int { return int(satAdd(int64(a), int64(b))) }
+
+func satSub(a, b int64) int64 {
+	switch {
+	case b < 0 && a > math.MaxInt64+b:
+		return math.MaxInt64
+	case b > 0 && a < math.MinInt64+b:
+		return math.MinInt64
+	}
+	return a - b
+}
+
 // durationUnits are the duration units a now()-relative bound takes: DQL's,
 // plus Go's spellings.
 var durationUnits = map[string]time.Duration{
@@ -152,6 +190,7 @@ func parseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, fmt.Errorf("missing duration")
 	}
+	whole := s
 	var d time.Duration
 	for s != "" {
 		m := durationPart.FindStringSubmatch(s)
@@ -162,7 +201,13 @@ func parseDuration(s string) (time.Duration, error) {
 		if err != nil {
 			return 0, err
 		}
-		d += time.Duration(n * float64(durationUnits[m[2]]))
+		// float64(math.MaxInt64) is 2^63, the first value a Duration cannot
+		// hold; converting it would not fail but give an arbitrary one.
+		part := n * float64(durationUnits[m[2]])
+		if part >= float64(math.MaxInt64) || time.Duration(part) > math.MaxInt64-d {
+			return 0, fmt.Errorf("duration %q is out of range", whole)
+		}
+		d += time.Duration(part)
 		s = s[len(m[0]):]
 	}
 	return d, nil

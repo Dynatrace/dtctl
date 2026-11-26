@@ -2,6 +2,7 @@ package profiling
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -188,7 +189,7 @@ func nodeSamples(n map[string]interface{}) map[string]int {
 	}
 	for k := range out {
 		if v, ok := s[k].(float64); ok {
-			out[k] = int(v)
+			out[k] = floatInt(v)
 		}
 	}
 	return out
@@ -211,5 +212,20 @@ func strVal(m map[string]interface{}, key string) string {
 
 func intVal(m map[string]interface{}, key string) int {
 	v, _ := m[key].(float64)
+	return floatInt(v)
+}
+
+// floatInt is the integer a JSON number stands for, held at the nearest int
+// where it has none: converting a float64 out of range does not fail but gives
+// an arbitrary value.
+func floatInt(v float64) int {
+	switch {
+	case v >= float64(math.MaxInt): // 2^63, the first value an int cannot hold
+		return math.MaxInt
+	case v <= float64(math.MinInt):
+		return math.MinInt
+	case v != v: // NaN
+		return 0
+	}
 	return int(v)
 }

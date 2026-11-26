@@ -267,10 +267,10 @@ func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 					byPath[key] = l
 					all = append(all, l)
 				}
-				l.allocSize += self.allocSize
-				l.survSize += self.survSize
-				l.allocCount += self.allocCount
-				l.survCount += self.survCount
+				l.allocSize = satAddInt(l.allocSize, self.allocSize)
+				l.survSize = satAddInt(l.survSize, self.survSize)
+				l.allocCount = satAddInt(l.allocCount, self.allocCount)
+				l.survCount = satAddInt(l.survCount, self.survCount)
 			}
 		}
 		for _, cid := range n.children {

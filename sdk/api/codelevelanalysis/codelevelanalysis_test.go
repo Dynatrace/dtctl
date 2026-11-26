@@ -3,6 +3,8 @@ package codelevelanalysis
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -593,6 +595,28 @@ func TestEligibleEntity(t *testing.T) {
 	for id, want := range cases {
 		if got := EligibleEntity(id); got != want {
 			t.Errorf("EligibleEntity(%q) = %v, want %v", id, got, want)
+		}
+	}
+}
+
+// The length check must hold for bounds so far apart that their difference
+// does not fit an int64: it used to wrap around and pass.
+func TestValidateTimeframeLength(t *testing.T) {
+	const day = int64(24 * 60 * 60 * 1000)
+	cases := []struct {
+		from, to int64
+		wantErr  string
+	}{
+		{1, 1 + day, ""},
+		{1, 2 + day, "codelevelanalysis: timeframe must not exceed 24 hours"},
+		{math.MinInt64, 1_700_000_000_000, "codelevelanalysis: timeframe must not exceed 24 hours"},
+		{-1, math.MaxInt64, "codelevelanalysis: timeframe must not exceed 24 hours"},
+		{2, 1, "codelevelanalysis: from/to must be epoch-millis with to > from"},
+	}
+	for _, tc := range cases {
+		err := validate(Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: tc.from, To: tc.to})
+		if got := fmt.Sprint(err); (tc.wantErr == "" && err != nil) || (tc.wantErr != "" && got != tc.wantErr) {
+			t.Errorf("validate(from=%d, to=%d) = %v, want %q", tc.from, tc.to, err, tc.wantErr)
 		}
 	}
 }

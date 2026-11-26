@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -244,6 +245,39 @@ func TestAllocations_Stacks(t *testing.T) {
 	}}
 	if got := a.Stacks(true, false); !reflect.DeepEqual(got, want) {
 		t.Errorf("Stacks(true, false) = %+v\nwant %+v", got, want)
+	}
+}
+
+// Totals over byte counts the API could not mean are held at the largest
+// int64 instead of wrapping around into a negative or a small one.
+func TestAllocations_TotalsDoNotWrap(t *testing.T) {
+	a := allocationsOf(allocationsResult([]interface{}{float64(1), float64(2), float64(3)},
+		survnode(1, "A.a", true, 6e18, 6e18),
+		survnode(2, "B.b", true, 6e18, 1),
+		map[string]interface{}{"id": float64(3), "name": "C.c", "childIds": []interface{}{},
+			"allocationInfo": map[string]interface{}{"allocationSize": 1e300, "allocationCount": -1e300}},
+	))
+	got := a.Stacks(false, false)
+	if got.AllocatedBytes != math.MaxInt64 || got.SurvivedBytes != 6e18+1 {
+		t.Errorf("totals = %d allocated, %d survived; want %d, %d", got.AllocatedBytes, got.SurvivedBytes, int64(math.MaxInt64), int64(6e18+1))
+	}
+	want := []AllocationRow{
+		{AllocBytes: math.MaxInt64, Stack: "C.c"},
+		{AllocBytes: 6e18, SurvivedBytes: 6e18, AllocCount: 1, Stack: "A.a"},
+		{AllocBytes: 6e18, SurvivedBytes: 1, AllocCount: 1, Stack: "B.b"},
+	}
+	if !reflect.DeepEqual(got.Rows, want) {
+		t.Errorf("rows = %+v\nwant   %+v", got.Rows, want)
+	}
+
+	// Two paths that appOnly merges into one row add up the same way.
+	merged := allocationsOf(allocationsResult([]interface{}{float64(1)},
+		survnode(1, "A.a", true, math.MaxInt64, 0, float64(2), float64(3)),
+		survnode(2, "lib.x", false, 6e18, 0),
+		survnode(3, "lib.y", false, 6e18, 0),
+	)).Stacks(true, false)
+	if len(merged.Rows) != 1 || merged.Rows[0].AllocBytes != math.MaxInt64 || merged.AllocatedBytes != math.MaxInt64 {
+		t.Errorf("merged rows = %+v, total %d; want one row and a total of %d", merged.Rows, merged.AllocatedBytes, int64(math.MaxInt64))
 	}
 }
 

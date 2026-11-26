@@ -151,7 +151,7 @@ type StackView struct {
 func (h *Hotspots) Stacks(appOnly bool) StackView {
 	v := StackView{Rows: hotspotStacks(h.result, appOnly)}
 	for _, r := range v.Rows {
-		v.Samples += r.Running
+		v.Samples = satAddInt(v.Samples, r.Running)
 	}
 	if len(v.Rows) == 0 {
 		v.Empty = h.whyEmpty("")
@@ -178,8 +178,8 @@ type AllocationView struct {
 func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
 	v := AllocationView{Rows: allocationStacks(a.result, appOnly, bySurvivors)}
 	for _, r := range v.Rows {
-		v.AllocatedBytes += int64(r.AllocBytes)
-		v.SurvivedBytes += int64(r.SurvivedBytes)
+		v.AllocatedBytes = satAdd(v.AllocatedBytes, int64(r.AllocBytes))
+		v.SurvivedBytes = satAdd(v.SurvivedBytes, int64(r.SurvivedBytes))
 	}
 	switch {
 	case len(v.Rows) > 0:

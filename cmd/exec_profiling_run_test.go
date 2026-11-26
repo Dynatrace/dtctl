@@ -470,6 +470,10 @@ func TestExecProfiling_WindowErrors(t *testing.T) {
 			`invalid --default-timeframe-start: cannot parse time "yesterday": use ISO-8601/RFC3339, epoch millis, or now()-<dur>`},
 		{"unreadable end", []string{"--default-timeframe-start", "now()-1h", "--default-timeframe-end", "now()-1y"},
 			`invalid --default-timeframe-end: invalid duration in "now()-1y": unknown duration "1y": use a number and a unit (ms, s, m, h, d, w), e.g. 1d or 1h30m`},
+		// An end with no time 2h before it. The subtraction used to wrap
+		// around, and this was refused as a start in the future.
+		{"end out of range", []string{"--default-timeframe-end=-9223372036854775808"},
+			`invalid --default-timeframe-end: time "-9223372036854775808" is out of range`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

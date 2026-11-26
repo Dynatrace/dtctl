@@ -2,6 +2,7 @@ package profiling
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 )
@@ -111,6 +112,8 @@ func TestResolveWindow_Errors(t *testing.T) {
 			text: "profiling: the window starts in the future"},
 		{name: "start now", start: "now()", is: ErrWindowStartInFuture,
 			text: "profiling: the window starts in the future"},
+		{name: "start alone, in the future", start: "9223372036854775807", is: ErrWindowStartInFuture,
+			text: "profiling: the window starts in the future"},
 		{name: "end in the future", start: "now()-1h", end: "now()+1h", is: ErrWindowEndInFuture,
 			text: "profiling: the window ends in the future"},
 		{name: "end alone, in the future", end: "now()+1ms", is: ErrWindowEndInFuture,
@@ -149,6 +152,12 @@ func TestResolveWindow_UnreadableBound(t *testing.T) {
 			why: `cannot parse time "tomorrow": use ISO-8601/RFC3339, epoch millis, or now()-<dur>`},
 		{name: "now() without a sign", start: "now()*5m", bound: BoundStart, value: "now()*5m",
 			why: `expected now()-<duration> or now()+<duration>, got "now()*5m"`},
+		// An end with no time 2h before it, and a duration no time is that
+		// far from: both used to wrap around into a valid-looking window.
+		{name: "end alone, before every start", end: "-9223372036854775808", bound: BoundEnd, value: "-9223372036854775808",
+			why: `time "-9223372036854775808" is out of range`},
+		{name: "duration out of range", start: "now()-99999999999999999999w", bound: BoundStart, value: "now()-99999999999999999999w",
+			why: `invalid duration in "now()-99999999999999999999w": duration "99999999999999999999w" is out of range`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,6 +226,10 @@ func TestResolveWindow_TooLongReportsTheRequest(t *testing.T) {
 			text: "profiling: the window is 3h0m0s long, over the limit of 2h0m0s"},
 		{name: "a day, far back", start: "now()-3d", end: "now()-2d", tooLong: true, from: nowMs - 72*h, to: nowMs - 48*h,
 			text: "profiling: the window is 24h0m0s long, over the limit of 2h0m0s"},
+		// Longer than a Duration can say, and than the subtraction can: it
+		// used to wrap around and pass as a window within the cap.
+		{name: "from the first representable millisecond", start: "-9223372036854775808", end: "now()", tooLong: true, from: math.MinInt64, to: nowMs,
+			text: "profiling: the window is 2562047h47m16.854775807s long, over the limit of 2h0m0s"},
 		{name: "start alone is never over", start: "now()-3d"},
 		{name: "end alone is never over", end: "now()-3d"},
 	}
@@ -255,6 +268,10 @@ func TestWindow_Span(t *testing.T) {
 		{Window{From: -1000, To: 1000}, 2 * time.Second},
 		{Window{}, 0},
 		{Window{From: 4000, To: 1000}, -3 * time.Second},
+		// Longer than a Duration can say: the longest one, not a wrapped one.
+		{Window{From: math.MinInt64, To: math.MaxInt64}, math.MaxInt64},
+		{Window{From: 0, To: math.MaxInt64}, math.MaxInt64},
+		{Window{From: math.MaxInt64, To: math.MinInt64}, math.MinInt64},
 	}
 	for _, tc := range cases {
 		if got := tc.w.Span(); got != tc.want {

@@ -384,7 +384,8 @@ func validate(p Payload) error {
 	if p.From == 0 || p.To == 0 || p.To <= p.From {
 		return fmt.Errorf("codelevelanalysis: from/to must be epoch-millis with to > from")
 	}
-	if p.To-p.From > 24*60*60*1000 {
+	// To is after From here, so a negative difference is one that overflowed.
+	if d := p.To - p.From; d > 24*60*60*1000 || d < 0 {
 		return fmt.Errorf("codelevelanalysis: timeframe must not exceed 24 hours")
 	}
 	if p.Kind == KindAllocationDetails && (p.Type == "" || p.Method == "") {
