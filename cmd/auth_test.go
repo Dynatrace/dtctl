@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1259,4 +1260,285 @@ func TestAuthLogin_KeepsTheContextsSafetyLevel(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLoginSafetyLevels covers the two levels a login works with: the one it
+// saves to the context and the one whose scopes it requests.
+func TestLoginSafetyLevels(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	withContext := func(level config.SafetyLevel) *config.Config {
+		cfg := config.NewConfig()
+		cfg.SetContextWithOptions("ctx", envURL, "ctx-oauth", &config.ContextOptions{SafetyLevel: level})
+		return cfg
+	}
+
+	tests := []struct {
+		name          string
+		cfg           *config.Config
+		flagLevel     config.SafetyLevel
+		flagGiven     bool
+		wantSaved     config.SafetyLevel
+		wantRequested config.SafetyLevel
+	}{
+		{"new context takes the default", config.NewConfig(), config.DefaultSafetyLevel, false, config.DefaultSafetyLevel, config.DefaultSafetyLevel},
+		{"new context takes the flag", config.NewConfig(), config.SafetyLevelReadOnly, true, config.SafetyLevelReadOnly, config.SafetyLevelReadOnly},
+		{"readonly is kept", withContext(config.SafetyLevelReadOnly), config.DefaultSafetyLevel, false, config.SafetyLevelReadOnly, config.SafetyLevelReadOnly},
+		{"readwrite-mine is kept", withContext(config.SafetyLevelReadWriteMine), config.DefaultSafetyLevel, false, config.SafetyLevelReadWriteMine, config.SafetyLevelReadWriteMine},
+		{"dangerously-unrestricted is kept", withContext(config.SafetyLevelDangerouslyUnrestricted), config.DefaultSafetyLevel, false, config.SafetyLevelDangerouslyUnrestricted, config.SafetyLevelDangerouslyUnrestricted},
+		{"the flag replaces a stored level", withContext(config.SafetyLevelReadOnly), config.SafetyLevelReadWriteMine, true, config.SafetyLevelReadWriteMine, config.SafetyLevelReadWriteMine},
+		{"the flag set to the default still counts", withContext(config.SafetyLevelReadOnly), config.DefaultSafetyLevel, true, config.DefaultSafetyLevel, config.DefaultSafetyLevel},
+		{"a context with no level gets the default", withContext(""), config.DefaultSafetyLevel, false, config.DefaultSafetyLevel, config.DefaultSafetyLevel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saved, requested, err := loginSafetyLevels(tt.cfg, "ctx", tt.flagLevel, tt.flagGiven)
+			if err != nil {
+				t.Fatalf("loginSafetyLevels: %v", err)
+			}
+			if saved != tt.wantSaved || requested != tt.wantRequested {
+				t.Errorf("saved %q, requested %q; want saved %q, requested %q", saved, requested, tt.wantSaved, tt.wantRequested)
+			}
+		})
+	}
+
+	t.Run("an invalid stored level is refused", func(t *testing.T) {
+		cfg := withContext("read-only")
+		_, _, err := loginSafetyLevels(cfg, "ctx", config.DefaultSafetyLevel, false)
+		if err == nil {
+			t.Fatal("want an error for the stored level \"read-only\"")
+		}
+		for _, want := range []string{`"ctx"`, `"read-only"`, "--safety-level"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not name %s", err, want)
+			}
+		}
+		// The flag is the way out, so it must still work.
+		saved, requested, err := loginSafetyLevels(cfg, "ctx", config.SafetyLevelReadOnly, true)
+		if err != nil || saved != config.SafetyLevelReadOnly || requested != config.SafetyLevelReadOnly {
+			t.Errorf("with the flag: saved %q, requested %q, err %v", saved, requested, err)
+		}
+	})
+}
+
+// TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes: a .dtctl.yaml found
+// in the working directory declares its own level, and dtctl enforces no more
+// than the global config binds to the token. The login keeps what the file
+// says and requests scopes for what is enforced.
+func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
+	// Not parallel: the working directory and XDG_CONFIG_HOME are process-wide.
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	xdgDir := t.TempDir()
+	globalDir := filepath.Join(xdgDir, "dtctl")
+	if err := os.MkdirAll(globalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	global := "apiVersion: v1\nkind: Config\ncurrent-context: prod\ncontexts:\n  - name: prod\n    context:\n      environment: " + envURL + "\n      token-ref: prod-oauth\n      safety-level: readonly\n"
+	if err := os.WriteFile(filepath.Join(globalDir, "config"), []byte(global), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+
+	projectDir := t.TempDir()
+	local := "apiVersion: v1\nkind: Config\ncurrent-context: project\ncontexts:\n  - name: project\n    context:\n      environment: " + envURL + "\n      token-ref: prod-oauth\n      safety-level: dangerously-unrestricted\n"
+	if err := os.WriteFile(filepath.Join(projectDir, ".dtctl.yaml"), []byte(local), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(projectDir)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.IsLocal() {
+		t.Fatal("the project config was not picked up")
+	}
+
+	saved, requested, err := loginSafetyLevels(cfg, "project", config.DefaultSafetyLevel, false)
+	if err != nil {
+		t.Fatalf("loginSafetyLevels: %v", err)
+	}
+	if saved != config.SafetyLevelDangerouslyUnrestricted {
+		t.Errorf("saved %q: the login must not rewrite what the file declares", saved)
+	}
+	if requested != config.SafetyLevelReadOnly {
+		t.Errorf("requested %q, want readonly: the global config binds this token to readonly", requested)
+	}
+
+	// Through the command: the login is configured with the enforced level,
+	// says why it differs from the declared one, and leaves the file's level.
+	viper.Reset()
+	resetAuthLoginFlags(t)
+	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
+	t.Setenv(config.EnvTokenStorage, "file")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	xdg.Reload()
+	t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
+	t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
+	t.Setenv(envLoginAccountURN, "")
+	origCheck := authCheckKeyringFunc
+	t.Cleanup(func() { authCheckKeyringFunc = origCheck })
+	authCheckKeyringFunc = func() error {
+		return fmt.Errorf("keyring disabled via %s environment variable", config.EnvDisableKeyring)
+	}
+	origGrant := authClientCredentialsFunc
+	t.Cleanup(func() { authClientCredentialsFunc = origGrant })
+	authClientCredentialsFunc = func(context.Context, *auth.OAuthFlow, string, string, string, []string) (*auth.TokenSet, error) {
+		return &auth.TokenSet{AccessToken: "test-access-token", TokenType: "Bearer", ExpiresIn: 300, ExpiresAt: time.Now().Add(5 * time.Minute)}, nil
+	}
+
+	var runErr error
+	stderr := captureAuthStderr(t, func() {
+		rootCmd.SetArgs([]string{"auth", "login", "--context", "project"})
+		runErr = rootCmd.Execute()
+	})
+	if runErr != nil {
+		t.Fatalf("auth login: %v\n%s", runErr, stderr)
+	}
+	for _, want := range []string{
+		"Safety level: readonly",
+		"The context declares dangerously-unrestricted; the global config allows this token readonly, so the login requests readonly scopes.",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, stderr)
+		}
+	}
+	after, err := config.Load()
+	if err != nil {
+		t.Fatalf("load after login: %v", err)
+	}
+	nc, err := after.GetContext("project")
+	if err != nil {
+		t.Fatalf("context missing after login: %v", err)
+	}
+	if nc.Context.SafetyLevel != config.SafetyLevelDangerouslyUnrestricted {
+		t.Errorf("the file's level became %q", nc.Context.SafetyLevel)
+	}
+}
+
+// TestContextsNarrowedByLogin: a login replaces the stored token, so contexts
+// that share it and are allowed more are named before it happens.
+func TestContextsNarrowedByLogin(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	cfg := config.NewConfig()
+	add := func(name, token string, level config.SafetyLevel) {
+		cfg.SetContextWithOptions(name, envURL, token, &config.ContextOptions{SafetyLevel: level})
+	}
+	add("ro", "shared", config.SafetyLevelReadOnly)
+	add("writer", "shared", config.SafetyLevelReadWriteAll)
+	add("admin", "shared", config.SafetyLevelDangerouslyUnrestricted)
+	add("mine", "shared", config.SafetyLevelReadWriteMine)
+	add("unset", "shared", "")
+	add("elsewhere", "other", config.SafetyLevelDangerouslyUnrestricted)
+
+	tests := []struct {
+		context   string
+		requested config.SafetyLevel
+		want      []string
+	}{
+		{"ro", config.SafetyLevelReadOnly, []string{"admin", "mine", "unset", "writer"}},
+		{"mine", config.SafetyLevelReadWriteMine, []string{"admin", "unset", "writer"}},
+		{"writer", config.SafetyLevelReadWriteAll, []string{"admin"}},
+		{"admin", config.SafetyLevelDangerouslyUnrestricted, nil},
+	}
+	for _, tt := range tests {
+		got := contextsNarrowedByLogin(cfg, tt.context, "shared", tt.requested)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("login to %s at %s: got %v, want %v", tt.context, tt.requested, got, tt.want)
+		}
+	}
+	if got := contextsNarrowedByLogin(cfg, "ro", "ro-oauth", config.SafetyLevelReadOnly); got != nil {
+		t.Errorf("a token nobody else uses: got %v", got)
+	}
+}
+
+// TestAuthLogin_StoredLevelThroughTheCommand runs the command for the two
+// cases a renewed login has to say something about: a token another context
+// relies on, and a stored level that is not a level.
+func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+
+	run := func(t *testing.T, stored config.SafetyLevel) (stderr string, runErr error, granted bool, saved config.SafetyLevel) {
+		t.Helper()
+		viper.Reset()
+		resetAuthLoginFlags(t)
+		t.Setenv(config.EnvTokenStorage, "file")
+		t.Setenv("XDG_DATA_HOME", t.TempDir())
+		xdg.Reload()
+		t.Cleanup(xdg.Reload)
+		t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
+		t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
+		t.Setenv(envLoginAccountURN, "")
+
+		// "writer" and "viewer" share one token; "viewer" stores the level under test.
+		configPath := setupAuthTestConfig(t, "writer", envURL, "shared-oauth")
+		cfg, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		cfg.SetContextWithOptions("writer", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadWriteAll})
+		cfg.SetContextWithOptions("viewer", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: stored})
+		if err := cfg.SaveTo(configPath); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+		gFlags.cfgFile = configPath
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+
+		origCheck := authCheckKeyringFunc
+		t.Cleanup(func() { authCheckKeyringFunc = origCheck })
+		authCheckKeyringFunc = func() error {
+			return fmt.Errorf("keyring disabled via %s environment variable", config.EnvDisableKeyring)
+		}
+		origGrant := authClientCredentialsFunc
+		t.Cleanup(func() { authClientCredentialsFunc = origGrant })
+		authClientCredentialsFunc = func(context.Context, *auth.OAuthFlow, string, string, string, []string) (*auth.TokenSet, error) {
+			granted = true
+			return &auth.TokenSet{AccessToken: "test-access-token", TokenType: "Bearer", ExpiresIn: 300, ExpiresAt: time.Now().Add(5 * time.Minute)}, nil
+		}
+
+		stderr = captureAuthStderr(t, func() {
+			// No --environment: the context supplies it, and its token name
+			// with it, which is how a session is renewed.
+			rootCmd.SetArgs([]string{"auth", "login", "--context", "viewer"})
+			runErr = rootCmd.Execute()
+		})
+		after, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load saved config: %v", err)
+		}
+		nc, err := after.GetContext("viewer")
+		if err != nil {
+			t.Fatalf("context missing: %v", err)
+		}
+		return stderr, runErr, granted, nc.Context.SafetyLevel
+	}
+
+	t.Run("a shared token is named before it is replaced", func(t *testing.T) {
+		stderr, err, granted, saved := run(t, config.SafetyLevelReadOnly)
+		if err != nil || !granted {
+			t.Fatalf("login: err %v, granted %v", err, granted)
+		}
+		if saved != config.SafetyLevelReadOnly {
+			t.Errorf("saved level %q, want readonly", saved)
+		}
+		for _, want := range []string{"Safety level: readonly", "Token 'shared-oauth' is also used by writer", "--token-name"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		}
+	})
+
+	t.Run("an invalid stored level stops the login before a token is requested", func(t *testing.T) {
+		_, err, granted, saved := run(t, "read-only")
+		if err == nil || !strings.Contains(err.Error(), `invalid safety level "read-only"`) {
+			t.Errorf("err = %v, want the invalid-level error", err)
+		}
+		if granted {
+			t.Error("a token was requested")
+		}
+		if saved != "read-only" {
+			t.Errorf("the config was rewritten: level %q", saved)
+		}
+	})
 }

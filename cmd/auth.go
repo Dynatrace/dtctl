@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -504,14 +506,75 @@ func finalizeLoginConfig(cfg *config.Config, contextName, environment, tokenName
 	cfg.PruneEmptyEnvironments(contextName, placeholderNames)
 }
 
-// existingSafetyLevel returns the safety level the named context already
-// has, or fallback when the context is new or records none.
-func existingSafetyLevel(cfg *config.Config, contextName string, fallback config.SafetyLevel) config.SafetyLevel {
-	nc, err := cfg.GetContext(contextName)
-	if err != nil || nc.Context.SafetyLevel == "" {
-		return fallback
+// loginSafetyLevels returns the level a login saves to the context and the
+// level whose scopes it requests.
+//
+// With --safety-level the flag decides both. Without it, a context that
+// already exists keeps the level it stores, because logging in again is how
+// an expired session is renewed and must not change what the context may do;
+// flagLevel, the flag's default, is saved only to a context that is new or
+// stores no level.
+//
+// The scopes follow the level dtctl enforces for the context, not the one
+// its file declares. The two differ in an auto-discovered project config,
+// whose level is clamped to what the global config binds to the token
+// (Config.EffectiveSafetyLevelFor): a cloned .dtctl.yaml must not be able to
+// make a login ask for more than the context is allowed to use.
+//
+// A stored level that is not a valid value is refused rather than kept or
+// replaced. Keeping it would save and print a level dtctl does not enforce,
+// and replacing it would pick a level nobody chose.
+func loginSafetyLevels(cfg *config.Config, contextName string, flagLevel config.SafetyLevel, flagGiven bool) (saved, requested config.SafetyLevel, err error) {
+	if flagGiven {
+		return flagLevel, flagLevel, nil
 	}
-	return nc.Context.SafetyLevel
+	nc, err := cfg.GetContext(contextName)
+	if err != nil {
+		// Not an existing context: the default applies.
+		return flagLevel, flagLevel, nil
+	}
+	stored := nc.Context.SafetyLevel
+	if !stored.IsValid() {
+		return "", "", fmt.Errorf("context %q has an invalid safety level %q (valid values: %v): pass --safety-level to set it",
+			contextName, stored, config.ValidSafetyLevels())
+	}
+	saved = stored
+	if saved == "" {
+		saved = flagLevel
+	}
+	return saved, cfg.EffectiveSafetyLevelFor(&nc.Context), nil
+}
+
+// contextsNarrowedByLogin names the other contexts that use tokenName and are
+// allowed more than requested. A login replaces the stored token, so those
+// contexts lose the scopes their level relies on until one of them logs in
+// again.
+func contextsNarrowedByLogin(cfg *config.Config, contextName, tokenName string, requested config.SafetyLevel) []string {
+	var names []string
+	for i := range cfg.Contexts {
+		nc := &cfg.Contexts[i]
+		if nc.Name == contextName || nc.Context.TokenRef != tokenName {
+			continue
+		}
+		if safetyLevelPermitsMore(cfg.EffectiveSafetyLevelFor(&nc.Context), requested) {
+			names = append(names, nc.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// safetyLevelPermitsMore reports whether level a allows more than level b.
+// config.ValidSafetyLevels lists the levels from most to least restrictive;
+// a value outside it is enforced as the default (see sdk/session's checker).
+func safetyLevelPermitsMore(a, b config.SafetyLevel) bool {
+	rank := func(l config.SafetyLevel) int {
+		if i := slices.Index(config.ValidSafetyLevels(), l); i >= 0 {
+			return i
+		}
+		return slices.Index(config.ValidSafetyLevels(), config.DefaultSafetyLevel)
+	}
+	return rank(a) > rank(b)
 }
 
 // Environment variables that supply client credentials grant parameters. They
@@ -715,11 +778,11 @@ Non-interactive login (CI/CD):
 				cfg = config.NewConfig()
 			}
 
-			// Re-authenticating a context keeps the level it already has:
-			// the flag's default is for a context that does not exist yet,
-			// and must not raise one that was set to readonly.
-			if !cmd.Flags().Changed("safety-level") {
-				safetyLevel = existingSafetyLevel(cfg, contextName, safetyLevel)
+			// safetyLevel is what the context stores from here on;
+			// scopeLevel is what the login asks the identity provider for.
+			safetyLevel, scopeLevel, err := loginSafetyLevels(cfg, contextName, safetyLevel, cmd.Flags().Changed("safety-level"))
+			if err != nil {
+				return err
 			}
 
 			// Ensure a token storage backend is available before starting OAuth flow.
@@ -762,11 +825,18 @@ Non-interactive login (CI/CD):
 			}
 
 			// Detect environment and create appropriate OAuth config with safety level
-			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, safetyLevel)
+			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, scopeLevel)
 
 			// Log which environment we detected
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Detected environment: %s", oauthConfig.Environment)
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Safety level: %s", oauthConfig.SafetyLevel)
+			if scopeLevel != safetyLevel {
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "The context declares %s; the global config allows this token %s, so the login requests %s scopes.", safetyLevel, scopeLevel, scopeLevel)
+			}
+			if narrowed := contextsNarrowedByLogin(cfg, contextName, tokenName, scopeLevel); len(narrowed) > 0 {
+				output.FprintWarning(currentStderr(cmdContext(cmd)), "Token '%s' is also used by %s, which allow more than %s. This login replaces it with a %s token.", tokenName, strings.Join(narrowed, ", "), scopeLevel, scopeLevel)
+				output.FprintHint(currentStderr(cmdContext(cmd)), "Log in to one of them afterwards to restore its scopes, or give this context its own token with --token-name.")
+			}
 
 			// Create OAuth flow
 			flow, err := auth.NewOAuthFlow(oauthConfig)
