@@ -53,6 +53,30 @@ const (
 	causeSamplingRefused = "sampling_refused"
 )
 
+// CauseWords is a query's Cause for a reader: the causes are identifiers a
+// program switches on, not something to print.
+func CauseWords(cause string) string {
+	switch cause {
+	case causeTimeout:
+		return "out of time"
+	case causeAuth:
+		return "not authorized"
+	case causeUnknownObject:
+		return "no such data object"
+	case causeTruncated:
+		return "cut short"
+	case causeRowLimit:
+		return "row limit"
+	case causeCancelled:
+		return "interrupted"
+	case causePredictedCap:
+		return "would pass the scan cap"
+	case causeSamplingRefused:
+		return "not sampled"
+	}
+	return cause
+}
+
 // samplingRung is one sampled retry of a record query.
 type samplingRung struct {
 	window string // from:now()-<window>
@@ -939,6 +963,9 @@ func failureCause(ctx context.Context, err error) string {
 	return causeError
 }
 
+// failureNote says what a query that gave no whole answer means for the
+// report. It names the consequence that holds whatever was found: a result
+// with no candidate has no verdict to cap.
 func failureNote(q *Query) string {
 	if q.ProcessGroupCheck() && q.Skipped {
 		// What this lookup would have found is a binding, never a
@@ -957,9 +984,9 @@ func failureNote(q *Query) string {
 	case causeCancelled:
 		return "discovery was interrupted, so the result is incomplete"
 	case causeTruncated:
-		return fmt.Sprintf("%s stopped at %s, so the verdict is capped at ambiguous", q.DataObject, truncationLimit(q.truncation))
+		return fmt.Sprintf("%s stopped at %s, so the result is partial", q.DataObject, truncationLimit(q.truncation))
 	case causeRowLimit:
-		return fmt.Sprintf("%s returned %d rows, the most a discovery query reads, so the verdict is capped at ambiguous",
+		return fmt.Sprintf("%s returned %d rows, the most a discovery query reads, so the result is partial",
 			q.DataObject, discoveryRowLimit)
 	case causeUnknownObject:
 		if !q.fallback() {

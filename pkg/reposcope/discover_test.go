@@ -608,7 +608,7 @@ func TestDiscover_FullPageCapsTheVerdict(t *testing.T) {
 	assert.True(t, r.Queries[0].Truncated)
 	assert.Equal(t, causeRowLimit, r.Queries[0].Cause)
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
-	assert.Equal(t, "spans returned 200 rows, the most a discovery query reads, so the verdict is capped at ambiguous", r.Notes[0])
+	assert.Equal(t, "spans returned 200 rows, the most a discovery query reads, so the result is partial", r.Notes[0])
 
 	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
 		"spans": {{records: []map[string]interface{}{
@@ -1172,7 +1172,7 @@ func TestDiscover_SamplingRefusedByGrail(t *testing.T) {
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 	assert.Equal(t, []string{
 		"this environment did not sample spans, so there is no cheaper query than the capped one",
-		"spans stopped at the 5 GB scan cap, so the verdict is capped at ambiguous",
+		"spans stopped at the 5 GB scan cap, so the result is partial",
 	}, r.Notes)
 	assert.Empty(t, r.SamplingNotes())
 }

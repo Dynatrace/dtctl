@@ -191,7 +191,7 @@ func TestDiscover_TypedResultLimitIsACutPage(t *testing.T) {
 			assert.Equal(t, tc.partial, r.Queries[0].Truncated)
 			if tc.partial {
 				assert.Equal(t, VerdictAmbiguous, r.Verdict)
-				assert.Equal(t, []string{"spans stopped at Grail's result limit, so the verdict is capped at ambiguous"}, r.Notes)
+				assert.Equal(t, []string{"spans stopped at Grail's result limit, so the result is partial"}, r.Notes)
 			} else {
 				assert.Equal(t, VerdictMatch, r.Verdict)
 				assert.Empty(t, r.Notes)
@@ -469,7 +469,7 @@ func TestDiscover_RefusedRungAfterAnEmptyOne(t *testing.T) {
 	assert.Equal(t, causeSamplingRefused, r.Queries[2].Cause)
 	assert.Equal(t, []string{
 		"this environment did not sample spans, so there is no cheaper query than the capped one",
-		"spans stopped at the 5 GB scan cap, so the verdict is capped at ambiguous",
+		"spans stopped at the 5 GB scan cap, so the result is partial",
 	}, r.Notes)
 	assert.True(t, r.Partial)
 	assert.False(t, r.SampledRecords(), "nothing was read by a sample")

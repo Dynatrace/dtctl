@@ -486,7 +486,7 @@ func TestRepoScopeDiscoverReadsEveryNotification(t *testing.T) {
 		partial       bool
 		note          string
 	}{
-		"a typed result limit":         {typedLimit, 2, true, "spans stopped at Grail's result limit, so the verdict is capped at ambiguous"},
+		"a typed result limit":         {typedLimit, 2, true, "spans stopped at Grail's result limit, so the result is partial"},
 		"the message alone":            {message, 2, false, ""},
 		"the scan cap after a message": {message + "," + scanCap, 3, false, "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
 		"the scan cap before a limit":  {scanCap + "," + typedLimit, 3, false, "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},

@@ -64,7 +64,7 @@ func TestDiscoverTruncationNotes(t *testing.T) {
 			require.Len(t, runner.sent, 2, "no sampled retry")
 			require.True(t, r.Partial)
 			require.Equal(t, VerdictAmbiguous, r.Verdict)
-			require.Equal(t, []string{"spans stopped at " + tc.note + ", so the verdict is capped at ambiguous"}, r.Notes)
+			require.Equal(t, []string{"spans stopped at " + tc.note + ", so the result is partial"}, r.Notes)
 		})
 	}
 	// On a record query a result limit is an id list cut at its maxLength
@@ -76,7 +76,7 @@ func TestDiscoverTruncationNotes(t *testing.T) {
 		}}, singleGo(t), prodHost)
 		require.NoError(t, err)
 		require.True(t, r.Partial)
-		require.Equal(t, []string{"dt.entity.service stopped at Grail's result limit, so the verdict is capped at ambiguous"}, r.Notes)
+		require.Equal(t, []string{"dt.entity.service stopped at Grail's result limit, so the result is partial"}, r.Notes)
 	})
 }
 

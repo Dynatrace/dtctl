@@ -59,7 +59,7 @@ func TestRepoScopeDiscoveryExplainsIncompleteNoMatch(t *testing.T) {
 	var out bytes.Buffer
 	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), 0)
 	require.Contains(t, out.String(), "skipped")
-	require.Contains(t, out.String(), "failed (auth)")
+	require.Contains(t, out.String(), "failed (not authorized)")
 	require.Contains(t, out.String(), "200 matched, capped")
 	require.Contains(t, out.String(), "2 of 3 queries ran")
 }
@@ -246,4 +246,31 @@ func TestRepoScopeDiscoveryTableHoldsControlCharacters(t *testing.T) {
 		"2  prod-us   payments/ledger    -              -              -        exact\n"+
 		"   second evidence\n")
 	require.Contains(t, out.String(), "Note: a note with �[2J in it\n")
+}
+
+// The Tried list is read by a person: a query's cause is printed in words,
+// not as the identifier a program switches on.
+func TestRepoScopeQueryOutcomeIsInWords(t *testing.T) {
+	for cause, want := range map[string]string{
+		"timeout":          "failed (out of time)",
+		"auth":             "failed (not authorized)",
+		"unknown_object":   "failed (no such data object)",
+		"error":            "failed (error)",
+		"cancelled":        "failed (interrupted)",
+		"predicted_cap":    "skipped (would pass the scan cap)",
+		"sampling_refused": "7 matched (not sampled)",
+		"row_limit":        "7 matched (row limit)",
+	} {
+		q := reposcope.Query{Cause: cause, Rows: 7}
+		switch cause {
+		case "predicted_cap":
+			q.Skipped = true
+		case "sampling_refused", "row_limit":
+		default:
+			q.Error = "it failed"
+		}
+		require.Equal(t, want, repoScopeQueryOutcome(q))
+	}
+	require.Equal(t, "skipped (interrupted)", repoScopeQueryOutcome(reposcope.Query{Skipped: true, Cause: "cancelled"}))
+	require.Equal(t, "7 matched, capped", repoScopeQueryOutcome(reposcope.Query{Truncated: true, Cause: "truncated", Rows: 7}))
 }

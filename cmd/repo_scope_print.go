@@ -404,15 +404,15 @@ func writeRepoScopeHandLinks(w io.Writer, p repoScopeProposal) {
 func repoScopeQueryOutcome(q reposcope.Query) string {
 	switch {
 	case q.Skipped && q.Cause != "":
-		return "skipped (" + q.Cause + ")"
+		return "skipped (" + reposcope.CauseWords(q.Cause) + ")"
 	case q.Skipped:
 		return "skipped"
 	case q.Error != "":
-		return "failed (" + q.Cause + ")"
+		return "failed (" + reposcope.CauseWords(q.Cause) + ")"
 	case q.Truncated:
 		return strconv.Itoa(q.Rows) + " matched, capped"
 	case q.Cause != "":
-		return strconv.Itoa(q.Rows) + " matched (" + q.Cause + ")"
+		return strconv.Itoa(q.Rows) + " matched (" + reposcope.CauseWords(q.Cause) + ")"
 	}
 	return strconv.Itoa(q.Rows) + " matched"
 }
