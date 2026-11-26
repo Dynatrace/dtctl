@@ -228,6 +228,19 @@ func TestRepoFS(t *testing.T) {
 	assert.Equal(t, []string{"module orders go.mod:1"}, tokenLines(s.tokens))
 }
 
+// A Location is what Locate returns. One without a path names no file, and
+// is refused before anything is read from or written to the working
+// directory.
+func TestLocationWithoutAPathIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	_, err := Load(Location{})
+	require.EqualError(t, err, "reposcope: a Location without a Path names no file; use Locate")
+	require.EqualError(t, Save(Location{}, exampleFile()), "reposcope: a Location without a Path names no file; use Locate")
+	require.EqualError(t, Save(Location{}, &File{}), "reposcope: a Location without a Path names no file; use Locate")
+	assertOnlyEntries(t, dir)
+}
+
 // Deleting the last entry removes the file, but not one that holds a key
 // this dtctl does not know: a newer dtctl wrote something there.
 func TestSave_KeepsAFileWithUnknownKeysWhenTheLastEntryGoes(t *testing.T) {

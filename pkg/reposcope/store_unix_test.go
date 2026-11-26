@@ -4,6 +4,7 @@ package reposcope
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -90,4 +91,22 @@ func TestSave_ReplacesTheFile(t *testing.T) {
 	seen, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.Equal(t, old, seen)
+}
+
+// The temp file of a save is the scope file's name with a suffix, so the
+// patterns that ignore one ignore the other.
+func TestSave_TempFileName(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to a read-only directory")
+	}
+	root := newRepo(t)
+	loc, _, err := Locate(root)
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(root, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+
+	err = Save(loc, exampleFile())
+	var pathErr *fs.PathError
+	require.ErrorAs(t, err, &pathErr)
+	require.Regexp(t, `^\.dtctl-repo-scope\.yaml\.\d+\.tmp$`, filepath.Base(pathErr.Path))
 }

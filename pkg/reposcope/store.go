@@ -84,6 +84,11 @@ func gitRoot(dir string) (string, bool) {
 	}
 }
 
+// errNoPath refuses the zero Location. Its path would be the working
+// directory's, which is not where a caller that forgot Locate means to read
+// or write.
+var errNoPath = errors.New("reposcope: a Location without a Path names no file; use Locate")
+
 // Load reads and validates the file at loc.Path. A missing file yields an
 // empty, valid File, so a caller that saves can start from Load.
 //
@@ -91,6 +96,9 @@ func gitRoot(dir string) (string, bool) {
 // cloned repository could otherwise point the file at /dev/zero or a FIFO and
 // hang every query run inside it.
 func Load(loc Location) (*File, error) {
+	if loc.Path == "" {
+		return nil, errNoPath
+	}
 	data, err := readRegular(os.DirFS(filepath.Dir(loc.Path)), filepath.Base(loc.Path))
 	var invalidErr *InvalidError
 	switch {
@@ -122,6 +130,9 @@ func Load(loc Location) (*File, error) {
 // writing would drop. Comments and key order are not preserved; the header is
 // rewritten.
 func Save(loc Location, f *File) error {
+	if loc.Path == "" {
+		return errNoPath
+	}
 	if err := f.check(); err != nil {
 		err.Source = loc.Path
 		return err
@@ -146,7 +157,7 @@ func Save(loc Location, f *File) error {
 // writeAtomic replaces path with data so that a reader sees either the old
 // file or the new one, never a mix.
 func writeAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+FileName+".*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(path), FileName+".*.tmp")
 	if err == nil {
 		_, err = tmp.Write(data)
 		err = errors.Join(err, tmp.Sync(), tmp.Chmod(fileMode), tmp.Close())
