@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-resty/resty/v2"
+
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
@@ -618,5 +620,153 @@ func TestValidateTimeframeLength(t *testing.T) {
 		if got := fmt.Sprint(err); (tc.wantErr == "" && err != nil) || (tc.wantErr != "" && got != tc.wantErr) {
 			t.Errorf("validate(from=%d, to=%d) = %v, want %q", tc.from, tc.to, err, tc.wantErr)
 		}
+	}
+}
+
+// A Retry-After too large for a Duration must wait the cap, not wrap around to
+// a negative wait that sends the next submit at once.
+func TestThrottleWait(t *testing.T) {
+	defer func(d time.Duration) { throttleBaseWait = d }(throttleBaseWait)
+	throttleBaseWait = 5 * time.Second
+
+	cases := []struct {
+		retryAfter string
+		attempt    int
+		want       time.Duration
+	}{
+		{"", 1, 5 * time.Second},
+		{"", 2, 10 * time.Second},
+		{"", 9, 60 * time.Second},
+		{"0", 1, 0},
+		{"7", 3, 7 * time.Second},
+		{"61", 1, 60 * time.Second},
+		{"10000000000", 1, 60 * time.Second},
+		{"9223372036854775807", 1, 60 * time.Second},
+		{"-1", 1, 5 * time.Second},
+		{"soon", 2, 10 * time.Second},
+	}
+	for _, tc := range cases {
+		raw := &http.Response{Header: http.Header{}}
+		if tc.retryAfter != "" {
+			raw.Header.Set("Retry-After", tc.retryAfter)
+		}
+		if got := throttleWait(&resty.Response{RawResponse: raw}, tc.attempt); got != tc.want {
+			t.Errorf("throttleWait(Retry-After %q, attempt %d) = %s, want %s", tc.retryAfter, tc.attempt, got, tc.want)
+		}
+	}
+}
+
+// The submit answers 200 with the result, 202 with a token and 204 when there
+// is nothing to analyse. Any other status that is not a failure is not one of
+// the API's answers, and must not be read as a 202.
+func TestSubmitStatus(t *testing.T) {
+	ok := Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2}
+
+	resp, err := phaseServer(t, http.StatusNoContent, 0).Run(context.Background(), ok)
+	if err != nil {
+		t.Fatalf("submit 204: %v", err)
+	}
+	if resp.Status != "no-data" || resp.PollCount != 0 || resp.Kind != KindHotspots || resp.EntityID != "PROCESS_GROUP-ABC" || resp.Result != nil {
+		t.Errorf("submit 204 = %+v, want no-data for the payload's kind and entity, unpolled, without a result", *resp)
+	}
+
+	_, err = phaseServer(t, http.StatusNonAuthoritativeInfo, 0).Run(context.Background(), ok)
+	var runErr *Error
+	if !errors.As(err, &runErr) || runErr.Phase != PhaseSubmit {
+		t.Fatalf("submit 203: err = %v, want an *Error of the submit phase", err)
+	}
+	if want := "codelevelanalysis: submit: unexpected status 203"; err.Error() != want {
+		t.Errorf("submit 203: err = %q, want %q", err, want)
+	}
+}
+
+// pollHandler starts an analysis and answers the n-th poll with answer(n).
+func pollHandler(t *testing.T, answer func(w http.ResponseWriter, n int)) *Handler {
+	t.Helper()
+	old := pollInterval
+	pollInterval = time.Millisecond
+	t.Cleanup(func() { pollInterval = old })
+
+	polls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/result") {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"token":"tok-poll"}`))
+			return
+		}
+		polls++
+		answer(w, polls)
+	}))
+	t.Cleanup(srv.Close)
+	c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, 0, 0))
+	if err != nil {
+		t.Fatalf("httpclient.New: %v", err)
+	}
+	return NewHandler(c)
+}
+
+// When the poll budget ends, the error says what the last poll met. Only an
+// analysis that was still running (202) did not complete; a throttled last
+// poll is the API's 429 and a dropped one a transport failure.
+func TestPollBudgetEndsOnTheLastAnswer(t *testing.T) {
+	ok := Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2}
+
+	t.Run("throttled", func(t *testing.T) {
+		_, err := pollHandler(t, func(w http.ResponseWriter, _ int) {
+			w.WriteHeader(http.StatusTooManyRequests)
+		}).Run(context.Background(), ok)
+		var apiErr *httpclient.APIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("err = %v, want an APIError with status 429", err)
+		}
+		if errors.Is(err, ErrNotCompleted) {
+			t.Errorf("err = %v matches ErrNotCompleted; the analysis was never seen running", err)
+		}
+		var runErr *Error
+		if !errors.As(err, &runErr) || runErr.Phase != PhasePoll {
+			t.Errorf("err = %v, want an *Error of the poll phase", err)
+		}
+	})
+
+	t.Run("connection lost", func(t *testing.T) {
+		_, err := pollHandler(t, func(w http.ResponseWriter, n int) {
+			if n < maxPollAttempts {
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
+			dropConn(t, w)
+		}).Run(context.Background(), ok)
+		if err == nil || errors.Is(err, ErrNotCompleted) {
+			t.Fatalf("err = %v, want the transport failure of the last poll", err)
+		}
+		if want := "codelevelanalysis: poll failed on the last of 40 attempts (token tok-poll): "; !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("err = %q, want it to start with %q", err, want)
+		}
+	})
+
+	t.Run("still running", func(t *testing.T) {
+		_, err := pollHandler(t, func(w http.ResponseWriter, _ int) {
+			w.WriteHeader(http.StatusAccepted)
+		}).Run(context.Background(), ok)
+		if !errors.Is(err, ErrNotCompleted) {
+			t.Fatalf("err = %v, want ErrNotCompleted", err)
+		}
+		// ErrNotCompleted is wrapped, not imitated: Unwrap reaches it.
+		var runErr *Error
+		if !errors.As(err, &runErr) || errors.Unwrap(runErr.Err) != ErrNotCompleted {
+			t.Errorf("errors.Unwrap(%v) is not ErrNotCompleted", err)
+		}
+		if want := "codelevelanalysis: analysis did not complete within 0s (token tok-poll)"; err.Error() != want {
+			t.Errorf("err = %q, want %q", err, want)
+		}
+	})
+}
+
+// LeafType decides the servicefilter whenever it is set, also when it selects
+// the total, which is sent as no filter at all.
+func TestLeafTypeTotalOverridesRawServiceFilter(t *testing.T) {
+	p := Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2, ServiceFilter: "42\x110", LeafType: LeafTypeTotal}
+	if got, want := buildSubmitPath(p), basePath+"/methodhotspots/PROCESS_GROUP-ABC?from=1&to=2"; got != want {
+		t.Errorf("buildSubmitPath = %q, want %q", got, want)
 	}
 }

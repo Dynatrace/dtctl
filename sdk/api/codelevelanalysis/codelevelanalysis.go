@@ -70,14 +70,6 @@ func (e *Error) Unwrap() error { return e.Err }
 // was still running after the last poll.
 var ErrNotCompleted = errors.New("codelevelanalysis: analysis did not complete")
 
-// notCompletedError carries the text of the poll that gave up, and matches
-// ErrNotCompleted.
-type notCompletedError struct{ text string }
-
-func (e *notCompletedError) Error() string { return e.text }
-
-func (e *notCompletedError) Is(target error) bool { return target == ErrNotCompleted }
-
 // Kind names an analysis by its API name, which is also the kind a Response
 // reports.
 type Kind string
@@ -172,8 +164,8 @@ type Payload struct {
 	To       int64  `json:"to"`
 	// LeafType selects which CPU samples to attribute (hotspots/threads):
 	// "total" (default), "service", or "background". It is the friendly form of
-	// ServiceFilter and, when set to a non-total value, populates the
-	// servicefilter param via the control-char encoding. See LeafType* consts.
+	// ServiceFilter and, when set, decides the servicefilter param via the
+	// control-char encoding ("total" sends none). See LeafType* consts.
 	LeafType string `json:"leafType,omitempty"`
 	// ServiceFilter is the raw servicefilter wire value — an escape hatch for
 	// SDK callers who already hold an encoded filter. LeafType takes precedence
@@ -221,15 +213,23 @@ func (h *Handler) Run(ctx context.Context, p Payload) (*Response, error) {
 		return nil, &Error{Phase: PhaseSubmit, Err: err}
 	}
 
-	if resp.StatusCode() == 200 {
+	switch sc := resp.StatusCode(); sc {
+	case http.StatusOK:
 		result, err := parseResult(p, 0, resp.Body())
 		if err != nil {
 			return nil, &Error{Phase: PhaseSubmit, Err: err}
 		}
 		return result, nil
+	case http.StatusNoContent:
+		return &Response{Status: "no-data", Kind: p.Kind, EntityID: p.EntityID}, nil
+	case http.StatusAccepted:
+		// async task started — extract token and poll
+	default:
+		// submit already turned 4xx/5xx into an error, so this is a status
+		// the API is not known to answer with. It carries no token to poll.
+		return nil, &Error{Phase: PhaseSubmit, Err: fmt.Errorf("codelevelanalysis: submit: unexpected status %d", sc)}
 	}
 
-	// 202: async task started — extract token and poll
 	var pt progressToken
 	if err := json.Unmarshal(resp.Body(), &pt); err != nil || pt.Token == "" {
 		return nil, &Error{Phase: PhaseSubmit, Err: fmt.Errorf("codelevelanalysis: submit returned 202 without a progress token")}
@@ -258,7 +258,7 @@ func (h *Handler) submit(ctx context.Context, path string) (*resty.Response, err
 			return nil, fmt.Errorf("codelevelanalysis: submit: %w", err)
 		}
 		if resp.StatusCode() != http.StatusTooManyRequests || attempt >= maxThrottledSubmits {
-			// CheckResponse only errors on 4xx/5xx, so a 200 or 202 passes.
+			// CheckResponse only errors on 4xx/5xx; Run reads the other statuses.
 			if err := httpclient.CheckResponse(resp); err != nil {
 				return nil, fmt.Errorf("codelevelanalysis: submit: %w", err)
 			}
@@ -278,7 +278,9 @@ func throttleWait(resp *resty.Response, attempt int) time.Duration {
 	wait := throttleBaseWait << (attempt - 1)
 	if v := strings.TrimSpace(resp.Header().Get("Retry-After")); v != "" {
 		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
-			wait = time.Duration(secs) * time.Second
+			// Capped before the multiplication, which would wrap around to a
+			// negative wait for a large enough number of seconds.
+			wait = time.Duration(min(secs, int(maxThrottleWait/time.Second))) * time.Second
 		} else if t, err := http.ParseTime(v); err == nil {
 			wait = max(time.Until(t), 0)
 		}
@@ -306,6 +308,9 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 	// async task, so every poll must be routed back to it.
 	resultPath := fmt.Sprintf("%s/result?token=%s&serverId=%d", basePath, url.QueryEscape(token), serverID)
 	transportErrors := 0
+	// failed is why the latest poll did not answer for the analysis: nil when
+	// it said the analysis is still running.
+	var failed error
 
 	for attempt := 1; attempt <= maxPollAttempts; attempt++ {
 		select {
@@ -327,6 +332,7 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 			if transportErrors >= maxPollTransportErrors {
 				return nil, fmt.Errorf("codelevelanalysis: poll failed %d times in a row (token %s): %w", transportErrors, token, err)
 			}
+			failed = fmt.Errorf("codelevelanalysis: poll failed on the last of %d attempts (token %s): %w", maxPollAttempts, token, err)
 			continue
 		}
 		transportErrors = 0
@@ -336,11 +342,15 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 			return parseResult(p, attempt, resp.Body())
 		case http.StatusNoContent:
 			return &Response{Status: "no-data", Kind: p.Kind, EntityID: p.EntityID, PollCount: attempt}, nil
-		case http.StatusAccepted, http.StatusTooManyRequests:
-			// 202: still running. 429: rate limited (the shared client already
-			// retried a few times at the transport layer); a burst of 429s must
-			// not abort an otherwise-healthy analysis, so keep polling the same
-			// node. These are the only statuses that are polled again.
+		case http.StatusAccepted:
+			// Still running: poll again.
+			failed = nil
+		case http.StatusTooManyRequests:
+			// Rate limited (the shared client already retried a few times at
+			// the transport layer); a burst of 429s must not abort an
+			// otherwise-healthy analysis, so keep polling the same node. 202
+			// and 429 are the only statuses that are polled again.
+			failed = fmt.Errorf("codelevelanalysis: poll (token %s): %w", token, httpclient.CheckResponse(resp))
 		default:
 			// Any other status is terminal: an expired or unknown task (404), a
 			// missing scope (403), a server error. Report it as the API's own
@@ -353,8 +363,12 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 		}
 	}
 
-	return nil, &notCompletedError{text: fmt.Sprintf("codelevelanalysis: analysis did not complete within %ds (token %s)",
-		int(maxPollAttempts*pollInterval/time.Second), token)}
+	if failed != nil {
+		// The budget ended on a poll that got no answer about the analysis: it
+		// was not seen still running, so this is that poll's failure.
+		return nil, failed
+	}
+	return nil, fmt.Errorf("%w within %ds (token %s)", ErrNotCompleted, int(maxPollAttempts*pollInterval/time.Second), token)
 }
 
 func parseResult(p Payload, pollCount int, body []byte) (*Response, error) {
@@ -414,12 +428,13 @@ func buildSubmitPath(p Payload) string {
 	path := "memoryallocationdetails"
 	switch p.Kind {
 	case KindHotspots, KindThreads:
-		// LeafType wins when set; otherwise fall back to a raw ServiceFilter.
-		// Both encoders were already validated in validate(), so the error here
-		// is impossible — ignore it to keep this path total.
+		// LeafType wins when set, also when it selects the total (no filter);
+		// otherwise fall back to a raw ServiceFilter. validate() already
+		// checked the leaf type, so the error here is impossible — ignore it
+		// to keep this path total.
 		serviceFilter := p.ServiceFilter
-		if encoded, _ := encodeLeafType(p.LeafType); encoded != "" {
-			serviceFilter = encoded
+		if p.LeafType != "" {
+			serviceFilter, _ = encodeLeafType(p.LeafType)
 		}
 		setIfSet("servicefilter", serviceFilter)
 		setIfTrue("showWaiting", p.ShowWaiting)
