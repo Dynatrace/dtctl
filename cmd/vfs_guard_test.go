@@ -57,15 +57,17 @@ var hostFileAccessAllowlist = map[string]string{
 
 	// Test-only helper: golden files are repository state, read and written by
 	// the test suite, never by a command.
-	"cmd/testutil/golden.go": "golden-file helper for tests — repository state, not reachable from a command",
+	"cmd/testutil/golden.go":  "golden-file helper for tests — repository state, not reachable from a command",
+	"cmd/testutil/helpers.go": "temp-file helper for tests, in the test's own temp directory; not reachable from a command",
 
 	// Spill machinery writes results to, and lists them from, a host directory
 	// dtctl chooses. It requires the HostDiskSpill capability, which embedded
 	// callers do not grant: a spilled file would outlive the request on the
 	// server's disk and the path returned would be unreadable by the caller.
-	"pkg/output/spill.go":      "writes/prunes dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
-	"pkg/output/spill_list.go": "enumerates dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
-	"pkg/inspect/reader.go":    "streams a spilled result file from the host disk; `inspect` is blocked in a service and nothing spills there",
+	"pkg/output/spill.go":        "writes/prunes dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
+	"pkg/output/spill_list.go":   "enumerates dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
+	"pkg/output/spill_stream.go": "streams rows into a temp file in dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
+	"pkg/inspect/reader.go":      "streams a spilled result file from the host disk; `inspect` is blocked in a service and nothing spills there",
 
 	// The usage ledger is a counter file dtctl keeps in its own XDG state
 	// directory for a context that opted in. Recording needs the
@@ -90,7 +92,9 @@ var hostFileAccessAllowlist = map[string]string{
 }
 
 // hostFileAccessCalls are the direct host-filesystem entry points that bypass
-// the vfs seam. os.Stdin/os.Stdout/os.Stderr are deliberately absent: the
+// the vfs seam: the calls that read or write a file, and the ones that reach
+// one without them (a directory as an fs.FS, a temp file renamed into place,
+// an inspection that does not follow links). os.Stdin/os.Stdout/os.Stderr are deliberately absent: the
 // stream seam swaps those variables per invocation (see stdio.go), so using
 // them is correct. Opening "/dev/stdin" as a *path* is not — that reaches the
 // process's real fd 0, past the redirection, and does not exist on Windows.
@@ -101,6 +105,9 @@ var hostFileAccessCalls = []string{
 	"os.OpenFile(",
 	"os.Create(",
 	"os.ReadDir(",
+	"os.DirFS(",
+	"os.CreateTemp(",
+	"os.Lstat(",
 	`"/dev/stdin"`,
 }
 
