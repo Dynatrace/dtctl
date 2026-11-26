@@ -357,6 +357,25 @@ func TestRepoScopeSetTakesOneNamespaceAndCluster(t *testing.T) {
 	require.Equal(t, []reposcope.Workload{{Namespace: "b", Name: "one"}}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[2].Workloads)
 }
 
+// A context whose URL ends its host with the dot of a fully qualified name
+// is the same environment: it reads and writes the entries of the host
+// without the dot, the only spelling the file takes.
+func TestRepoScopeHostWithATrailingDot(t *testing.T) {
+	writeIsolatedConfig(t, safetyLevelConfig("https://abc12345.apps.dynatrace.com./", "readonly"))
+	repo := chdirTestRepo(t, monorepoScope)
+	chdirSubdir(t, "services/checkout")
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "checkout  (services/checkout · abc12345.apps.dynatrace.com)\n", stdout)
+
+	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "tools", "--service-name", "tools"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	t.Chdir(repo)
+	f := loadScopeFile(t, repo)
+	require.Equal(t, []string{repoScopeTestEnvHost}, f.Hosts())
+	require.Equal(t, []string{"checkout", "ledger", "tools"}, f.Names(repoScopeTestEnvHost))
+}
+
 // --cluster-uid qualifies the --workload names, as --namespace does.
 func TestRepoScopeSetClusterUID(t *testing.T) {
 	const uid = "11111111-2222-3333-4444-555555555555"

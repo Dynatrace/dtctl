@@ -237,7 +237,9 @@ func repoScopeHost(cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	host := urls.Host(current.Environment)
+	// The dot that ends a fully qualified name is not part of the key: the
+	// file takes a host without it, and it is the same environment.
+	host := strings.TrimSuffix(urls.Host(current.Environment), ".")
 	if host == "" {
 		return "", fmt.Errorf("context %q has no environment URL to key a repo scope by", cfg.CurrentContext)
 	}
