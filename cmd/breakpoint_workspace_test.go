@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -136,4 +137,35 @@ func TestBreakpoint_WorkspaceIsResolvedBeforeTheClient(t *testing.T) {
 			require.Equal(t, "not_found", agentError(t, stdout).Code, stdout)
 		})
 	}
+}
+
+// A breakpoint that is not found is not found in one workspace, and the
+// error says which: the workspace depends on where the command ran, so that
+// is the first thing to check.
+func TestBreakpoint_NotFoundNamesTheWorkspace(t *testing.T) {
+	for _, argv := range [][]string{
+		{"update", "breakpoint", "B.java:9", "--enabled=false"},
+		{"delete", "breakpoint", "B.java:9", "--yes"},
+		{"describe", "breakpoint", "B.java:9"},
+		{"describe", "breakpoint", "dtctl-rule-9999"},
+		{"get", "snapshots", "B.java:9"},
+		{"get", "snapshots", "dtctl-rule-9999"},
+	} {
+		t.Run(strings.Join(argv[:3], " "), func(t *testing.T) {
+			newLiveDebuggerStub(t, "readwrite-all").rules = []interface{}{ruleAt("A.java", 1, "")}
+			chdirTestRepo(t, breakpointScope)
+			chdirSubdir(t, filepath.Join("services", "ledger"))
+
+			code, stdout, _ := runRepoScoped(append(argv, "--agent"), RunOptions{})
+			require.NotZero(t, code)
+			require.Contains(t, agentError(t, stdout).Message, " in workspace "+filepath.Base(filepath.Dir(filepath.Dir(mustGetwd(t))))+"/ledger")
+		})
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	return dir
 }

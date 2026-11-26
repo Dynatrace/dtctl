@@ -248,7 +248,7 @@ Examples:
 				return err
 			}
 
-			targetRules, targetDescription, allowDirectID, err := resolveBreakpointRulesForEdit(rules, identifier)
+			targetRules, targetDescription, allowDirectID, err := resolveBreakpointRulesForEdit(rules, identifier, workspace)
 			if err != nil {
 				return err
 			}
@@ -322,11 +322,15 @@ Examples:
 	return c
 }
 
-func resolveBreakpointRulesForEdit(rules []livedebugger.BreakpointRule, identifier string) ([]livedebugger.BreakpointRule, string, bool, error) {
+// resolveBreakpointRulesForEdit finds the rules identifier names among rules,
+// the breakpoints of workspace: by location, where none is an error naming
+// the workspace, or by id, where none leaves the identifier to be tried as an
+// id directly (allowDirectID).
+func resolveBreakpointRulesForEdit(rules []livedebugger.BreakpointRule, identifier, workspace string) ([]livedebugger.BreakpointRule, string, bool, error) {
 	if fileName, lineNumber, err := parseBreakpoint(identifier); err == nil {
 		matches := findBreakpointRulesByLocation(rules, fileName, lineNumber)
 		if len(matches) == 0 {
-			return nil, "", false, fmt.Errorf("no breakpoints found at %s:%d", fileName, lineNumber)
+			return nil, "", false, fmt.Errorf("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 		}
 		return matches, fmt.Sprintf("%s:%d", fileName, lineNumber), false, nil
 	}

@@ -104,12 +104,12 @@ Use -o json / -o yaml for structured output.`,
 			}
 
 			identifier := args[0]
-			matchedRules, _, _, err := resolveBreakpointRulesForEdit(rules, identifier)
+			matchedRules, _, _, err := resolveBreakpointRulesForEdit(rules, identifier, workspace)
 			if err != nil {
 				return err
 			}
 			if len(matchedRules) == 0 {
-				return fmt.Errorf("no breakpoint found with identifier %q", identifier)
+				return fmt.Errorf("no breakpoint found with identifier %q in workspace %s", identifier, workspace)
 			}
 
 			rule := matchedRules[0]

@@ -120,7 +120,7 @@ Examples:
 			if fileName, lineNumber, err := parseBreakpoint(identifier); err == nil {
 				targets := findBreakpointRowsByLocation(rows, fileName, lineNumber)
 				if len(targets) == 0 {
-					return fmt.Errorf("no breakpoints found at %s:%d", fileName, lineNumber)
+					return fmt.Errorf("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 				}
 				return runDeleteBreakpointRowsWithOps(cmdContext(cmd), handler, workspaceID, workspace, targets, yes, verbose, ops)
 			}

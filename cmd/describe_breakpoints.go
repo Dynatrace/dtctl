@@ -144,12 +144,12 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
-	targetRules, _, allowDirectID, err := resolveBreakpointRulesForEdit(rules, strings.TrimSpace(identifier))
+	targetRules, _, allowDirectID, err := resolveBreakpointRulesForEdit(rules, strings.TrimSpace(identifier), workspace)
 	if err != nil {
 		return err
 	}
 	if allowDirectID {
-		return fmt.Errorf("no breakpoint found with identifier %q", strings.TrimSpace(identifier))
+		return fmt.Errorf("no breakpoint found with identifier %q in workspace %s", strings.TrimSpace(identifier), workspace)
 	}
 
 	results := make([]breakpointStatusResult, 0, len(targetRules))
