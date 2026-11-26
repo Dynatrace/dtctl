@@ -470,12 +470,14 @@ func (d *discovery) explain(c *Candidate) {
 // ownsProcessGroups reports whether c's process groups can stand for it: all
 // of them are listed, read whole, and no candidate of another workload
 // carries one. A binding by them then selects no other candidate's records.
+// Candidates whose records name no workload are not one workload: each is
+// another to the rest.
 func (d *discovery) ownsProcessGroups(c *Candidate) bool {
 	if len(c.ProcessGroups) == 0 || c.ProcessGroupsCapped || c.Sampled {
 		return false
 	}
 	for _, o := range d.records {
-		if o.cluster == c.cluster && o.Namespace == c.Namespace && o.Workload == c.Workload {
+		if o == c || (c.Workload != "" && o.cluster == c.cluster && o.Namespace == c.Namespace && o.Workload == c.Workload) {
 			continue
 		}
 		if slices.ContainsFunc(o.ProcessGroups, func(id string) bool { return slices.Contains(c.ProcessGroups, id) }) {

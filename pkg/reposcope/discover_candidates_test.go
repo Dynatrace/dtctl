@@ -68,3 +68,31 @@ func TestDiscover_RowWithoutServiceNameJoinsItsWorkload(t *testing.T) {
 		assert.Equal(t, VerdictAmbiguous, r.Verdict)
 	})
 }
+
+// Two candidates whose records name no workload are two services, not one
+// workload: a process group both carry is neither's alone. The first was
+// credited with the second's logs, and its line would have bound the group.
+func TestDiscover_ProcessGroupSharedByServicesWithoutAWorkload(t *testing.T) {
+	row := func(serviceName string, records float64) map[string]interface{} {
+		return map[string]interface{}{fieldServiceName: serviceName, fieldRecords: records,
+			fieldProcessGroups: collected(pgID), fieldProcessGroupCount: float64(1)}
+	}
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{row("checkout", 100)}}},
+		"logs": {
+			{records: []map[string]interface{}{row("checkout-service", 5000)}},
+			{records: []map[string]interface{}{pgLogs(5000, pgID)}},
+		},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	require.Len(t, r.Candidates, 2)
+	assert.Len(t, runner.sent, 2, "the group is not looked up for either")
+	for _, c := range r.Candidates {
+		assert.Zero(t, c.LogsByProcessGroup, c.ServiceName)
+	}
+	assert.Equal(t, []string{
+		"candidate 1 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group",
+	}, r.Notes)
+}
