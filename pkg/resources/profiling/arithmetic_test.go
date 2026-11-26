@@ -303,3 +303,35 @@ func TestCounts_MergedAllocationRowOverTheLimit(t *testing.T) {
 		t.Errorf("Stacks = %+v, want two rows and totals of %d", got, int64(math.MaxInt64))
 	}
 }
+
+// One function reached on two paths, each past half the largest count: its
+// total, the caller it shares and the callee it shares are sums over both.
+func TestCounts_FunctionOnTwoPathsOverTheLimit(t *testing.T) {
+	h := hotspotsOf(hotspotsResult("0",
+		snode("0", "", "", false, counts(), "P"),
+		snode("P", "C", "p", true, counts("RUNNING", 1e300), "A", "B"),
+		snode("A", "C", "x", true, counts("RUNNING", float64(big))),
+		snode("B", "C", "x", true, counts("RUNNING", float64(big))),
+	))
+
+	wantFns := FunctionView{Samples: math.MaxInt, Rows: []FunctionRow{
+		{Self: math.MaxInt, SelfPct: 100, Total: math.MaxInt, TotalPct: 100, Paths: 1, Function: "C.x"}, // one path: both frames fold to C.p;C.x
+		{Self: 0, SelfPct: 0, Total: math.MaxInt, TotalPct: 100, Paths: 1, Function: "C.p"},
+	}}
+	if got := mustFunctions(t, h, false, StateRunning); !reflect.DeepEqual(got, wantFns) {
+		t.Errorf("Functions = %+v\nwant %+v", got, wantFns)
+	}
+	want := FocusView{Function: "C.x", Total: math.MaxInt, Self: math.MaxInt, Callers: []FocusRow{
+		{Relation: "caller", Samples: math.MaxInt, Share: 100, Function: "C.p"},
+	}}
+	if got := mustFocus(t, h, false, StateRunning, "C.x"); !reflect.DeepEqual(got, want) {
+		t.Errorf("Focus(C.x) = %+v\nwant %+v", got, want)
+	}
+	want = FocusView{Function: "C.p", Total: math.MaxInt, Self: 0,
+		Callers: []FocusRow{{Relation: "caller", Samples: math.MaxInt, Share: 100, Function: RootCaller}},
+		Callees: []FocusRow{{Relation: "callee", Samples: math.MaxInt, Share: 100, Function: "C.x"}},
+	}
+	if got := mustFocus(t, h, false, StateRunning, "C.p"); !reflect.DeepEqual(got, want) {
+		t.Errorf("Focus(C.p) = %+v\nwant %+v", got, want)
+	}
+}
