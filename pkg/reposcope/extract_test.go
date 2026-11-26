@@ -760,6 +760,38 @@ func TestExtract_Gradle(t *testing.T) {
 			tokens: []string{"dir invoicing invoicing/", "artifact invoicing-service invoicing/build.gradle.kts:1"},
 		},
 		{
+			// A directory with a build file of its own below a library
+			// module is its own unit, not the deployable that owns the
+			// library.
+			name: "a build unit below a library module",
+			fsys: fstest.MapFS{
+				"settings.gradle":                  {Data: []byte("rootProject.name = 'storefront'\ninclude ':app', ':web', ':core'\n")},
+				"app/build.gradle":                 {Data: []byte("dependencies {\n    implementation project(':core')\n}\n")},
+				"app/Dockerfile":                   dockerfile,
+				"web/build.gradle":                 {Data: []byte("plugins { id 'java' }\n")},
+				"web/Dockerfile":                   dockerfile,
+				"core/build.gradle":                {Data: []byte("plugins { id 'java-library' }\n")},
+				"core/tools/notifier/package.json": {Data: []byte(`{"name": "notifier"}`)},
+			},
+			dir:    "core/tools/notifier",
+			unit:   "core/tools/notifier",
+			tokens: []string{"dir notifier core/tools/notifier/", "package notifier core/tools/notifier/package.json:1"},
+		},
+		{
+			// A settings file may include a module the checkout does not
+			// hold. Nothing is deployed from a directory that is not there,
+			// whatever chart is named like it.
+			name: "an included module that is not on disk",
+			fsys: fstest.MapFS{
+				"settings.gradle":            {Data: []byte("rootProject.name = 'storefront'\ninclude ':checkout', ':ledger'\n")},
+				"charts/checkout/Chart.yaml": {Data: []byte("name: checkout\n")},
+				"charts/ledger/Chart.yaml":   {Data: []byte("name: ledger\n")},
+			},
+			dir:    ".",
+			unit:   ".",
+			tokens: []string{"chart checkout charts/checkout/Chart.yaml:1", "chart ledger charts/ledger/Chart.yaml:1", "project storefront settings.gradle:1"},
+		},
+		{
 			// A test module is part of its build, and its directory name is
 			// not sent.
 			name: "a test module",

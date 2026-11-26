@@ -152,6 +152,9 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 	found = append(found, readRemote(fsys)...)
 
 	builds := readGradleBuilds(files, gradle, found)
+	for _, b := range builds {
+		b.dropMissing(fsys)
+	}
 	units := map[string]bool{".": true}
 	for _, f := range files {
 		if sourceFor(f).makesUnit && !builds.absorbs(f) {
