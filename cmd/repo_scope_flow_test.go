@@ -930,6 +930,35 @@ func TestRepoScopeDiscoverChecksScopes(t *testing.T) {
 	require.Equal(t, []string{recordQuery("spans"), recordQuery("logs")}, srv.queries())
 	require.Equal(t, []string{"auth", "auth"}, []string{report.Queries[8].Cause, report.Queries[9].Cause})
 	require.True(t, report.Partial)
+	// A query dtctl refused itself was never sent, and is not counted among
+	// those that ran.
+	require.True(t, report.Queries[8].Skipped && report.Queries[9].Skipped)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "  services by entity name            skipped (not authorized)  ")
+	require.Contains(t, stdout, "\n2 of 11 queries ran in ")
+}
+
+// A run interrupted before its first query sent nothing, and says so rather
+// than printing an empty list of values.
+func TestRepoScopeDiscoveryNothingSent(t *testing.T) {
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Environment: "127.0.0.1", Verdict: reposcope.VerdictNone, Partial: true, Sent: []string{},
+		Queries: []reposcope.Query{{Purpose: "spans by workload or service name", DQL: "fetch spans", Skipped: true, Cause: "cancelled"}}}
+	var out bytes.Buffer
+	printRepoScopeDiscovery(&out, r, repoScopeProposal{}, 0)
+	require.NotContains(t, out.String(), "Values sent:")
+	require.Contains(t, out.String(), "No value was sent.\n0 of 1 queries ran in 0.0s. Nothing was written.\n")
+}
+
+// A plan lists every query a run could send, and no run sends them all: the
+// entity searches run when the records find nothing, the process-group
+// lookup when they found a candidate. The preview says how many at most.
+func TestRepoScopeDiscoverDryRunCountsWhatARunCanSend(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	chdirCheckoutRepo(t)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, `Dry run: discovery for unit "." would send at most 10 of these 11 queries to the current context's environment; nothing was sent`)
 }
 
 // A run that outlives its deadline reports the queries that ran out of time,

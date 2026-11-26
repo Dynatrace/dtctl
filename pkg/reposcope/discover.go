@@ -179,6 +179,23 @@ type Plan struct {
 	tokens    []token
 }
 
+// MostSent is the most of the plan's queries one run can send. The plan lists
+// every query a run could need, and two kinds exclude each other: the entity
+// searches run only when the records found nothing, and the process-group
+// lookup only for a candidate they found.
+func (p *Plan) MostSent() int {
+	fallbacks, lookups := 0, 0
+	for i := range p.Queries {
+		switch q := &p.Queries[i]; {
+		case q.fallback():
+			fallbacks++
+		case q.ProcessGroupCheck():
+			lookups++
+		}
+	}
+	return len(p.Queries) - min(fallbacks, lookups)
+}
+
 // TruncationNote says what a Truncated plan leaves out, for whoever shows the
 // plan or its report; "" for a plan that read the repository whole.
 func (p *Plan) TruncationNote() string {

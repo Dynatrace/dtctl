@@ -99,7 +99,7 @@ Test content is not read, because the names in it describe what the tests deploy
 dtctl repo-scope discover --dry-run
 ```
 
-A run sends at most eleven queries: two record queries, three sampled retries of each (only when the scan cap stops the record query, and only until one answers), two entity searches (only when the records find nothing), and one lookup of logs by process group (only when a candidate's spans match and no logs do). The record queries always run:
+A plan holds eleven queries, and a run sends at most ten of them, since the last two kinds exclude each other: two record queries, three sampled retries of each (only when the scan cap stops the record query, and only until one answers), two entity searches (only when the records find nothing), and one lookup of logs by process group (only when a candidate's spans match and no logs do). The record queries always run:
 
 ```text
 fetch spans, from:now()-24h, scanLimitGBytes:5

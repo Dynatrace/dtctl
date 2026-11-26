@@ -234,7 +234,7 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 
 	runCtx, cancel := inventoryCancelContext(cmd)
 	defer cancel()
-	runner := scopeCheckedRunner{&inventoryRunner{executor: newDQLExecutorFromConfig(ctx, cfg, c), scanLimitGB: reposcope.ScanLimitGB}}
+	runner := &scopeCheckedRunner{Runner: &inventoryRunner{executor: newDQLExecutorFromConfig(ctx, cfg, c), scanLimitGB: reposcope.ScanLimitGB}}
 	selectors := repoScopeSelectors(ctx, cfg)
 	names := repoScopeNames{}
 	// Each plan is a run of its own with its own time bound. After a Ctrl-C
@@ -254,6 +254,13 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		defer cancelTimeout()
 		began := time.Now()
 		report, err := reposcope.Discover(runCtx, runner, plan, host)
+		for i := range report.Queries {
+			// Refused here, so never sent: the report must not count it
+			// among the queries that ran.
+			if q := &report.Queries[i]; runner.refused[q.DQL] {
+				q.Skipped = true
+			}
+		}
 		for i := range report.Candidates {
 			c := &report.Candidates[i]
 			if c.SetCommand = repoScopeSetCommand(report, *c, selectors); c.SetCommand == "" {
@@ -360,11 +367,19 @@ func (n repoScopeNames) claim(name, unit string) (claimed, holder string) {
 
 // scopeCheckedRunner refuses a query the token provably cannot read with the
 // denial Grail would send, so Discover records it like any other and carries
-// on with what the token can read.
-type scopeCheckedRunner struct{ inventory.Runner }
+// on with what the token can read. refused holds the text of each query it
+// turned away: those never left the machine.
+type scopeCheckedRunner struct {
+	inventory.Runner
+	refused map[string]bool
+}
 
-func (r scopeCheckedRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunResult, error) {
+func (r *scopeCheckedRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunResult, error) {
 	if err := dqlScopePrecheck(ctx, dql); err != nil {
+		if r.refused == nil {
+			r.refused = map[string]bool{}
+		}
+		r.refused[dql] = true
 		return nil, &sdkquery.QueryError{ErrorType: "NOT_AUTHORIZED_FOR_TABLE", Message: err.Error()}
 	}
 	return r.Runner.RunQuery(ctx, dql)
@@ -417,7 +432,8 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 		return
 	}
 	report.
-		Linef("Dry run: discovery for unit %q would send %d queries to the current context's environment; nothing was sent", plan.Unit, len(plan.Queries)).
+		Linef("Dry run: discovery for unit %q would send at most %d of these %d queries to the current context's environment; nothing was sent",
+			plan.Unit, plan.MostSent(), len(plan.Queries)).
 		Linef("Values it would send: %s", quotedValues(plan.Sent))
 	noteDropped()
 	record := 0 // the number of the record query a rung retries

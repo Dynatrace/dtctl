@@ -383,7 +383,12 @@ func printRepoScopeNoMatch(w io.Writer, r *reposcope.DiscoveryReport, p repoScop
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", q.Purpose, repoScopeQueryOutcome(q), first)
 		}
 		_ = tw.Flush()
-		fmt.Fprintf(w, "Values sent: %s\n%s\n", quotedValues(r.Sent), took)
+		// A run interrupted before its first query sent nothing.
+		if len(r.Sent) == 0 {
+			fmt.Fprintf(w, "No value was sent.\n%s\n", took)
+		} else {
+			fmt.Fprintf(w, "Values sent: %s\n%s\n", quotedValues(r.Sent), took)
+		}
 	}
 	writeRepoScopeHandLinks(w, p)
 }
