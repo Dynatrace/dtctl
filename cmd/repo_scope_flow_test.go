@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -226,6 +228,54 @@ func TestRepoScopeFlow(t *testing.T) {
 	require.Zero(t, code, stderr)
 	require.Equal(t, "checkout  (whole repository · 127.0.0.1; the cluster narrows the workloads only: service names select records of every cluster)\n", stdout)
 	require.Len(t, srv.queries(), 4, "only discover talks to the environment")
+}
+
+// lockedBuffer is a stream a test reads while the command still writes it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Every value is named before it is sent, in every output mode: agent mode is
+// detected, not chosen, so an agent's user is owed the line as much as anyone.
+// It goes to stderr, so the envelope on stdout stays one JSON document.
+func TestRepoScopeDiscoverNamesEveryValueBeforeSendingIt(t *testing.T) {
+	const line = `Sending to 127.0.0.1: "checkout" (compared to k8s.workload.name, service.name, entity.name); nothing else leaves this machine` + "\n"
+	for _, mode := range [][]string{{"--agent"}, {"-o", "json"}, {"-o", "yaml"}, {"--plain"}} {
+		t.Run(strings.Join(mode, " "), func(t *testing.T) {
+			var stdout bytes.Buffer
+			stderr := &lockedBuffer{}
+			atFirstQuery := ""
+			var once sync.Once
+			respond := rowsByObject(checkoutRows)
+			newDQLRecorder(t, "readonly", func(r *http.Request, query string) (int, string) {
+				once.Do(func() { atFirstQuery = stderr.String() })
+				return respond(r, query)
+			})
+			chdirCheckoutRepo(t)
+
+			code := Run(append([]string{"repo-scope", "discover"}, mode...), RunOptions{Stdout: &stdout, Stderr: stderr})
+			require.Zero(t, code, stderr.String())
+			require.Equal(t, line, atFirstQuery, "what stderr held when the first query arrived")
+			require.Equal(t, line, stderr.String())
+			require.NotContains(t, stdout.String(), "Sending to")
+			if mode[0] == "--agent" {
+				require.True(t, agentEnvelope(t, stdout.String()).OK)
+			}
+		})
+	}
 }
 
 // The terminal output of discover, from reports the mock environment

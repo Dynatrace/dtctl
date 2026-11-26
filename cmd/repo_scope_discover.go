@@ -47,7 +47,7 @@ them between "-" or "." (acme-prod-checkout for checkout) is found too, ranked
 below one named exactly, when the name has at least five letters and digits.
 Each candidate is one workload in one cluster, and its line binds that cluster. When a candidate's spans match and no logs
 do, its logs are looked up once by the process group the spans carried. It
-names every value before sending it, and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
+names every value on stderr before sending it, and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
 that saves it. Test content (test, testdata, e2e, examples and similar
 directories, and files such as Dockerfile.test) is not read, and a name that
 starts with test, mock or fixture is not sent unless given with --term.
@@ -175,7 +175,11 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	// output no deployable drops out of the answer unsaid. The only error is
 	// the shared context's cancellation, so the last plan's stands for all.
 	discover := func(plan *reposcope.Plan) (*reposcope.DiscoveryReport, time.Duration, error) {
-		if !agentMode(ctx) && len(plan.Queries) > 0 && runCtx.Err() == nil {
+		// The disclosure goes to stderr in every mode, agent mode included:
+		// that mode is detected rather than chosen, and its envelope carries
+		// the values only once the queries have run, or not at all after an
+		// interruption.
+		if len(plan.Queries) > 0 && runCtx.Err() == nil {
 			output.FprintInfo(currentStderr(ctx), "Sending to %s: %s (compared to %s); nothing else leaves this machine",
 				host, quotedValues(plan.Sent), strings.Join(reposcope.MatchedFields(), ", "))
 		}
