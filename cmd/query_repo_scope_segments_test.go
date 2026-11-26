@@ -247,6 +247,25 @@ func TestQueryRepoScope_SegmentsBesideTheUsers(t *testing.T) {
 	require.Contains(t, body, `"filterSegments":[{"id":"Ab3dEf9hIjk","variables":[{"name":"environment","values":["staging"]}]},{"id":"other-2"},{"id":"plain-1"}]`)
 	require.Contains(t, stderr, "repo scope checkout: segment Ab3dEf9hIjk is also given on the command line; its variables there are used\n")
 
+	// The notice and the envelope report what the scope sent, not what the
+	// entry lists: the overridden segment is the user's now, and it is not
+	// read a second time for the entry.
+	require.Contains(t, stderr, "applying repo scope checkout to fetch logs: "+checkoutLogsFilter+" with segments plain-1 (use --no-repo-scope to ignore it)")
+	require.Equal(t, []output.RepoScopeSegment{{ID: "plain-1"}}, repoScopeContext(t, stdout).Segments)
+
+	// Eleven named, ten sent: a segment both name counts once.
+	fits := []string{"query", repoScopeTypedQuery, "--agent", "--segment", "plain-1"}
+	for _, id := range []string{"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8"} {
+		srv.segments[id] = http.StatusOK
+		fits = append(fits, "--segment", id)
+	}
+	code, stdout, stderr = runRepoScoped(fits, RunOptions{})
+	require.Zero(t, code, stderr+stdout)
+	requests := srv.requests()
+	body = requests[len(requests)-1]
+	require.Contains(t, body, `{"id":"u8"},{"id":"Ab3dEf9hIjk","variables":[{"name":"environment","values":["production"]}]}]`)
+	require.Equal(t, 10, strings.Count(body[strings.Index(body, `"filterSegments"`):], `"id":`))
+
 	args := []string{"query", repoScopeTypedQuery, "--agent"}
 	for _, id := range []string{"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"} {
 		srv.segments[id] = http.StatusOK
@@ -258,6 +277,43 @@ func TestQueryRepoScope_SegmentsBesideTheUsers(t *testing.T) {
 	require.Equal(t, "too many segments: 9 given and 2 from repo scope checkout, maximum is 10 per query; give fewer, or pass --no-repo-scope",
 		agentError(t, stdout).Message)
 	require.Empty(t, srv.queries())
+}
+
+// An entry that references only segments, every one of them given on the
+// command line, sent nothing of its own: the scope reports that it was not
+// applied, not that it was.
+func TestQueryRepoScope_EverySegmentOverridden(t *testing.T) {
+	const timeseries = "timeseries avg(dt.host.cpu.usage)"
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	repo := chdirTestRepo(t, segmentScope)
+	writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
+	chdirSubdir(t, "tools")
+
+	code, stdout, stderr := runRepoScoped([]string{"query", timeseries, "--agent", "--segment", "plain-1"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	body, _ := srv.executed(t)
+	require.Contains(t, body, `"filterSegments":[{"id":"plain-1"}]`)
+	const reason = "every segment it references is given on the command line, and those are sent"
+	require.Equal(t, "repo scope tools: segment plain-1 is also given on the command line; its variables there are used\n"+
+		"repo scope tools not applied: "+reason+" (use --no-repo-scope to silence this)\n", stderr)
+	scope := repoScopeContext(t, stdout)
+	require.Equal(t, []any{false, "user_segment", reason}, []any{scope.Applied, scope.Code, scope.Reason})
+	require.Empty(t, scope.Segments)
+}
+
+// --segment-var binds a variable of a segment given with --segment. Aimed at
+// one the entry references, it fails before the scope line and before any
+// request, and says how to give the entry's segment its variables.
+func TestQueryRepoScope_SegmentVarForAnEntrysSegment(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, segmentScope)
+
+	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--segment-var", "Ab3dEf9hIjk:environment=staging"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, pass --segment "Ab3dEf9hIjk?environment=staging"`,
+		agentError(t, stdout).Message)
+	require.Empty(t, srv.requests(), "nothing is read or sent")
+	require.Empty(t, stderr)
 }
 
 // wait query sends the entry's segments on every attempt and reads them

@@ -133,10 +133,7 @@ Examples:
 			if err := scoped.requireSegments("wait query"); err != nil {
 				return err
 			}
-			segments, err := scoped.withSegments(nil)
-			if err != nil {
-				return err
-			}
+			segments := scoped.withSegments(nil)
 
 			// Parse timing flags
 			timeout, _ := cmd.Flags().GetDuration("timeout")

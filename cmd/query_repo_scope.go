@@ -42,6 +42,9 @@ const (
 	// repoScopeSegmentUnavailable is an entry one of whose filter segments
 	// could not be read: the query runs as typed, without the filter either.
 	repoScopeSegmentUnavailable = "segment_unavailable"
+	// repoScopeUserSegment is an entry that references only segments, each
+	// of which the command line gives too: the scope sent nothing of its own.
+	repoScopeUserSegment = "user_segment"
 )
 
 // repoScopeCodes is every context.repo_scope.code; docs/AGENT_MODE.md lists
@@ -49,7 +52,7 @@ const (
 var repoScopeCodes = []string{
 	string(dql.Applied), string(dql.NotFetch), string(dql.UnsupportedObject), repoScopeNoBinding,
 	string(dql.UserFilter), string(dql.Subquery), string(dql.Unscannable), repoScopeNoEntry, repoScopeAmbiguousEntry,
-	repoScopeInvalidFile, repoScopeSegmentUnavailable,
+	repoScopeInvalidFile, repoScopeSegmentUnavailable, repoScopeUserSegment,
 }
 
 // repoScopeRefusals are the codes for an entry that resolved but cannot narrow
@@ -210,6 +213,9 @@ type repoScopedQuery struct {
 	// still to be sent; unsent says a command that sends none dropped them.
 	segments []reposcope.Segment
 	unsent   string
+	// overridden says the user named a segment the entry references, which
+	// is then theirs and no longer among segments.
+	overridden bool
 	// refusedCode and refusedReason are why the filter was not inserted, and
 	// unavailable why a segment could not be read; settle reports them.
 	refusedCode, refusedReason, unavailable string
@@ -321,6 +327,9 @@ func (q *repoScopedQuery) settle() {
 	case q.unavailable != "":
 		s.Code = repoScopeSegmentUnavailable
 		q.setReason(q.unavailable)
+	case !q.bound && !s.Applied && q.overridden:
+		s.Code = repoScopeUserSegment
+		q.setReason("every segment it references is given on the command line, and those are sent")
 	case q.filtered || !q.bound:
 		s.Code = string(dql.Applied)
 		q.setReason("")
@@ -406,39 +415,76 @@ func (q *repoScopedQuery) requireSegments(command string) error {
 		q.scope.Name, q.unavailable, command, reposcope.FileName, noRepoScopeFlag)
 }
 
-// withSegments is the segments to send: the user's own, then the entry's. A
-// segment the user also names is sent once, with the user's variables, since
-// what is typed wins over what is committed. More than a query takes is an
-// error: leaving some out would change the rows without saying so.
-func (q *repoScopedQuery) withSegments(user []exec.FilterSegmentRef) ([]exec.FilterSegmentRef, error) {
+// refuseSegmentVars fails a --segment-var aimed at a segment the entry
+// references and the command line does not: the flag binds variables of a
+// segment the user gave, and the entry's values are the entry's. It runs
+// before anything is read or printed, and says how to give the segment other
+// variables, which is to name it.
+func (q *repoScopedQuery) refuseSegmentVars(cmd *cobra.Command) error {
 	if q.scope == nil || len(q.segments) == 0 {
-		return user, nil
+		return nil
 	}
-	if total := len(user) + len(q.segments); total > maxSegmentsPerQuery {
-		kept := q.segments[:0:0]
-		for _, seg := range q.segments {
-			if !slices.ContainsFunc(user, func(u exec.FilterSegmentRef) bool { return u.ID == seg.ID }) {
-				kept = append(kept, seg)
-			}
-		}
-		if len(user)+len(kept) > maxSegmentsPerQuery {
-			return nil, fmt.Errorf("too many segments: %d given and %d from repo scope %s, maximum is %d per query; give fewer, or pass --%s",
-				len(user), len(kept), q.scope.Name, maxSegmentsPerQuery, noRepoScopeFlag)
-		}
+	given, _ := cmd.Flags().GetStringArray("segment")
+	if file, _ := cmd.Flags().GetString("segments-file"); file != "" {
+		return nil
 	}
-	out := slices.Clone(user)
+	vars, _ := cmd.Flags().GetStringArray("segment-var")
+	for _, v := range vars {
+		id, assignment, _ := strings.Cut(v, ":")
+		named := slices.ContainsFunc(given, func(g string) bool {
+			name, _, _ := strings.Cut(g, "?")
+			return name == id
+		})
+		if named || !slices.ContainsFunc(q.segments, func(s reposcope.Segment) bool { return s.ID == id }) {
+			continue
+		}
+		return fmt.Errorf("--segment-var names segment %q, which repo scope %s references; to give it other variables, pass --segment %q",
+			id, q.scope.Name, id+"?"+assignment)
+	}
+	return nil
+}
+
+// yieldTo drops the entry's segments the user also names: such a segment is
+// sent once, with the user's variables, since what is typed wins over what
+// is committed. From then on it is the user's, so the scope neither reads it
+// nor reports it. More segments than a query takes is an error: leaving some
+// out would change the rows without saying so.
+func (q *repoScopedQuery) yieldTo(user []exec.FilterSegmentRef) error {
+	if q.scope == nil || len(q.segments) == 0 {
+		return nil
+	}
+	kept := q.segments[:0:0]
 	for _, seg := range q.segments {
 		if slices.ContainsFunc(user, func(u exec.FilterSegmentRef) bool { return u.ID == seg.ID }) {
 			output.FprintInfo(q.stderr, "repo scope %s: segment %s is also given on the command line; its variables there are used", q.scope.Name, seg.ID)
+			q.overridden = true
 			continue
 		}
+		kept = append(kept, seg)
+	}
+	if len(user)+len(kept) > maxSegmentsPerQuery {
+		return fmt.Errorf("too many segments: %d given and %d from repo scope %s, maximum is %d per query; give fewer, or pass --%s",
+			len(user), len(kept), q.scope.Name, maxSegmentsPerQuery, noRepoScopeFlag)
+	}
+	q.segments = kept
+	q.settle()
+	return nil
+}
+
+// withSegments is the segments to send: the user's own, then the entry's.
+func (q *repoScopedQuery) withSegments(user []exec.FilterSegmentRef) []exec.FilterSegmentRef {
+	if q.scope == nil {
+		return user
+	}
+	out := slices.Clone(user)
+	for _, seg := range q.segments {
 		ref := exec.FilterSegmentRef{ID: seg.ID}
 		for _, name := range seg.VariableNames() {
 			ref.Variables = append(ref.Variables, exec.FilterSegmentVariable{Name: name, Values: seg.Variables[name]})
 		}
 		out = append(out, ref)
 	}
-	return out, nil
+	return out
 }
 
 // withoutSegments is for a command that sends the query text and nothing
@@ -495,6 +541,10 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	case with != "":
 		output.FprintWarning(q.stderr, "repo scope %s: its filter was not inserted: %s; its segments %s still apply (use --%s to ignore them)",
 			s.Name, q.refusedReason, q.segmentList(), noRepoScopeFlag)
+		return
+	}
+	if s.Code == repoScopeUserSegment {
+		output.FprintInfo(q.stderr, "repo scope %s not applied: %s (use --%s to silence this)", s.Name, q.notApplied, noRepoScopeFlag)
 		return
 	}
 	label := "repo scope"

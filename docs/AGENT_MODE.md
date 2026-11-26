@@ -337,6 +337,7 @@ still stopped, points at the executor's scan-limit advice.
 | `ambiguous_entry` | several entries cover the working directory as closely; `reason` names them; pick one with `--repo-scope <name>` |
 | `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
 | `segment_unavailable` | a filter segment the entry references could not be read (deleted, not shared with you, or the token lacks `storage:filter-segments:read`); `reason` names it |
+| `user_segment` | the entry references only filter segments, and `--segment` gave every one of them: those were sent and the entry added nothing |
 
 An entry may also reference existing filter segments, which the query then
 sends as if `--segment` had been typed. `segments` lists the ones sent, each
@@ -353,7 +354,9 @@ with its `id` and its `variables` by name:
 segments or both. An entry that references only segments has no `filter`. When
 an entry has both and the filter could not be inserted, the segments are still
 sent: `applied` stays true, `filter` is absent, and `reason` starts with
-`filter not inserted (<code>):` and one of the codes above. `wait query` sends
+`filter not inserted (<code>):` and one of the codes above. A segment the
+command line also gives (`--segment`) is the caller's: it is sent with the
+caller's variables and is not listed under `segments`. `wait query` sends
 the segments too; `verify query` does not, and says so on stderr.
 
 When the scope file holds document keys this dtctl does not know (a typo, or a

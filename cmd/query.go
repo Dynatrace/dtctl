@@ -14,6 +14,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
+	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/resources/resolver"
@@ -297,9 +298,24 @@ Examples:
 			if err != nil {
 				return err
 			}
+			// The command line's segments come first: one the entry also
+			// references is the user's, so the entry's copy is neither read
+			// nor reported, and a flag that cannot be used fails before the
+			// scope says anything.
+			if err := scoped.refuseSegmentVars(cmd); err != nil {
+				return err
+			}
+			segments, err := querySegments(cmd, c)
+			if err != nil {
+				return err
+			}
+			if err := scoped.yieldTo(segments); err != nil {
+				return err
+			}
 			if err := scoped.checkSegments(c); err != nil {
 				return err
 			}
+			segments = scoped.withSegments(segments)
 			query = scoped.Query
 
 			// Query limits resolve flag -> context config -> global config -> server
@@ -379,72 +395,6 @@ Examples:
 				default:
 					return fmt.Errorf("unsupported --decode-snapshots value %q (use \"simplified\" or \"full\")", decodeVal)
 				}
-			}
-
-			// Parse filter segments
-			segmentFlags, _ := cmd.Flags().GetStringArray("segment")
-			segmentsFile, _ := cmd.Flags().GetString("segments-file")
-			segmentVarFlags, _ := cmd.Flags().GetStringArray("segment-var")
-
-			var segments []exec.FilterSegmentRef
-			if len(segmentFlags) > 0 || segmentsFile != "" {
-				var flagRefs, fileRefs []exec.FilterSegmentRef
-
-				// Track original (pre-resolution) IDs so --segment-var can
-				// reference segments by the same name/UID the user typed.
-				origIDs := make(map[string]string) // resolved UID -> original flag value
-
-				if len(segmentFlags) > 0 {
-					flagRefs, err = parseSegmentFlags(segmentFlags)
-					if err != nil {
-						return err
-					}
-
-					// Resolve segment names to UIDs for --segment flag values.
-					// IDs from --segments-file are assumed to be UIDs already (the file
-					// format mirrors the API and should use UIDs).
-					res := resolver.NewResolver(c)
-					for i, ref := range flagRefs {
-						orig := ref.ID
-						resolved, resolveErr := res.ResolveID(resolver.TypeSegment, ref.ID)
-						if resolveErr != nil {
-							return fmt.Errorf("failed to resolve segment %q: %w", ref.ID, resolveErr)
-						}
-						flagRefs[i].ID = resolved
-						origIDs[resolved] = orig
-					}
-				}
-
-				if segmentsFile != "" {
-					fileRefs, err = parseSegmentsFile(cmdContext(cmd), segmentsFile)
-					if err != nil {
-						return err
-					}
-				}
-
-				segments = mergeSegmentRefs(flagRefs, fileRefs)
-
-				// Apply --segment-var bindings
-				if len(segmentVarFlags) > 0 {
-					varMap, varErr := parseSegmentVarFlags(segmentVarFlags)
-					if varErr != nil {
-						return varErr
-					}
-					segments, err = applySegmentVars(segments, varMap, origIDs)
-					if err != nil {
-						return err
-					}
-				}
-
-				if len(segments) > maxSegmentsPerQuery {
-					return fmt.Errorf("too many segments: %d specified, maximum is %d per query", len(segments), maxSegmentsPerQuery)
-				}
-			} else if len(segmentVarFlags) > 0 {
-				return fmt.Errorf("--segment-var requires at least one --segment or --segments-file")
-			}
-			// The repo scope entry's own segments go beside the user's.
-			if segments, err = scoped.withSegments(segments); err != nil {
-				return err
 			}
 
 			clientContext, _ := cmd.Flags().GetString("client-context")
@@ -713,6 +663,74 @@ default: never for a bare command, auto in agent mode`)
 
 // maxSegmentsPerQuery is the maximum number of filter segments allowed per query (Dynatrace limit).
 const maxSegmentsPerQuery = 10
+
+// querySegments is the filter segments the command line names: --segment and
+// --segments-file, with the --segment-var bindings applied. A --segment
+// given by name is resolved to its UID, which is the one request it makes.
+func querySegments(cmd *cobra.Command, c *client.Client) ([]exec.FilterSegmentRef, error) {
+	var err error
+	segmentFlags, _ := cmd.Flags().GetStringArray("segment")
+	segmentsFile, _ := cmd.Flags().GetString("segments-file")
+	segmentVarFlags, _ := cmd.Flags().GetStringArray("segment-var")
+
+	var segments []exec.FilterSegmentRef
+	if len(segmentFlags) > 0 || segmentsFile != "" {
+		var flagRefs, fileRefs []exec.FilterSegmentRef
+
+		// Track original (pre-resolution) IDs so --segment-var can
+		// reference segments by the same name/UID the user typed.
+		origIDs := make(map[string]string) // resolved UID -> original flag value
+
+		if len(segmentFlags) > 0 {
+			flagRefs, err = parseSegmentFlags(segmentFlags)
+			if err != nil {
+				return nil, err
+			}
+
+			// Resolve segment names to UIDs for --segment flag values.
+			// IDs from --segments-file are assumed to be UIDs already (the file
+			// format mirrors the API and should use UIDs).
+			res := resolver.NewResolver(c)
+			for i, ref := range flagRefs {
+				orig := ref.ID
+				resolved, resolveErr := res.ResolveID(resolver.TypeSegment, ref.ID)
+				if resolveErr != nil {
+					return nil, fmt.Errorf("failed to resolve segment %q: %w", ref.ID, resolveErr)
+				}
+				flagRefs[i].ID = resolved
+				origIDs[resolved] = orig
+			}
+		}
+
+		if segmentsFile != "" {
+			fileRefs, err = parseSegmentsFile(cmdContext(cmd), segmentsFile)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		segments = mergeSegmentRefs(flagRefs, fileRefs)
+
+		// Apply --segment-var bindings
+		if len(segmentVarFlags) > 0 {
+			varMap, varErr := parseSegmentVarFlags(segmentVarFlags)
+			if varErr != nil {
+				return nil, varErr
+			}
+			segments, err = applySegmentVars(segments, varMap, origIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if len(segments) > maxSegmentsPerQuery {
+			return nil, fmt.Errorf("too many segments: %d specified, maximum is %d per query", len(segments), maxSegmentsPerQuery)
+		}
+	} else if len(segmentVarFlags) > 0 {
+		return nil, fmt.Errorf("--segment-var requires at least one --segment or --segments-file")
+	}
+	return segments, nil
+}
 
 // parseSegmentFlags parses --segment flag values into FilterSegmentRef entries.
 // Each value can be a plain segment ID/name, or include inline variable bindings
