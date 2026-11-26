@@ -633,9 +633,10 @@ func (r *DiscoveryReport) checkLogs(ctx context.Context, runner inventory.Runner
 		return
 	}
 	q.Rows = len(res.Records)
-	cut := res.Truncated || q.Rows >= discoveryRowLimit
+	limit, cut := cutShort(q, res)
+	cut = cut || q.Rows >= discoveryRowLimit
 	if cut {
-		q.Truncated, q.Cause, q.truncation = true, causeTruncated, res.TruncationCause
+		q.Truncated, q.Cause, q.truncation = true, causeTruncated, limit
 	}
 	for _, c := range checked {
 		for _, rec := range res.Records {
@@ -687,8 +688,8 @@ func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.R
 		skipUnneeded(rungs)
 		return
 	}
-	if res.Truncated && res.TruncationCause == inventory.TruncationScanLimit {
-		q.Rows, q.Truncated, q.Cause, q.truncation = len(res.Records), true, causeTruncated, res.TruncationCause
+	if limit, _ := cutShort(q, res); limit == inventory.TruncationScanLimit {
+		q.Rows, q.Truncated, q.Cause, q.truncation = len(res.Records), true, causeTruncated, limit
 		if r.sample(ctx, runner, rungs, d) {
 			if d.addCapped(q.DataObject, res.Records) {
 				r.Partial = true
@@ -740,6 +741,7 @@ func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, r
 			continue
 		}
 		q.Rows = len(res.Records)
+		limit, cut := cutShort(q, res)
 		switch {
 		case !res.Sampled && (q.Rows > 0 || res.ScannedBytes > 0):
 			// As in inventory: every further rung would be the capped query
@@ -748,11 +750,11 @@ func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, r
 			// there the flag says nothing and the rung is simply empty.
 			q.Cause, done = causeSamplingRefused, true
 			r.note(failureNote(q))
-		case res.Truncated && !collectedArrayCut(q, res):
+		case cut:
 			// Even sampled this rung does not fit, and every rung after it
 			// reads more.
-			q.Truncated, q.Cause, q.truncation = true, causeTruncated, res.TruncationCause
-			capped = res.TruncationCause == inventory.TruncationScanLimit
+			q.Truncated, q.Cause, q.truncation = true, causeTruncated, limit
+			capped = limit == inventory.TruncationScanLimit
 			done = !capped
 			r.note(failureNote(q))
 		case q.Rows == 0:
@@ -796,9 +798,10 @@ func (r *DiscoveryReport) fail(ctx context.Context, q *Query, err error) {
 // candidates.
 func (r *DiscoveryReport) fold(q *Query, res *inventory.RunResult, d *discovery) {
 	q.Rows = len(res.Records)
+	limit, cut := cutShort(q, res)
 	switch {
-	case res.Truncated && !collectedArrayCut(q, res):
-		q.Truncated, q.Cause, q.truncation, r.Partial = true, causeTruncated, res.TruncationCause, true
+	case cut:
+		q.Truncated, q.Cause, q.truncation, r.Partial = true, causeTruncated, limit, true
 		r.note(failureNote(q))
 	case q.Rows >= discoveryRowLimit:
 		// The limit stage is the query's own, not a cap Grail reports, so a
@@ -815,15 +818,34 @@ func (r *DiscoveryReport) fold(q *Query, res *inventory.RunResult, d *discovery)
 	}
 }
 
-// collectedArrayCut reports a result limit on a record query, which is not
-// taken to have cut the page. Grail may report a collected id array cut at
-// its maxLength with a "limited to" message, which the runner maps to a
-// result limit. A page shorter than the query's own limit lost no row, and
-// the only thing Grail could have limited is such an array, which the id
-// count reports truthfully; a page as long as the limit is still judged by
-// its length.
-func collectedArrayCut(q *Query, res *inventory.RunResult) bool {
-	return !q.fallback() && res.TruncationCause == inventory.TruncationResultLimit
+// cutShort reports whether a limit Grail reported cut res short, and which.
+// A response can report several: the scan cap wins, since it says how little
+// was read and is the one a sampled retry answers, then the first reported.
+//
+// One report is not taken as a cut: a result limit on a query that collects
+// ids (a record query or one of its retries), recognised by its message
+// alone. Grail may word an id array cut at its maxLength that way, and the
+// row then says so itself by holding more ids than a binding takes. A page
+// that lost rows is reported with a type, and one as long as the query's own
+// limit is judged by its length whatever Grail says.
+//
+// A runner that reports only one cause is taken at its word, as if typed.
+func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCause, cut bool) {
+	limits := res.Truncations
+	if len(limits) == 0 && res.Truncated {
+		limits = []inventory.Truncation{{Cause: res.TruncationCause, Typed: true}}
+	}
+	collectsIDs := !q.fallback() && !q.ProcessGroupCheck()
+	for _, l := range limits {
+		switch {
+		case collectsIDs && l.Cause == inventory.TruncationResultLimit && !l.Typed:
+		case l.Cause == inventory.TruncationScanLimit:
+			return l.Cause, true
+		case !cut:
+			limit, cut = l.Cause, true
+		}
+	}
+	return limit, cut
 }
 
 // samplingNotes states, for each data object discovery had to sample, what

@@ -33,8 +33,11 @@ type fakeRunner struct {
 }
 
 type answer struct {
-	records      []map[string]interface{}
+	records []map[string]interface{}
+	// truncation is the one cause a runner that knows no more reports;
+	// truncations is every limit, as the command's runner reports them.
 	truncation   inventory.TruncationCause
+	truncations  []inventory.Truncation
 	sampled      bool
 	scannedBytes int64
 	err          error
@@ -53,7 +56,11 @@ func (r *fakeRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunRe
 	if a.err != nil {
 		return nil, a.err
 	}
-	return &inventory.RunResult{Records: a.records, Truncated: a.truncation != "", TruncationCause: a.truncation,
+	cause := a.truncation
+	if len(a.truncations) > 0 {
+		cause = a.truncations[0].Cause
+	}
+	return &inventory.RunResult{Records: a.records, Truncated: cause != "", TruncationCause: cause, Truncations: a.truncations,
 		Sampled: a.sampled, ScannedBytes: a.scannedBytes}, nil
 }
 
@@ -649,7 +656,7 @@ func TestDiscover_ManyIDsAreOneCandidate(t *testing.T) {
 // query's own limit lost no row, so that is not a cut page.
 func TestDiscover_CollectedArrayCapIsNotACutPage(t *testing.T) {
 	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
-		"spans": {{records: serviceNames(3), truncation: inventory.TruncationResultLimit}},
+		"spans": {{records: serviceNames(3), truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}},
 		"logs":  {{records: serviceNames(3)}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
@@ -658,7 +665,7 @@ func TestDiscover_CollectedArrayCapIsNotACutPage(t *testing.T) {
 	assert.Empty(t, r.Notes)
 
 	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
-		"spans": {{records: serviceNames(discoveryRowLimit), truncation: inventory.TruncationResultLimit}},
+		"spans": {{records: serviceNames(discoveryRowLimit), truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	assert.True(t, r.Partial)
@@ -1088,7 +1095,7 @@ func TestDiscover_EmptySampledAnswerIsPartial(t *testing.T) {
 // record query's own: its rows are the answer.
 func TestDiscover_SampledRungCollectedArrayCapIsNotACutPage(t *testing.T) {
 	rung := sampledAnswer(rows(t, "spans-checkout-sampled"), 100_000_000)
-	rung.truncation = inventory.TruncationResultLimit
+	rung.truncations = []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}
 	runner := &fakeRunner{answers: map[string][]answer{
 		"spans": {capped(rows(t, "spans-checkout")), rung},
 		"logs":  {{records: rows(t, "logs-checkout")}},

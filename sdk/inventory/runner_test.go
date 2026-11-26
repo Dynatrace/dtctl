@@ -108,3 +108,33 @@ func TestRunnerOmittingColumnTypesLosesNotApplicable(t *testing.T) {
 		t.Fatalf("without column types the n/a verdict silently degrades to empty; got %q — if this now reports unknown or errors, the contract improved and this test should be updated", got)
 	}
 }
+
+// TestTruncationsOfKeepsEveryLimit pins what FirstTruncationCause loses: a
+// response can report two limits, and a caller for which one matters more
+// than the other needs both, in order, with whether each named its type.
+func TestTruncationsOfKeepsEveryLimit(t *testing.T) {
+	got := TruncationsOf([]query.Notification{
+		{NotificationType: "SAMPLING_APPLIED", Message: "sampling applied"},
+		{Message: "The result has been limited to 50 values."},
+		{NotificationType: "RESULT_LIMIT_BYTES"},
+		{NotificationType: "SCAN_LIMIT_GBYTES", Message: "Scan limit of 5 gigabytes reached"},
+		{Message: "Your execution was stopped after 5 gigabytes of data were scanned."},
+	})
+	want := []Truncation{
+		{Cause: TruncationResultLimit},
+		{Cause: TruncationResultLimit, Typed: true},
+		{Cause: TruncationScanLimit, Typed: true},
+		{Cause: TruncationScanLimit},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("TruncationsOf = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("TruncationsOf[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+	if got := TruncationsOf([]query.Notification{{NotificationType: "SAMPLING_APPLIED"}}); got != nil {
+		t.Errorf("TruncationsOf with nothing truncating = %v, want nil", got)
+	}
+}

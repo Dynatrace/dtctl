@@ -198,6 +198,7 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 		Seconds:         time.Since(start).Seconds(),
 		Truncated:       cause != "",
 		TruncationCause: cause,
+		Truncations:     inventory.TruncationsOf(resp.GetNotifications()),
 		ColumnTypes:     inventory.ColumnTypesOf(resp.GetTypes()),
 		Sampled:         sampled,
 		ScannedBytes:    scanned,

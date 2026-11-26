@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 // Logs of a workload need not carry a service name while its spans do. The
@@ -158,4 +160,64 @@ func TestDiscover_SampledRetryKeepsWhatTheCappedScanSaw(t *testing.T) {
 	require.Len(t, r.Candidates, 1)
 	assert.Empty(t, r.Candidates[0].CappedScan)
 	assert.False(t, r.Partial)
+}
+
+// Grail says a result was limited in two ways. A typed RESULT_LIMIT_BYTES or
+// RESULT_LIMIT_RECORDS is a page that lost rows, however short it is. Only
+// the message without a type, which is also how a collected id array cut at
+// its maxLength is reported, leaves a short page whole.
+func TestDiscover_TypedResultLimitIsACutPage(t *testing.T) {
+	for name, tc := range map[string]struct {
+		answer  answer
+		partial bool
+	}{
+		"typed":                 {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit, Typed: true}}}, true},
+		"by its message alone":  {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}, false},
+		"both":                  {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}, {Cause: inventory.TruncationResultLimit, Typed: true}}}, true},
+		"a runner with a cause": {answer{truncation: inventory.TruncationResultLimit}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tc.answer.records = rows(t, "spans-checkout")
+			r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+				"spans": {tc.answer},
+				"logs":  {{records: rows(t, "logs-checkout")}},
+			}}, singleGo(t), prodHost)
+			require.NoError(t, err)
+			require.Len(t, r.Candidates, 1)
+			assert.Equal(t, tc.partial, r.Partial)
+			assert.Equal(t, tc.partial, r.Queries[0].Truncated)
+			if tc.partial {
+				assert.Equal(t, VerdictAmbiguous, r.Verdict)
+				assert.Equal(t, []string{"spans stopped at Grail's result limit, so the verdict is capped at ambiguous"}, r.Notes)
+			} else {
+				assert.Equal(t, VerdictMatch, r.Verdict)
+				assert.Empty(t, r.Notes)
+			}
+		})
+	}
+}
+
+// A response can report a result limit and the scan cap together. The scan
+// cap is the one that says how little was read, and the one a sampled retry
+// answers, so it decides whichever notification came first.
+func TestDiscover_ScanCapWinsOverAnotherLimit(t *testing.T) {
+	scan := inventory.Truncation{Cause: inventory.TruncationScanLimit, Typed: true}
+	for name, limits := range map[string][]inventory.Truncation{
+		"reported first": {scan, {Cause: inventory.TruncationResultLimit}},
+		"reported last":  {{Cause: inventory.TruncationResultLimit}, scan},
+		"after a typed":  {{Cause: inventory.TruncationResultLimit, Typed: true}, scan},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := &fakeRunner{answers: map[string][]answer{
+				"spans": {{records: rows(t, "spans-checkout"), truncations: limits}, sampledAnswer(rows(t, "spans-checkout-sampled"), 100_000_000)},
+				"logs":  {{records: rows(t, "logs-checkout")}},
+			}}
+			r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+			require.NoError(t, err)
+			assert.Len(t, runner.sent, 3, "the capped query was retried sampled")
+			assert.Equal(t, inventory.TruncationScanLimit, r.Queries[0].truncation)
+			require.Len(t, r.Candidates, 1)
+			assert.True(t, r.Candidates[0].Sampled)
+		})
+	}
 }

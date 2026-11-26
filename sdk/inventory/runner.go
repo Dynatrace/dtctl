@@ -78,26 +78,32 @@ const (
 // it a truncated result reads as complete and every row below the cut becomes
 // a fabricated absence.
 func TruncationCauseOf(n query.Notification) TruncationCause {
+	return truncationOf(n).Cause
+}
+
+// truncationOf classifies one notification; the zero Truncation is one that
+// does not truncate.
+func truncationOf(n query.Notification) Truncation {
 	switch n.NotificationType {
 	case notifyScanLimit:
-		return TruncationScanLimit
+		return Truncation{Cause: TruncationScanLimit, Typed: true}
 	case notifyResultRecords, notifyResultBytes:
-		return TruncationResultLimit
+		return Truncation{Cause: TruncationResultLimit, Typed: true}
 	case notifyFetchTimeout, notifyExecTimeLimit:
-		return TruncationTimeout
+		return Truncation{Cause: TruncationTimeout, Typed: true}
 	case notifyConsumption:
-		return TruncationConsumption
+		return Truncation{Cause: TruncationConsumption, Typed: true}
 	}
 	msg := strings.ToLower(n.Message)
 	switch {
 	case strings.Contains(msg, "scan") && strings.Contains(msg, "gigabyte"):
-		return TruncationScanLimit
+		return Truncation{Cause: TruncationScanLimit}
 	case strings.Contains(msg, "result has been limited"), strings.Contains(msg, "limited to"):
-		return TruncationResultLimit
+		return Truncation{Cause: TruncationResultLimit}
 	case strings.Contains(msg, "internal time limit"):
-		return TruncationTimeout
+		return Truncation{Cause: TruncationTimeout}
 	}
-	return ""
+	return Truncation{}
 }
 
 // FirstTruncationCause reports the first truncating cause among a response's
@@ -109,6 +115,20 @@ func FirstTruncationCause(notifications []query.Notification) TruncationCause {
 		}
 	}
 	return ""
+}
+
+// TruncationsOf reports every truncating notification of a response, in the
+// order the response lists them, for RunResult.Truncations; nil when none
+// truncates. A response can report more than one limit, and which one it
+// lists first says nothing about which one matters to the caller.
+func TruncationsOf(notifications []query.Notification) []Truncation {
+	var out []Truncation
+	for _, n := range notifications {
+		if t := truncationOf(n); t.Cause != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // NormalizeSince turns a window given as a duration into the DQL timeframe
