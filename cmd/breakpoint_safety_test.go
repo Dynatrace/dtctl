@@ -203,3 +203,20 @@ func TestCreateBreakpoint_SettingFiltersNeedsTheUpdateLevel(t *testing.T) {
 		}
 	}
 }
+
+// A dry run of update previews a change in one context's environment, so a
+// context that does not exist fails it as it fails the real run.
+func TestUpdateBreakpoint_DryRunNeedsItsContext(t *testing.T) {
+	for _, argv := range [][]string{
+		{"update", "breakpoint", "--filters", "k8s.namespace.name:web"},
+		{"update", "breakpoint", "dtctl-rule-0001", "--enabled=false"},
+	} {
+		srv := newLiveDebuggerStub(t, "readwrite-all")
+		chdirTestRepo(t, breakpointScope)
+
+		code, stdout, _ := runRepoScoped(append(argv, "--agent", "--dry-run", "--context", "nope"), RunOptions{})
+		require.NotZero(t, code, stdout)
+		require.Contains(t, agentError(t, stdout).Message, `"nope"`)
+		require.Empty(t, srv.ops())
+	}
+}

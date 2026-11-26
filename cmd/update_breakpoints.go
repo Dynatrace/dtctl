@@ -111,6 +111,11 @@ Examples:
 				if err != nil {
 					return err
 				}
+				// Before the dry run returns: a preview for a context that
+				// does not exist would name the wrong workspace.
+				if _, err := cfg.CurrentContextObj(); err != nil {
+					return err
+				}
 
 				if err := checkSafety(cmdContext(cmd), cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
 					return err
@@ -192,6 +197,9 @@ Examples:
 
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
+				return err
+			}
+			if _, err := cfg.CurrentContextObj(); err != nil {
 				return err
 			}
 
