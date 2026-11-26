@@ -476,6 +476,12 @@ func repoScopeSegments(flags []string) ([]reposcope.Segment, error) {
 	}
 	var out []reposcope.Segment
 	for i, ref := range refs {
+		// query's --segment has always read "id?&" as the bare segment, and
+		// goes on doing so. Here the result is written to a committed file,
+		// so a ? that introduces nothing is asked about instead.
+		if strings.Contains(flags[i], "?") && len(ref.Variables) == 0 {
+			return nil, fmt.Errorf("invalid --segment %q: expected VARIABLE=VALUE after '?'", strings.TrimSpace(flags[i]))
+		}
 		seg := reposcope.Segment{ID: ref.ID}
 		for _, v := range ref.Variables {
 			if _, twice := seg.Variables[v.Name]; twice {

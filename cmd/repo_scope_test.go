@@ -480,6 +480,7 @@ func TestRepoScopeSetSegments(t *testing.T) {
 		"a name":           {"Payments prod", `entry "checkout": segments[0] id "Payments prod" is not a filter segment id (letters, digits, - and _; a name is not accepted)`},
 		"a variable twice": {"Ab3dEf9hIjk?env=a&env=b", `repo-scope set: invalid --segment "Ab3dEf9hIjk?env=a&env=b": variable "env" is given twice; list its values as env=a,b`},
 		"no value":         {"Ab3dEf9hIjk?env=", `repo-scope set: invalid --segment "Ab3dEf9hIjk?env=": variable "env" value must not be empty`},
+		"no pair after ?":  {"Ab3dEf9hIjk?&", `repo-scope set: invalid --segment "Ab3dEf9hIjk?&": expected VARIABLE=VALUE after '?'`},
 	} {
 		code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "checkout", "--agent", "--segment", tc.segment}, RunOptions{})
 		require.NotZero(t, code, name)
