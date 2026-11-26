@@ -15,8 +15,16 @@
 // that in cmd/, where the flag names are.
 //
 // The HTTP calls are the SDK's (sdk/api/codelevelanalysis); this package adds
-// the window rules and the folds. Its API follows the tier of the command
-// (docs/STABILITY.md): while that is experimental, so is this.
+// the window rules and the folds.
+//
+// This package is experimental. Any exported name, signature, value or
+// behaviour here may change or be removed in any dtctl release, without a
+// deprecation period, and so may the API of the environment it calls. That is
+// this package's own promise: it does not change when the tier of the
+// `dtctl exec profiling` command changes (docs/STABILITY.md describes
+// commands and flags, not Go packages), and it holds until this paragraph
+// says otherwise. A program that imports the package should pin the dtctl
+// version it builds against.
 package profiling
 
 import (

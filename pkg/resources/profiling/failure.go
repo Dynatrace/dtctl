@@ -8,9 +8,8 @@ import (
 )
 
 // FailureReason names why an analysis failed, for a caller that branches on
-// it. The values follow the tier of `dtctl exec profiling`
-// (docs/STABILITY.md): while the command is experimental, they may change with
-// it.
+// it. Like the rest of the package the values are experimental: more may be
+// added, so a caller needs a default for a reason it does not know.
 type FailureReason string
 
 const (

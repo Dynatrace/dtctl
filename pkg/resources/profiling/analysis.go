@@ -369,9 +369,9 @@ func (h *Hotspots) focus(appOnly bool, state State, pattern string, exact bool) 
 }
 
 // EmptyReason names why a view of an analysis has no rows. A view carries the
-// reason for the arguments it was read with. The values follow the tier of
-// `dtctl exec profiling` (docs/STABILITY.md): while the command is
-// experimental, they may change with it.
+// reason for the arguments it was read with. Like the rest of the package the
+// values are experimental: more may be added, so a caller needs a default for
+// a reason it does not know.
 type EmptyReason string
 
 const (
