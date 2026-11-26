@@ -177,6 +177,9 @@ type Plan struct {
 	Truncated bool    `json:"truncated,omitempty" yaml:"truncated,omitempty"`
 	Queries   []Query `json:"queries" yaml:"queries"`
 	tokens    []token
+	// terms are the names the user passed, which stand as evidence of their
+	// own whether or not a file of the repository spells one too.
+	terms []string
 }
 
 // MostSent is the most of the plan's queries one run can send. The plan lists
@@ -240,7 +243,7 @@ func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 		return nil, err
 	}
 	p := &Plan{Dir: dir, Unit: s.unit, SharedBy: s.sharedBy, Truncated: s.capped,
-		Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens}
+		Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens, terms: terms}
 	p.Dropped = heldBack(s.dropped, p.Sent)
 	switch n := len(p.Sent); {
 	case n == 0:
@@ -312,6 +315,13 @@ func checkTerms(terms []string) ([]string, error) {
 	return out, nil
 }
 
+// UsableTerm reports whether discovery takes s as a term, for a caller that
+// proposes one.
+func UsableTerm(s string) bool {
+	terms, err := checkTerms([]string{s})
+	return err == nil && len(terms) == 1
+}
+
 // sendValues is every value the queries carry: each token's variants, and
 // each term as given, lowercased and in its variants. terms are checked.
 func sendValues(tokens []token, terms []string) []string {
@@ -325,13 +335,17 @@ func sendValues(tokens []token, terms []string) []string {
 		}
 	}
 	for _, term := range terms {
-		set[term] = true
-		set[strings.ToLower(term)] = true
-		for _, v := range variants(term) {
+		for _, v := range termSpellings(term) {
 			set[v] = true
 		}
 	}
 	return sortedKeys(set)
+}
+
+// termSpellings is every value a checked term is sent as: as given,
+// lowercased and in its variants.
+func termSpellings(term string) []string {
+	return append([]string{term, strings.ToLower(term)}, variants(term)...)
 }
 
 func recordQuery(object, purpose, stages string) Query {

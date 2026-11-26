@@ -36,7 +36,28 @@ type token struct {
 	variants []string
 	file     string
 	line     int
+	// indirect says, as what the name was read from, why it cannot settle a
+	// candidate by itself; "" for a name the unit gives itself. See
+	// indirectNames.
+	indirect string
 }
+
+// A repository holds names that are not its own, and each of these finds a
+// candidate without settling it. The words complete "named only by".
+const (
+	// The hosting service's name for the repository is often an
+	// organisation's or a platform's, shared by everything in it.
+	indirectRemote = "the origin remote's name"
+	// A manifest lists the images of sidecars and of the products it deploys
+	// beside the unit's own.
+	indirectImage = "an image a manifest lists"
+	// A manifest or chart the unit does not claim by name may deploy a
+	// dependency: a cache, a broker, a proxy.
+	indirectUnclaimed = "a manifest or chart that is not named like the unit"
+	// What a directory kept for other projects' code, for build output or
+	// for test content holds, its own name included.
+	indirectForeign = "what is under %s/, which holds no name of this repository's own"
+)
 
 // source is where the token was read, "deploy/k8s/deployment.yaml:4".
 func (t token) source() string {

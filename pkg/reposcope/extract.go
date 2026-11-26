@@ -180,7 +180,8 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 
 // unitTokens collects the names of unit: nameDir's own name unless it is the
 // repository root or one of layoutWords, then the names of every source
-// attributed to the unit.
+// attributed to the unit. The names that are not the unit's own are marked
+// (see indirectNames).
 func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string) []token {
 	var tokens []token
 	if nameDir != "." {
@@ -188,12 +189,83 @@ func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string
 			tokens = append(tokens, t)
 		}
 	}
+	var attributed []sourceNames
 	for _, f := range found {
 		if attribute(units, f) == unit {
-			tokens = append(tokens, f.tokens...)
+			attributed = append(attributed, f)
 		}
 	}
+	return append(tokens, indirectNames(tokens, attributed)...)
+}
+
+// indirectNames returns the tokens of a unit's sources, after its directory
+// tokens dirs, marking in both the names that find a candidate and cannot
+// settle one, because the repository holds them without their being the
+// unit's own:
+//
+//   - the origin remote's name and every image, marked where they are read;
+//   - the names of a manifest or chart the unit does not claim. A build
+//     file's name, the unit's directory and the remote say what the unit is
+//     called, and a manifest whose workload or image is called the same is
+//     the unit's. Any other may deploy a dependency;
+//   - whatever was read at or below one of skippedDirs or excludedDirs, a
+//     directory's own name included. The walk never enters the first and
+//     enters the second only on the way to the directory discovery was asked
+//     about, and being asked about a fixture does not make it the service.
+//
+// A candidate matched by such names alone is reported, never as a match,
+// and gets no line (Candidate.Indirect). A --term is the way to say that it
+// is what runs this code.
+func indirectNames(dirs []token, sources []sourceNames) []token {
+	var called []string // what the unit is called
+	for _, t := range dirs {
+		called = append(called, t.value)
+	}
+	for _, f := range sources {
+		if len(f.claims) == 0 {
+			for _, t := range f.tokens {
+				called = append(called, t.value)
+			}
+		}
+	}
+	claimed := func(f sourceNames) bool {
+		return len(f.claims) == 0 || slices.ContainsFunc(f.claims, func(claim string) bool {
+			return slices.ContainsFunc(called, func(name string) bool { return sameName(claim, name) })
+		})
+	}
+	var tokens []token
+	for _, f := range sources {
+		for _, t := range f.tokens {
+			if t.indirect == "" && !claimed(f) {
+				t.indirect = indirectUnclaimed
+			}
+			tokens = append(tokens, t)
+		}
+	}
+	foreign := func(t *token) {
+		// The remote is read from .git/config and says so itself.
+		if dir := foreignDir(path.Dir(t.file)); dir != "" && t.kind != kindRemote {
+			t.indirect = fmt.Sprintf(indirectForeign, dir)
+		}
+	}
+	for i := range dirs {
+		foreign(&dirs[i])
+	}
+	for i := range tokens {
+		foreign(&tokens[i])
+	}
 	return tokens
+}
+
+// foreignDir is the first directory of the path dir that is one of
+// skippedDirs or excludedDirs, or "".
+func foreignDir(dir string) string {
+	for _, name := range strings.Split(dir, "/") {
+		if skippedDirs[name] || excludedDirs[strings.ToLower(strings.TrimPrefix(name, "."))] {
+			return name
+		}
+	}
+	return ""
 }
 
 // newSignals holds the unit's test names back from its tokens. They are held

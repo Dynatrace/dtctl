@@ -243,7 +243,11 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 				fmt.Fprintf(w, "%s:\n  %s\n", capitalize(a.sentence()), a.line)
 			}
 		case len(p.handLinks) > 0:
-			fmt.Fprintf(w, "%s No binding selects any candidate alone.\n", took)
+			why := "No binding selects any candidate alone."
+			if !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.Indirect == "" }) {
+				why = "No candidate is named by the unit itself (see the notes)."
+			}
+			fmt.Fprintf(w, "%s %s\n", took, why)
 			writeRepoScopeHandLinks(w, p)
 		case len(r.Candidates) == 1:
 			fmt.Fprintf(w, "%s If it is what runs this code, save it with:\n  %s\n", took, r.Candidates[0].SetCommand)
@@ -267,8 +271,8 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 // the way of one. With several candidates it is their number. With one it is
 // not: that candidate's name matched only in part, the result is partial and
 // a query that did not answer could have found another, a sample read the
-// records and could have missed another, or only the entity table holds the
-// name.
+// records and could have missed another, no name of the unit's own matched
+// it, or only the entity table holds the name.
 func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 	switch {
 	case len(r.Candidates) != 1:
@@ -277,6 +281,8 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 		return ": one candidate, but the result is partial (see the notes)"
 	case r.SampledRecords():
 		return ": one candidate, but the records were sampled, which can miss another (see the notes)"
+	case r.Candidates[0].Indirect != "":
+		return ": one candidate, " + r.Candidates[0].Indirect
 	case r.Candidates[0].Tier == "exact" && r.Candidates[0].Workload == "" && r.Candidates[0].ServiceName == "":
 		// Named exactly, but found by the entity-name search, which runs
 		// only when the records find nothing: the entity exists, and

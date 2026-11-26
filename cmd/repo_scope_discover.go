@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -476,6 +477,11 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // discovery did not send: the queries compare service.name to the sent names
 // only, so nothing looked for what else reports it.
 //
+// A candidate that only names the repository holds without their being the
+// unit's own matched (Candidate.Indirect) gets no line at all: the line is
+// the whole hand-off, and nothing shows that the candidate runs this code. A
+// note says so and names the --term that confirms it.
+//
 // The workload binding carries the cluster the candidate's records name, so
 // the same namespace and workload in another cluster stays out of the entry.
 // That holds for a sampled candidate too: the cluster is a key its rows were
@@ -508,6 +514,11 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 // what their sender wrote, a namespace in capitals or an entity id of
 // another kind, and a line that is refused saves nothing.
 func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e reposcope.Entry, unheld []repoScopeUnheld) {
+	// Nothing shows that a candidate found by indirect names runs this
+	// code, and a line is something to run.
+	if c.Indirect != "" {
+		return e, nil
+	}
 	// holds reports whether a scope file can hold b, the bindings of one
 	// kind, and records them as left out when it cannot.
 	holds := func(b reposcope.Entry) bool {
@@ -778,18 +789,24 @@ func repoScopeSelectAllLines(r *reposcope.DiscoveryReport, selectors []string, n
 		if !c.ServiceNameShared || slices.ContainsFunc(out, func(s repoScopeSelectAll) bool { return s.serviceName == c.ServiceName }) {
 			continue
 		}
-		reporting, matchedDir := 0, true
+		// indirect stays set only when every candidate reporting the name
+		// was found by indirect names: the line is then no better founded
+		// than theirs would be.
+		reporting, matchedDir, indirect := 0, true, c.Indirect
 		for _, o := range r.Candidates {
 			if o.ServiceName == c.ServiceName {
 				reporting++
 				matchedDir = matchedDir && o.MatchedDir
+				if o.Indirect == "" {
+					indirect = ""
+				}
 			}
 		}
 		// The service name of every candidate that reports it, and nothing
 		// of this one. A sampled candidate's service name, or one of a
 		// partial result, is never proposed alone.
 		all := reposcope.Candidate{Rank: c.Rank, Name: reposcope.EntryName(c.ServiceName), ServiceName: c.ServiceName,
-			Sampled: c.Sampled, MatchedDir: matchedDir}
+			Sampled: c.Sampled, MatchedDir: matchedDir, Indirect: indirect}
 		if repoScopeSetCommand(r, all, selectors) == "" {
 			continue
 		}
@@ -849,6 +866,9 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 		why := repoScopeIDRefusal(r, c, true)
 		switch {
+		case c.Indirect != "":
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it is %s, so nothing shows that it runs this code%s",
+				c.Rank, c.Indirect, repoScopeConfirmHint(c)))
 		case len(unheld) > 0:
 			var all []string
 			for _, u := range unheld {
@@ -866,6 +886,18 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 	}
 	return notes
+}
+
+// repoScopeConfirmHint is how the user says that a candidate found by
+// indirect names is what runs this code: a term spelling its workload or
+// service name, which is then evidence of its own. Records carry what their
+// sender wrote, so a name a term cannot hold gets no hint.
+func repoScopeConfirmHint(c reposcope.Candidate) string {
+	name := cmp.Or(c.Workload, c.ServiceName)
+	if !reposcope.UsableTerm(name) {
+		return ""
+	}
+	return "; if it does, run discover again with --term " + exec.ShellQuote(name)
 }
 
 // repoScopeClusterNotes says, for each namespace and workload the candidates

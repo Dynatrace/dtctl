@@ -26,6 +26,7 @@ func readRemote(fsys fs.FS) []sourceNames {
 		return nil
 	}
 	if t, ok := newToken(kindRemote, repositoryName(remote), gitConfig, line); ok {
+		t.indirect = indirectRemote
 		return []sourceNames{{dir: ".", tokens: []token{t}}}
 	}
 	return nil

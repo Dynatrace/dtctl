@@ -74,7 +74,10 @@ func workloadNames(doc *yaml.Node, file string) (sourceNames, bool) {
 	}
 	for _, c := range containers(mapValue(doc, "spec")) {
 		if image := mapValue(c, "image"); image != nil {
-			f.add(kindImage, image.Value, file, image.Line)
+			if t, ok := newToken(kindImage, image.Value, file, image.Line); ok {
+				t.indirect = indirectImage
+				f.tokens = append(f.tokens, t)
+			}
 			f.claims = append(f.claims, baseName(image.Value))
 		}
 		for _, env := range sequence(mapValue(c, "env")) {

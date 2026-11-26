@@ -96,6 +96,13 @@ type Candidate struct {
 	// name is then all that ties the candidate to the directory rather than
 	// to the whole repository.
 	MatchedDir bool `json:"matchedDir,omitempty" yaml:"matchedDir,omitempty"`
+	// Indirect says why the names that matched the candidate do not settle
+	// it: "named only by" what the repository holds without its being the
+	// unit's own, such as a sidecar's image or the origin remote's name. It
+	// is empty when one of the names is the unit's own or a term. A
+	// candidate with it is never a match and is proposed no line, since
+	// nothing shows that it runs this code.
+	Indirect string `json:"indirect,omitempty" yaml:"indirect,omitempty"`
 	// SetCommand is the command line that saves the candidate. Discover
 	// leaves it empty: spelling a command line is the CLI's business.
 	SetCommand string `json:"setCommand,omitempty" yaml:"setCommand,omitempty"`
@@ -109,6 +116,8 @@ type Candidate struct {
 	// that repeats a name on several lines is still one file: ranking
 	// weighs independent files, not repetition.
 	sources map[string]bool
+	// named are the tokens whose names matched, for Indirect.
+	named   []token
 	matched string  // the token an entity matched
 	rate    float64 // records, or sampled hits, per hour: see before
 	// logsMissed is spans matched and, in a logs query that read the whole
@@ -162,7 +171,9 @@ type discovery struct {
 }
 
 // newDiscovery prepares the matchers: every variant of every token sent, then
-// every sent value no token explains, which came from a term.
+// every sent value a term spells or no token explains, which came from a
+// term. A term stands beside a token of the same spelling: it is the user's
+// word that the name is this code's, which a file's may not be.
 func newDiscovery(p *Plan) *discovery {
 	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}, stopped: map[string]bool{}}
 	if p.Unit == "." && p.Dir != "." {
@@ -179,8 +190,14 @@ func newDiscovery(p *Plan) *discovery {
 			explained[v] = true
 		}
 	}
+	termed := map[string]bool{}
+	for _, term := range p.terms {
+		for _, v := range termSpellings(term) {
+			termed[v] = true
+		}
+	}
 	for _, v := range p.Sent {
-		if !explained[v] {
+		if !explained[v] || termed[v] {
 			d.matchers = append(d.matchers, matcher{value: v, token: token{kind: kindTerm, value: v}})
 		}
 	}
@@ -430,6 +447,7 @@ func (d *discovery) addEntity(object string, rec map[string]interface{}) {
 	c := &Candidate{tier: t, matched: m.token.value, sources: map[string]bool{}}
 	for _, o := range matched {
 		c.sources[o.token.file] = true
+		c.named = append(c.named, o.token)
 	}
 	if object == objectServices {
 		c.Services = []string{id}
@@ -531,9 +549,11 @@ func (d *discovery) explain(c *Candidate) {
 			}
 		}
 		c.cite(field.name, field.value, from)
+		c.named = append(c.named, from...)
 		if inside := d.workloadSegments(c.Workload); len(inside) > 0 && field.name == fieldWorkload && len(from) == 0 {
 			for _, m := range inside {
 				c.sources[m.token.file] = true
+				c.named = append(c.named, m.token)
 			}
 			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(inside[0].token), tierSegment))
 		}
@@ -751,6 +771,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.ServiceNameShared = shared[c.ServiceName]
 		c.WorkloadShared = c.Workload != "" && inClusters[Workload{Namespace: c.Namespace, Name: c.Workload}] > 1
 		c.MatchedDir = d.dirSource != "" && c.sources[d.dirSource]
+		c.Indirect = indirect(c.named)
 		c.Rank, c.Tier = i+1, c.tier.String()
 		c.Name = EntryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
 	}
@@ -758,7 +779,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		r.note(n)
 	}
 	for i, c := range all {
-		c.tier, c.cluster, c.sources, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, "", nil, "", 0, false, false
+		c.tier, c.cluster, c.sources, c.named, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, "", nil, nil, "", 0, false, false
 		r.Candidates[i] = *c
 	}
 	// A sample can have missed a second candidate, as its note says, so what
@@ -766,6 +787,25 @@ func (d *discovery) finish(r *DiscoveryReport) {
 	// found in the entity table alone: an entity outlives its last record,
 	// so with no span or log in the window nothing shows that it runs.
 	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial || r.SampledRecords() || len(d.records) == 0)
+}
+
+// indirect is Candidate.Indirect for the tokens whose names matched: empty
+// when one of them is the unit's own name or a term, or when none matched at
+// all, which the tier already says.
+func indirect(named []token) string {
+	var by []string
+	for _, t := range named {
+		if t.indirect == "" {
+			return ""
+		}
+		if !slices.Contains(by, t.indirect) {
+			by = append(by, t.indirect)
+		}
+	}
+	if len(by) == 0 {
+		return ""
+	}
+	return "named only by " + strings.Join(by, " and ")
 }
 
 // sharedServiceNames is the service names more than one candidate carries.
@@ -904,7 +944,8 @@ func VerdictLabel(kind string) string {
 
 // verdicts decides each kind and the whole. unsure is a result that is
 // partial, that a sample read, or that rests on entity names alone: it is
-// never a match. A kind is tallied by
+// never a match. Nor is a candidate found by its whole name when every name
+// that matched is Indirect. A kind is tallied by
 // its count where it has one, so a candidate listing one of its 200 service
 // ids is 200 services, not one. No kind is a match unless the whole is.
 func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict) {
@@ -924,12 +965,12 @@ func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict)
 				most = max(most, n)
 			}
 			if len(values) > 0 || n > 0 {
-				exact = exact && c.Tier == tierExact.String()
+				exact = exact && settles(c)
 			}
 		}
 		per[kind] = decide(max(len(distinct), int(most)), exact, unsure)
 	}
-	overall := decide(len(candidates), len(candidates) == 1 && candidates[0].Tier == tierExact.String(), unsure)
+	overall := decide(len(candidates), len(candidates) == 1 && settles(candidates[0]), unsure)
 	if overall != VerdictMatch {
 		// No kind is settled while the candidates are not: the one value of
 		// a kind may be what two candidates share.
@@ -940,6 +981,12 @@ func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict)
 		}
 	}
 	return overall, per
+}
+
+// settles reports whether c, were it the only candidate, is one a verdict can
+// rest on: found by its whole name, and by a name that is the unit's own.
+func settles(c Candidate) bool {
+	return c.Tier == tierExact.String() && c.Indirect == ""
 }
 
 func decide(distinct int, exact, unsure bool) Verdict {
