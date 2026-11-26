@@ -186,20 +186,19 @@ func commandSynonym(c *queryContext) (hint, bool) {
 var asAliasRe = regexp.MustCompile(`\s+as\s+(` + fieldName + `)$`)
 
 // singleQuotes: DQL strings take double quotes; a doubled single quote is SQL's escape.
+//
+// It walks the masked view, so a literal is copied whole as the scanner read
+// it, a """…""" string and an identifier with an escaped backtick included,
+// and only a single quote outside every literal starts a repair.
 func singleQuotes(c *queryContext) (hint, bool) {
 	q := c.q
 	var out strings.Builder
 	changed := false
 	for i := 0; i < len(q); i++ {
-		switch q[i] {
+		switch c.code[i] {
 		case '"', '`':
-			j := i + 1
-			for ; j < len(q) && q[j] != q[i]; j++ {
-				if q[j] == '\\' && q[i] == '"' {
-					j++
-				}
-			}
-			if j >= len(q) {
+			j := literalEnd(c.code, i)
+			if j < 0 {
 				return hint{}, false
 			}
 			out.WriteString(q[i : j+1])
@@ -235,6 +234,21 @@ func singleQuotes(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	return hint{reason: "DQL strings take double quotes", query: out.String()}, true
+}
+
+// literalEnd returns the offset of the last byte of the literal that opens at
+// code[open], or -1. code is the masked view: a literal's contents are
+// masked, so the next quote of its kind closes it.
+func literalEnd(code string, open int) int {
+	quote, from := code[open:open+1], open+1
+	if strings.HasPrefix(code[open:], `"""`) {
+		quote, from = `"""`, open+3
+	}
+	end := strings.Index(code[from:], quote)
+	if end < 0 {
+		return -1
+	}
+	return from + end + len(quote) - 1
 }
 
 // functionSynonyms maps exact renames only; arguments stay as they are.

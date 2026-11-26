@@ -53,6 +53,22 @@ func TestSuggest_HabitRewrites(t *testing.T) {
 			match: "single-quotes",
 		},
 		{
+			// The scanner knows the triple-quoted string; its quotes, its //
+			// and its single quotes are data and must come back unchanged.
+			name: "single quotes beside a triple-quoted string that holds some",
+			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
+				Query: `fetch logs | fieldsAdd x = """a" // 'keep' "b""" | filter level == 'warn'`, Span: span(68, 73)},
+			want:  `fetch logs | fieldsAdd x = """a" // 'keep' "b""" | filter level == "warn"`,
+			match: "single-quotes",
+		},
+		{
+			name: "single quotes beside an identifier that holds one after an escaped backtick",
+			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
+				Query: "fetch logs | filter `a\\`'b` == 'x'", Span: span(33, 35)},
+			want:  "fetch logs | filter `a\\`'b` == \"x\"",
+			match: "single-quotes",
+		},
+		{
 			name: "single quotes with an SQL-escaped quote",
 			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
 				Query: "fetch logs | filter loglevel == 'ERROR' and content != 'it''s'", Span: span(60, 62)},
