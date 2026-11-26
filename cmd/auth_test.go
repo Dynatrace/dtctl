@@ -1970,6 +1970,15 @@ func TestAuthLogin_ProjectConfigRequestsNoMoreThanTheTokensBinding(t *testing.T)
 			wantNotice: `The context declares dangerously-unrestricted; the global config binds no context to token "mine-oauth", which limits a project config to readwrite-all, so the login requests readwrite-all scopes.`,
 		},
 		{
+			// The sdk binds a token to hosts; an environment without one binds nothing.
+			name:       "a global context whose environment has no host binds nothing",
+			global:     loginConfigYAML("prod", loginTestContext{"prod", "not-a-url", "mine-oauth", config.SafetyLevelDangerouslyUnrestricted}),
+			project:    loginTestContext{"project", envURL, "mine-oauth", config.SafetyLevelDangerouslyUnrestricted},
+			args:       []string{"--context", "project"},
+			wantLevel:  config.SafetyLevelReadWriteAll,
+			wantNotice: `The context declares dangerously-unrestricted; the global config binds no context to token "mine-oauth", which limits a project config to readwrite-all, so the login requests readwrite-all scopes.`,
+		},
+		{
 			name:      "a level within the binding needs no explanation",
 			project:   loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly},
 			args:      []string{"--context", "project"},

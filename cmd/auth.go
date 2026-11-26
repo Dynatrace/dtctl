@@ -683,14 +683,6 @@ func globalContextsFor(cfg *config.Config) []config.NamedContext {
 	return global.Contexts
 }
 
-// tokenBoundIn reports whether one of contexts binds tokenName to an
-// environment.
-func tokenBoundIn(contexts []config.NamedContext, tokenName string) bool {
-	return slices.ContainsFunc(contexts, func(nc config.NamedContext) bool {
-		return nc.Context.TokenRef == tokenName && nc.Context.Environment != ""
-	})
-}
-
 // globalContextsBinding returns the contexts of global, the global config's
 // contexts, that bind tokenName: those the clamp of a project config's level
 // is built from. The rule is the one of buildGlobalBindings in sdk/session,
@@ -1117,7 +1109,7 @@ Non-interactive login (CI/CD):
 			} else {
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Requesting OAuth scopes for safety level %s...", oauthConfig.SafetyLevel)
 				if scopeLevel != levels.declared {
-					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", levels.ceilingNotice(tokenName, tokenBoundIn(globalContexts, tokenName)))
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", levels.ceilingNotice(tokenName, len(globalContextsBinding(globalContexts, tokenName)) > 0))
 				}
 				if len(scopesLeftOut) > 0 {
 					output.FprintInfo(currentStderr(cmdContext(cmd)), "The login requests only scopes that the global binding of token %q (%s) requests too. Left out: %s.", tokenName, boundLevel, strings.Join(scopesLeftOut, ", "))
