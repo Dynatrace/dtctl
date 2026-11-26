@@ -20,8 +20,11 @@ import (
 // experimental tier. One constant for the whole family.
 const profilingSince = "0.47.0"
 
+// profilingFindIDsQuery lists eligible entity ids.
+const profilingFindIDsQuery = `dtctl query 'smartscapeNodes PROCESS | fields id, dt.process_group.detected_name, dt.process_group.id'`
+
 // profilingFindIDsHint tells the caller how to find an eligible entity id.
-const profilingFindIDsHint = profiling.FindIDsQuery + `
+const profilingFindIDsHint = profilingFindIDsQuery + `
   # id is the PROCESS-xxx id to pass; dt.process_group.id is its PROCESS_GROUP-xxx id`
 
 // profilingExperimentalNotice opens every profiling help page, so whoever
@@ -697,19 +700,47 @@ func profilingEmptyNote(reason profiling.EmptyReason, run *profilingRun, state s
 		run.entity, run.status, spanString(profiling.MaxWindow))
 }
 
-// profilingAPIError adds profiling-specific advice to the API failures a
-// caller can act on. Everything else passes through unchanged and gets dtctl's
-// generic handling.
+// profilingAPIError adds profiling-specific advice to the failures a caller
+// can act on. Everything else passes through unchanged and gets dtctl's generic
+// handling, as do the failures whose own text already says what happened: a
+// request the SDK refused, a server error and an analysis that did not finish.
 func profilingAPIError(err error) error {
 	f, ok := profiling.ClassifyError(err)
 	if !ok {
+		return err
+	}
+	var suggestions []string
+	switch f.Reason {
+	case profiling.FailureBadRequest:
+		suggestions = []string{
+			fmt.Sprintf("The API rejected the request parameters — check the timeframe (in the past, at most %s) and the entity id", spanString(profiling.MaxWindow)),
+		}
+	case profiling.FailureForbidden:
+		suggestions = []string{
+			"Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy",
+			"OAuth (dtctl auth login): log in again so the session requests storage:profiles:read",
+		}
+	case profiling.FailureNotFound:
+		suggestions = []string{
+			"The environment knows no such process (ids are per environment, and short-lived process instances disappear)",
+			"List eligible ids: " + profilingFindIDsQuery,
+		}
+	case profiling.FailureTaskExpired:
+		suggestions = []string{
+			"The analysis was started, but the environment no longer knows its task (it expired, or it ran on a node that is gone) — run the command again",
+		}
+	case profiling.FailureThrottled:
+		suggestions = []string{
+			"The environment limits concurrent profiling analyses and is at that limit — wait and retry, and avoid running many analyses in parallel",
+		}
+	default:
 		return err
 	}
 	return &diagnostic.Error{
 		Operation:   "run profiling analysis",
 		StatusCode:  f.StatusCode,
 		Message:     f.Message,
-		Suggestions: f.Advice,
+		Suggestions: suggestions,
 		Err:         err,
 	}
 }

@@ -502,10 +502,118 @@ func TestExecProfiling_WindowInEnvelope(t *testing.T) {
 	require.Empty(t, env.Context.Window.Note)
 }
 
-// An API failure fails the command.
-func TestExecProfiling_APIErrorFails(t *testing.T) {
-	newProfilingAPI(t, http.StatusForbidden, `{"error":{"code":403,"message":"missing scope"}}`)
+// newProfilingPollAPI is an endpoint that accepts every analysis and then
+// answers each poll for its result with one canned status and body.
+func newProfilingPollAPI(t *testing.T, status int, body string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/result") {
+			w.WriteHeader(status)
+			_, _ = fmt.Fprint(w, body)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = fmt.Fprint(w, `{"token":"t1"}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeIsolatedConfig(t, safetyLevelConfig(srv.URL, "readonly"))
+}
 
-	code, _ := runProfilingCmd(t, "hotspots", testProcess)
-	require.NotZero(t, code)
+// A failure the caller can act on carries advice for it, and the exit code and
+// the agent error code of its status.
+func TestExecProfiling_APIErrors(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		poll        bool
+		exit        int
+		code        string
+		suggestions []string
+	}{
+		{name: "bad request", status: 400, exit: 1, code: "bad_request", suggestions: []string{
+			"The API rejected the request parameters — check the timeframe (in the past, at most 2h) and the entity id",
+		}},
+		{name: "missing scope", status: 403, exit: 5, code: "permission_denied", suggestions: []string{
+			"Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy",
+			"OAuth (dtctl auth login): log in again so the session requests storage:profiles:read",
+		}},
+		{name: "unknown process", status: 404, exit: 4, code: "not_found", suggestions: []string{
+			"The environment knows no such process (ids are per environment, and short-lived process instances disappear)",
+			"List eligible ids: dtctl query 'smartscapeNodes PROCESS | fields id, dt.process_group.detected_name, dt.process_group.id'",
+		}},
+		// The process was found when the analysis started: a poll that finds
+		// nothing has lost the task, and must not send the caller looking for
+		// another id.
+		{name: "task gone", status: 404, poll: true, exit: 4, code: "not_found", suggestions: []string{
+			"The analysis was started, but the environment no longer knows its task (it expired, or it ran on a node that is gone) — run the command again",
+		}},
+		{name: "missing scope on a poll", status: 403, poll: true, exit: 5, code: "permission_denied", suggestions: []string{
+			"Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy",
+			"OAuth (dtctl auth login): log in again so the session requests storage:profiles:read",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"error":{"code":%d,"message":"the API's message"}}`, tc.status)
+			if tc.poll {
+				newProfilingPollAPI(t, tc.status, body)
+			} else {
+				newProfilingAPI(t, tc.status, body)
+			}
+
+			code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess)
+			require.Equal(t, tc.exit, code)
+			require.Empty(t, stdout)
+			want := fmt.Sprintf("Error: Failed to run profiling analysis (HTTP %d): the API's message\n\nTroubleshooting suggestions:\n", tc.status)
+			for _, s := range tc.suggestions {
+				want += "  • " + s + "\n"
+			}
+			require.Equal(t, want, stderr)
+
+			code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--agent")
+			require.Equal(t, tc.exit, code)
+			require.Empty(t, stderr)
+			var env struct {
+				OK    bool `json:"ok"`
+				Error struct {
+					Code        string   `json:"code"`
+					Message     string   `json:"message"`
+					Operation   string   `json:"operation"`
+					StatusCode  int      `json:"status_code"`
+					Suggestions []string `json:"suggestions"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &env), stdout)
+			require.False(t, env.OK)
+			require.Equal(t, tc.code, env.Error.Code)
+			require.Equal(t, "the API's message", env.Error.Message)
+			require.Equal(t, "run profiling analysis", env.Error.Operation)
+			require.Equal(t, tc.status, env.Error.StatusCode)
+			require.Equal(t, tc.suggestions, env.Error.Suggestions)
+		})
+	}
+}
+
+// A failure with nothing profiling-specific to add is shown as it is.
+func TestExecProfiling_ErrorsPassedThrough(t *testing.T) {
+	t.Run("server error", func(t *testing.T) {
+		newProfilingAPI(t, http.StatusNotImplemented, `{"error":{"code":501,"message":"boom"}}`)
+		code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess)
+		require.Equal(t, 1, code)
+		require.Empty(t, stdout)
+		require.Equal(t, "Error: codelevelanalysis: submit: API error (501): boom\n", stderr)
+	})
+	t.Run("ineligible entity", func(t *testing.T) {
+		api := newProfilingAPI(t, http.StatusOK, profilingTree)
+		code, stdout, stderr := runProfilingStreams(t, "hotspots", "SERVICE-0000000000000001")
+		require.Equal(t, 1, code)
+		require.Empty(t, stdout)
+		require.Equal(t, `Error: invalid entity "SERVICE-0000000000000001": profiling takes a process id, PROCESS-xxx (classic PROCESS_GROUP-xxx and PROCESS_GROUP_INSTANCE-xxx ids work too; SERVICE ids do not).
+Find a process id:
+  dtctl query 'smartscapeNodes PROCESS | fields id, dt.process_group.detected_name, dt.process_group.id'
+  # id is the PROCESS-xxx id to pass; dt.process_group.id is its PROCESS_GROUP-xxx id
+`, stderr)
+		require.Empty(t, api.paths)
+	})
 }

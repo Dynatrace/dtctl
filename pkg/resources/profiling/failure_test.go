@@ -1,68 +1,133 @@
 package profiling
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 func TestClassifyError(t *testing.T) {
-	api := func(status int) error {
-		// Wrapped, the way the SDK returns it.
-		return fmt.Errorf("codelevelanalysis: submit: %w", httpclient.NewAPIError(status, "the API's message", ""))
+	// The errors as the SDK returns them: an *Error naming the phase, around
+	// the API's answer where there was one.
+	api := func(phase sdkcla.Phase, status int) error {
+		return &sdkcla.Error{Phase: phase, Err: fmt.Errorf("codelevelanalysis: %s: %w", phase, httpclient.NewAPIError(status, "the API's message", ""))}
 	}
+	notCompleted := &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: sdkcla.ErrNotCompleted}
+	refused := &sdkcla.Error{Phase: sdkcla.PhaseValidate, Err: errors.New(`codelevelanalysis: unknown leaf type "nope": use total, service, or background`)}
 	cases := []struct {
-		name   string
-		err    error
-		ok     bool
-		reason FailureReason
-		advice []string // one substring per expected entry
+		name string
+		err  error
+		want Failure
+		ok   bool
 	}{
-		{name: "400", err: api(400), ok: true, reason: FailureBadRequest,
-			advice: []string{"check the timeframe (in the past, at most 2h) and the entity id"}},
-		{name: "403", err: api(403), ok: true, reason: FailureForbidden,
-			advice: []string{"storage:profiles:read and storage:entities:read", "dtctl auth login"}},
-		{name: "404", err: api(404), ok: true, reason: FailureNotFound,
-			advice: []string{"knows no such process", "List eligible ids: " + FindIDsQuery}},
-		{name: "429", err: api(429), ok: true, reason: FailureThrottled,
-			advice: []string{"limits concurrent profiling analyses"}},
-		{name: "401 is left to generic handling", err: api(401)},
-		{name: "500 is left to generic handling", err: api(500)},
-		{name: "not an API error", err: errors.New("codelevelanalysis: analysis did not complete within 60s")},
+		{name: "400", err: api(sdkcla.PhaseSubmit, 400), ok: true,
+			want: Failure{Reason: FailureBadRequest, StatusCode: 400, Message: "the API's message"}},
+		{name: "403", err: api(sdkcla.PhaseSubmit, 403), ok: true,
+			want: Failure{Reason: FailureForbidden, StatusCode: 403, Message: "the API's message"}},
+		{name: "403 on a poll", err: api(sdkcla.PhasePoll, 403), ok: true,
+			want: Failure{Reason: FailureForbidden, StatusCode: 403, Message: "the API's message"}},
+		// The same status, two meanings: the submit names the entity, a poll
+		// names the task.
+		{name: "404 on the submit", err: api(sdkcla.PhaseSubmit, 404), ok: true,
+			want: Failure{Reason: FailureNotFound, StatusCode: 404, Message: "the API's message"}},
+		{name: "404 on a poll", err: api(sdkcla.PhasePoll, 404), ok: true,
+			want: Failure{Reason: FailureTaskExpired, StatusCode: 404, Message: "the API's message"}},
+		{name: "429", err: api(sdkcla.PhaseSubmit, 429), ok: true,
+			want: Failure{Reason: FailureThrottled, StatusCode: 429, Message: "the API's message"}},
+		{name: "500", err: api(sdkcla.PhaseSubmit, 500), ok: true,
+			want: Failure{Reason: FailureServer, StatusCode: 500, Message: "the API's message"}},
+		{name: "503 on a poll", err: api(sdkcla.PhasePoll, 503), ok: true,
+			want: Failure{Reason: FailureServer, StatusCode: 503, Message: "the API's message"}},
+		{name: "never completed", err: notCompleted, ok: true,
+			want: Failure{Reason: FailureTimeout, Message: "codelevelanalysis: analysis did not complete"}},
+		{name: "request refused before it was sent", err: refused, ok: true,
+			want: Failure{Reason: FailureInvalidInput, Message: `codelevelanalysis: unknown leaf type "nope": use total, service, or background`}},
+		{name: "wrapped again by the caller", err: fmt.Errorf("profile: %w", api(sdkcla.PhasePoll, 404)), ok: true,
+			want: Failure{Reason: FailureTaskExpired, StatusCode: 404, Message: "the API's message"}},
+		// An API error that did not come through an analysis has no phase.
+		{name: "404 without a phase", err: httpclient.NewAPIError(404, "the API's message", ""), ok: true,
+			want: Failure{Reason: FailureNotFound, StatusCode: 404, Message: "the API's message"}},
+		{name: "401 is left to generic handling", err: api(sdkcla.PhaseSubmit, 401)},
+		{name: "409 is left to generic handling", err: api(sdkcla.PhaseSubmit, 409)},
+		{name: "a transport error", err: &sdkcla.Error{Phase: sdkcla.PhaseSubmit, Err: errors.New("codelevelanalysis: submit: connection refused")}},
+		{name: "a cancelled context", err: &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: context.Canceled}},
+		{name: "not an analysis error", err: errors.New("boom")},
 		{name: "nil", err: nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f, ok := ClassifyError(tc.err)
-			if ok != tc.ok {
-				t.Fatalf("ok = %v, want %v", ok, tc.ok)
-			}
-			if !ok {
-				if f.Reason != "" || f.StatusCode != 0 || f.Message != "" || f.Advice != nil {
-					t.Errorf("an unclassified error must yield the zero Failure, got %+v", f)
-				}
-				return
-			}
-			if f.Reason != tc.reason {
-				t.Errorf("Reason = %q, want %q", f.Reason, tc.reason)
-			}
-			if f.Message != "the API's message" {
-				t.Errorf("Message = %q", f.Message)
-			}
-			if got := fmt.Sprint(f.StatusCode); got != tc.name {
-				t.Errorf("StatusCode = %s, want %s", got, tc.name)
-			}
-			if len(f.Advice) != len(tc.advice) {
-				t.Fatalf("Advice = %q, want %d entries", f.Advice, len(tc.advice))
-			}
-			for i, want := range tc.advice {
-				if !strings.Contains(f.Advice[i], want) {
-					t.Errorf("Advice[%d] = %q, want it to contain %q", i, f.Advice[i], want)
-				}
+			got, ok := ClassifyError(tc.err)
+			if ok != tc.ok || got != tc.want {
+				t.Errorf("ClassifyError = %+v, %v\nwant            %+v, %v", got, ok, tc.want, tc.ok)
 			}
 		})
+	}
+}
+
+// The failures a caller meets most, through the real request path: what the
+// SDK refuses before sending, and what the API answers on the submit and on a
+// poll.
+func TestClassifyError_ThroughTheHandler(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/result"):
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":{"code":404,"message":"task gone"}}`)
+		case strings.Contains(r.URL.Path, "/memoryallocation/"):
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":{"code":404,"message":"no such entity"}}`)
+		default:
+			w.WriteHeader(http.StatusAccepted)
+			fmt.Fprint(w, `{"token":"t1"}`)
+		}
+	}))
+	defer srv.Close()
+	c, err := client.NewForTesting(srv.URL, "dt0c01.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(c)
+	window := Window{From: 1000, To: 2000}
+	ctx := context.Background()
+
+	_, err = h.Hotspots(ctx, HotspotsRequest{Entity: "SERVICE-0000000000000001", Window: window})
+	want := Failure{Reason: FailureInvalidInput, Message: `codelevelanalysis: entityId must be a PROCESS, PROCESS_GROUP, or PROCESS_GROUP_INSTANCE — services are not eligible; got "SERVICE-0000000000000001"`}
+	if got, ok := ClassifyError(err); !ok || got != want {
+		t.Errorf("an ineligible entity: %+v, %v; want %+v", got, ok, want)
+	}
+	_, err = h.Hotspots(ctx, HotspotsRequest{Entity: testEntity, Window: window, LeafType: "nope"})
+	want = Failure{Reason: FailureInvalidInput, Message: `codelevelanalysis: unknown leaf type "nope": use total, service, or background`}
+	if got, ok := ClassifyError(err); !ok || got != want {
+		t.Errorf("an unknown leaf type: %+v, %v; want %+v", got, ok, want)
+	}
+	_, err = h.Allocations(ctx, AllocationsRequest{Entity: testEntity, Window: Window{From: 2000, To: 1000}})
+	want = Failure{Reason: FailureInvalidInput, Message: "codelevelanalysis: from/to must be epoch-millis with to > from"}
+	if got, ok := ClassifyError(err); !ok || got != want {
+		t.Errorf("an inverted window: %+v, %v; want %+v", got, ok, want)
+	}
+	if requests != 0 {
+		t.Errorf("%d requests were sent for input the SDK refuses", requests)
+	}
+
+	_, err = h.Allocations(ctx, AllocationsRequest{Entity: testEntity, Window: window})
+	want = Failure{Reason: FailureNotFound, StatusCode: 404, Message: "no such entity"}
+	if got, ok := ClassifyError(err); !ok || got != want {
+		t.Errorf("a 404 on the submit: %+v, %v; want %+v", got, ok, want)
+	}
+	_, err = h.Hotspots(ctx, HotspotsRequest{Entity: testEntity, Window: window})
+	want = Failure{Reason: FailureTaskExpired, StatusCode: 404, Message: "task gone"}
+	if got, ok := ClassifyError(err); !ok || got != want {
+		t.Errorf("a 404 on a poll: %+v, %v; want %+v", got, ok, want)
 	}
 }

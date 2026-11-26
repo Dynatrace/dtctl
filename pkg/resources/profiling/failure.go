@@ -3,71 +3,91 @@ package profiling
 import (
 	"errors"
 
+	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
-// FindIDsQuery is the dtctl command that lists eligible entity ids.
-const FindIDsQuery = `dtctl query 'smartscapeNodes PROCESS | fields id, dt.process_group.detected_name, dt.process_group.id'`
-
-// FailureReason names why the API refused an analysis, for a caller that
-// branches on it. The values are stable.
+// FailureReason names why an analysis failed, for a caller that branches on
+// it. The values follow the tier of `dtctl exec profiling`
+// (docs/STABILITY.md): while the command is experimental, they may change with
+// it.
 type FailureReason string
 
 const (
+	// FailureInvalidInput: the request was refused before it was sent: an
+	// entity that is not eligible (EligibleEntity), an unknown leaf type, or
+	// a window the API does not take.
+	FailureInvalidInput FailureReason = "invalid_input"
 	// FailureBadRequest: the API rejected the request parameters (400).
 	FailureBadRequest FailureReason = "bad_request"
 	// FailureForbidden: a scope or an IAM permission is missing (403).
+	// Analyses need storage:profiles:read and storage:entities:read.
 	FailureForbidden FailureReason = "forbidden"
-	// FailureNotFound: the environment knows no such process (404).
+	// FailureNotFound: the environment knows no such process (404 on the
+	// request that starts the analysis). Ids are per environment, and
+	// short-lived process instances disappear.
 	FailureNotFound FailureReason = "not_found"
+	// FailureTaskExpired: the analysis was started, but the environment no
+	// longer knows its task (404 while waiting for the result). Running it
+	// again starts a new one.
+	FailureTaskExpired FailureReason = "task_expired"
 	// FailureThrottled: the environment is at its limit of concurrent
 	// analyses (429), after the waits the SDK already made.
 	FailureThrottled FailureReason = "throttled"
+	// FailureServer: the API failed on its side (5xx).
+	FailureServer FailureReason = "server_error"
+	// FailureTimeout: the analysis was still running after the last poll.
+	FailureTimeout FailureReason = "timeout"
 )
 
-// Failure is an API failure a caller can act on.
+// Failure is an analysis failure a caller can act on.
 type Failure struct {
-	Reason     FailureReason
+	Reason FailureReason
+	// StatusCode is the status the API answered with, and 0 for a failure
+	// that is not an answer of the API (FailureInvalidInput, FailureTimeout).
 	StatusCode int
-	// Message is the API's own message.
+	// Message is the API's own message, or the error's text where the
+	// failure is not an answer of the API.
 	Message string
-	// Advice is what to do about it, one step per entry, worded for a dtctl
-	// user.
-	Advice []string
 }
 
-// ClassifyError recognizes the API failures of an analysis that a caller can
-// act on, and says what to do about each. It reports false for every other
-// error, which is then best shown as it is.
+// ClassifyError recognizes the failures of an analysis that a caller can act
+// on. It reports false for every other error (a failed connection, a cancelled
+// context, a status with no meaning of its own here such as 401), which is
+// then best shown as it is.
 func ClassifyError(err error) (Failure, bool) {
+	var runErr *sdkcla.Error
+	phase := sdkcla.PhaseSubmit // an API error from elsewhere has no phase
+	if errors.As(err, &runErr) {
+		phase = runErr.Phase
+	}
+	if phase == sdkcla.PhaseValidate {
+		return Failure{Reason: FailureInvalidInput, Message: runErr.Error()}, true
+	}
+	if errors.Is(err, sdkcla.ErrNotCompleted) {
+		return Failure{Reason: FailureTimeout, Message: err.Error()}, true
+	}
+
 	var apiErr *httpclient.APIError
 	if !errors.As(err, &apiErr) {
 		return Failure{}, false
 	}
 	f := Failure{StatusCode: apiErr.StatusCode, Message: apiErr.Message}
-	switch apiErr.StatusCode {
-	case 400:
+	switch {
+	case apiErr.StatusCode == 400:
 		f.Reason = FailureBadRequest
-		f.Advice = []string{
-			"The API rejected the request parameters — check the timeframe (in the past, at most 2h) and the entity id",
-		}
-	case 403:
+	case apiErr.StatusCode == 403:
 		f.Reason = FailureForbidden
-		f.Advice = []string{
-			"Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy",
-			"OAuth (dtctl auth login): log in again so the session requests storage:profiles:read",
-		}
-	case 404:
+	case apiErr.StatusCode == 404 && phase == sdkcla.PhasePoll:
+		// The entity was found when the analysis was submitted: what a poll
+		// does not find is the task.
+		f.Reason = FailureTaskExpired
+	case apiErr.StatusCode == 404:
 		f.Reason = FailureNotFound
-		f.Advice = []string{
-			"The environment knows no such process (ids are per environment, and short-lived process instances disappear)",
-			"List eligible ids: " + FindIDsQuery,
-		}
-	case 429:
+	case apiErr.StatusCode == 429:
 		f.Reason = FailureThrottled
-		f.Advice = []string{
-			"The environment limits concurrent profiling analyses and is at that limit — wait and retry, and avoid running many analyses in parallel",
-		}
+	case apiErr.StatusCode >= 500:
+		f.Reason = FailureServer
 	default:
 		return Failure{}, false
 	}
