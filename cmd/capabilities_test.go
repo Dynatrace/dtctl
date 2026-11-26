@@ -39,6 +39,20 @@ func TestCurrentWorkDirNeedsHostWorkingDirectory(t *testing.T) {
 	require.Equal(t, "the working directory is not available in this environment", capErr.Error())
 }
 
+// A session is one tenant's request. Whatever the host granted, its working
+// directory is the server's and not the tenant's.
+func TestCurrentWorkDirIsNotASessions(t *testing.T) {
+	require.True(t, caps.HostWorkingDirectory)
+	orig := runSession
+	runSession = &Session{}
+	t.Cleanup(func() { runSession = orig })
+
+	got, err := currentWorkDir(context.Background())
+	var capErr *CapabilityError
+	require.ErrorAs(t, err, &capErr)
+	require.Empty(t, got)
+}
+
 func TestLaunchEditorCapabilityDisabled(t *testing.T) {
 	prev := SetCapabilities(Capabilities{})
 	t.Cleanup(func() { SetCapabilities(prev) })

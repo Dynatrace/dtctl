@@ -150,20 +150,41 @@ func TestEngineNeverAppliesARepoScope(t *testing.T) {
 	cliCode, cliStdout, cliStderr := cli(map[string]string{"DTCTL_NO_REPO_SCOPE": "1"})
 	unscoped := sent()
 
+	// At the default floor the experimental flags are not admitted, which
+	// alone keeps a scope from resolving. A request may lower the floor, and
+	// then the only thing between it and the host's repository is that a
+	// service request has no working directory: both floors are run, so the
+	// test fails without either.
+	for _, floor := range []string{"", "experimental"} {
+		res, err := engine.Execute(context.Background(), engine.Request{
+			Command:        `query "fetch logs" --agent`,
+			EnvironmentURL: srv.URL,
+			Token:          "tenant-token",
+			MinStability:   floor,
+		})
+		require.NoError(t, err)
+		fromEngine := sent()
+		require.NotContains(t, fromEngine, "filter-segments", floor)
+		require.NotContains(t, fromEngine, "filterSegments", floor)
+		require.NotContains(t, fromEngine, "k8s.cluster.uid", floor)
+		require.Equal(t, unscoped, fromEngine, "the engine sends what the CLI sends with the scope off")
+		require.Equal(t, cliCode, res.ExitCode)
+		require.Equal(t, normalizeEnvelope(cliStdout), normalizeEnvelope(string(res.Stdout)))
+		require.Equal(t, normalizeEnvelope(cliStderr), normalizeEnvelope(string(res.Stderr)))
+	}
+
+	// Asked for by name, an entry is an error where it cannot be read: the
+	// request is told that it has no working directory, and nothing is sent.
 	res, err := engine.Execute(context.Background(), engine.Request{
-		Command:        `query "fetch logs" --agent`,
+		Command:        `query "fetch logs" --repo-scope checkout --agent`,
 		EnvironmentURL: srv.URL,
 		Token:          "tenant-token",
+		MinStability:   "experimental",
 	})
 	require.NoError(t, err)
-	fromEngine := sent()
-	require.NotContains(t, fromEngine, "filter-segments")
-	require.NotContains(t, fromEngine, "filterSegments")
-	require.NotContains(t, fromEngine, "k8s.cluster.uid")
-	require.Equal(t, unscoped, fromEngine, "the engine sends what the CLI sends with the scope off")
-	require.Equal(t, cliCode, res.ExitCode)
-	require.Equal(t, normalizeEnvelope(cliStdout), normalizeEnvelope(string(res.Stdout)))
-	require.Equal(t, normalizeEnvelope(cliStderr), normalizeEnvelope(string(res.Stderr)))
+	require.NotZero(t, res.ExitCode)
+	require.Contains(t, string(res.Stdout), `"code":"capability_disabled"`)
+	require.Empty(t, sent())
 }
 
 // buildCLI compiles the real dtctl binary once per test run.
