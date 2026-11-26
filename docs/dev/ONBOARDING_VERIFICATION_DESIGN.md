@@ -660,7 +660,7 @@ telemetry is not implicated.
 
 ## Open questions — with recommendations
 
-All five carry a recommendation; three were settled empirically on `gmg`, 2026-09-11.
+The first five carry a recommendation; three were settled empirically on `gmg`, 2026-09-11.
 
 ### 1. Time fields for the remaining streams — RESOLVED
 
@@ -760,6 +760,32 @@ both filters, and a segment is simply the reusable, governed form of the same id
 Consequently, restate D4 as *`arrivals` requires **a scope***, satisfied by `--scope`, by
 `-S`, or by both. Demanding a redundant `--scope` next to an existing segment would be
 busywork, and the cost argument that motivates D4 is satisfied either way.
+
+### 6. Sampled recovery — four follow-ups, none started
+
+D22 leaves these open. None changes a verdict that is reported today into a wrong one; each
+is evidence the walk has and does not use, or a case it reads conservatively.
+
+1. **A count that is a floor.** A response that matched records proves arrival whether or
+   not it was sampled and whether or not it ran to completion. Today such a response only
+   dates a hit another rung made: the capped exhaustive probe, an unflagged rung and a
+   sampled rung that was cut short all supply their newest timestamp and no count. With no
+   hit to date, the signal stays `unknown` even though records of the scope were seen.
+   Reporting it as arrived with "at least N" needs a lower-bound notion that `Signal` does
+   not have, so it gets a design entry of its own. Preferring a complete unflagged count
+   over an extrapolation from a thin sample is deliberately not part of it until the
+   missing-flag behaviour has been observed more than once.
+2. **Where the sampled flag is read from.** `RunResult.Sampled` comes from one metadata
+   block of the response. If Grail ever reports sampling only at the top level, or only as
+   a notification, every sampled rung looks unflagged and the recovery degrades to
+   `unknown`. It needs one read-only observation of real response shapes before any code.
+3. **A hit without a usable weight.** A flagged rung whose `population` is null reports its
+   sampled count as an exact one, with ratio 0. Whether that is a hit of unknown volume has
+   to be decided before it can be labelled.
+4. **A failed query costs no seconds.** `budgetRunner` debits only the seconds a result
+   reports, so a query that fails without one is free against `BudgetSeconds`, and the walk
+   it interrupted does not say that a rung failed. This is shared by every probe, not only
+   the sampled ones.
 
 ## Implementation sketch
 
