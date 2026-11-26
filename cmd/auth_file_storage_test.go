@@ -18,11 +18,9 @@ var errNoSecretService = errors.New("keyring probe failed: The name org.freedesk
 // prompt hooks; it returns a counter for how often the user was asked.
 func stubFileStorageConsent(t *testing.T, interactive, answer bool) *int {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 	t.Setenv(config.EnvTokenStorage, "")
 	t.Setenv(config.EnvDisableKeyring, "")
-	xdg.Reload()
-	t.Cleanup(xdg.Reload)
 
 	origInteractive, origConfirm := authIsInteractiveFunc, authConfirmFunc
 	t.Cleanup(func() { authIsInteractiveFunc, authConfirmFunc = origInteractive, origConfirm })
@@ -99,5 +97,23 @@ func TestTokenStorageUnavailableSuggestions_LeadWithTheFix(t *testing.T) {
 	}
 	if len(absent) > 5 {
 		t.Errorf("suggestion list should stay short, got %d", len(absent))
+	}
+}
+
+// TestStubFileStorageConsentRestoresThePaths: the stub moves the data
+// directory for one test and must hand the next test the path it found.
+func TestStubFileStorageConsentRestoresThePaths(t *testing.T) {
+	xdg.Reload()
+	dataHome := xdg.DataHome
+
+	t.Run("moved", func(t *testing.T) {
+		stubFileStorageConsent(t, false, false)
+		if xdg.DataHome == dataHome {
+			t.Fatalf("xdg.DataHome is still %q", xdg.DataHome)
+		}
+	})
+
+	if xdg.DataHome != dataHome {
+		t.Errorf("xdg.DataHome is %q after the test, want %q", xdg.DataHome, dataHome)
 	}
 }
