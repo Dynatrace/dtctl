@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -472,4 +473,43 @@ func TestDiscover_RefusedRungAfterAnEmptyOne(t *testing.T) {
 	}, r.Notes)
 	assert.True(t, r.Partial)
 	assert.False(t, r.SampledRecords(), "nothing was read by a sample")
+}
+
+// A workload or entity that holds several of the unit's names is credited
+// with every file that names it, not only the one behind the longest name.
+// Credited with go.mod alone, a candidate the directory's own name also
+// matched lost MatchedDir, and its line would have covered the whole
+// repository instead of the directory.
+func TestDiscover_PartialMatchCreditsEveryFile(t *testing.T) {
+	fsys := fstest.MapFS{
+		"go.mod":         {Data: []byte("module example.invalid/ledger-writer\n")},
+		"ledger/main.go": {Data: []byte("package main\n")},
+	}
+	p, err := PlanDiscovery(fsys, "ledger", nil)
+	require.NoError(t, err)
+	require.Equal(t, ".", p.Unit)
+	require.Contains(t, p.Sent, "ledger")
+	require.Contains(t, p.Sent, "ledger-writer")
+
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{
+			{fieldNamespace: "prod", fieldWorkload: "acme-ledger-writer", fieldRecords: float64(10)},
+			{fieldNamespace: "prod", fieldWorkload: "acme-ledger-reader", fieldRecords: float64(900)},
+		}}},
+	}}, p, prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 2)
+	writer := r.Candidates[0]
+	assert.Equal(t, "acme-ledger-writer", writer.Workload, "two files name it, so it ranks ahead of more records")
+	assert.True(t, writer.MatchedDir)
+	assert.Contains(t, writer.Evidence, `k8s.workload.name "acme-ledger-writer" contains module "ledger-writer" (go.mod:1) (segment match)`)
+	assert.True(t, r.Candidates[1].MatchedDir)
+
+	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"dt.entity.service": {{records: []map[string]interface{}{{fieldEntityID: svcID, fieldEntityName: "acme-ledger-writer"}}}},
+	}}, p, prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.True(t, r.Candidates[0].MatchedDir)
+	assert.Equal(t, []string{`entity.name "acme-ledger-writer" contains module "ledger-writer" (go.mod:1) (segment match)`}, r.Candidates[0].Evidence)
 }

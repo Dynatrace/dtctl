@@ -383,21 +383,30 @@ func (d *discovery) recordTier(key recordKey) tier {
 			return tierExact
 		}
 	}
-	if _, ok := d.workloadSegment(key.workload); ok {
+	if len(d.workloadSegments(key.workload)) > 0 {
 		return tierSegment
 	}
 	return tierSubstring
 }
 
-// workloadSegment is the sent name that is a run of workload's segments, the
-// longest when several are: it says the most about why the row was found.
-func (d *discovery) workloadSegment(workload string) (best matcher, ok bool) {
+// workloadSegments are the sent names that are a run of workload's segments,
+// the longest first: it says the most about why the row was found, and the
+// others are further files that name the workload.
+func (d *discovery) workloadSegments(workload string) []matcher {
+	var found []matcher
 	for _, m := range d.matchers {
-		if segmentable(m.value) && len(m.value) > len(best.value) && containsSegment(workload, m.value) {
-			best, ok = m, true
+		if segmentable(m.value) && containsSegment(workload, m.value) {
+			found = append(found, m)
 		}
 	}
-	return best, ok
+	longestFirst(found)
+	return found
+}
+
+// longestFirst sorts matchers by the length of their value, longest first,
+// keeping the order of equals.
+func longestFirst(ms []matcher) {
+	slices.SortStableFunc(ms, func(a, b matcher) int { return len(b.value) - len(a.value) })
 }
 
 // addEntity turns one row of an entity-table query into a candidate carrying
@@ -407,11 +416,15 @@ func (d *discovery) addEntity(object string, rec map[string]interface{}) {
 	if id == "" {
 		return
 	}
-	t, m, ok := d.entityMatch(name)
-	if !ok {
+	t, matched := d.entityMatch(name)
+	if len(matched) == 0 {
 		return
 	}
-	c := &Candidate{tier: t, matched: m.token.value, sources: map[string]bool{m.token.file: true}}
+	m := matched[0]
+	c := &Candidate{tier: t, matched: m.token.value, sources: map[string]bool{}}
+	for _, o := range matched {
+		c.sources[o.token.file] = true
+	}
 	if object == objectServices {
 		c.Services = []string{id}
 	} else {
@@ -426,12 +439,13 @@ func (d *discovery) addEntity(object string, rec map[string]interface{}) {
 }
 
 // entityMatch finds the best tier at which an entity name matches a sent
-// value. It is exact when the whole name is the value, as written or as its
+// value, and every matcher that matches at it, the longest first: the
+// evidence cites that one, and each is a file that names the entity. It is exact when the whole name is the value, as written or as its
 // words joined with "-", the first spelling every name is sent in. The name
 // is not read the way a repository's is: an entity called retired/checkout
 // is not the image checkout with a registry in front, it only holds the
 // name.
-func (d *discovery) entityMatch(name string) (best tier, bestMatch matcher, ok bool) {
+func (d *discovery) entityMatch(name string) (best tier, matched []matcher) {
 	lower := strings.ToLower(name)
 	normal := strings.Join(splitWords(name), "-")
 	for _, m := range d.matchers {
@@ -446,11 +460,15 @@ func (d *discovery) entityMatch(name string) (best tier, bestMatch matcher, ok b
 		default:
 			continue
 		}
-		if !ok || t < best {
-			best, bestMatch, ok = t, m, true
+		switch {
+		case len(matched) == 0 || t < best:
+			best, matched = t, []matcher{m}
+		case t == best:
+			matched = append(matched, m)
 		}
 	}
-	return best, bestMatch, ok
+	longestFirst(matched)
+	return best, matched
 }
 
 var segmentDelimiters = regexp.MustCompile(`[-_.\s]+`)
@@ -507,9 +525,11 @@ func (d *discovery) explain(c *Candidate) {
 			}
 		}
 		c.cite(field.name, field.value, from)
-		if m, ok := d.workloadSegment(c.Workload); ok && field.name == fieldWorkload && len(from) == 0 {
-			c.sources[m.token.file] = true
-			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(m.token), tierSegment))
+		if inside := d.workloadSegments(c.Workload); len(inside) > 0 && field.name == fieldWorkload && len(from) == 0 {
+			for _, m := range inside {
+				c.sources[m.token.file] = true
+			}
+			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(inside[0].token), tierSegment))
 		}
 	}
 	if c.tier == tierSubstring {
