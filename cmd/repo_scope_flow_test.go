@@ -717,8 +717,8 @@ func TestRepoScopeOnDiskDir(t *testing.T) {
 		"README/x":                 `"README/x" is not a directory of this repository`,
 		"../elsewhere":             `"../elsewhere" is not a directory of this repository`,
 		"/services":                `"/services" is not a directory of this repository`,
-		"link":                     `"link" is a symbolic link, which discovery does not follow; name the directory it points to`,
-		"link/checkout":            `"link" is a symbolic link, which discovery does not follow; name the directory it points to`,
+		"link":                     `"link" is a symbolic link, which is not followed; name the directory it points to`,
+		"link/checkout":            `"link" is a symbolic link, which is not followed; name the directory it points to`,
 		"services/checkout/go.mod": `"services/checkout/go.mod" is not a directory of this repository`,
 	} {
 		_, err := repoScopeOnDiskDir(repo, dir)
@@ -740,7 +740,7 @@ func TestRepoScopeDiscoverRefusesASymlinkedPath(t *testing.T) {
 	require.NotZero(t, code)
 	detail := agentError(t, stdout)
 	require.Equal(t, "validation_error", detail.Code)
-	require.Equal(t, `--path: "linkdir" is a symbolic link, which discovery does not follow; name the directory it points to`, detail.Message)
+	require.Equal(t, `--path: "linkdir" is a symbolic link, which is not followed; name the directory it points to`, detail.Message)
 }
 
 // A repository with more source files than discovery reads: the dry run says

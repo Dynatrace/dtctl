@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/exec"
@@ -159,11 +160,15 @@ func discoveryPlans(ctx context.Context, dir string, terms []string) ([]*reposco
 // way. Discovery finds a directory's unit by comparing paths, and a volume
 // that ignores case opens Services/Checkout for services/checkout, so the
 // spelling a user typed must not be the one compared. A name that differs
-// from an entry only in case is that entry when it is the only such one.
+// from an entry only in case is that entry when it is the only such one, and
+// one that differs only in how its accented letters are composed is that
+// entry.
 //
-// A symbolic link on the way is refused: the walk does not follow links, so
-// what lies behind one would not be read, and its name would be sent as a
-// name of whatever unit holds the link.
+// A symbolic link on the way is refused. Discovery's walk does not follow
+// links, so what lies behind one would not be read, and its name would be
+// sent as a name of whatever unit holds the link; and an entry on a link
+// would cover a directory no query is run from, since the working directory
+// is resolved through links.
 func repoScopeOnDiskDir(repo fs.FS, dir string) (string, error) {
 	notDir := fmt.Errorf("%q is not a directory of this repository", dir)
 	if !fs.ValidPath(dir) {
@@ -181,7 +186,7 @@ func repoScopeOnDiskDir(repo fs.FS, dir string) (string, error) {
 		var exact, folded []fs.DirEntry
 		for _, e := range entries {
 			switch {
-			case e.Name() == name:
+			case e.Name() == name, norm.NFC.String(e.Name()) == norm.NFC.String(name):
 				exact = append(exact, e)
 			case strings.EqualFold(e.Name(), name):
 				folded = append(folded, e)
@@ -194,7 +199,7 @@ func repoScopeOnDiskDir(repo fs.FS, dir string) (string, error) {
 		case len(exact) != 1:
 			return "", notDir
 		case exact[0].Type()&fs.ModeSymlink != 0:
-			return "", fmt.Errorf("%q is a symbolic link, which discovery does not follow; name the directory it points to", path.Join(at, exact[0].Name()))
+			return "", fmt.Errorf("%q is a symbolic link, which is not followed; name the directory it points to", path.Join(at, exact[0].Name()))
 		case !exact[0].IsDir():
 			return "", notDir
 		}

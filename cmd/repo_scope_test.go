@@ -265,6 +265,7 @@ func (s *dqlRecorder) reset() {
 func TestRepoScopeSet(t *testing.T) {
 	localRepoScopeConfig(t)
 	repo := chdirTestRepo(t, monorepoScope)
+	require.NoError(t, os.MkdirAll("services/checkout", 0o755))
 
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "set", "checkout",
 		"--service", "SERVICE-0123456789ABCDEF", "--process-group", "PROCESS_GROUP-FEDCBA9876543210",
@@ -291,9 +292,44 @@ func TestRepoScopeSet(t *testing.T) {
 func TestRepoScopeSetComposesThePath(t *testing.T) {
 	localRepoScopeConfig(t)
 	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.MkdirAll("services/caf\u00e9", 0o755))
 	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "cafe", "--service-name", "cafe", "--path", "services/cafe\u0301"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, "services/caf\u00e9", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[0].Path)
+}
+
+// An entry's path is a directory the repository has: a path that names
+// nothing would be committed and never cover a query, and one that names a
+// file or leads through a link is not where a query is run from. The file
+// takes the spelling the repository holds the directory in.
+func TestRepoScopeSetPathIsADirectoryOfTheRepository(t *testing.T) {
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, monorepoScope)
+	require.NoError(t, os.MkdirAll("services/Billing", 0o755))
+	require.NoError(t, os.WriteFile("services/notes.txt", nil, 0o644))
+	require.NoError(t, os.Symlink("Billing", "services/link"))
+	before := readScopeFile(t, repo)
+
+	for dir, message := range map[string]string{
+		"nope/dir":           `--path: "nope/dir" is not a directory of this repository`,
+		"services/notes.txt": `--path: "services/notes.txt" is not a directory of this repository`,
+		"services/link":      `--path: "services/link" is a symbolic link, which is not followed; name the directory it points to`,
+	} {
+		code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "billing", "--agent", "--service-name", "billing", "--path", dir}, RunOptions{})
+		require.NotZero(t, code, dir)
+		detail := agentError(t, stdout)
+		require.Equal(t, "validation_error", detail.Code)
+		require.Equal(t, message, detail.Message)
+		require.Equal(t, before, readScopeFile(t, repo), "a refused set must not touch the file")
+	}
+
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "billing", "--service-name", "billing", "--path", "services/billing"}, RunOptions{})
+	if code != 0 {
+		// A volume that tells the two spellings apart has no such directory.
+		require.Contains(t, stderr, "is not a directory of this repository")
+		return
+	}
+	require.Equal(t, "services/Billing", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[2].Path)
 }
 
 // --cluster-uid qualifies the --workload names, as --namespace does.
@@ -339,6 +375,7 @@ func TestRepoScopeSetSegments(t *testing.T) {
 		"--segment", "Ab3dEf9hIjk?environment=production,staging&k8s.namespace.name=payments", "--segment", "plain-1"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	// A segment alone makes an entry.
+	require.NoError(t, os.Mkdir("tools", 0o755))
 	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "tools", "--path", "tools", "--segment", "plain-1"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, []reposcope.Entry{
@@ -379,6 +416,7 @@ func TestRepoScopeSetSegments(t *testing.T) {
 func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 	localRepoScopeConfig(t)
 	repo := chdirTestRepo(t, monorepoScope)
+	require.NoError(t, os.MkdirAll("services/ledger", 0o755))
 	before := readScopeFile(t, repo)
 
 	for _, tc := range []struct {
@@ -391,7 +429,7 @@ func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 		{"service name", []string{"--service-name", `a"b`}, reposcope.FileName},
 		{"namespace", []string{"--namespace", "Payments", "--workload", "checkout"}, reposcope.FileName},
 		{"cluster name", []string{"--cluster-uid", "prod-eu", "--namespace", "payments", "--workload", "checkout"}, reposcope.FileName},
-		{"path outside", []string{"--service-name", "checkout", "--path", "../elsewhere"}, reposcope.FileName},
+		{"path outside", []string{"--service-name", "checkout", "--path", "../elsewhere"}, "--path"},
 		{"path taken", []string{"--service-name", "checkout", "--path", "services/ledger"}, reposcope.FileName},
 		{"two paths", []string{"--service-name", "checkout", "--path", "services/checkout", "--path", "libs/cart"}, "repo-scope set"},
 		{"entry name", nil, reposcope.FileName},

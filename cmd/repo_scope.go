@@ -129,9 +129,7 @@ Examples:
 				}
 			}
 			if len(entryPaths) == 1 {
-				// The spelling the file takes: slashes, clean, and composed
-				// Unicode, whatever the shell handed over.
-				entry.Path = norm.NFC.String(path.Clean(filepath.ToSlash(entryPaths[0])))
+				entry.Path = path.Clean(filepath.ToSlash(entryPaths[0]))
 			}
 			if clusterUID != "" && len(workloads) == 0 {
 				return &reposcope.InvalidError{
@@ -447,6 +445,17 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 	scope, err := openRepoScopeForEdit(ctx)
 	if err != nil {
 		return err
+	}
+	if entry.Path != "" {
+		// A path that names no directory would be committed and never cover
+		// a query. The file takes the spelling the repository holds the
+		// directory in, composed, whatever the shell handed over.
+		dir, err := repoScopeOnDiskDir(reposcope.RepoFS(scope.loc), entry.Path)
+		if err != nil {
+			return &reposcope.InvalidError{Source: "--path", Msg: err.Error(),
+				Suggestions: []string{"name the directory relative to the repository root, e.g. services/checkout"}}
+		}
+		entry.Path = norm.NFC.String(dir)
 	}
 	scope.file.Upsert(scope.host, entry)
 	if err := reposcope.Save(scope.loc, scope.file); err != nil {
