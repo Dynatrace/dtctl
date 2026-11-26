@@ -513,3 +513,33 @@ func TestDiscover_PartialMatchCreditsEveryFile(t *testing.T) {
 	assert.True(t, r.Candidates[0].MatchedDir)
 	assert.Equal(t, []string{`entity.name "acme-ledger-writer" contains module "ledger-writer" (go.mod:1) (segment match)`}, r.Candidates[0].Evidence)
 }
+
+// A query the scan cap or a time limit stopped read part of the window, so
+// what it counted is a lower bound, and the evidence says "at least". It
+// used to print the count like one read whole.
+func TestDiscover_CountsOfAStoppedQueryAreLowerBounds(t *testing.T) {
+	typed := func(c inventory.TruncationCause) answer {
+		return answer{records: rows(t, "spans-checkout"), truncations: []inventory.Truncation{{Cause: c, Typed: true}}}
+	}
+	for name, tc := range map[string]struct {
+		spans answer
+		want  string
+	}{
+		"the scan cap, no sample":  {capped(rows(t, "spans-checkout")), "at least 12400 spans, 88000 logs in 24h"},
+		"a time limit":             {typed(inventory.TruncationTimeout), "at least 12400 spans, 88000 logs in 24h"},
+		"the consumption limit":    {typed(inventory.TruncationConsumption), "at least 12400 spans, 88000 logs in 24h"},
+		"a result limit cuts rows": {typed(inventory.TruncationResultLimit), "12400 spans, 88000 logs in 24h"},
+		"read whole":               {answer{records: rows(t, "spans-checkout")}, "12400 spans, 88000 logs in 24h"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+				"spans": {tc.spans},
+				"logs":  {{records: rows(t, "logs-checkout")}},
+			}}, singleGo(t), prodHost)
+			require.NoError(t, err)
+			require.Len(t, r.Candidates, 1)
+			e := r.Candidates[0].Evidence
+			assert.Equal(t, tc.want, e[len(e)-1])
+		})
+	}
+}

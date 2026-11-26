@@ -62,7 +62,9 @@ type Candidate struct {
 	ServicesCapped      bool     `json:"servicesCapped,omitempty" yaml:"servicesCapped,omitempty"`
 	Tier                string   `json:"tier" yaml:"tier"`
 	// Spans and Logs count the records of a data object read whole, over the
-	// discovery window. SpansSampled and LogsSampled are, for an object a
+	// discovery window. When the object's query is marked truncated for a
+	// limit other than the result limit, it read part of the window and the
+	// count is a lower bound, which the evidence line says. SpansSampled and LogsSampled are, for an object a
 	// sampled retry read instead, the records the sample matched over that
 	// retry's window. No population is reported for a sample: on a busy
 	// environment the extrapolation came out hundreds of times above the
@@ -153,12 +155,16 @@ type discovery struct {
 	// samples is the sampled retry that answered for a data object, absent
 	// for one read whole.
 	samples map[string]*Query
+	// stopped are the data objects whose record query a limit stopped part
+	// of the way through the window, with no sampled retry answering in its
+	// place: what it counted is a lower bound.
+	stopped map[string]bool
 }
 
 // newDiscovery prepares the matchers: every variant of every token sent, then
 // every sent value no token explains, which came from a term.
 func newDiscovery(p *Plan) *discovery {
-	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}}
+	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}, stopped: map[string]bool{}}
 	if p.Unit == "." && p.Dir != "." {
 		d.dirSource = dirSource(p.Dir)
 	}
@@ -622,7 +628,8 @@ func ranked(ranks []int) (who, whose string) {
 // counts is a record candidate's evidence line for its record counts. Counts
 // read whole share one window: "12400 spans, 88000 logs in 24h". A sampled
 // object's hits say so, with the ratio asked for: "17 sampled span hits in
-// 1h (1 in 100000 requested), 88000 logs in 24h".
+// 1h (1 in 100000 requested), 88000 logs in 24h". A count from a query that
+// was stopped part of the way is "at least" that many.
 func (d *discovery) counts(c *Candidate) string {
 	var whole, all []string
 	for _, n := range c.recordCounts() {
@@ -631,8 +638,12 @@ func (d *discovery) counts(c *Candidate) string {
 				n.count, strings.TrimSuffix(n.object, "s"), d.window(n.object), q.SamplingRatio))
 			continue
 		}
-		whole = append(whole, fmt.Sprintf("%d %s", n.count, n.object))
-		all = append(all, fmt.Sprintf("%d %s in %s", n.count, n.object, d.window(n.object)))
+		count := fmt.Sprintf("%d %s", n.count, n.object)
+		if d.stopped[n.object] {
+			count = "at least " + count
+		}
+		whole = append(whole, count)
+		all = append(all, fmt.Sprintf("%s in %s", count, d.window(n.object)))
 	}
 	switch {
 	case len(all) == 0:

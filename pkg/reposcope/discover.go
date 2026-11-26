@@ -806,6 +806,9 @@ func (r *DiscoveryReport) fold(q *Query, res *inventory.RunResult, d *discovery)
 	switch {
 	case cut:
 		q.Truncated, q.Cause, q.truncation, r.Partial = true, causeTruncated, limit, true
+		// A result limit drops rows and leaves the counts in the others
+		// whole; any other limit stopped the read itself.
+		d.stopped[q.DataObject] = !q.fallback() && limit != inventory.TruncationResultLimit
 		r.note(failureNote(q))
 	case q.Rows >= discoveryRowLimit:
 		// The limit stage is the query's own, not a cap Grail reports, so a
