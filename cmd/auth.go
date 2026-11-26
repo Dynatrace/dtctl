@@ -1044,7 +1044,12 @@ Non-interactive login (CI/CD):
 			// Parse and validate safety level
 			safetyLevel := config.SafetyLevel(safetyLevelStr)
 			if !safetyLevel.IsValid() {
-				return fmt.Errorf("invalid safety level: %s (valid values: %v)", safetyLevelStr, config.ValidSafetyLevels())
+				// Not a plain error: its agent-mode code would be read off
+				// the text, which quotes the value.
+				return &diagnostic.Error{
+					Operation: "auth login",
+					Message:   fmt.Sprintf("--safety-level %q is not a valid value (valid values: %s)", safetyLevelStr, validSafetyLevelList()),
+				}
 			}
 
 			// Load config

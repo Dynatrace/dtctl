@@ -1887,6 +1887,39 @@ func TestAuthLogin_EmptySafetyLevelIsRejected(t *testing.T) {
 	}
 }
 
+// TestAuthLogin_InvalidSafetyLevelFlagHasOneAgentCode: a value that is not a
+// level is refused with the valid ones, and the agent-mode code of the refusal
+// must not depend on the value. As a plain error it was classified by its
+// text, and the text quotes the value.
+func TestAuthLogin_InvalidSafetyLevelFlagHasOneAgentCode(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	for _, value := range []string{"bogus", "timeout", "my-config", "no context"} {
+		t.Run(value, func(t *testing.T) {
+			configPath := setupAuthTestConfig(t, "viewer", envURL, "viewer-oauth")
+			gFlags.cfgFile = configPath
+			t.Cleanup(func() { gFlags.cfgFile = "" })
+
+			stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "viewer", "--safety-level", value)
+			if granted {
+				t.Errorf("a token was requested\n%s", stderr)
+			}
+			var diagErr *diagnostic.Error
+			if !errors.As(runErr, &diagErr) {
+				t.Fatalf("err = %T %v, want a diagnostic.Error", runErr, runErr)
+			}
+			if want := fmt.Sprintf("--safety-level %q is not a valid value (valid values: readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)", value); diagErr.Message != want {
+				t.Errorf("message = %q\nwant      %q", diagErr.Message, want)
+			}
+			if diagErr.Operation != "auth login" {
+				t.Errorf("operation = %q, want %q", diagErr.Operation, "auth login")
+			}
+			if detail := errorToDetail(context.Background(), runErr); detail.Code != "error" {
+				t.Errorf("code %q, want %q", detail.Code, "error")
+			}
+		})
+	}
+}
+
 // loginTestContext is one context of a config file written by loginConfigYAML.
 type loginTestContext struct {
 	name, environment, tokenRef string
