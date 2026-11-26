@@ -644,3 +644,38 @@ func TestQueryRepoScope_StableFloor(t *testing.T) {
 		}
 	}
 }
+
+// dtui's workspace file is dtui's: a `.dtui.yaml` beside the scope file
+// changes nothing about a query. Its environment must not pick the context,
+// which in a CLI that writes would let a cloned file choose the environment,
+// and its segments must not be applied or even looked up. The recorder
+// answers 404 to everything but a query, so a segment lookup would fail the
+// run, and a request sent to the file's environment would never reach it.
+func TestQueryLeavesTheDtuiWorkspaceFileUnread(t *testing.T) {
+	const workspaceFile = `version: 1
+environment: https://xyz98765.apps.dynatrace.com
+timeframe: 30m
+segments:
+  - payments-prod
+`
+	run := func(t *testing.T, withWorkspaceFile bool) (query, stdout, stderr string) {
+		srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+		dir := chdirTestRepo(t, checkoutScope)
+		if withWorkspaceFile {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, ".dtui.yaml"), []byte(workspaceFile), 0o644))
+		}
+		code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery}, RunOptions{})
+		require.Zero(t, code, stderr)
+		return srv.first(t), stdout, stderr
+	}
+
+	var without, with [3]string
+	t.Run("scope file only", func(t *testing.T) {
+		without[0], without[1], without[2] = run(t, false)
+	})
+	t.Run("with .dtui.yaml", func(t *testing.T) {
+		with[0], with[1], with[2] = run(t, true)
+	})
+	require.Equal(t, repoScopeScopedQuery, without[0])
+	require.Equal(t, without, with)
+}
