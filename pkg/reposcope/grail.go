@@ -40,8 +40,11 @@ const (
 	fieldRecords        = "records"
 	fieldAnyClusterName = "clusterName"
 	// workloadSegments is the workload name as the record queries compare
-	// a name's segments in it; it is removed before the rows are returned.
+	// a name's segments in it, and nameTier is 0 for a row whose workload or
+	// service name is a sent value and 1 for one that only holds a name;
+	// both are removed before the rows are returned.
 	fieldWorkloadSegments  = "workloadSegments"
+	fieldNameTier          = "nameTier"
 	fieldServiceCount      = "serviceCount"
 	fieldServices          = "services"
 	fieldProcessGroupCount = "processGroupCount"

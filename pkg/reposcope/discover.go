@@ -260,25 +260,37 @@ func sampledRecordQuery(object, purpose string, values []string, rung samplingRu
 // a sent name, and a second one, after the aggregation, keeps of those only
 // the rows where the name is a whole run of the workload name's segments. The
 // service name is compared whole: it is free text, with no segments to trust.
+//
+// Those rows sort behind the ones named exactly, whatever their volume. The
+// row limit cuts the end of the page, and a busy environment can hold more
+// workloads that merely contain a name than the page has rows: sorted by
+// records alone, they would push the workload that is named exactly off it.
 func recordDQL(fetch, records string, values []string) string {
 	list := quotedList(values)
 	exact := fmt.Sprintf("in(%s, array(%s)) or in(%s, array(%s))", fieldWorkload, list, fieldServiceName, list)
-	inside, segments := "", []string(nil)
+	inside := ""
+	page := []string{
+		fmt.Sprintf("| sort %s desc", fieldRecords),
+		fmt.Sprintf("| limit %d", discoveryRowLimit),
+	}
 	if patterns := segmentPatterns(values); len(patterns) > 0 {
 		for _, n := range segmentNeedles(patterns) {
 			inside += fmt.Sprintf(" or contains(%s, %s)", fieldWorkload, dql.Quote(n))
 		}
-		whole := exact
+		whole := fieldNameTier + " == 0"
 		for _, p := range patterns {
 			whole += fmt.Sprintf(" or contains(%s, %s)", fieldWorkloadSegments, dql.Quote("-"+p+"-"))
 		}
-		segments = []string{
+		page = []string{
 			// A workload name is lowercase letters, digits, "-" and ".":
 			// with "." folded into "-" and a "-" at each end, a name is a
 			// run of its segments exactly when "-name-" is in it.
-			fmt.Sprintf(`| fieldsAdd %s = concat("-", replaceString(%s, ".", "-"), "-")`, fieldWorkloadSegments, fieldWorkload),
+			fmt.Sprintf(`| fieldsAdd %s = concat("-", replaceString(%s, ".", "-"), "-"),`, fieldWorkloadSegments, fieldWorkload),
+			fmt.Sprintf("    %s = if(%s, 0, else:1)", fieldNameTier, exact),
 			"| filter " + whole,
-			"| fieldsRemove " + fieldWorkloadSegments,
+			fmt.Sprintf("| sort %s asc, %s desc", fieldNameTier, fieldRecords),
+			fmt.Sprintf("| limit %d", discoveryRowLimit),
+			fmt.Sprintf("| fieldsRemove %s, %s", fieldWorkloadSegments, fieldNameTier),
 		}
 	}
 	ids := func(count, collected, field, end string) string {
@@ -294,11 +306,7 @@ func recordDQL(fetch, records string, values []string) string {
 		ids(fieldProcessGroupCount, fieldProcessGroups, fieldProcessGroup, "},"),
 		fmt.Sprintf("    by:{%s, %s, %s, %s}", fieldClusterUID, fieldNamespace, fieldWorkload, fieldServiceName),
 	}
-	lines = append(lines, segments...)
-	return strings.Join(append(lines,
-		fmt.Sprintf("| sort %s desc", fieldRecords),
-		fmt.Sprintf("| limit %d", discoveryRowLimit),
-	), "\n")
+	return strings.Join(append(lines, page...), "\n")
 }
 
 // minSegmentRunes is the fewest letters and digits a name needs to be looked

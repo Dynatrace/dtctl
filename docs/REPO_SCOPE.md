@@ -104,16 +104,17 @@ fetch spans, from:now()-24h, scanLimitGBytes:5
     serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
     processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
     by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
-| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-")
-| filter in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>)) or contains(workloadSegments, "-<value>-")
-| fieldsRemove workloadSegments
-| sort records desc
+| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),
+    nameTier = if(in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>)), 0, else:1)
+| filter nameTier == 0 or contains(workloadSegments, "-<value>-")
+| sort nameTier asc, records desc
 | limit 200
+| fieldsRemove workloadSegments, nameTier
 ```
 
 and the same over `logs`. Each row is one cluster, namespace, workload and service name. Its entity ids are counted exactly and listed up to 50, so a workload that runs as hundreds of service ids is one candidate, not a page of them.
 
-The `contains` clause and the three stages after the aggregation are how a workload named with a prefix is found in the same query: the first filter keeps records whose workload name holds a sent name, and the second keeps, of the aggregated rows, those where it is a whole run of segments. They are there only when a sent name has at least five letters and digits. A name whose words a workload joins with both `-` and `.` (`billing.engine-v2` for `billing-engine-v2`) is not found this way.
+The `contains` clause and the stages after the aggregation are how a workload named with a prefix is found in the same query: the first filter keeps records whose workload name holds a sent name, and the second keeps, of the aggregated rows, those where it is a whole run of segments. Rows named exactly sort first (`nameTier`), so when a page fills, the 200-row limit cuts the looser matches and not the workload the repository names. They are there only when a sent name has at least five letters and digits; without one the query sorts by `records` and has neither field. A name whose words a workload joins with both `-` and `.` (`billing.engine-v2` for `billing-engine-v2`) is not found this way.
 
 On a busy environment a day of spans or logs scans more than the 5 GB cap even with the filter, and a capped scan covers an unknown part of the window. Discovery then retries the record query sampled, coarsest first, and stops at the first retry that finds a candidate:
 

@@ -178,11 +178,12 @@ func recordQuery(object string) string {
 		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
 		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
 		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n" +
-		`| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-")` + "\n" +
-		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(workloadSegments, "-checkout-")` + "\n" +
-		"| fieldsRemove workloadSegments\n" +
-		"| sort records desc\n" +
-		"| limit 200"
+		`| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),` + "\n" +
+		`    nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)` + "\n" +
+		`| filter nameTier == 0 or contains(workloadSegments, "-checkout-")` + "\n" +
+		"| sort nameTier asc, records desc\n" +
+		"| limit 200\n" +
+		"| fieldsRemove workloadSegments, nameTier"
 }
 
 // discoverReport runs `repo-scope discover --agent` and decodes its report.

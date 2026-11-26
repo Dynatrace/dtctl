@@ -116,18 +116,20 @@ func TestPlan(t *testing.T) {
 	// Only "checkout" is looked for inside a workload name: every other
 	// value holds it, so a name holding one of them holds it too, except
 	// "checkoutservice" as a segment, which the second filter keeps.
-	segments := "| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\")\n" +
-		"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))" +
-		" or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-checkoutservice-\")\n" +
-		"| fieldsRemove workloadSegments\n"
+	// A row named exactly sorts ahead of one that only holds a name, so the
+	// row limit cuts the looser matches first.
+	segments := "| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n" +
+		"    nameTier = if(in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + ")), 0, else:1)\n" +
+		"| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-checkoutservice-\")\n" +
+		"| sort nameTier asc, records desc\n" +
+		"| limit 200\n" +
+		"| fieldsRemove workloadSegments, nameTier"
 	assert.Equal(t, Query{
 		Purpose:    "spans by workload or service name",
 		DataObject: "spans",
 		DQL: "fetch spans, from:now()-24h, scanLimitGBytes:5\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + ")) or contains(k8s.workload.name, \"checkout\")\n" +
-			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids + segments +
-			"| sort records desc\n" +
-			"| limit 200",
+			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids + segments,
 	}, p.Queries[0])
 	assert.Equal(t, Query{
 		Purpose:       "spans by workload or service name (sampled 1-in-100000 over 1h)",
@@ -136,9 +138,7 @@ func TestPlan(t *testing.T) {
 		SamplingRatio: 100000,
 		DQL: "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + ")) or contains(k8s.workload.name, \"checkout\")\n" +
-			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids + segments +
-			"| sort records desc\n" +
-			"| limit 200",
+			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids + segments,
 	}, p.Queries[1])
 	assert.NotContains(t, p.Queries[0].DQL, "service.name, dt.entity",
 		"an id in by: would make one row per id")
