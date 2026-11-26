@@ -1,6 +1,7 @@
 package reposcope
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -196,6 +197,11 @@ func BenchmarkDecode_Hostile(b *testing.B) {
 			}
 		})
 	}
+}
+
+// What the YAML parser says is put on one line, like every other reason.
+func TestNotYAMLIsOneLine(t *testing.T) {
+	assert.Equal(t, "not valid YAML: line 2: first second", notYAML(errors.New("yaml: line 2: first\n  second")).Msg)
 }
 
 // The file is written through types of its own, which spell its keys. A

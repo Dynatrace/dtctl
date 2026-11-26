@@ -296,6 +296,13 @@ func TestRepoScopeSetComposesThePath(t *testing.T) {
 	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "cafe", "--service-name", "cafe", "--path", "services/cafe\u0301"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, "services/caf\u00e9", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[0].Path)
+
+	// A directory the repository holds in the decomposed spelling is saved
+	// composed too: the file takes one form.
+	require.NoError(t, os.MkdirAll("services/nai\u0308ve", 0o755))
+	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "naive", "--service-name", "naive", "--path", "services/nai\u0308ve"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "services/na\u00efve", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[1].Path)
 }
 
 // An entry's path is a directory the repository has: a path that names

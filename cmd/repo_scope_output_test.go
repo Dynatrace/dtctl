@@ -91,6 +91,8 @@ func TestRepoScopeExitCodes(t *testing.T) {
 	}
 	_, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "x", "--workload", "w", "--agent"}, RunOptions{})
 	require.Equal(t, "repo-scope set: --workload names a workload of a namespace; pass --namespace with it", agentError(t, stdout).Message)
+	_, stdout, _ = runRepoScoped([]string{"repo-scope", "set", "x", "--namespace", "n", "--service-name", "x", "--agent"}, RunOptions{})
+	require.Equal(t, "repo-scope set: --namespace qualifies the --workload names; pass --workload with it", agentError(t, stdout).Message)
 }
 
 // A misspelt subcommand is answered from the group's own subcommands.
