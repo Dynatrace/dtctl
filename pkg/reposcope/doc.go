@@ -10,4 +10,10 @@
 // discovery through an inventory.Runner. Where the working directory comes
 // from, whether the host grants access to it, and how results are printed
 // are the caller's.
+//
+// A program other than dtctl that wants the same scope reads it through this
+// package rather than parsing the file: Locate, Load, Resolve and Filters,
+// then dql.InsertFilter (see the package example). Those calls only read.
+// Save is the one function that writes, and Discover the one that queries an
+// environment.
 package reposcope
