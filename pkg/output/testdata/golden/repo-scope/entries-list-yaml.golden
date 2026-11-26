@@ -15,3 +15,10 @@
   workloads:
     - namespace: payments
       name: ledger
+  segments:
+    - id: Ab3dEf9hIjk
+      variables:
+        environment:
+          - production
+          - staging
+    - id: plain-1

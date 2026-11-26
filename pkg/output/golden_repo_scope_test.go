@@ -30,16 +30,27 @@ func repoScopeEntries() []reposcope.Entry {
 			Name:      "ledger",
 			Path:      "services/ledger",
 			Workloads: []reposcope.Workload{{Namespace: "payments", Name: "ledger"}},
+			Segments: []reposcope.Segment{
+				{ID: "Ab3dEf9hIjk", Variables: map[string][]string{"environment": {"production", "staging"}}},
+				{ID: "plain-1"},
+			},
 		},
 	}
 }
 
 func repoScopeStatusLinked() reposcope.Status {
+	return repoScopeStatus("services/checkout/internal")
+}
+
+// repoScopeStatus is the status resolved for dir: services/checkout is
+// covered by an entry of bindings, services/ledger by one that also
+// references filter segments.
+func repoScopeStatus(dir string) reposcope.Status {
 	f := &reposcope.File{Environments: map[string][]reposcope.Entry{
 		repoScopeHost:    repoScopeEntries(),
 		repoScopeStgHost: {{Name: "checkout", ServiceNames: []string{"checkout"}}},
 	}}
-	s, err := reposcope.Resolve(fstest.MapFS{}, f, repoScopeHost, "services/checkout/internal", "")
+	s, err := reposcope.Resolve(fstest.MapFS{}, f, repoScopeHost, dir, "")
 	if err != nil {
 		panic(err)
 	}
@@ -199,6 +210,7 @@ func TestGolden_RepoScope(t *testing.T) {
 		formats []string
 	}{
 		"status-linked":     {repoScopeStatusLinked(), all},
+		"status-segments":   {repoScopeStatus("services/ledger"), all},
 		"status-unlinked":   {reposcope.Status{Reason: "not inside a git repository"}, all},
 		"discovery-match":   {repoScopeDiscoveryMatch(), all},
 		"discovery-none":    {repoScopeDiscoveryNone(), []string{"json"}},

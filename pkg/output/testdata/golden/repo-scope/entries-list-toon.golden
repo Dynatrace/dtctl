@@ -8,5 +8,10 @@
       11111111-2222-3333-4444-555555555555,checkout,payments
   - name: ledger
     path: services/ledger
+    segments[2]:
+      - id: Ab3dEf9hIjk
+        variables:
+          environment[2]: production,staging
+      - id: plain-1
     workloads[1]{name,namespace}:
       ledger,payments
