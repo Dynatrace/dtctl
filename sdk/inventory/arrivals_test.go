@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -967,6 +968,155 @@ func TestSamplingRefusalIsNotRetried(t *testing.T) {
 	}
 	if got := len(sampledCalls(runner)); got != 1 {
 		t.Errorf("ran %d sampled probes, want 1: a refusal applies to every rung", got)
+	}
+}
+
+// unflaggedEmptyRung is a rung that matched nothing and whose response carries
+// no sampled flag. A sample too thin to read a record can come back this way,
+// so on its own it says nothing about whether the environment samples the
+// object. The summarize row is there in one shape and missing in the other.
+func unflaggedEmptyRung(ratio int64, withRow bool) mockResponse {
+	r := mockResponse{match: fmt.Sprintf("samplingRatio:%d", ratio)}
+	if withRow {
+		r.records = []map[string]interface{}{rec("matched", int64(0))}
+	}
+	return r
+}
+
+// TestUnflaggedEmptyRungDoesNotEndTheWalk: the coarsest rung of a capped
+// signal often reads no record at all, and its response then lacks the sampled
+// flag. That is an empty rung, not a refusal. Ending the walk there left the
+// signal unknown one query in, with evidence blaming the environment, while
+// the next rung would have found the data.
+func TestUnflaggedEmptyRungDoesNotEndTheWalk(t *testing.T) {
+	for name, withRow := range map[string]bool{"no record": false, "a zero count": true} {
+		t.Run(name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append([]mockResponse{
+				cappedLogs(),
+				unflaggedEmptyRung(100000, withRow),
+				sampledRung(10000, 96, 960000, fixedNow.Add(-30*time.Second).Format(time.RFC3339)),
+			}, runner.responses...)
+
+			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+			if got := len(sampledCalls(runner)); got != 2 {
+				t.Errorf("ran %d sampled probes, want 2: an empty rung is followed by the next one, and the hit there ends the walk", got)
+			}
+			if logs.State != SignalLive || logs.Truncation != "" {
+				t.Fatalf("state/truncation = %q/%q, want live with no truncation (evidence: %s)", logs.State, logs.Truncation, logs.Evidence)
+			}
+			if logs.Records != 960000 || logs.SamplingRatio != 10000 || logs.RecordsSampled != 96 {
+				t.Errorf("records/ratio/sampled = %d/%d/%d, want 960000/10000/96", logs.Records, logs.SamplingRatio, logs.RecordsSampled)
+			}
+			if strings.Contains(logs.Evidence, "does not support sampling") {
+				t.Errorf("evidence %q blames the environment for a rung that merely read nothing", logs.Evidence)
+			}
+		})
+	}
+}
+
+// TestUnflaggedEmptyRungsKeepTheCappedVerdict: when no rung matched and none
+// reported that it sampled, nothing was learned either way. The signal keeps
+// the capped verdict: it must not claim a sampled bound that no response
+// confirmed, nor that the environment refuses to sample.
+func TestUnflaggedEmptyRungsKeepTheCappedVerdict(t *testing.T) {
+	runner := windowRunner()
+	rungs := []mockResponse{cappedLogs()}
+	for _, r := range samplingLadder {
+		rungs = append(rungs, unflaggedEmptyRung(r, true))
+	}
+	runner.responses = append(rungs, runner.responses...)
+	opts := windowOpts()
+
+	logs := signalByName(t, discoverWith(t, runner, opts), "logs")
+	if got := len(sampledCalls(runner)); got != len(samplingLadder) {
+		t.Errorf("ran %d sampled probes, want %d: no rung gave a reason to stop", got, len(samplingLadder))
+	}
+	if logs.State != SignalUnknown || logs.Truncation != TruncationScanLimit {
+		t.Errorf("state/truncation = %q/%q, want unknown/scan_limit", logs.State, logs.Truncation)
+	}
+	if want := truncatedEvidence("logs", TruncationScanLimit, opts.Since, opts.ScanLimitGBytes); logs.Evidence != want {
+		t.Errorf("evidence = %q, want the capped verdict unchanged: %q", logs.Evidence, want)
+	}
+	if logs.SamplingRatio != 0 || logs.Records != 0 || logs.RecordsSampled != 0 {
+		t.Errorf("ratio/records/sampled = %d/%d/%d, want 0/0/0", logs.SamplingRatio, logs.Records, logs.RecordsSampled)
+	}
+}
+
+// TestSampledBoundComesFromAFlaggedRung: the bound a miss reports is a claim
+// that the window was sampled at that ratio, so only a rung whose response
+// says it sampled may supply it. The unflagged rungs below the flagged one are
+// walked, but they do not tighten the bound.
+func TestSampledBoundComesFromAFlaggedRung(t *testing.T) {
+	runner := windowRunner()
+	rungs := []mockResponse{cappedLogs(), sampledRung(100000, 0, 0, "")}
+	for _, r := range samplingLadder[1:] {
+		rungs = append(rungs, unflaggedEmptyRung(r, false))
+	}
+	runner.responses = append(rungs, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State != SignalUnknown {
+		t.Fatalf("state = %q, want unknown", logs.State)
+	}
+	if !strings.Contains(logs.Evidence, "1-in-100k matched nothing") || !strings.Contains(logs.Evidence, "under ~300k records") {
+		t.Errorf("evidence %q should report the bound of the one rung that confirmed it sampled", logs.Evidence)
+	}
+	if got := len(sampledCalls(runner)); got != len(samplingLadder) {
+		t.Errorf("ran %d sampled probes, want %d", got, len(samplingLadder))
+	}
+}
+
+// TestTruncatedUnflaggedRungIsARefusal: a rung that was cut short without
+// having sampled is the original capped query over again, whether or not the
+// part it read held a match. Every further rung would be the same query.
+func TestTruncatedUnflaggedRungIsARefusal(t *testing.T) {
+	runner := windowRunner()
+	cut := unflaggedEmptyRung(100000, true)
+	cut.truncated = true
+	cut.cause = TruncationScanLimit
+	runner.responses = append([]mockResponse{
+		cappedLogs(), cut,
+		sampledRung(10000, 96, 960000, fixedNow.Format(time.RFC3339)),
+	}, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if got := len(sampledCalls(runner)); got != 1 {
+		t.Errorf("ran %d sampled probes, want 1: an unsampled rung that hit the cap will hit it at every ratio", got)
+	}
+	if logs.State != SignalUnknown || logs.Truncation != TruncationScanLimit {
+		t.Errorf("state/truncation = %q/%q, want unknown/scan_limit", logs.State, logs.Truncation)
+	}
+	if !strings.Contains(logs.Evidence, "does not support sampling") {
+		t.Errorf("evidence %q should say why the fallback did not apply", logs.Evidence)
+	}
+}
+
+// TestCancellationEndsTheWalk: a run cancelled mid-walk surfaces the
+// cancellation from the walk itself and issues no further rung, also when the
+// rung before it was an empty one that the walk continues past. The walk is
+// driven directly because Discover would report the cancellation on its own
+// at the next signal.
+func TestCancellationEndsTheWalk(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mock := &mockRunner{responses: []mockResponse{
+		unflaggedEmptyRung(100000, false),
+		sampledRung(10000, 96, 960000, fixedNow.Format(time.RFC3339)),
+	}}
+	runner := &cancellingRunner{inner: mock, cancel: cancel, marker: "samplingRatio:10000 "}
+	b := &budgetRunner{runner: runner, report: &Report{}, queries: 100, seconds: 100}
+
+	sig, err := b.recoverBySampling(ctx, Signal{Name: "logs"}, &CapabilityDef{DataObject: "logs"},
+		windowOpts(), DefaultTimeField, fixedNow, TruncationScanLimit)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("recoverBySampling = %+v, %v; want context.Canceled", sig, err)
+	}
+	if sig.State != "" || sig.Evidence != "" {
+		t.Errorf("state/evidence = %q/%q, want neither: a cancelled walk reaches no verdict", sig.State, sig.Evidence)
+	}
+	if got := len(sampledCalls(mock)); got != 2 {
+		t.Errorf("ran %d sampled probes, want 2: nothing may run after the cancellation", got)
 	}
 }
 

@@ -237,8 +237,9 @@ func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *C
 	}
 
 	var hit *sampledProbe
-	// zeroAt remembers the least aggressive rung that came back empty, since
-	// that is the rung whose bound is tightest and therefore worth reporting.
+	// zeroAt remembers the least aggressive sampled rung that came back empty,
+	// since that is the rung whose bound is tightest and therefore worth
+	// reporting.
 	var zeroAt int64
 walk:
 	for _, ratio := range samplingLadder {
@@ -254,7 +255,19 @@ walk:
 			// did not run.
 			break walk
 		}
+		p := readSampledProbe(res)
 		if !res.Sampled {
+			if p.matched == 0 && !res.Truncated {
+				// Nothing matched and nothing was cut short, so this response
+				// does not show the original capped query running again: a
+				// refused rung reads everything, and reading everything is
+				// what hit the cap. A sample too thin to read a single record
+				// may come back without the flag as well. Under either reading
+				// this rung is empty rather than refused, and the next one is
+				// still worth asking. It lends no bound: nothing in the
+				// response confirms that the window was sampled at this ratio.
+				continue
+			}
 			// The environment declined to sample this object, so that retry
 			// was the original capped query over again and every further rung
 			// would be too. Say why the fallback does not apply here.
@@ -268,7 +281,7 @@ walk:
 			// reads ten times more. Stop descending.
 			break walk
 		}
-		if p := readSampledProbe(res); p.matched > 0 {
+		if p.matched > 0 {
 			hit = &p
 			// A hit is conclusive about arrival at any ratio, but a thin one
 			// cannot be trusted about *age* — so keep descending to thicken

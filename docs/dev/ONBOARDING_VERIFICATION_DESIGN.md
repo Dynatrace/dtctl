@@ -604,7 +604,11 @@ telemetry is not implicated.
     of ten — reporting both as a warning on a **200**, with a full unsampled result. Trusting
     the requested ratio would have overstated a refused object's volume by that entire factor,
     so the probe sums `dt.system.sampling_ratio` and the runner reads `metadata.sampled`
-    (`TestSampledCountIgnoresRequestedRatio`, `TestSamplingRefusalIsNotRetried`).
+    (`TestSampledCountIgnoresRequestedRatio`, `TestSamplingRefusalIsNotRetried`). A rung
+    without the flag is a refusal only if it matched a record or was itself cut short. One
+    that matched nothing and ran to completion is an empty rung: the walk continues past it,
+    and it supplies no bound, since nothing in the response confirms the ratio
+    (`TestUnflaggedEmptyRungDoesNotEndTheWalk`, `TestSampledBoundComesFromAFlaggedRung`).
   - *A sampled `takeMax` is biased old by about `window / sampled_records`* — measured at 91s
     for 11 records over 15m, and under a second for 676. A `stale` verdict the bias alone could
     explain is therefore withheld as `unknown`, because inventing an ingest outage is the most
