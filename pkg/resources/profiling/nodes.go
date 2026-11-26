@@ -1,8 +1,8 @@
 package profiling
 
 import (
-	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -192,12 +192,16 @@ func nodeSamples(n map[string]interface{}) map[string]int {
 	return out
 }
 
+// nodeIDStr is a node id as the text ids are compared by. The API writes an
+// id as a string or as a number, and a number is spelled the way JSON writes
+// an integer, without an exponent: %g gives 1e+06 for a million, which is not
+// the "1000000" a string id of the same node holds.
 func nodeIDStr(v interface{}) string {
 	switch x := v.(type) {
 	case string:
 		return x
 	case float64:
-		return fmt.Sprintf("%g", x)
+		return strconv.FormatFloat(x, 'f', -1, 64)
 	}
 	return ""
 }

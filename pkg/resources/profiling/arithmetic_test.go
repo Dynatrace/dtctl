@@ -277,6 +277,27 @@ func TestHotspots_NumericChildIDs(t *testing.T) {
 	}
 }
 
+// A numeric id and the same id written as a string are one id, however large:
+// a number of a million or more must not be spelled with an exponent.
+func TestHotspots_LargeNumericIDs(t *testing.T) {
+	h := hotspotsOf(map[string]interface{}{
+		"dataRootNodeId": "1000000",
+		"dataNodes": []interface{}{
+			snode(float64(1000000), "C", "p", true, counts("RUNNING", float64(7)), "2000000"),
+			snode(float64(2000000), "C", "c", true, counts("RUNNING", float64(5))),
+		},
+	})
+	want := StackView{Samples: 7, Rows: []StackRow{{Running: 5, Stack: "C.p;C.c"}, {Running: 2, Stack: "C.p"}}}
+	if got := h.Stacks(false); !reflect.DeepEqual(got, want) {
+		t.Errorf("Stacks(false) = %+v\nwant %+v", got, want)
+	}
+	for id, want := range map[float64]string{999999: "999999", 1000000: "1000000", 1e21: "1000000000000000000000", 1.5: "1.5"} {
+		if got := nodeIDStr(id); got != want {
+			t.Errorf("nodeIDStr(%v) = %q, want %q", id, got, want)
+		}
+	}
+}
+
 // Every figure of an allocation row is merged the same way when appOnly folds
 // paths together: survived bytes and both counts as well as allocated bytes.
 func TestCounts_MergedAllocationRowOverTheLimit(t *testing.T) {
