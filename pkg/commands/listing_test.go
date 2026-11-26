@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // newTestRoot creates a minimal Cobra command tree for testing.
@@ -81,6 +81,11 @@ func TestBuild_SchemaVersion(t *testing.T) {
 	require.Equal(t, SchemaVersion, listing.SchemaVersion)
 	require.Equal(t, "dtctl", listing.Tool)
 	require.Equal(t, "verb-noun", listing.CommandModel)
+}
+
+func TestBuildVerbs_MatchesBuild(t *testing.T) {
+	root := newTestRoot()
+	require.Equal(t, Build(root).Verbs, BuildVerbs(root))
 }
 
 func TestBuild_RequiredScopes(t *testing.T) {

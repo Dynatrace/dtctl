@@ -16,10 +16,10 @@ import (
 	toon "github.com/toon-format/toon-go"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/plugin"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/version"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/plugin"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/version"
 )
 
 // SchemaVersion is incremented on breaking changes to the listing structure.
@@ -199,6 +199,11 @@ var unadvertisedResources = map[string]bool{
 	"exec api": true,
 }
 
+// MaskedAnnotation marks a command a surface stage (profile, blocked commands,
+// stability floor, deprecated surface) masks for the current run. The catalog
+// leaves it out even when it is unadvertised.
+const MaskedAnnotation = "dtctl.surface.masked"
+
 // advertisedResources drops the unadvertised leaves of a verb, for the catalog
 // projections that are meant to be browsed rather than searched.
 func advertisedResources(verb string, resources []string) []string {
@@ -268,6 +273,13 @@ var defaultTimeFormats = &TimeFormats{
 	Relative: []string{"1h", "30m", "7d", "5min"},
 	Absolute: "RFC3339 (e.g., 2024-01-15T10:00:00Z)",
 	Unix:     "Unix timestamp (e.g., 1705312800)",
+}
+
+// BuildVerbs walks the Cobra command tree rooted at root and returns the
+// Listing's verbs alone. Unlike Build it does no I/O: Build also discovers
+// plugins, which reads the directories on PATH.
+func BuildVerbs(root *cobra.Command) map[string]*Verb {
+	return buildVerbs(root)
 }
 
 // Build walks the Cobra command tree rooted at root and returns a Listing.
@@ -358,9 +370,9 @@ func buildVerbs(root *cobra.Command) map[string]*Verb {
 					continue
 				}
 				// A hidden leaf is normally absent from the catalog too. An
-				// unadvertised one is the exception: the full catalog is the only
-				// place it is documented.
-				if sub.Hidden && !unadvertisedResources[name+" "+sub.Name()] {
+				// unadvertised one is the exception, unless a stage masked it:
+				// the full catalog is the only place it is documented.
+				if sub.Hidden && (!unadvertisedResources[name+" "+sub.Name()] || sub.Annotations[MaskedAnnotation] != "") {
 					continue
 				}
 
@@ -454,7 +466,7 @@ func newNestedNode(verbName string, cmd *cobra.Command) *Verb {
 		v.SafetyOp = safetyOp
 	}
 	v.Access = string(auth.AccessForVerb(verbName, v.SafetyOp))
-	if scopes := auth.ScopesForResource(cmd.Name(), auth.Access(v.Access)); len(scopes) > 0 {
+	if scopes := auth.ScopesForCommand(verbName, cmd.Name(), auth.Access(v.Access)); len(scopes) > 0 {
 		v.RequiredScopes = append([]string(nil), scopes...)
 	}
 	annotateStability(v, cmd)
@@ -532,7 +544,7 @@ func populateVerbScopes(name string, verb *Verb) {
 	access := auth.Access(verb.Access)
 	byResource := make(map[string][]string)
 	for _, r := range verb.Resources {
-		scopes := auth.ScopesForResource(r, access)
+		scopes := auth.ScopesForCommand(name, r, access)
 		if len(scopes) == 0 && access != auth.AccessRead {
 			// A resource nested under a mutating verb can itself be read-only
 			// (e.g. `share get` under the mutating `share` verb): such a
@@ -1045,11 +1057,11 @@ func RequiredScopesUnion(l *Listing) []string {
 func RequiredScopesForResource(l *Listing, resource string) []string {
 	resolved := ResolveAlias(resource)
 	seen := map[string]bool{}
-	for _, verb := range l.Verbs {
+	for name, verb := range l.Verbs {
 		if !containsResource(verb, resolved) && !containsResource(verb, resource) {
 			continue
 		}
-		for _, s := range auth.ScopesForResource(resolved, auth.Access(verb.Access)) {
+		for _, s := range auth.ScopesForCommand(name, resolved, auth.Access(verb.Access)) {
 			seen[s] = true
 		}
 		// A name that matches only below the verb (`create aws connection`) has
@@ -1115,7 +1127,7 @@ func WriteValue(w io.Writer, v any, format string) error {
 		if err := json.Unmarshal(b, &generic); err != nil {
 			return err
 		}
-		data, err := toon.Marshal(generic, toon.WithLengthMarkers(true))
+		data, err := toon.Marshal(generic)
 		if err != nil {
 			return err
 		}

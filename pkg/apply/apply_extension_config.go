@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // dryRunExtensionConfig performs dry-run validation for extension monitoring configs

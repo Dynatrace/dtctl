@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/pkg/diagnostic"
 )
 
 // TestHandleDeleteErrorForbidden pins the behaviour reported in issue #344: the

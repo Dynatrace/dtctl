@@ -12,15 +12,15 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsmonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azureconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azuremonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpmonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
 )
 
 // cloudSpec describes one hyperscaler so the monitoring-config tests can run

@@ -6,11 +6,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/bucket"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/bucket"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
 )
 
 // createBucketCmd creates a Grail bucket
@@ -111,6 +111,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing bucket definition, or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("name", "", "bucket name (3-100 chars, lowercase alphanumeric, underscores, hyphens)")
 	c.Flags().String("table", "", "table type (logs, events, or bizevents)")
 	c.Flags().Int("retention", 0, "retention period in days (1-3657)")

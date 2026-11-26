@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
+	"github.com/Dynatrace/dtctl/pkg/resources/appengine"
 )
 
 // TestDescribeIntentProperty pins the table view of one property (#517): an

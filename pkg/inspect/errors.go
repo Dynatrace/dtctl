@@ -11,7 +11,7 @@
 // the file.
 package inspect
 
-import "github.com/dynatrace-oss/dtctl/pkg/output"
+import "github.com/Dynatrace/dtctl/pkg/output"
 
 // Error is a typed inspect failure carrying a stable envelope error code (D32 /
 // INSPECT IN9) and actionable suggestions. The command layer surfaces Code and

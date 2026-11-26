@@ -298,6 +298,7 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 		newExecSLOCmd(),
 		newExecPreviewProcessorCmd(),
 		newExecAPICmd(),
+		newExecProfilingCmd(),
 	)
 
 	// --- enable ---
@@ -465,6 +466,11 @@ SLOs, queries, and other Dynatrace platform capabilities.`,
 	wait := newWaitCmd()
 	wait.AddCommand(newWaitQueryCmd())
 
+	// --- usage ---
+	usage := newUsageCmd()
+	usage.AddCommand(newUsageResetCmd())
+	root.AddCommand(usage)
+
 	// Wire all verbs onto root
 	root.AddCommand(
 		alias, apply, auth, claim, commands, newCompletionCmd(), cfg, create, ctx,
@@ -540,7 +546,7 @@ func registerRootPersistentFlags(c *cobra.Command, flags *rootFlags) {
 
 	c.PersistentFlags().StringVarP(&flags.outputFormat, "output", "o", "table", "output format: json|yaml|csv|toon|table|wide|auto")
 	c.PersistentFlags().StringVar(&flags.jqFilter, "jq", "", "jq filter expression for structured output (json|yaml|toon); applied to the result payload, not the --agent envelope (on query: '.records', not '.result.records'); non-structured formats are auto-promoted to json")
-	c.PersistentFlags().CountVarP(&flags.verbosity, "verbose", "v", "verbose output (-v for details, -vv for full debug including auth headers)")
+	c.PersistentFlags().CountVarP(&flags.verbosity, "verbose", "v", "verbose output (-v for details, -vv for full HTTP debug, sensitive headers redacted)")
 	c.PersistentFlags().BoolVar(&flags.debugMode, "debug", false, "enable debug mode (full HTTP request/response logging, equivalent to -vv)")
 	c.PersistentFlags().BoolVar(&flags.plainMode, "plain", false, "plain output for machine processing (no colors, no interactive prompts)")
 	c.PersistentFlags().BoolVarP(&flags.agentMode, "agent", "A", false, "agent output mode: wrap output in a structured JSON envelope with metadata")

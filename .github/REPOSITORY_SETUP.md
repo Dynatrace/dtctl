@@ -13,7 +13,7 @@ kubectl-inspired CLI for managing Dynatrace platform resources from your termina
 
 ### Website
 ```
-https://github.com/dynatrace-oss/dtctl
+https://github.com/Dynatrace/dtctl
 ```
 
 ### Topics (Tags)

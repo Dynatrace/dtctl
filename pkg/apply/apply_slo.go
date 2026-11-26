@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/slo"
+	"github.com/Dynatrace/dtctl/pkg/resources/slo"
 )
 
 // applySLO applies an SLO resource

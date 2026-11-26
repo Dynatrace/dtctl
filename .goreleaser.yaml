@@ -23,9 +23,18 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/dynatrace-oss/dtctl/pkg/version.Version={{.Version}}
-      - -X github.com/dynatrace-oss/dtctl/pkg/version.Commit={{.ShortCommit}}
-      - -X github.com/dynatrace-oss/dtctl/pkg/version.Date={{.Date}}
+      - -X github.com/Dynatrace/dtctl/pkg/version.Version={{.Version}}
+      - -X github.com/Dynatrace/dtctl/pkg/version.Commit={{.ShortCommit}}
+      - -X github.com/Dynatrace/dtctl/pkg/version.Date={{.CommitDate}}
+    hooks:
+      post:
+        # Release pipeline only: with SIGNED_WINDOWS_DIR set, replace the freshly
+        # built dtctl.exe with the Authenticode-signed one from the sign jobs before
+        # it is archived. A missing signed file fails the release rather than
+        # shipping an unsigned binary. A no-op for local and snapshot builds.
+        - cmd: >-
+            sh -c 'if [ "{{ .Os }}" = "windows" ] && [ -n "{{ index .Env "SIGNED_WINDOWS_DIR" }}" ]; then
+            cp "{{ index .Env "SIGNED_WINDOWS_DIR" }}/{{ .Arch }}/dtctl.exe" "{{ .Path }}"; fi'
 
 archives:
   - formats:
@@ -75,7 +84,18 @@ homebrew_casks:
       owner: dynatrace-oss
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: https://github.com/dynatrace-oss/dtctl
+      # The tap's main branch requires a pull request, so a direct push is refused
+      # (409 Repository rule violations). Push the cask to a per-release branch and
+      # open a PR instead; a tap maintainer merges it. The token needs
+      # contents and pull-requests write on the tap.
+      branch: "dtctl-{{ .Version }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: dynatrace-oss
+          name: homebrew-tap
+          branch: main
+    homepage: https://github.com/Dynatrace/dtctl
     description: "kubectl-inspired CLI for Dynatrace - manage workflows, dashboards, SLOs, queries, and more from your terminal"
     skip_upload: auto
     completions:
@@ -84,9 +104,9 @@ homebrew_casks:
       fish: completions/dtctl.fish
     hooks:
       post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/dtctl"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/dtctl"]
           end
 
 # Release notes are written by release-please (GitHub Release body) and GoReleaser

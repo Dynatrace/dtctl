@@ -14,7 +14,7 @@ Analyzers perform statistical computations on your observability data: forecasti
 | Operation | Resource | Command syntax | Description | Mutating | Access |
 | --- | --- | --- | --- | --- | --- |
 | describe | analyzer | `dtctl describe analyzer` | Show details of a specific resource | no | read |
-| exec | analyzer | `dtctl exec analyzer` | Execute queries, workflows, or functions | yes | run |
+| exec | analyzer | `dtctl exec analyzer` | Execute workflows, functions, analyzers, SLOs, and code-level profiling | yes | run |
 | get | analyzers | `dtctl get analyzers` | Display one or many resources | no | read |
 | verify | analyzer | `dtctl verify analyzer` | Verify resources without executing them | no | read |
 
@@ -30,6 +30,12 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | --- | --- |
 | read | `davis:analyzers:read` |
 | run | `davis:analyzers:execute` |
+
+These commands call other endpoints than the resource's, so they need these scopes instead of the ones for their access level.
+
+| Command | Scopes |
+| --- | --- |
+| `dtctl verify analyzer` | `davis:analyzers:execute` |
 <!-- GENERATED:analyzers:end -->
 
 ## Output

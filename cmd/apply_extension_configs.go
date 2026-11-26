@@ -6,12 +6,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // applyExtensionConfigCmd creates or updates a monitoring configuration for an extension
@@ -170,6 +170,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing the monitoring configuration (scope + value), or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("scope", "", "scope for the monitoring configuration (e.g. HOST-1234, only for create)")
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	stability.MarkStable(c)

@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
-	"github.com/dynatrace-oss/dtctl/pkg/serve"
+	"github.com/Dynatrace/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/pkg/serve"
 )
 
 func main() {

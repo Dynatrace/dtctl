@@ -75,7 +75,9 @@ YAML document. Top-level keys: `apiVersion`, `kind`, `current-context`,
 `preferences`, `aliases`, `spill`, `query-limits`. Per-context keys:
 `environment`, `token-ref`, `safety-level` (`readonly` | `readwrite-mine` |
 `readwrite-all` | `dangerously-unrestricted`; empty means `readwrite-all`),
-`description`, `hooks`, `spill`, `query-limits`. The Go structs in
+`description`, `hooks`, `spill`, `query-limits`, `usage-tracking` (bool,
+default off, honored only from the global config, never an auto-discovered
+`.dtctl.yaml`; see [USAGE_TRACKING.md](../USAGE_TRACKING.md)). The Go structs in
 `sdk/session/config.go` are the schema's source of truth;
 `testdata/contract/v1-full.yaml` exercises every field.
 

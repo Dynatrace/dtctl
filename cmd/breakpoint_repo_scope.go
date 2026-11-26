@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
+	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
 
 // A repo scope entry binds the labels a Live Debugger workspace is filtered

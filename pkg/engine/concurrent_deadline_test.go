@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/engine"
+	"github.com/Dynatrace/dtctl/pkg/engine"
 )
 
 // TestConcurrentDeadlineEndsAStalledRequest holds the design's single deadline:

@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/engine"
+	"github.com/Dynatrace/dtctl/pkg/engine"
 )
 
 // mockEnv is a fake Dynatrace environment recording the Authorization header
@@ -34,6 +34,16 @@ func newMockEnv(t *testing.T) *mockEnv {
 // Config.ConnState there to track connections for Close.
 func newMockEnvWithConnState(t *testing.T, connState func(net.Conn, http.ConnState)) *mockEnv {
 	t.Helper()
+	m := newUnstartedMockEnv()
+	m.Config.ConnState = connState
+	m.Start()
+	t.Cleanup(m.Server.Close)
+	return m
+}
+
+// newUnstartedMockEnv builds the mock environment without starting it, so a
+// test can choose between Start and StartTLS.
+func newUnstartedMockEnv() *mockEnv {
 	m := &mockEnv{}
 	m.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
@@ -60,9 +70,6 @@ func newMockEnvWithConnState(t *testing.T, connState func(net.Conn, http.ConnSta
 			_, _ = w.Write([]byte(`{"error":{"code":404,"message":"not found"}}`))
 		}
 	}))
-	m.Config.ConnState = connState
-	m.Start()
-	t.Cleanup(m.Server.Close)
 	return m
 }
 

@@ -14,11 +14,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 // repoScopeDiscoverTimeout bounds one discovery run. A run that needs longer

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // applyAnomalyDetector applies a custom anomaly detector resource.

@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkbucket "github.com/dynatrace-oss/dtctl/sdk/api/bucket"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkbucket "github.com/Dynatrace/dtctl/sdk/api/bucket"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Re-export SDK types that have no table tags.

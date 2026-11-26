@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkdocument "github.com/dynatrace-oss/dtctl/sdk/api/document"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkdocument "github.com/Dynatrace/dtctl/sdk/api/document"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // TrashedDocument is the CLI read model for a trashed document.

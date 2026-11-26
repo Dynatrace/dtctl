@@ -2,7 +2,7 @@
 # Install dtctl (Dynatrace CLI) on Linux and macOS.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.sh | sh
 #
 # Environment variables:
 #   DTCTL_INSTALL_DIR  Override install directory (default: ~/.local/bin on Linux, /usr/local/bin on macOS)

@@ -1,6 +1,7 @@
 package stability
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -116,7 +117,7 @@ func TestPolicyRestrictsIsFalseAtTheWeakestFloor(t *testing.T) {
 }
 
 func TestRegisterDeclaresEvenWhenDisabled(t *testing.T) {
-	r := &Registry{features: map[string]string{}}
+	r := &Registry{features: map[string][]string{}}
 	r.Declare("account", "account")
 
 	// A disabled feature must still be nameable: Cobra cannot attach an error
@@ -170,5 +171,35 @@ func TestExceptionStringRoundTrips(t *testing.T) {
 		if got := parsed[0].String(); got != strings.TrimSpace(entry) {
 			t.Errorf("round trip of %q produced %q", entry, got)
 		}
+	}
+}
+
+func TestRegistryOneFeatureGatesSeveralCommands(t *testing.T) {
+	r := &Registry{features: map[string][]string{}}
+	r.Declare("actions", "get actions")
+	r.Declare("actions", "describe action")
+	r.Declare("actions", "get actions") // declaring a path again is a no-op
+
+	if got, want := r.Paths("actions"), []string{"get actions", "describe action"}; !slices.Equal(got, want) {
+		t.Errorf("Paths = %v, want %v (declaration order, no duplicates)", got, want)
+	}
+	if path, ok := r.Path("actions"); !ok || path != "get actions" {
+		t.Errorf("Path = %q,%v; want the first declared path", path, ok)
+	}
+	for _, cmd := range []string{"get actions", "describe action"} {
+		if feature, ok := r.FeatureForCommand(cmd); !ok || feature != "actions" {
+			t.Errorf("FeatureForCommand(%q) = %q,%v; want \"actions\",true", cmd, feature, ok)
+		}
+	}
+	// The floor exempts every path of an enabled feature, not only one: with a
+	// single path per key, `describe action` stayed blocked after opting in.
+	if got, want := r.EnabledPaths(map[string]bool{"actions": true}), []string{"describe action", "get actions"}; !slices.Equal(got, want) {
+		t.Errorf("EnabledPaths = %v, want %v", got, want)
+	}
+	if got := r.EnabledPaths(map[string]bool{}); len(got) != 0 {
+		t.Errorf("EnabledPaths with nothing enabled = %v", got)
+	}
+	if r.Paths("missing") != nil {
+		t.Error("Paths of an unregistered feature should be nil")
 	}
 }

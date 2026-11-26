@@ -157,13 +157,44 @@ type ResponseContext struct {
 	TruncatedFields []string `json:"truncated_fields,omitempty"`
 
 	// Window is the window `dtctl query` searched, as the response's own
-	// metadata states it.
+	// metadata states it, or the window a profiling analysis covered.
 	Window *TimeWindow `json:"window,omitempty"`
 
 	// RepoScope reports what the working directory's repo scope did to the
 	// query. Absent when no repo scope resolved for the invocation: the query
 	// ran exactly as typed.
 	RepoScope *RepoScope `json:"repo_scope,omitempty"`
+
+	// Profile describes the analysis behind an `exec profiling` result, so a
+	// reader gets the entity, kind and sample totals as fields rather than
+	// parsing them out of suggestion text.
+	Profile *ProfileContext `json:"profile,omitempty"`
+}
+
+// ProfileContext is what an `exec profiling` analysis was run on and what it
+// counted.
+type ProfileContext struct {
+	// Entity is the id as the caller passed it.
+	Entity string `json:"entity"`
+	// APIEntity is the id the API was asked about when dtctl rewrote it: the
+	// API speaks the classic vocabulary, so PROCESS-<id> becomes
+	// PROCESS_GROUP_INSTANCE-<id>, the same entity. Omitted when unchanged.
+	APIEntity string `json:"api_entity,omitempty"`
+	// Kind is the analysis: hotspots or allocations.
+	Kind string `json:"kind"`
+	// View is the hotspots view: stacks, functions or focus.
+	View string `json:"view,omitempty"`
+	// LeafType is the hotspots CPU sample scope: total, service or background.
+	LeafType string `json:"leaf_type,omitempty"`
+	// State names the thread states Samples counts (hotspots functions/focus).
+	State string `json:"state,omitempty"`
+	// Status is the API's verdict: completed, or no-data.
+	Status string `json:"status,omitempty"`
+	// Samples is the number of samples the rows are shares of (hotspots).
+	Samples *int `json:"samples,omitempty"`
+	// AllocatedBytes and SurvivedBytes are the window's totals (allocations).
+	AllocatedBytes *int64 `json:"allocated_bytes,omitempty"`
+	SurvivedBytes  *int64 `json:"survived_bytes,omitempty"`
 }
 
 // TimeWindow is a query window as absolute RFC3339 instants.

@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/dql"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/pkg/dql"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 // ScanLimitGB is a discovery query's scan cap. The record queries carry it in

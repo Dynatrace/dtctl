@@ -48,3 +48,12 @@ everything they need to work with Dynatrace effectively.
 
 You can install all skills without penalty. Agents use progressive disclosure
 and only load what they need for the current task.
+
+The dtctl skill points agents at these skills, and `dtctl skills install`
+prints a hint with the install command when `dt-dql-essentials` is not found
+in the same agent's skill directories (in agent mode, the hint goes to
+`context.suggestions` instead of stderr):
+
+```bash
+npx skills add dynatrace/dynatrace-for-ai
+```

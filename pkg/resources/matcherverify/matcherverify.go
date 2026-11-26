@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkmatcher "github.com/dynatrace-oss/dtctl/sdk/api/matcherverify"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkmatcher "github.com/Dynatrace/dtctl/sdk/api/matcherverify"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // VerifyOptions are the inputs for a single matcher verify request.

@@ -53,14 +53,17 @@ GoReleaser will create `Casks/dtctl.rb` automatically on the first release.
 
 ### Step 2: Create a GitHub App for tap pushes
 
-GoReleaser needs a token with write access to `dynatrace-oss/homebrew-tap`.
+GoReleaser needs a token with write access to `dynatrace-oss/homebrew-tap`
+(**Contents** and **Pull requests**: it pushes a `dtctl-<version>` branch and
+opens a PR, because the tap's `main` does not accept direct pushes).
 The default `GITHUB_TOKEN` from GitHub Actions is scoped to the current repo
 only, so a separate token is required.
 
 We use a **GitHub App** (not a PAT) because:
 
 - Owned by the org, not a personal account (no bus factor)
-- Narrowly scoped permissions (`Contents: read+write` on `homebrew-tap` only)
+- Narrowly scoped permissions (`Contents` and `Pull requests`: read+write, on
+  `homebrew-tap` only)
 - Short-lived installation tokens (auto-rotated per workflow run)
 - Shows up as a bot in commit history
 
@@ -68,10 +71,12 @@ Setup:
 
 1. Create a GitHub App in the `dynatrace-oss` org:
    - Name: e.g., `dtctl-homebrew-tap`
-   - Permissions: `Contents: read+write` (repository)
+   - Permissions (repository): `Contents: read+write` and
+     `Pull requests: read+write`. Without the second, the branch is pushed but
+     no PR is opened, and the release still reports success.
    - No webhook needed (uncheck "Active" under Webhook)
 2. Install the app on the `homebrew-tap` repo only
-3. Store two secrets in `dynatrace-oss/dtctl` repo settings:
+3. Store two secrets in `Dynatrace/dtctl` repo settings:
    - `HOMEBREW_TAP_APP_ID` — the App ID (from the app's settings page)
    - `HOMEBREW_TAP_APP_PRIVATE_KEY` — a generated private key (PEM format)
 
@@ -88,7 +93,14 @@ homebrew_casks:
       owner: dynatrace-oss
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: https://github.com/dynatrace-oss/dtctl
+      branch: "dtctl-{{ .Version }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: dynatrace-oss
+          name: homebrew-tap
+          branch: main
+    homepage: https://github.com/Dynatrace/dtctl
     description: >-
       kubectl-inspired CLI for Dynatrace - manage workflows, dashboards,
       SLOs, queries, and more from your terminal
@@ -109,6 +121,10 @@ Key decisions:
 
 - **`homebrew_casks`** -- The non-deprecated GoReleaser mechanism (since v2.10).
   Generates a Cask file in `Casks/` directory.
+- **`branch` + `pull_request`** -- The tap's `main` requires a pull request,
+  so a direct push fails with `409 Repository rule violations`. GoReleaser
+  pushes the cask to a `dtctl-<version>` branch and opens a PR against `main`
+  instead; a tap maintainer merges it.
 - **`skip_upload: auto`** -- GoReleaser skips the tap push for pre-release
   tags. This prevents unstable versions from being published to Homebrew.
 - **Post-install hook** -- Strips the macOS quarantine attribute since dtctl
@@ -150,7 +166,9 @@ Add the GitHub App token generation step and pass it to GoReleaser in
 
 The `create-github-app-token` action exchanges the App ID + private key for a
 short-lived installation token scoped to `homebrew-tap`. This token is passed
-to GoReleaser which uses it to push the generated cask file.
+to GoReleaser, which uses it to push the `dtctl-<version>` branch and open the
+PR. The action does not narrow the token, so it carries every permission the
+app has on the tap -- which is why both must be granted in Step 2.
 
 ### Step 5: Update README and docs
 
@@ -189,7 +207,7 @@ brew untap local/tap
 2. Tag a new release: `git tag v0.X.0 && git push origin v0.X.0`
 3. Verify:
    - GitHub Release is created with binaries
-   - `dynatrace-oss/homebrew-tap` has a new commit with `Casks/dtctl.rb`
+   - `dynatrace-oss/homebrew-tap` has a new PR (branch `dtctl-<version>`) updating `Casks/dtctl.rb`; merge it
    - `brew install dynatrace-oss/tap/dtctl` works on a clean machine
 
 ## Generated Cask
@@ -201,10 +219,10 @@ cask "dtctl" do
   version "0.12.0"
   sha256 "abc123..."
 
-  url "https://github.com/dynatrace-oss/dtctl/releases/download/v0.12.0/dtctl_0.12.0_darwin_arm64.tar.gz"
+  url "https://github.com/Dynatrace/dtctl/releases/download/v0.12.0/dtctl_0.12.0_darwin_arm64.tar.gz"
   name "dtctl"
   desc "kubectl-inspired CLI for Dynatrace - manage workflows, dashboards, SLOs, queries, and more from your terminal"
-  homepage "https://github.com/dynatrace-oss/dtctl"
+  homepage "https://github.com/Dynatrace/dtctl"
 
   binary "dtctl"
 
@@ -218,8 +236,10 @@ end
 
 ## Maintenance
 
-- **Cask updates are automatic** -- every tagged release triggers GoReleaser,
-  which pushes an updated cask.
+- **Cask updates need a merge** -- every tagged release triggers GoReleaser,
+  which opens a PR on the tap with the updated cask. The cask only reaches
+  users once a tap maintainer merges it. GoReleaser logs, but does not fail
+  on, an error opening the PR, so check the tap after each release.
 - **Pre-releases are skipped** -- `skip_upload: auto` ensures only stable
   releases are published.
 - **No manual cask editing** -- The cask is fully generated. Don't edit
@@ -251,7 +271,7 @@ end
 - [x] Initialize `dynatrace-oss/homebrew-tap` with README and empty `Casks/` dir
 - [ ] Create GitHub App (`dtctl-homebrew-tap`) with `Contents: read+write`
 - [ ] Install app on `homebrew-tap` repo only
-- [ ] Store `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_PRIVATE_KEY` secrets in `dynatrace-oss/dtctl`
+- [ ] Store `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_PRIVATE_KEY` secrets in `Dynatrace/dtctl`
 - [x] Add `homebrew_casks` section to `.goreleaser.yaml`
 - [x] Fix all GoReleaser deprecation warnings (formats, version_template)
 - [x] Add GitHub App token generation to `.github/workflows/release.yml`

@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // loadConfigRaw loads configuration respecting the --config flag but WITHOUT applying
@@ -340,6 +340,10 @@ Examples:
     --token-ref prod-token \
     --profile query \
     --safety-level readonly
+
+  # Keep a local tally of the queries dtctl runs here and the data they
+  # scan (off by default; see 'dtctl usage')
+  dtctl config set-context prod-viewer --usage-tracking
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -76,6 +76,12 @@ func TestContract_LoadFullFixture(t *testing.T) {
 	if dev.QueryLimits == nil || dev.QueryLimits.ScanLimitGbytes != 50 {
 		t.Errorf("dev query-limits override not parsed: %+v", dev.QueryLimits)
 	}
+	if !dev.UsageTracking {
+		t.Error("dev usage-tracking not parsed")
+	}
+	if cfg.Contexts[1].Context.UsageTracking {
+		t.Error("prod usage-tracking must default to off when the key is absent")
+	}
 }
 
 func TestContract_LoadMinimalFixture(t *testing.T) {

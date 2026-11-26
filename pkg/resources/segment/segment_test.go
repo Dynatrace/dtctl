@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // astFilterFor converts a DQL expression to its AST form for use in mock API

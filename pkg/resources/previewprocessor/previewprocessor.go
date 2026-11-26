@@ -11,10 +11,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
-	sdkpreview "github.com/dynatrace-oss/dtctl/sdk/api/previewprocessor"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
+	sdkpreview "github.com/Dynatrace/dtctl/sdk/api/previewprocessor"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // PreviewResult is the CLI read-model for a single preview result entry.

@@ -27,6 +27,8 @@ Read-only access for production monitoring and troubleshooting.
 
 This level does not include the Live Debugger write scope `dev-obs:breakpoints:set`.
 
+This level includes `davis:analyzers:execute`, because `dtctl verify analyzer` calls the analyzer's validate endpoint, which requires that scope. The scope also lets a `readonly` login run `dtctl exec analyzer`, a read-shaped analysis that the `readonly` safety level allows.
+
 ```
 document:documents:read,
 document:direct-shares:read,
@@ -52,6 +54,7 @@ storage:application.snapshots:read,
 storage:user.events:read,
 storage:user.sessions:read,
 storage:user.replays:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:bucket-definitions:read,
 storage:fieldsets:read,
@@ -62,9 +65,11 @@ iam:users:read,
 iam:groups:read,
 notification:notifications:read,
 davis:analyzers:read,
+davis:analyzers:execute,
 app-engine:apps:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `readwrite-mine`
@@ -83,7 +88,10 @@ document:trash.documents:restore,
 automation:workflows:read,
 automation:workflows:write,
 automation:workflows:run,
+document:environment-shares:read,
+document:environment-shares:write,
 document:environment-shares:claim,
+document:environment-shares:delete,
 dev-obs:breakpoints:set,
 slo:slos:read,
 slo:slos:write,
@@ -105,8 +113,10 @@ storage:entities:read,
 storage:smartscape:read,
 storage:system:read,
 storage:security.events:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:bucket-definitions:read,
+storage:bucket-definitions:write,
 storage:files:read,
 storage:files:write,
 storage:filter-segments:read,
@@ -121,7 +131,8 @@ app-engine:apps:run,
 app-engine:functions:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `readwrite-all`
@@ -173,9 +184,11 @@ storage:application.snapshots:read,
 storage:user.events:read,
 storage:user.sessions:read,
 storage:user.replays:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:buckets:write,
 storage:bucket-definitions:read,
+storage:bucket-definitions:write,
 storage:fieldsets:read,
 storage:fieldset-definitions:read,
 storage:files:read,
@@ -199,7 +212,8 @@ app-engine:functions:run,
 app-engine:edge-connects:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ### `dangerously-unrestricted`
@@ -253,6 +267,7 @@ storage:application.snapshots:read,
 storage:user.events:read,
 storage:user.sessions:read,
 storage:user.replays:read,
+storage:profiles:read,
 storage:buckets:read,
 storage:buckets:write,
 storage:bucket-definitions:read,
@@ -290,7 +305,8 @@ app-engine:edge-connects:read,
 openpipeline:configurations:read,
 app-engine:edge-connects:write,
 app-engine:edge-connects:delete,
-email:emails:send
+email:emails:send,
+environment-api:dashboard-3rdgen-migration:execute
 ```
 
 ---
@@ -307,8 +323,10 @@ A few flags reach a second API, so they need a scope the resource itself does no
 | --- | --- | --- |
 | `dtctl get documents` / `dashboards` / `notebooks` | `--admin-access` | `document:documents:admin` |
 | `dtctl update extension` / `extensions` | `--with-configurations` | `extensions:configurations:read`, `extensions:configurations:write` |
+| `dtctl unshare document` / `dashboard` / `notebook` | `--user`, `--group` | `document:direct-shares:write` |
+| `dtctl unshare document` / `dashboard` / `notebook` | `--all` | `document:direct-shares:delete` |
 
-Without the extra scope the flag fails with `403 Insufficient permissions`, while the same command without it succeeds — which is why the scope is not declared on the resource.
+Without the extra scope the flag fails with `403 Insufficient permissions`, while the same command without it succeeds — which is why the scope is not declared on the resource. `dtctl unshare` always needs `--user`, `--group` or `--all`. With only `--user`/`--group` it writes the direct share and needs the write scope; with only `--all` it deletes the share and needs the delete scope. A command line that sets `--all` together with `--user` or `--group` asks for both scopes.
 
 `dtctl auth login` requests `document:documents:admin` at the `readwrite-all` and `dangerously-unrestricted` safety levels (not at `readonly` or `readwrite-mine`, which exist to keep other users' documents out of reach). The scope alone is not enough: the tenant's IAM policy must also grant the `document:documents:admin` permission — a user without it can still log in, the API just keeps refusing `--admin-access`. OAuth sessions created before dtctl requested the scope do not carry it; run `dtctl auth login` again to pick it up.
 
@@ -334,6 +352,8 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | --- | --- |
 | app | `app-engine:apps:delete` |
 | breakpoint | `dev-obs:breakpoints:set` |
+| bucket | `storage:bucket-definitions:delete` |
+| bucket | `storage:bucket-definitions:read` |
 | dashboard | `document:documents:delete` |
 | document | `document:documents:delete` |
 | edgeconnect | `app-engine:edge-connects:delete` |
@@ -365,7 +385,7 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | azure | `extensions:configurations:read` |
 | azure | `settings:objects:read` |
 | breakpoint | `dev-obs:breakpoints:set` |
-| bucket | `storage:buckets:read` |
+| bucket | `storage:bucket-definitions:read` |
 | classic-pipelines | `settings:objects:read` |
 | copilot-skill | `davis-copilot:conversations:execute` |
 | dashboard | `document:documents:read` |
@@ -418,6 +438,9 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | analyzer | `davis:analyzers:execute` |
 | copilot | `davis-copilot:conversations:execute` |
 | function | `app-engine:functions:run` |
+| profiling | `storage:entities:read` |
+| profiling | `storage:profiles:read` |
+| slo | `slo:slos:read` |
 | workflow | `automation:workflows:run` |
 
 ### write
@@ -431,7 +454,7 @@ Generated reference of the API token scopes each resource requires, grouped by s
 | azure | `extensions:configurations:write` |
 | azure | `settings:objects:write` |
 | breakpoint | `dev-obs:breakpoints:set` |
-| bucket | `storage:buckets:write` |
+| bucket | `storage:bucket-definitions:write` |
 | dashboard | `document:documents:write` |
 | document | `document:documents:write` |
 | edgeconnect | `app-engine:edge-connects:write` |

@@ -6,8 +6,8 @@ package e2e
 import (
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/schedulingrule"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/schedulingrule"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 func TestSchedulingRuleLifecycle(t *testing.T) {

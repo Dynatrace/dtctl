@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 type flagSite struct {
@@ -67,6 +67,7 @@ var requiredNonEmptyFlags = []flagSite{
 // rejected, and the command body keeps reporting the flag left out.
 var optionalNonEmptyFlags = []flagSite{
 	{createBucketCmd, "name"},
+	{execFunctionCmd, "sdk-major-versions"},
 	{createBucketCmd, "table"},
 	{createBucketCmd, "retention"},
 	{createEdgeConnectCmd, "name"},

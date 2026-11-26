@@ -1,4 +1,4 @@
-[#4]:
+[4]:
   - base_path: /platform/widget/v1
     category: Widgets
     dtctl: widget

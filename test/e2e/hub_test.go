@@ -6,8 +6,8 @@ package e2e
 import (
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/hub"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/hub"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 func TestHubExtensionList(t *testing.T) {

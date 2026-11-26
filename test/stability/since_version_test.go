@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
-	"github.com/dynatrace-oss/dtctl/pkg/version"
+	"github.com/Dynatrace/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/pkg/version"
 )
 
 // TestSinceVersionsNameNoReleaseBeyondTheNextOne is the tree-side half of the

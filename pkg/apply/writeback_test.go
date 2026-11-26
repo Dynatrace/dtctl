@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 func TestInjectIDIntoFileContent(t *testing.T) {

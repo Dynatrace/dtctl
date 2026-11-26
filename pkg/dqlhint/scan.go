@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/dynatrace-oss/dtctl/pkg/dql"
+	"github.com/Dynatrace/dtctl/pkg/dql"
 )
 
 // queryContext is a query error prepared for the rules: the query, a masked

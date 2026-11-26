@@ -14,10 +14,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
+	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
 
 func TestGetBreakpointsCommandRegistration(t *testing.T) {

@@ -298,3 +298,19 @@ func TestNewProgressReporterTo_DrawsOnTheGivenWriter(t *testing.T) {
 		t.Errorf("a reporter on a non-terminal writer wrote %q, want nothing", buf.String())
 	}
 }
+
+func TestProgressReporter_LabelDrawsNoBar(t *testing.T) {
+	var buf bytes.Buffer
+	r := &ProgressReporter{w: &buf, animate: true, manualTick: true}
+
+	r.Update(ProgressState{Label: "running hotspots analysis"})
+	r.Stop()
+
+	got := buf.String()
+	if !strings.Contains(got, "running hotspots analysis") {
+		t.Errorf("output missing the label: %q", got)
+	}
+	if strings.Contains(got, "%") || strings.Contains(got, "querying") {
+		t.Errorf("a labelled line should carry no percentage or verb: %q", got)
+	}
+}

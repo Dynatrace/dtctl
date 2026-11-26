@@ -16,7 +16,7 @@ Service Level Objectives (SLOs) define reliability targets for your services. dt
 | create | slo | `dtctl create slo` | Create resources from files | yes | write |
 | delete | slo | `dtctl delete slo` | Delete resources | yes | delete |
 | describe | slo | `dtctl describe slo` | Show details of a specific resource | no | read |
-| exec | slo | `dtctl exec slo` | Execute queries, workflows, or functions | yes | run |
+| exec | slo | `dtctl exec slo` | Execute workflows, functions, analyzers, SLOs, and code-level profiling | yes | run |
 | get | slos | `dtctl get slos` | Display one or many resources | no | read |
 | get | slo-templates | `dtctl get slo-templates` | Display one or many resources | no | read |
 
@@ -31,6 +31,7 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | Safety level | Scopes |
 | --- | --- |
 | read | `slo:objective-templates:read`, `slo:slos:read` |
+| run | `slo:slos:read` |
 | write | `slo:slos:write` |
 <!-- GENERATED:slos:end -->
 

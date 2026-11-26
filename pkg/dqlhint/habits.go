@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/dql"
+	"github.com/Dynatrace/dtctl/pkg/dql"
 )
 
 // bareArg is arg i without the backticks some error types quote it in.

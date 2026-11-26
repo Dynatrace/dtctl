@@ -1,12 +1,12 @@
 # dtctl
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dynatrace-oss/dtctl/badge)](https://scorecard.dev/viewer/?uri=github.com/dynatrace-oss/dtctl)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dynatrace/dtctl/badge)](https://scorecard.dev/viewer/?uri=github.com/Dynatrace/dtctl)
 
-[![Release](https://img.shields.io/github/v/release/dynatrace-oss/dtctl?style=flat-square)](https://github.com/dynatrace-oss/dtctl/releases/latest)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/dynatrace-oss/dtctl/build.yml?branch=main&style=flat-square)](https://github.com/dynatrace-oss/dtctl/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/dynatrace-oss/dtctl?style=flat-square)](https://goreportcard.com/report/github.com/dynatrace-oss/dtctl)
-[![License](https://img.shields.io/github/license/dynatrace-oss/dtctl?style=flat-square)](LICENSE)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/dynatrace-oss/dtctl?style=flat-square)](go.mod)
+[![Release](https://img.shields.io/github/v/release/Dynatrace/dtctl?style=flat-square)](https://github.com/Dynatrace/dtctl/releases/latest)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Dynatrace/dtctl/build.yml?branch=main&style=flat-square)](https://github.com/Dynatrace/dtctl/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Dynatrace/dtctl?style=flat-square)](https://goreportcard.com/report/github.com/Dynatrace/dtctl)
+[![License](https://img.shields.io/github/license/Dynatrace/dtctl?style=flat-square)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Dynatrace/dtctl?style=flat-square)](go.mod)
 
 **Your Dynatrace platform, one command away.**
 
@@ -20,11 +20,12 @@ dtctl query "fetch logs | limit 10"           # Run DQL queries
 dtctl apply -f workflow.yaml --set env=prod   # Declarative configuration
 dtctl get dashboards -o json                  # Structured output for automation
 dtctl exec copilot nl2dql "error logs from last hour"
+dtctl exec profiling hotspots PROCESS-ABC123    # Code-level profiling (experimental)
 ```
 
 ![dtctl dashboard workflow demo](docs/assets/dtctl-1.gif)
 
-> **Active Development**: dtctl has stabilized considerably, but some commands and flags are still `experimental` or `development` tier (see [Stability](docs/STABILITY.md)). If you encounter any bugs or issues, please [file a GitHub issue](https://github.com/dynatrace-oss/dtctl/issues/new). Contributions and feedback are welcome!
+> **Active Development**: dtctl has stabilized considerably, but some commands and flags are still `experimental` or `development` tier (see [Stability](docs/STABILITY.md)). If you encounter any bugs or issues, please [file a GitHub issue](https://github.com/Dynatrace/dtctl/issues/new). Contributions and feedback are welcome!
 
 **[Documentation](docs/README.md)** · **[Installation](docs/INSTALLATION.md)** · **[Quick Start](docs/QUICK_START.md)** · **[Command Reference](docs/COMMANDS.md)**
 
@@ -39,12 +40,12 @@ brew install dynatrace-oss/tap/dtctl
 
 ```bash
 # Shell script (macOS/Linux)
-curl -fsSL https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.sh | sh
 ```
 
 ```powershell
 # PowerShell (Windows)
-irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.ps1 | iex
 ```
 
 Binary downloads, building from source, shell completion setup, and more in the **[Installation Guide](docs/INSTALLATION.md)**.
@@ -88,6 +89,7 @@ Token-based authentication and multi-environment configuration are covered in th
 | Extensions 2.0 | get, describe, apply monitoring configs |
 | Hub Extensions | get, describe, list releases, filter by keyword |
 | App Functions & Intents | get, describe, execute, find, open (deep linking) |
+| Code Profiling | hotspots, allocations — folded stacks via `dtctl exec profiling` (experimental); see [docs/PROFILING.md](docs/PROFILING.md) |
 | Analyzers & CoPilot | statistical analyzers, CoPilot chat, NL-to-DQL, document search |
 | Cloud Integrations | AWS, Azure & GCP connections and monitoring (get, describe, create, delete, apply, update, enable) |
 | EdgeConnect | get, describe, create, delete |
@@ -105,7 +107,7 @@ dtctl ships with an [Agent Skill](https://agentskills.io) that teaches AI coding
 
 ```bash
 # Install via skills.sh
-npx skills add dynatrace-oss/dtctl
+npx skills add Dynatrace/dtctl
 
 # Or install with dtctl itself
 dtctl skills install              # Auto-detects your AI agent

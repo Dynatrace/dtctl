@@ -29,7 +29,7 @@ type SettingsDenial struct {
 // SettingsForbidden builds the 403 error for a Settings 2.0 object operation.
 //
 // It is the Settings-API counterpart of the Grail-file 403 handling added for
-// github.com/dynatrace-oss/dtctl#344, and exists for the same reason: the OAuth
+// github.com/Dynatrace/dtctl#344, and exists for the same reason: the OAuth
 // scope in the token and the IAM permission of the same name are two
 // independent gates, so "access denied" without the server's explanation reads
 // like a token problem even when the token is fine. Per the settings service

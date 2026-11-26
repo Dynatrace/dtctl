@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkplatform "github.com/dynatrace-oss/dtctl/sdk/api/platform"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkplatform "github.com/Dynatrace/dtctl/sdk/api/platform"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // EnvironmentInfo represents the Dynatrace environment details with CLI display fields.

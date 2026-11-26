@@ -4,6 +4,6 @@ schemaVersion: 1.0.5
 scope: environment
 summary: Default Alerting Profile
 value:
-  eventTypeFilter[#0]:
+  eventTypeFilter: []
   name: Default
-  severityRules[#0]:
+  severityRules: []

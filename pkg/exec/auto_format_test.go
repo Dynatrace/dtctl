@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // TestBuildSpillResponse_InlineAuto pins the agent-mode `-o auto` contract for

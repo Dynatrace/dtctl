@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsmonitoringconfig"
 )
 
 // applyAWSMonitoringConfig applies AWS monitoring configuration

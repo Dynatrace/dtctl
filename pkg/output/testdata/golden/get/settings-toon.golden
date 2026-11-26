@@ -1,13 +1,13 @@
-[#3]:
+[3]:
   - objectId: vu9U3hXa3q0AAAABABhidWlsdGluOmFsZXJ0aW5nLnByb2ZpbGUABnRlbmFudAAGdGVuYW50ACRhMWIyYzNkNC1lNWY2LTRhN2ItOGM5ZC0wZTFmMmEzYjRjNWQ
     schemaId: "builtin:alerting.profile"
     schemaVersion: 1.0.5
     scope: environment
     summary: Default Alerting Profile
     value:
-      eventTypeFilter[#0]:
+      eventTypeFilter: []
       name: Default
-      severityRules[#0]:
+      severityRules: []
   - objectId: vu9U3hXa3q0AAAABABxidWlsdGluOnByb2JsZW0ubm90aWZpY2F0aW9ucwAGdGVuYW50AAZ0ZW5hbnQAJGIyYzNkNGU1LWY2YTctNGI4Yy05ZDBlLTFmMmEzYjRjNWQ2ZQ
     schemaId: "builtin:problem.notifications"
     schemaVersion: 2.1.0
@@ -24,4 +24,4 @@
     summary: Environment Tag Rule
     value:
       name: environment
-      rules[#0]:
+      rules: []

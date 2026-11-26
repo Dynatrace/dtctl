@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // The defect behind #476 was a 403 that reported "access denied" and threw the

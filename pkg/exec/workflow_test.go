@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 func TestWorkflowExecutor_Execute_SendsLegacyParamsCompatibilityRequest(t *testing.T) {

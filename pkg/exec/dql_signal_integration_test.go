@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // TestDQLExecutor_SIGINT_CancelsBackendQuery is an integration-style test that

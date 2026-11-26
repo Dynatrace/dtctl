@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
 )
 
 func TestGetWorkflowsCmd_ListWithFilters(t *testing.T) {

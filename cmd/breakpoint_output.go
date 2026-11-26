@@ -3,7 +3,7 @@ package cmd
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 type breakpointCommandOutput struct {

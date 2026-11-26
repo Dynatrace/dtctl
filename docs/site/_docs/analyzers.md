@@ -1,5 +1,5 @@
 ---
 layout: redirect
 title: Analyzers
-redirect_to: https://github.com/dynatrace-oss/dtctl/blob/main/docs/resources/analyzers.md
+redirect_to: https://github.com/Dynatrace/dtctl/blob/main/docs/resources/analyzers.md
 ---

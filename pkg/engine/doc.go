@@ -29,6 +29,20 @@
 //     surface entirely — hidden from `dtctl commands` and help, and guarded
 //     with the stable agent-mode error code "unsupported_in_service".
 //
+// Analysis without running: Parse reports what a command line means — its
+// verb and resource, the files it reads and writes, whether it reads the
+// request's input, and its required scopes with how certain they are — without
+// running it. It needs no token, reads no file, calls no platform API and
+// takes no execution slot, and it applies the same surface and validation as
+// Execute, so a command line Execute would refuse is a *UsageError carrying
+// Execute's error. A host uses it as a preflight, to know which files to
+// attach before it runs a command. Parse is experimental until a second host
+// uses it.
+//
+//	p, err := engine.Parse(ctx, engine.ParseRequest{Command: `apply -f workflow.yaml --write-id`})
+//	// p.InputFiles and p.OutputFiles are ["workflow.yaml"];
+//	// p.Scopes is ScopesInputDependent: the file decides the resource kind.
+//
 // Concurrency: Execute is safe to call from multiple goroutines, but by
 // default executions serialize on an internal lock (the command tree is process
 // state — see cmd.Run). A service scales by running more engine processes or
@@ -38,6 +52,20 @@
 // docs/dev/CONCURRENT_EXECUTION.md for what that guarantees and costs. Giving
 // every request a WASM instance instead costs about 55ms of CPU to start each
 // one.
+//
+// Transport: by default every invocation reaches its environment through one
+// process-wide connection pool. An Engine built with
+// New(limits, WithTransport(rt)) sends its invocations' platform requests
+// through rt instead — how a host tests against a stand-in environment
+// (an httptest.Server's URL as EnvironmentURL, its Client().Transport as rt)
+// or gives the engine a TLS configuration of its own. Only the transport
+// changes; credentials, safety and output are what they would be against a
+// real environment.
+//
+// Request headers: an Engine built with New(limits, WithHeaderPolicy(policy))
+// lets the host refuse headers a caller passes to `exec api -H` (Host, the
+// X-Forwarded-* family, ...). Which headers matter is the host's decision;
+// without the option only the credential headers are refused.
 //
 // Admission and resource limits: ExecuteWithLimits (which Execute calls with
 // DefaultLimits) bounds how many requests may queue for an execution slot

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // finishStreamedJSONL closes out a `-o jsonl` stream: the rows are already on

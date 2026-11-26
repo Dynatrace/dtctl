@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 var inventoryArrivalsCmd = newInventoryArrivalsCmd()
@@ -127,7 +127,10 @@ Examples:
 
 			scanLimitGB, _ := cmd.Flags().GetFloat64("scan-limit-gbytes")
 			noSample, _ := cmd.Flags().GetBool("no-sample")
-			runner := newInventoryRunner(cmd, cfg, c)
+			runner, err := newInventoryRunner(cmd, cfg, c)
+			if err != nil {
+				return err
+			}
 			ctx, cancel := inventoryCancelContext(cmd)
 			defer cancel()
 

@@ -143,7 +143,7 @@ set -e
 DTCTL_VERSION=0.40.0
 DT_ENVIRONMENT_URL=https://abc12345.apps.dynatrace.com
 
-curl -fsSL "https://github.com/dynatrace-oss/dtctl/releases/download/v${DTCTL_VERSION}/dtctl_${DTCTL_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin dtctl
+curl -fsSL "https://github.com/Dynatrace/dtctl/releases/download/v${DTCTL_VERSION}/dtctl_${DTCTL_VERSION}_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin dtctl
 dtctl config set-context web --environment "$DT_ENVIRONMENT_URL" --token-ref t --safety-level readonly
 dtctl config set-credentials t --token '${DT_API_TOKEN}'
 ```
@@ -548,7 +548,28 @@ Two caveats worth knowing:
   query unless approximate answers are what the whole context is for.
 
 Limits apply to `dtctl query` and `dtctl wait query`. `dtctl inventory` keeps its
-own discovery cap (`--scan-limit-gbytes`, default 25).
+own discovery caps (`--scan-limit-gbytes`, default 25, and `--max-result-bytes`,
+unset by default) and does not read this block.
+
+## Usage Tracking
+
+A context can opt in to a local tally of the DQL queries dtctl runs and the
+data they scan, shown by `dtctl usage` (today, 7d, 30d). It is off by default,
+and with it off dtctl writes nothing. Only the global config can turn it on; a
+project-local `.dtctl.yaml` cannot.
+
+```bash
+dtctl config set-context prod --usage-tracking   # adds usage-tracking: true to the context
+dtctl usage
+dtctl usage reset                                # clear it
+```
+
+Only aggregate counters per UTC day and context are kept (query count, failed
+queries, scanned bytes, records and data points), never query text, results,
+identity or tokens. It counts only queries dtctl ran on this machine; billing
+events (`dt.system.events`, `BILLING_USAGE_EVENT`) are the authoritative
+source. See [USAGE_TRACKING.md](USAGE_TRACKING.md) for the file location and
+format.
 
 ## Command Aliases
 

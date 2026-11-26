@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/skills"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/skills"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
 )
 
 // skillsCmd is the parent command for AI assistant skill management.
@@ -48,6 +48,7 @@ which is automatically discovered by any agentskills.io-compatible agent.`,
   dtctl skills status`,
 		RunE: requireSkillsSubcommand,
 	}
+	markRefusalOnly(c)
 	stability.MarkStable(c)
 	return c
 }
@@ -283,11 +284,22 @@ func runSkillsInstall(cmd *cobra.Command, _ []string) error {
 		scope = "global"
 	}
 
+	// Best-effort nudge toward the Dynatrace for AI domain skills; it never
+	// affects the outcome of the install.
+	companionHint := ""
+	if !skills.CompanionInstalled(agent, baseDir, result.Path) {
+		companionHint = "For DQL and observability domain skills, also install Dynatrace for AI: " + skills.CompanionInstallCommand
+	}
+
 	printer := newPrinterCtx(cmdContext(cmd))
 	if ap := enrichAgent(printer, "install", "skills"); ap != nil {
-		ap.SetSuggestions([]string{
+		suggestions := []string{
 			"Run 'dtctl skills status' to verify installation",
-		})
+		}
+		if companionHint != "" {
+			suggestions = append(suggestions, companionHint)
+		}
+		ap.SetSuggestions(suggestions)
 	}
 
 	if agentMode(cmdContext(cmd)) {
@@ -309,6 +321,9 @@ func runSkillsInstall(cmd *cobra.Command, _ []string) error {
 		output.FprintSuccess(currentStderr(cmdContext(cmd)), "Installed %s skill: %s", result.Agent.DisplayName, result.Path)
 	}
 	output.FprintInfo(currentStderr(cmdContext(cmd)), "Scope: %s", scope)
+	if companionHint != "" {
+		output.FprintHint(currentStderr(cmdContext(cmd)), "%s", companionHint)
+	}
 
 	return nil
 }

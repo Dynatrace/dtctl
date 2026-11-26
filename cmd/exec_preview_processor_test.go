@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
 )
 
 const previewProcessorPath = "/platform/openpipeline/v1/preview/processor"

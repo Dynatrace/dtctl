@@ -1,11 +1,11 @@
 # dtctl SDK
 
-A shared Go module for building tools and integrations against the Dynatrace platform, extracted from [dtctl](https://github.com/dynatrace-oss/dtctl).
+A shared Go module for building tools and integrations against the Dynatrace platform, extracted from [dtctl](https://github.com/Dynatrace/dtctl).
 
 ## Install
 
 ```bash
-go get github.com/dynatrace-oss/dtctl/sdk@latest
+go get github.com/Dynatrace/dtctl/sdk@latest
 ```
 
 ## Versioning
@@ -67,7 +67,7 @@ Thin, typed Go clients for Dynatrace REST APIs. Each package covers one API surf
 
 ## What does NOT go into the SDK
 
-- **Convenience wrappers that compose multiple APIs.** If a function calls API A then API B (e.g. `EnsureEnvironmentShare`), it belongs in the CLI.
+- **Convenience wrappers that compose multiple APIs.** If a function calls API A then API B (e.g. creating an environment share link and then making the document public), it belongs in the CLI.
 - **Display/formatting logic.** Functions like `populateDisplayFields`, `GetRaw`, DQL-to-AST conversion, or anything that transforms data for human consumption.
 - **Packages that wrap non-Dynatrace APIs** or aggregate multiple API calls into a higher-level operation (e.g. `anomalydetector`, `azureconnection`, `gcpconnection`).
 - **CLI-specific types.** Structs with fields that only exist for display purposes (e.g. `VariablesDisplay`, computed summary fields).

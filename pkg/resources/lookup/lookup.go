@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 )
 
 // Handler handles lookup table resources

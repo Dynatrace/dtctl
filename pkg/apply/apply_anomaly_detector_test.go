@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
 )
 
 // anomalyDetectorYAML is the definition from issue #369: raw Settings format,

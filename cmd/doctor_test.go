@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 func TestDoctorCheckVersionAlwaysPasses(t *testing.T) {
@@ -349,7 +349,7 @@ func TestDoctorURLValidation(t *testing.T) {
 // returns 403 because a platform token (dt0s16.*) cannot be granted
 // iam:users:read, the doctor authentication check is reported as "warn"
 // (with an explanation) rather than "fail". Regression test for
-// https://github.com/dynatrace-oss/dtctl/issues/190
+// https://github.com/Dynatrace/dtctl/issues/190
 func TestDoctorPlatformToken403(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

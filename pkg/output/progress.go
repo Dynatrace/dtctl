@@ -39,6 +39,11 @@ type ProgressState struct {
 	// PreviewRows is the number of rows in the latest preview snapshot, shown
 	// only when no scan totals are available (e.g. non-Grail-scan queries).
 	PreviewRows int
+	// Label, when set, draws an indeterminate line: the spinner, the label and
+	// the elapsed time, with no percentage or bar. For work whose backend
+	// reports no usable progress (an asynchronous analysis that is either
+	// running or done), where a bar would sit at 0% and then jump.
+	Label string
 }
 
 // ProgressReporter renders an in-place progress line to stderr while a query
@@ -171,8 +176,13 @@ func (p *ProgressReporter) renderLocked() {
 		verb = "scanning"
 	}
 	spin := Colorize(Cyan, string(progressSpinner[p.spinIdx%len(progressSpinner)]))
-	pct := Colorize(Bold, fmt.Sprintf("%3d%%", s.Progress))
-	line := fmt.Sprintf("%s %s %s %s%s", spin, verb, pct, renderBar(s.Progress), Colorize(Dim, statsSuffix(s, p.start)))
+	var line string
+	if s.Label != "" {
+		line = fmt.Sprintf("%s %s%s", spin, s.Label, Colorize(Dim, statsSuffix(s, p.start)))
+	} else {
+		pct := Colorize(Bold, fmt.Sprintf("%3d%%", s.Progress))
+		line = fmt.Sprintf("%s %s %s %s%s", spin, verb, pct, renderBar(s.Progress), Colorize(Dim, statsSuffix(s, p.start)))
+	}
 
 	// Clamp to the terminal width so a narrow terminal never wraps the line onto
 	// a second physical row (which a bare "\r" on the next frame cannot reach to

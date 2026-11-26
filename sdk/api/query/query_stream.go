@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // recordSink dispatches a decoded row to the top-level or result-nested

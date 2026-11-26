@@ -9,10 +9,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 // This file is the enforcement half of the stability axis; pkg/stability holds
@@ -203,9 +203,8 @@ func hasSubcommand(parent, child *cobra.Command) bool {
 // Returns nil when there is no usable config, which every caller treats as "no
 // constraint": the real command surfaces the config error later, with context.
 func configForArgs(ctx context.Context, args []string) *config.Config {
-	// Session-backed invocations resolve against the synthetic config: no
-	// user-defined profiles and no context binding, but the per-request
-	// environment (RunOptions.Env) still applies.
+	// Session-backed invocations resolve against the synthetic config: one
+	// context, bound to Session.Profile if set, with RunOptions.Env on top.
 	if currentSession(ctx) != nil {
 		return withInvocationEnv(ctx, currentSession(ctx).syntheticConfig())
 	}
@@ -533,7 +532,7 @@ func sortedStringKeys(m map[string]string) []string {
 // scheduled to go as a whole, and answering `dtctl <group>` with help listing
 // subcommands this mode has already removed would be a dead end.
 func maskDeprecated(cmd *cobra.Command, blocked *DeprecatedError) {
-	cmd.Hidden = true
+	hideMaskedCommand(cmd)
 	cmd.Args = cobra.ArbitraryArgs
 	cmd.DisableFlagParsing = true
 	cmd.Run = nil
@@ -554,7 +553,7 @@ func flagAdmitted(cmd *cobra.Command, path string, f *pflag.Flag, p stability.Po
 // blocked. Non-runnable commands (pure groups) need only the hide: Cobra will
 // print their help, and their runnable children are masked in their own right.
 func maskBelowFloor(cmd *cobra.Command, blocked *StabilityError) {
-	cmd.Hidden = true
+	hideMaskedCommand(cmd)
 	if cmd.RunE == nil && cmd.Run == nil {
 		return
 	}

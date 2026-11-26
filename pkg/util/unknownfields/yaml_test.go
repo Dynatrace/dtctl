@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
 )
 
 type yamlInner struct {

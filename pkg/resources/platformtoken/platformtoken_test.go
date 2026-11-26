@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	sdkpt "github.com/dynatrace-oss/dtctl/sdk/api/platformtoken"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	sdkpt "github.com/Dynatrace/dtctl/sdk/api/platformtoken"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 func newTestClient(t *testing.T, handler http.Handler) *httpclient.Client {

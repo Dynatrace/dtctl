@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/dql"
+	"github.com/Dynatrace/dtctl/pkg/dql"
 )
 
 func TestRender(t *testing.T) {

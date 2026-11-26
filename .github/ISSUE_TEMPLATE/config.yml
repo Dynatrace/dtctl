@@ -1,11 +1,11 @@
 blank_issues_enabled: true
 contact_links:
   - name: Question or Discussion
-    url: https://github.com/dynatrace-oss/dtctl/discussions
+    url: https://github.com/Dynatrace/dtctl/discussions
     about: Ask questions or discuss ideas with the community
   - name: Security Vulnerability
-    url: https://github.com/dynatrace-oss/dtctl/security/advisories/new
+    url: https://github.com/Dynatrace/dtctl/security/advisories/new
     about: Report a security vulnerability (private disclosure)
   - name: Documentation
-    url: https://github.com/dynatrace-oss/dtctl/tree/main/docs
+    url: https://github.com/Dynatrace/dtctl/tree/main/docs
     about: View documentation and guides

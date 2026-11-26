@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/appengine"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // openIntentCmd generates and optionally opens an intent URL
@@ -118,6 +118,7 @@ Examples:
 	}
 	c.Flags().StringVar(&openIntentData, "data", "", "data as comma-separated key=value pairs")
 	c.Flags().StringVar(&openIntentDataFile, "data-file", "", "JSON file containing data (use - for stdin)")
+	markFileFlag(c, "data-file", fileValuePath)
 	c.Flags().BoolVar(&openIntentBrowser, "browser", false, "open URL in browser")
 	stability.MarkStable(c)
 	return c

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
 )
 
 func TestCreateSettingsValidateOnly_Success(t *testing.T) {

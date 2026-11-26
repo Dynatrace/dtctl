@@ -42,6 +42,10 @@ Billable `fetch` (logs, events, bizevents, spans) bills by bytes scanned and das
 
 dtctl not installed/working? See [references/troubleshooting.md](references/troubleshooting.md).
 
+## Companion skills (Dynatrace for AI)
+
+This skill covers operating dtctl. The [Dynatrace for AI](https://github.com/Dynatrace/dynatrace-for-ai) skill pack adds the domain knowledge: `dt-dql-essentials` (DQL syntax, pitfalls, query optimization), `dt-obs-*` (logs, problems, services, tracing, hosts, kubernetes, frontends, aws/azure/gcp), and `dt-app-dashboards` / `dt-app-notebooks`. When they are loaded, use them for what to query and dtctl to run it. When they are not, tell the user they can add them with `npx skills add dynatrace/dynatrace-for-ai`; don't install them unasked.
+
 ## Resources & verbs
 
 Resources and aliases are discoverable via `dtctl commands` (run at init). They include: analyzer, anomaly-detector, app, aws/azure/gcp connection & monitoring, bucket, copilot-skill, dashboard, document, edgeconnect, environment, extension, extension-config, function, group, intent, license, license-settings, lookup, notebook, notification, sdk-version, segment, settings, settings-schema, slo, slo-template, trash, user, workflow, workflow-execution. **Use IDs, not names** — names may be ambiguous and fail.
@@ -51,6 +55,7 @@ Resources and aliases are discoverable via `dtctl commands` (run at init). They 
 | get / describe | `dtctl get workflows --mine` · `dtctl describe workflow <id>` |
 | apply / edit / delete | `dtctl apply -f wf.yaml --set env=prod` · `dtctl delete workflow <id>` |
 | exec | `dtctl exec function <id> --payload '{...}'` · `dtctl exec analyzer <id> --input '{...}'` (also workflow, copilot) |
+| exec profiling | `dtctl exec profiling hotspots PROCESS-xxx` · `dtctl exec profiling allocations PROCESS-xxx` (allocation pressure, not live heap; survived bytes are bytes × GCs survived, not a size). Reach for it when the question is *why* code is slow, busy, blocked or growing: hot methods, lock/IO waits behind low CPU, a slow endpoint (`--leaf-type service`), background CPU, a memory leak suspect. Metrics show *that*; profiling shows *which code*. (Experimental code-level profiling of a process, not a SERVICE: map a service to its processes first; folded stacks with per-stack running/lock/io/wait; `--view functions` ranks functions by self/total time summed over all stacks (use it for "which function is hot"), `--focus <function>` shows its callers and callees; optional `--leaf-type total\|service\|background`, `--app-only`, `--limit`, `--default-timeframe-start 'now()-1d'`; window at most 2h; `-o json` gives the same rows) |
 | query / wait | `dtctl query "fetch logs \| limit 10"` · `dtctl wait query ... --for=any` |
 | inspect | `dtctl inspect <file> --head 20` · `--tail`, `--page --offset N --limit M`, `--fields a,b`, `--schema`, `--stats`, `--sample N`, `--list` (row access over a spilled result file — no Grail re-query) |
 | logs / history / restore | `dtctl logs workflow-execution <id>` · `dtctl history dashboard <id>` · `dtctl restore dashboard <id> 3` (version is positional; snapshots exist only if the update passed `--create-snapshot`) |
@@ -158,7 +163,7 @@ Inside a git checkout, run `dtctl repo-scope current -A` first: a linked reposit
 
 ## Permissions & safety
 
-- Verify before mutating: `dtctl auth can-i <verb> <resource>`. Scopes: [TOKEN_SCOPES.md](https://github.com/dynatrace-oss/dtctl/blob/main/docs/TOKEN_SCOPES.md).
+- Verify before mutating: `dtctl auth can-i <verb> <resource>`. Scopes: [TOKEN_SCOPES.md](https://github.com/Dynatrace/dtctl/blob/main/docs/TOKEN_SCOPES.md).
 - Destructive ops may be blocked by safety level — switch with `dtctl config use-context <name>`, or raise the level when creating the context.
 - Prefer `get`/`describe` first; `--mine` scopes to resources you own; `--plain` for all machine consumption.
 

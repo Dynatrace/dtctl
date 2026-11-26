@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
 )
 
 // activationRecorder serves the endpoints resolveAndActivate touches and records

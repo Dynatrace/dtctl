@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 func newExecTestHandler(t *testing.T, mux *http.ServeMux) (*ExecutionHandler, func()) {

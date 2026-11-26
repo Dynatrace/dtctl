@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 func newTestClient(t *testing.T, handler http.Handler) *httpclient.Client {
@@ -414,6 +414,46 @@ func TestDeleteEnvironmentShare(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteEnvironmentShare() error: %v", err)
 	}
+}
+
+// TestDocumentVisibility pins the action each visibility setter calls: a
+// bodiless POST to :makePublic / :makePrivate, with no locking version. The
+// deprecated SetDocumentPublic goes through :makePublic too.
+func TestDocumentVisibility(t *testing.T) {
+	tests := []struct {
+		name       string
+		set        func(h *Handler) error
+		wantAction string
+	}{
+		{"public", func(h *Handler) error { return h.MakeDocumentPublic(context.Background(), "doc-1") }, "makePublic"},
+		{"private", func(h *Handler) error { return h.MakeDocumentPrivate(context.Background(), "doc-1") }, "makePrivate"},
+		{"deprecated SetDocumentPublic", func(h *Handler) error { return h.SetDocumentPublic(context.Background(), "doc-1", 7) }, "makePublic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls = append(calls, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			if err := tt.set(NewHandler(c)); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			want := "POST /platform/document/v1/documents/doc-1:" + tt.wantAction + "?"
+			if len(calls) != 1 || calls[0] != want {
+				t.Errorf("calls = %q, want [%q]", calls, want)
+			}
+		})
+	}
+
+	t.Run("error", func(t *testing.T) {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		}))
+		if err := NewHandler(c).MakeDocumentPrivate(context.Background(), "doc-1"); err == nil {
+			t.Error("expected an error for a 403")
+		}
+	})
 }
 
 // TestDirectShareSendNotification pins the one lever the API offers against

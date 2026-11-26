@@ -15,7 +15,7 @@ kubectl-inspired CLI for managing Dynatrace platform resources from your termina
 
 **Website:**
 ```
-https://github.com/dynatrace-oss/dtctl
+https://github.com/Dynatrace/dtctl
 ```
 
 **Topics (copy-paste ready):**
@@ -154,7 +154,7 @@ Verify all items are ✅:
 
 ### Set Topics via CLI (requires gh CLI)
 ```bash
-gh repo edit dynatrace-oss/dtctl \
+gh repo edit Dynatrace/dtctl \
   --add-topic dynatrace \
   --add-topic cli \
   --add-topic kubectl \
@@ -173,7 +173,7 @@ gh repo edit dynatrace-oss/dtctl \
 
 ### Update Description via CLI
 ```bash
-gh repo edit dynatrace-oss/dtctl \
+gh repo edit Dynatrace/dtctl \
   --description "kubectl-inspired CLI for managing Dynatrace platform resources from your terminal"
 ```
 

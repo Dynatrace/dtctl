@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/extension"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/extension"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // createExtensionCmd installs an extension — either a custom zip upload or a Hub extension.
@@ -68,6 +68,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "path to the extension zip file (for custom extension upload), or - for stdin")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("hub-extension", "", "Hub extension catalog ID to install (e.g. com.dynatrace.extension.host-monitoring)")
 	c.Flags().String("version", "", "version to install (only for --hub-extension; defaults to latest)")
 	stability.MarkStable(c)

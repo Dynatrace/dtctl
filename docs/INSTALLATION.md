@@ -28,7 +28,7 @@ brew untap dynatrace-oss/tap  # optional
 If you don't use Homebrew, install with a single command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.sh | sh
 ```
 
 This downloads the latest release, extracts it to `~/.local/bin` (Linux) or `/usr/local/bin` (macOS), and verifies the installation.
@@ -36,7 +36,7 @@ This downloads the latest release, extracts it to `~/.local/bin` (Linux) or `/us
 Override the install directory with `DTCTL_INSTALL_DIR`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.sh | DTCTL_INSTALL_DIR=~/bin sh
+curl -fsSL https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.sh | DTCTL_INSTALL_DIR=~/bin sh
 ```
 
 To update, re-run the same command.
@@ -44,7 +44,7 @@ To update, re-run the same command.
 ## Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.ps1 | iex
 ```
 
 This downloads the latest release, extracts it to `%LOCALAPPDATA%\dtctl`, and adds it to your PATH. Restart your terminal (or IDE) afterwards for the PATH change to take effect.
@@ -55,7 +55,7 @@ For detailed steps, manual install, PowerShell tips, quoting, and troubleshootin
 
 **For most users**, download the pre-built binary for your platform:
 
-1. **Download the latest release**: Visit the [releases page](https://github.com/dynatrace-oss/dtctl/releases/latest) and download the appropriate binary for your operating system and architecture.
+1. **Download the latest release**: Visit the [releases page](https://github.com/Dynatrace/dtctl/releases/latest) and download the appropriate binary for your operating system and architecture.
 
 2. **Extract and install**:
 
@@ -93,7 +93,7 @@ For detailed steps, manual install, PowerShell tips, quoting, and troubleshootin
 
 ```bash
 # Clone the repository
-git clone https://github.com/dynatrace-oss/dtctl.git
+git clone https://github.com/Dynatrace/dtctl.git
 cd dtctl
 
 # Build the binary
@@ -312,10 +312,10 @@ To remove dtctl:
 
 ```powershell
 # Remove binary + PATH entry
-irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/uninstall.ps1 | iex
 
 # Optional: full cleanup (config/cache/data)
-irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/uninstall.ps1 -OutFile uninstall-dtctl.ps1
+irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/uninstall.ps1 -OutFile uninstall-dtctl.ps1
 .\uninstall-dtctl.ps1 -RemoveConfig -RemoveCache -RemoveData
 ```
 
@@ -404,8 +404,8 @@ Since dtctl is an open-source project and not signed/notarized, macOS blocks it 
 
 **Is this safe?**
 
-Yes, if you downloaded dtctl from the official [GitHub releases page](https://github.com/dynatrace-oss/dtctl/releases). Always verify:
-- You're downloading from `github.com/dynatrace-oss/dtctl`
+Yes, if you downloaded dtctl from the official [GitHub releases page](https://github.com/Dynatrace/dtctl/releases). Always verify:
+- You're downloading from `github.com/Dynatrace/dtctl`
 - The checksum matches (see `checksums.txt` in the release)
 
 **Note**: If you build from source locally, this issue doesn't occur since the binary isn't quarantined.

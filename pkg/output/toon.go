@@ -43,7 +43,7 @@ func (p *ToonPrinter) marshal(obj interface{}) error {
 		return err
 	}
 
-	data, err := toon.Marshal(toonSafe(generic), toon.WithLengthMarkers(true))
+	data, err := toon.Marshal(toonSafe(generic))
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func MarshalTOON(v interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return toon.MarshalString(toonSafe(generic), toon.WithLengthMarkers(true))
+	return toon.MarshalString(toonSafe(generic))
 }
 
 // toonSafe replaces C0 control characters other than \t, \n and \r in every

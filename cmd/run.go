@@ -6,15 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"sync"
 	"sync/atomic"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 // RunOptions configures a single embedded invocation. The zero value is the
@@ -61,6 +62,14 @@ type RunOptions struct {
 	// Keyed by top-level command name; the value is the human-readable reason.
 	// nil is the full surface (the CLI default). See applyBlockedCommands.
 	BlockedCommands map[string]string
+
+	// HeaderPolicy lets the embedding caller refuse request headers passed to
+	// `exec api -H`. It receives the normalized header name (canonicalized,
+	// "_" folded to "-") and returns why the header is refused, or "" to allow
+	// it. A refusal is a HeaderRefusedError (agent-mode code "header_refused"),
+	// returned before any request is sent and before --dry-run prints one. nil
+	// applies only the CLI's own refusals (Authorization, Proxy-Authorization).
+	HeaderPolicy func(name string) string
 
 	// Context carries the request's context into the Cobra command tree so
 	// command bodies can observe cancellation and deadlines via cmd.Context().
@@ -171,10 +180,11 @@ func Run(argv []string, opts RunOptions) (code int) {
 	// every accessor below — streams, environment, capabilities, session —
 	// resolves to it rather than to the package globals.
 	inv := &invocation{
-		session:    opts.Session,
-		blocked:    opts.BlockedCommands,
-		caps:       granted,
-		concurrent: opts.Concurrent,
+		session:      opts.Session,
+		blocked:      opts.BlockedCommands,
+		headerPolicy: opts.HeaderPolicy,
+		caps:         granted,
+		concurrent:   opts.Concurrent,
 	}
 	ctx = withInvocation(ctx, inv)
 	// Registered first, so it runs last: nothing the deferred cleanups below
@@ -261,8 +271,9 @@ func reportOptionsError(ctx context.Context, opts RunOptions, err error) {
 }
 
 // pristineCommandState is the subset of cobra.Command that dtctl mutates
-// between construction and execution. applyProfile overwrites RunE/Run/Args/
-// Hidden/DisableFlagParsing to mask commands, installScopePreflight wraps RunE,
+// between construction and execution. The surface stages overwrite RunE/Run/
+// Args/Hidden/DisableFlagParsing, ValidArgs/ValidArgsFunction and Annotations
+// to mask commands, installScopePreflight wraps RunE,
 // applyStabilityFloor hides below-floor flags, and applyStabilityBadges
 // rewrites Short/Long and flag usage strings; restoring these fields returns a
 // command to its as-registered state.
@@ -274,6 +285,9 @@ type pristineCommandState struct {
 	disableFlagParsing bool
 	short              string
 	long               string
+	annotations        map[string]string
+	validArgs          []cobra.Completion
+	validArgsFunction  cobra.CompletionFunc
 	// flags is the as-registered hidden state and usage string of every flag,
 	// keyed by flag name. Flag *values* are reset separately (resetFlagSet);
 	// these two are help-surface properties that the stability stages rewrite.
@@ -307,6 +321,9 @@ func capturePristineState(c *cobra.Command) pristineCommandState {
 		disableFlagParsing: c.DisableFlagParsing,
 		short:              c.Short,
 		long:               c.Long,
+		annotations:        maps.Clone(c.Annotations),
+		validArgs:          c.ValidArgs,
+		validArgsFunction:  c.ValidArgsFunction,
 		flags:              flags,
 	}
 }
@@ -319,6 +336,15 @@ func capturePristineState(c *cobra.Command) pristineCommandState {
 // nothing from one invocation — a --context override, a profile mask, an
 // output format — can leak into the next.
 func restorePristineTree(ctx context.Context) {
+	// Cobra adds __complete during a completion run and leaves it on rootCmd,
+	// where the next serialized run (engine.Execute, or an Engine without
+	// WithConcurrentExecution) would mask it. Drop it; cobra adds it again
+	// when needed.
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == cobra.ShellCompRequestCmd {
+			rootCmd.RemoveCommand(c)
+		}
+	}
 	pristineOnce.Do(func() {
 		pristineTree = make(map[*cobra.Command]pristineCommandState)
 		walkPristineRoots(func(c *cobra.Command) {
@@ -343,6 +369,9 @@ func restorePristineTree(ctx context.Context) {
 		c.DisableFlagParsing = state.disableFlagParsing
 		c.Short = state.short
 		c.Long = state.long
+		c.Annotations = maps.Clone(state.annotations)
+		c.ValidArgs = state.validArgs
+		c.ValidArgsFunction = state.validArgsFunction
 		restoreFlagHelp(c.Flags(), state.flags)
 		restoreFlagHelp(c.PersistentFlags(), state.flags)
 		// No command sets IO writers at registration time, so pristine means
@@ -384,15 +413,18 @@ func walkPristineRoots(fn func(*cobra.Command)) {
 }
 
 // restoreFlagHelp returns every flag's help-surface properties to their
-// as-registered values. A flag absent from the snapshot was declared after the
-// first run; leaving it alone is correct, since its current state is its
-// pristine one.
+// as-registered values. A flag added after the snapshot (cobra adds --help
+// when a command first runs) is snapshotted now, before this run's stages, so
+// a later mask of it is undone too.
 func restoreFlagHelp(fs *pflag.FlagSet, snapshot map[string]pristineFlagState) {
 	fs.VisitAll(func(f *pflag.Flag) {
-		if state, ok := snapshot[f.Name]; ok {
-			f.Hidden = state.hidden
-			f.Usage = state.usage
+		state, ok := snapshot[f.Name]
+		if !ok {
+			snapshot[f.Name] = pristineFlagState{hidden: f.Hidden, usage: f.Usage}
+			return
 		}
+		f.Hidden = state.hidden
+		f.Usage = state.usage
 	})
 }
 

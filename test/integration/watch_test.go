@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/watch"
+	"github.com/Dynatrace/dtctl/pkg/watch"
 )
 
 func TestWatch_BasicFunctionality(t *testing.T) {

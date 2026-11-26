@@ -55,7 +55,7 @@ dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20' -A
 
 ## Live Debugger
 
-- `dtctl create breakpoint File.java:N` in a linked repository gives a workspace without filters the covering entry's namespace-and-workload set, in workspace `<repo>/<entry>`; `--repo-scope <name>` sets every set, `--no-repo-scope` turns the default off, and `dtctl repo-scope describe <name> -A` → `result.liveDebuggerFilters` lists the sets. Details: [LIVE_DEBUGGER.md](https://github.com/dynatrace-oss/dtctl/blob/main/docs/LIVE_DEBUGGER.md#filters-from-the-repo-scope).
+- `dtctl create breakpoint File.java:N` in a linked repository gives a workspace without filters the covering entry's namespace-and-workload set, in workspace `<repo>/<entry>`; `--repo-scope <name>` sets every set, `--no-repo-scope` turns the default off, and `dtctl repo-scope describe <name> -A` → `result.liveDebuggerFilters` lists the sets. Details: [LIVE_DEBUGGER.md](https://github.com/Dynatrace/dtctl/blob/main/docs/LIVE_DEBUGGER.md#filters-from-the-repo-scope).
 
 ## Manage
 

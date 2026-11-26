@@ -318,6 +318,20 @@ Path matching uses the longest base-path prefix at a segment boundary, so
   are refused: the context is the identity, dtctl attaches its credentials
   itself, and a caller-supplied value would silently fight the client's own
   auth (whichever writes last wins). Changing identity means changing context.
+- **Embedded, the host decides which other headers `-H` may set.** An embedder
+  passes a policy (`engine.WithHeaderPolicy`, `RunOptions.HeaderPolicy`) that
+  gets each header's name and returns why it is refused, or nothing. dtctl ships
+  no list of its own: which headers matter (`Host`, `Forwarded`,
+  `X-Forwarded-*`, a reserved prefix) depends on where the host runs and what
+  the proxies in front of its upstream trust, and a list tuned to one deployment
+  would publish its trust boundaries here. dtctl owns the generic parts: the
+  policy sees one spelling of each name (canonicalized, `_` folded to `-`, so
+  `x_forwarded_for` cannot slip past an `X-Forwarded-For` rule) while the
+  caller's spelling goes on the wire; a refusal is a `HeaderRefusedError` with
+  the agent-mode code `header_refused` (exit 2); and it comes before any request
+  and before `--dry-run` prints one, in a `PreRunE` so that `engine.Parse`
+  refuses the same command line. Without a policy nothing beyond the credentials
+  rule is refused, on the CLI and embedded alike.
 - **The output protocol is declared, not sniffed.** A JSON body goes through the
   normal printer, so `-o json/yaml` and the agent envelope behave as they do
   everywhere else. Anything else is passed through **verbatim, even under

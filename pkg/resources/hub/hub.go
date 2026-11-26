@@ -3,9 +3,9 @@ package hub
 import (
 	"context"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkhub "github.com/dynatrace-oss/dtctl/sdk/api/hub"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkhub "github.com/Dynatrace/dtctl/sdk/api/hub"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // HubExtension represents a Dynatrace Hub catalog extension (CLI version with table tags).

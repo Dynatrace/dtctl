@@ -180,4 +180,4 @@ The scope is a positional argument and must be `logs` or `bizevents`. Every outp
 
 - `dtctl <command> --help` for any command
 - `dtctl doctor` to diagnose connectivity, auth, and permission issues
-- [GitHub Issues](https://github.com/dynatrace-oss/dtctl/issues) for bugs and feature requests
+- [GitHub Issues](https://github.com/Dynatrace/dtctl/issues) for bugs and feature requests

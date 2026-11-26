@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 func withStubbedSessionStatus(t *testing.T, status *SessionStatus) {

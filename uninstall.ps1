@@ -5,7 +5,7 @@
     Removes dtctl from %LOCALAPPDATA%\dtctl and removes that directory from the
     user PATH. Optional switches remove XDG-based config/cache/data directories.
 .EXAMPLE
-    irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/uninstall.ps1 | iex
+    irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/uninstall.ps1 | iex
 .EXAMPLE
     .\uninstall.ps1 -RemoveConfig -RemoveCache -RemoveData
 #>

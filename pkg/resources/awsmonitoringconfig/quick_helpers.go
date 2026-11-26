@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsconnection"
 )
 
 // ResolveCredential resolves an AWS connection by name or ID and returns

@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/commands"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/commands"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // commandsCmd outputs a machine-readable listing of all dtctl commands.

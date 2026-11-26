@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	cmdtestutil "github.com/dynatrace-oss/dtctl/cmd/testutil"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/segment"
+	cmdtestutil "github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
 )
 
 func TestDescribeSegmentTableGolden(t *testing.T) {

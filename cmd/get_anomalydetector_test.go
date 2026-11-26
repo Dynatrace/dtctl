@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/diagnostic"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/anomalydetector"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
 )
 
 func newAnomalyDetectorHandler(t *testing.T, fn http.HandlerFunc) (*anomalydetector.Handler, func()) {

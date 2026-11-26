@@ -1,6 +1,6 @@
 # dtctl documentation
 
-Reference documentation for [`dtctl`](https://github.com/dynatrace-oss/dtctl), the Dynatrace platform CLI. Start at the repository [README](../README.md) for install and first steps; this folder is the detailed reference.
+Reference documentation for [`dtctl`](https://github.com/Dynatrace/dtctl), the Dynatrace platform CLI. Start at the repository [README](../README.md) for install and first steps; this folder is the detailed reference.
 
 ## How this is organized
 
@@ -46,7 +46,8 @@ Each resource type has its own page under [`resources/`](resources/), pairing ge
 - **[AGENT_MODE.md](AGENT_MODE.md)** and **[AGENT_SKILLS.md](AGENT_SKILLS.md)**: Use dtctl with AI agents
 - **[COOKBOOK.md](COOKBOOK.md)**: Recipes, tips, and troubleshooting
 - **[OBSERVABILITY.md](OBSERVABILITY.md)**: Distributed tracing, OTLP span export, CI/CD integration
-- **[EXTENSIONS.md](EXTENSIONS.md)**, **[LIVE_DEBUGGER.md](LIVE_DEBUGGER.md)**, **[SERVE.md](SERVE.md)**: Feature guides (SERVE is experimental)
+- **[USAGE_TRACKING.md](USAGE_TRACKING.md)**: Opt-in local tally of the DQL queries dtctl runs and the data they scan (`dtctl usage`)
+- **[EXTENSIONS.md](EXTENSIONS.md)**, **[LIVE_DEBUGGER.md](LIVE_DEBUGGER.md)**, **[PROFILING.md](PROFILING.md)**, **[SERVE.md](SERVE.md)**: Feature guides (PROFILING and SERVE are experimental)
 
 ## Generated vs. authored content
 

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // inlineRows carries a result's rows to the inline emitter in two forms: full

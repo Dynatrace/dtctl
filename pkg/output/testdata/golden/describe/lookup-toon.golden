@@ -1,11 +1,11 @@
-columns[#3]: code,description,severity
+columns[3]: code,description,severity
 description: Mapping of error codes to descriptions
 displayName: Error Codes
 fileSize: 2048
 lookupField: code
 modified: "2025-03-15T10:30:00Z"
 path: /lookups/grail/pm/error_codes
-previewData[#2]{code,description,severity}:
+previewData[2]{code,description,severity}:
   E001,Connection timeout,HIGH
   E002,Invalid input,LOW
 records: 42

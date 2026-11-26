@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
 
 func TestUpdateBreakpointCommandRegistration(t *testing.T) {

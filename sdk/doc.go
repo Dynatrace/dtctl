@@ -13,5 +13,5 @@
 // The SDK is designed to be leaf-shaped: it never imports from the CLI
 // module, has minimal dependencies, and avoids global state.
 //
-// See https://github.com/dynatrace-oss/dtctl/tree/main/sdk for details.
+// See https://github.com/Dynatrace/dtctl/tree/main/sdk for details.
 package sdk

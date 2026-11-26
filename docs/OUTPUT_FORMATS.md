@@ -414,7 +414,7 @@ dtctl get dashboards --fields id,name,owner,modificationInfo.lastModifiedTime -o
 
 # Tabular formats flatten nested fields into columns, so TOON stays tabular
 dtctl get dashboards --fields id,name,modificationInfo.lastModifiedTime -o toon
-# [#185]{id,name,modificationInfo.lastModifiedTime}:
+# [185]{id,name,modificationInfo.lastModifiedTime}:
 #   ...
 ```
 

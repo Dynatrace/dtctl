@@ -10,13 +10,13 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 // Invocation state travels on the context.
@@ -43,6 +43,10 @@ type invocation struct {
 	session *Session
 	blocked map[string]string
 	caps    Capabilities
+
+	// headerPolicy is the embedding caller's `exec api -H` policy
+	// (RunOptions.HeaderPolicy); nil refuses nothing beyond the CLI's own.
+	headerPolicy func(name string) string
 
 	// env overlays the process environment. A key present with ok==false was
 	// scrubbed for this invocation and must read as empty even though the host

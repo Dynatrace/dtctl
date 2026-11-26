@@ -6,15 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/shlex"
 
-	"github.com/dynatrace-oss/dtctl/cmd"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/cmd"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 // defaultAdmission is the admission state behind the package-level Execute
@@ -65,7 +66,8 @@ type Request struct {
 	SafetyLevel string
 	// Profile selects a built-in command profile (e.g. "query") that reduces
 	// the visible command surface for this request. Empty is the full
-	// (service-supported) surface.
+	// (service-supported) surface. Not allowed on an Engine built with
+	// WithProfileDefinition.
 	Profile string
 	// MinStability is the stability floor for this request: the weakest
 	// contract a command or flag may offer and still be reachable
@@ -119,16 +121,54 @@ type Request struct {
 	// DTCTL_OUTPUT). Applied after credential scrubbing, so entries here win;
 	// grant with care — the engine deliberately does not expose this in its
 	// HTTP reference wrapper. Profile, when set, overrides an Env entry for
-	// DTCTL_PROFILE.
+	// DTCTL_PROFILE. On an Engine built with WithProfileDefinition, an entry
+	// naming another profile is an error.
 	Env map[string]string
+}
+
+// ProfileDefinition is a host-defined command profile, set with
+// WithProfileDefinition. It works like a profile in a config file: entries are
+// canonical command paths ("get workflows", not "get wf"), a caller's alias
+// resolves to them, and any other command is refused with profile_blocked.
+// An entry allows its subtree and its ancestors; an ancestor that runs on its
+// own (`apply` for "apply extension-config") runs too. `commands` and `help`
+// are always available.
+type ProfileDefinition struct {
+	// Name identifies the profile in profile_blocked and `dtctl commands`.
+	Name string
+	// Description is a human-readable summary of the profile's purpose.
+	Description string
+	// Commands are the allowed command paths. Empty allows only the
+	// always-available commands.
+	Commands []string
+}
+
+// Validate checks that Name is set, has no whitespace and is not "full", and
+// that no entry is blank, contains a flag token ("query --dql") or starts with
+// "dtctl". An empty Commands list is valid. Entries are not checked against
+// the command tree.
+func (p ProfileDefinition) Validate() error {
+	if err := p.sessionProfile().Validate(); err != nil {
+		return fmt.Errorf("engine: %w", err)
+	}
+	return nil
+}
+
+// sessionProfile copies the definition into the profile a session carries.
+func (p ProfileDefinition) sessionProfile() *config.Profile {
+	return &config.Profile{
+		Name:        p.Name,
+		Description: p.Description,
+		Commands:    append([]string(nil), p.Commands...),
+	}
 }
 
 // Result is the outcome of one execution. Stdout and Stderr are byte-identical
 // to what the dtctl CLI would print for the same command line, credentials,
 // and files — including --agent envelopes, table layouts, and error messages.
 type Result struct {
-	// ExitCode is the CLI process exit code (0 success; sysexits-style codes
-	// for errors, e.g. 64 usage, 77 permission).
+	// ExitCode is the CLI process exit code: 0 success, 1 error, 2 usage,
+	// 3 not authenticated, 4 not found, 5 permission (pkg/client/errors.go).
 	ExitCode int
 	Stdout   []byte
 	Stderr   []byte
@@ -163,17 +203,26 @@ func Execute(ctx context.Context, req Request) (*Result, error) {
 // (cmd.RunOptions.Concurrent) — see docs/dev/CONCURRENT_EXECUTION.md for what that
 // costs and what it guarantees. The zero value is not usable; build one with New.
 type Engine struct {
-	limits     Limits
-	adm        *admission
-	concurrent bool
+	limits Limits
+	adm    *admission
+	opts   engineOptions
 }
 
 // Option configures an Engine at construction.
 type Option func(*engineOptions)
 
+// engineOptions apply to every invocation of an Engine. The zero value is the
+// package-level Execute's.
 type engineOptions struct {
 	concurrent    bool
 	maxConcurrent int
+	transport     http.RoundTripper
+	// headerPolicy is the host's `exec api -H` policy (WithHeaderPolicy).
+	headerPolicy func(name string) string
+	// profile is set by WithProfileDefinition; profileErr, if the definition
+	// is invalid, fails every request.
+	profile    *config.Profile
+	profileErr error
 }
 
 // WithConcurrentExecution opts an Engine into running up to maxConcurrent
@@ -186,6 +235,53 @@ func WithConcurrentExecution(maxConcurrent int) Option {
 	return func(o *engineOptions) {
 		o.concurrent = true
 		o.maxConcurrent = max(maxConcurrent, 1)
+	}
+}
+
+// WithTransport sends every platform request of this Engine's invocations
+// through rt instead of the process-wide connection pool. It is the seam a
+// host uses to run requests against a stand-in environment — typically an
+// httptest.Server, passing its URL as Request.EnvironmentURL and
+// srv.Client().Transport here, which also trusts the server's TLS
+// certificate — or to give the engine a TLS configuration of its own (an
+// *http.Transport with TLSClientConfig set).
+//
+// Only the transport changes: the request still names the environment and
+// carries the token, the safety level and the command surface, and dtctl
+// still adds its User-Agent, retries and request-path checks above rt, so the
+// Result is what the same command line would produce against a real
+// environment. rt is shared by every invocation of the Engine and must be
+// safe for concurrent use. nil keeps the default pool.
+func WithTransport(rt http.RoundTripper) Option {
+	return func(o *engineOptions) { o.transport = rt }
+}
+
+// WithHeaderPolicy lets the host refuse request headers a caller passes to
+// `exec api -H`. policy receives the normalized header name (canonicalized,
+// "_" folded to "-", so x_forwarded_for arrives as X-Forwarded-For) and
+// returns why it is refused, or "" to allow it. Without it, only the CLI's
+// own refusals (Authorization, Proxy-Authorization) apply.
+//
+// Which headers matter is the host's decision, not dtctl's: it depends on
+// where the host runs and what the proxies in front of its upstream trust
+// (Host, Forwarded, X-Forwarded-*, a reserved prefix, ...). A refusal is
+// returned before any request is sent and before --dry-run prints one, with
+// the stable agent-mode error code "header_refused" and exit code 2, and
+// Engine.Parse refuses the same command line. The header sent on the wire is
+// the caller's spelling, not the normalized one. policy is shared by every
+// invocation of the Engine and must be safe for concurrent use.
+func WithHeaderPolicy(policy func(name string) string) Option {
+	return func(o *engineOptions) { o.headerPolicy = policy }
+}
+
+// WithProfileDefinition runs every Execute and Parse of the Engine under the
+// host's command profile. The Engine keeps a copy of def. A request that sets
+// Request.Profile, or a DTCTL_PROFILE in Env naming another profile, is an
+// error. If def is invalid (see ProfileDefinition.Validate), every request
+// returns that error.
+func WithProfileDefinition(def ProfileDefinition) Option {
+	return func(o *engineOptions) {
+		o.profile, o.profileErr = def.sessionProfile(), def.Validate()
 	}
 }
 
@@ -205,9 +301,9 @@ func New(limits Limits, opts ...Option) *Engine {
 		l.MaxQueued = o.maxConcurrent
 	}
 	return &Engine{
-		limits:     l,
-		adm:        &admission{slot: make(chan struct{}, o.maxConcurrent)},
-		concurrent: o.concurrent,
+		limits: l,
+		adm:    &admission{slot: make(chan struct{}, o.maxConcurrent)},
+		opts:   o,
 	}
 }
 
@@ -218,19 +314,19 @@ func (e *Engine) MaxConcurrent() int { return cap(e.adm.slot) }
 // Execute runs one invocation against this engine's budget. Its Result and
 // error read as the package-level Execute documents.
 func (e *Engine) Execute(ctx context.Context, req Request) (*Result, error) {
-	return executeInner(ctx, req, e.limits, e.adm, e.concurrent)
+	return executeInner(ctx, req, e.limits, e.adm, e.opts)
 }
 
 // Limits reports the budget this engine was built with, after defaults.
 func (e *Engine) Limits() Limits { return e.limits }
 
 // executeInner is the shared implementation called by ExecuteWithLimits.
-func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, concurrent bool) (*Result, error) {
+func executeInner(ctx context.Context, req Request, limits Limits, adm *admission, opts engineOptions) (*Result, error) {
 	argv, err := req.argv()
 	if err != nil {
 		return nil, err
 	}
-	if err := req.validate(); err != nil {
+	if err := req.validate(opts); err != nil {
 		return nil, err
 	}
 	if limits.MaxFileBytes > 0 {
@@ -277,13 +373,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 		return nil, err
 	}
 
-	env := make(map[string]string, len(req.Env)+1)
-	for k, v := range req.Env {
-		env[k] = v
-	}
-	if req.Profile != "" {
-		env[config.ProfileEnvVar] = req.Profile
-	}
+	env := requestEnv(req.Env, req.Profile)
 
 	// Always a reader, never nil: a nil RunOptions.Stdin leaves the *host*
 	// process's stdin in place, which a request must never see (and which can
@@ -310,6 +400,8 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 			MinStability:        config.StabilityLevel(req.MinStability),
 			StabilityExceptions: req.StabilityExceptions,
 			NoDeprecated:        req.NoDeprecated,
+			Profile:             opts.profile,
+			Transport:           opts.transport,
 		},
 		Env:             env,
 		FS:              files,
@@ -317,11 +409,12 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 		Stdout:          stdout,
 		Stderr:          stderr,
 		BlockedCommands: unsupportedCommands,
+		HeaderPolicy:    opts.headerPolicy,
 		Context:         timeoutCtx,
 
 		// Overlapping invocations only when the engine was built with
 		// WithConcurrentExecution; everything else stays serialized.
-		Concurrent: concurrent,
+		Concurrent: opts.concurrent,
 		OnStart:    func() { started = true },
 	})
 	// Only a concurrent Run gives up before starting: its context ended while a
@@ -346,7 +439,7 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 	// The Result still comes back, since the command may have written before it
 	// was cut off. Only a concurrent engine does this; the serialized one
 	// reports what the command returned, as it always has.
-	if concurrent {
+	if opts.concurrent {
 		if err := contextEnded(timeoutCtx); err != nil {
 			return res, err
 		}
@@ -356,14 +449,18 @@ func executeInner(ctx context.Context, req Request, limits Limits, adm *admissio
 
 // argv resolves the request's argument vector: Argv verbatim when set,
 // otherwise Command split with POSIX shell rules.
-func (r *Request) argv() ([]string, error) {
-	if len(r.Argv) > 0 {
-		return r.Argv, nil
+func (r *Request) argv() ([]string, error) { return commandArgv(r.Command, r.Argv) }
+
+// commandArgv is a request's argument vector: argv verbatim when set,
+// otherwise command split with POSIX shell rules.
+func commandArgv(command string, argv []string) ([]string, error) {
+	if len(argv) > 0 {
+		return argv, nil
 	}
-	if r.Command == "" {
+	if command == "" {
 		return nil, errors.New("engine: request has no command (set Command or Argv)")
 	}
-	argv, err := shlex.Split(r.Command)
+	argv, err := shlex.Split(command)
 	if err != nil {
 		return nil, fmt.Errorf("engine: parse command: %w", err)
 	}
@@ -377,37 +474,57 @@ func (r *Request) argv() ([]string, error) {
 // surface as Go errors instead of a CLI error transcript. The same
 // constraints are enforced again inside the run (cmd.Session.validate) —
 // this is the caller-friendly first line.
-func (r *Request) validate() error {
+func (r *Request) validate(opts engineOptions) error {
 	if r.EnvironmentURL == "" {
 		return errors.New("engine: EnvironmentURL is required")
 	}
 	if r.Token == "" {
 		return errors.New("engine: Token is required")
 	}
-	if r.SafetyLevel != "" {
+	return validateSurface(r.SafetyLevel, r.Profile, opts, r.Env, r.MinStability, r.StabilityExceptions)
+}
+
+// validateSurface checks the fields that decide a request's surface, which
+// Request and ParseRequest share.
+func validateSurface(safetyLevel, profile string, opts engineOptions, env map[string]string, minStability string, exceptions []string) error {
+	if opts.profileErr != nil {
+		return opts.profileErr
+	}
+	if definition := opts.profile; definition != nil {
+		// A second profile is a host bug: refuse it rather than pick one.
+		if profile != "" {
+			return fmt.Errorf("engine: the request sets Profile %q, but the engine runs under profile %q (WithProfileDefinition)",
+				profile, definition.Name)
+		}
+		if v := env[config.ProfileEnvVar]; v != "" && v != definition.Name {
+			return fmt.Errorf("engine: Env sets %s=%q, but the engine runs under profile %q (WithProfileDefinition)",
+				config.ProfileEnvVar, v, definition.Name)
+		}
+	}
+	if safetyLevel != "" {
 		valid := false
 		for _, l := range config.ValidSafetyLevels() {
-			if config.SafetyLevel(r.SafetyLevel) == l {
+			if config.SafetyLevel(safetyLevel) == l {
 				valid = true
 				break
 			}
 		}
 		if !valid {
-			return fmt.Errorf("engine: invalid safety level %q", r.SafetyLevel)
+			return fmt.Errorf("engine: invalid safety level %q", safetyLevel)
 		}
 	}
-	if r.MinStability != "" {
-		level, err := config.ParseStabilityLevel(r.MinStability)
+	if minStability != "" {
+		level, err := config.ParseStabilityLevel(minStability)
 		if err != nil || level == config.StabilityDevelopment {
 			return fmt.Errorf("engine: invalid minimum stability %q; valid levels are "+
 				"experimental, stable (development surface is not reachable from a request)",
-				r.MinStability)
+				minStability)
 		}
 	}
 	// Rejected, not ignored: an exception the engine silently dropped would
 	// look like the command is simply gone, and the host would have no way to
 	// tell a typo from a tier it misjudged.
-	if _, err := stability.ParseExceptions(r.StabilityExceptions); err != nil {
+	if _, err := stability.ParseExceptions(exceptions); err != nil {
 		return fmt.Errorf("engine: %w", err)
 	}
 	return nil
@@ -439,7 +556,7 @@ func contextEnded(ctx context.Context) error {
 // deadline cut off returns its Result together with the context's error (see
 // Execute).
 func (e *Engine) ExecuteWithLimits(ctx context.Context, req Request, limits Limits) (*Result, error) {
-	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.concurrent)
+	return executeInner(ctx, req, e.effectiveLimits(limits), e.adm, e.opts)
 }
 
 // effectiveLimits is the budget one ExecuteWithLimits call runs under: the
@@ -453,4 +570,19 @@ func (e *Engine) effectiveLimits(limits Limits) Limits {
 	merged := limits.withDefaultsFrom(e.limits)
 	merged.MaxQueued = e.limits.MaxQueued
 	return merged
+}
+
+// requestEnv is the environment a request runs under: its Env, with Profile
+// (when set) overriding DTCTL_PROFILE. Execute and Parse both build it here, so
+// they cannot disagree about which profile a request resolves. A
+// ProfileDefinition is pinned by the session instead (cmd.Session.Profile).
+func requestEnv(env map[string]string, profile string) map[string]string {
+	out := make(map[string]string, len(env)+1)
+	for k, v := range env {
+		out[k] = v
+	}
+	if profile != "" {
+		out[config.ProfileEnvVar] = profile
+	}
+	return out
 }

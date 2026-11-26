@@ -15,11 +15,11 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsmonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azuremonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpmonitoringconfig"
 )
 
 // unmodelledCloudFixtures are monitoring configurations that carry every

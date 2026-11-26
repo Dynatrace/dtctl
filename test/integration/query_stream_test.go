@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Live-tenant guard: runs the same query through ExecuteAndPoll and through ExecuteStream

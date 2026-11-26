@@ -240,7 +240,7 @@ The `edit` command returns the flattened YAML format. On save, the handler recon
 }
 ```
 
-This matches dashboard/notebook/SLO behavior: `get -o json | apply -f` round-trips cleanly. The `AnomalyDetector` Go struct keeps derived display fields (`Title`, `Enabled`, `AnalyzerShort`, `EventType`) for the table renderer, but those fields are tagged `json:"-"` and excluded from the wire format via custom `MarshalJSON`/`MarshalYAML` methods. Including them at the top level (alongside `value`) would produce a hybrid shape that neither matches the Settings API nor the flattened authoring format — the bug fixed by [#216](https://github.com/dynatrace-oss/dtctl/issues/216).
+This matches dashboard/notebook/SLO behavior: `get -o json | apply -f` round-trips cleanly. The `AnomalyDetector` Go struct keeps derived display fields (`Title`, `Enabled`, `AnalyzerShort`, `EventType`) for the table renderer, but those fields are tagged `json:"-"` and excluded from the wire format via custom `MarshalJSON`/`MarshalYAML` methods. Including them at the top level (alongside `value`) would produce a hybrid shape that neither matches the Settings API nor the flattened authoring format — the bug fixed by [#216](https://github.com/Dynatrace/dtctl/issues/216).
 
 For human authoring, prefer the flattened YAML format above. The raw envelope is the export/round-trip format.
 

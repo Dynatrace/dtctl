@@ -3,7 +3,7 @@ package auth
 import (
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // Access is the access level a command verb needs against a resource. It is
@@ -23,7 +23,7 @@ const (
 // single resource type. A nil/empty list means the access level either does not
 // apply to the resource or has no distinct scope. Delete falls back to Write
 // when Delete is empty, matching resources that fold deletion into their write
-// scope (e.g. workflows, buckets) rather than exposing a distinct :delete scope
+// scope (e.g. workflows) rather than exposing a distinct :delete scope
 // (e.g. documents).
 //
 // The per-level lists are conjunctive: a token needs every scope in them.
@@ -133,10 +133,18 @@ var ResourceScopes = map[string]AccessScopes{
 	// not required.
 	"discover": {Read: []string{"storage:spans:read", "storage:logs:read"}},
 
-	// Grail storage. Buckets are managed via the bucket data scopes (delete
-	// folds into write); lookups and segments are stored as files / filter
+	// Grail storage. Buckets are managed through the bucket definitions of
+	// Storage Management (/platform/storage/management/v1/bucket-definitions),
+	// whose operations declare the storage:bucket-definitions:* scopes; the
+	// storage:buckets:* scopes are the ones a query or an ingest needs to
+	// reach a bucket's data. Delete also reads: delete bucket gets the bucket
+	// before it deletes it. Lookups and segments are stored as files / filter
 	// segments respectively.
-	"bucket":  {Read: []string{"storage:buckets:read"}, Write: []string{"storage:buckets:write"}},
+	"bucket": {
+		Read:   []string{"storage:bucket-definitions:read"},
+		Write:  []string{"storage:bucket-definitions:write"},
+		Delete: []string{"storage:bucket-definitions:delete", "storage:bucket-definitions:read"},
+	},
 	"lookup":  {Read: []string{"storage:files:read"}, Write: []string{"storage:files:write"}, Delete: []string{"storage:files:delete"}},
 	"segment": {Read: []string{"storage:filter-segments:read"}, Write: []string{"storage:filter-segments:write"}, Delete: []string{"storage:filter-segments:delete"}},
 
@@ -145,7 +153,9 @@ var ResourceScopes = map[string]AccessScopes{
 	"settings-schema": {Read: []string{"settings:schemas:read"}},
 
 	// SLOs
-	"slo":          {Read: []string{"slo:slos:read", "slo:objective-templates:read"}, Write: []string{"slo:slos:write"}},
+	// Evaluating an SLO (exec slo: evaluation:start and evaluation:poll)
+	// declares slo:slos:read; it reads no objective template.
+	"slo":          {Read: []string{"slo:slos:read", "slo:objective-templates:read"}, Write: []string{"slo:slos:write"}, Run: []string{"slo:slos:read"}},
 	"slo-template": {Read: []string{"slo:objective-templates:read"}},
 
 	// Extensions
@@ -159,9 +169,17 @@ var ResourceScopes = map[string]AccessScopes{
 	// intents are listed/launched via the App Engine app registry
 	// (/platform/app-engine/registry/v1/apps).
 	"intent": {Read: []string{"app-engine:apps:run"}},
+	// actions are declared in an app's manifest and served flat by the same
+	// registry (/platform/app-engine/registry/v1/actions).
+	"action": {Read: []string{"app-engine:apps:run"}},
 	// runtime SDK metadata from the function executor
 	// (/platform/app-engine/function-executor/v1/sdk-versions).
 	"sdk-version": {Read: []string{"app-engine:apps:run"}},
+
+	// Code-level profiling: the `exec profiling` namespace (hotspots, memory).
+	// storage:entities:read resolves the process entity; storage:profiles:read
+	// reads the profiling samples the analysis is built from.
+	"profiling": {Run: []string{"storage:entities:read", "storage:profiles:read"}},
 
 	// Davis AI
 	"analyzer": {Read: []string{"davis:analyzers:read"}, Run: []string{"davis:analyzers:execute"}},
@@ -234,6 +252,55 @@ var ResourceScopes = map[string]AccessScopes{
 	"license-settings": platformManagementRead,
 }
 
+// sharing reads the document's metadata for the ownership check, then works
+// on its direct shares (/platform/document/v1/direct-shares), whose
+// operations declare the document:direct-shares:* scopes. It does not write
+// the document.
+// unshare's flags add the scope of what they do: removing some recipients
+// writes the share, removing all deletes it (see flagScopeRequirements in
+// cmd/).
+var (
+	shareScopes   = []string{"document:documents:read", "document:direct-shares:read", "document:direct-shares:write"}
+	unshareScopes = []string{"document:documents:read", "document:direct-shares:read"}
+)
+
+// CommandScopes are the commands whose scopes ResourceScopes cannot express,
+// because the verb calls other endpoints than its resource's at its access
+// level. Keys are "<verb> <resource>" with the resource's singular name; each
+// value replaces the resource's scopes as the command's requirement.
+// ScopesForCommand reads them in place of ResourceScopes.
+var CommandScopes = map[string][]string{
+	// :validate declares davis:analyzers:execute, although verify is a read:
+	// it validates an execution's input without executing the analyzer.
+	"verify analyzer": {"davis:analyzers:execute"},
+
+	"share document":    shareScopes,
+	"share dashboard":   shareScopes,
+	"share notebook":    shareScopes,
+	"unshare document":  unshareScopes,
+	"unshare dashboard": unshareScopes,
+	"unshare notebook":  unshareScopes,
+}
+
+// lookupCommandScopes finds the CommandScopes entry of verb on resource, by
+// the resource's singular or plural name.
+func lookupCommandScopes(verb, resource string) ([]string, bool) {
+	if scopes, ok := CommandScopes[verb+" "+resource]; ok {
+		return scopes, true
+	}
+	scopes, ok := CommandScopes[verb+" "+singularize(resource)]
+	return scopes, ok
+}
+
+// ScopesForCommand returns the scopes verb requires on resource: its
+// CommandScopes entry, or else ScopesForResource at access.
+func ScopesForCommand(verb, resource string, access Access) []string {
+	if scopes, ok := lookupCommandScopes(verb, resource); ok {
+		return scopes
+	}
+	return ScopesForResource(resource, access)
+}
+
 // localResources are catalog subcommands that operate entirely on the local
 // machine (config, contexts, credentials, skills, aliases) and therefore
 // require no platform scopes. They are excluded from the scope catalog and the
@@ -255,6 +322,8 @@ var localResources = map[string]bool{
 	"export": true, "import": true, "list": true, "create": true,
 	// skills (local install)
 	"install": true, "uninstall": true,
+	// usage (clears the local usage ledger)
+	"reset": true,
 }
 
 // QueryScopes are the Grail read scopes required by DQL (`query`, `verify`,
@@ -340,9 +409,17 @@ func IsLocalResource(name string) bool {
 // of other people's documents is exactly what those levels exist to rule out.
 const DocumentAdminScope = "document:documents:admin"
 
+// DashboardMigrationScope lets a request convert a classic dashboard into 3rd
+// gen dashboard content. No built-in command uses it yet; requesting it at login
+// is what lets `exec api` reach the conversion. Every level requests it: the
+// conversion only returns the content and saves nothing, so storing the result
+// still takes the document write scopes.
+const DashboardMigrationScope = "environment-api:dashboard-3rdgen-migration:execute"
+
 // grailExtendedReadScopes are additional Grail read scopes granted at the
 // readonly, readwrite-all and dangerously-unrestricted levels. readwrite-mine
-// intentionally omits them (it focuses on write access to one's own resources).
+// intentionally omits them (it focuses on write access to one's own resources),
+// except ProfilesReadScope, which a command it allows needs.
 var grailExtendedReadScopes = []string{
 	"storage:application.snapshots:read",
 	"storage:user.events:read",
@@ -350,7 +427,15 @@ var grailExtendedReadScopes = []string{
 	"storage:user.replays:read",
 	"storage:fieldsets:read",
 	"storage:fieldset-definitions:read",
+	// Listed here for its place in the extended levels' order; addReadTier
+	// also requests it at readwrite-mine (see ProfilesReadScope).
+	ProfilesReadScope,
 }
+
+// ProfilesReadScope reads code-level profiling samples, which `exec profiling`
+// needs. Requesting it at login also lets `exec api` and dtctl-* plugins that
+// reuse the dtctl session reach them. Every safety level requests it.
+const ProfilesReadScope = "storage:profiles:read"
 
 // scopeSet collects scopes preserving first-seen order and de-duplicating.
 type scopeSet struct {
@@ -395,13 +480,17 @@ func (s *scopeSet) addReadTier(extended bool) {
 	if extended {
 		s.add(grailExtendedReadScopes...)
 	}
-	s.addResource("bucket", AccessRead)
-	s.add("storage:bucket-definitions:read")
+	// `exec profiling` is a read every level allows, readwrite-mine included,
+	// so every read tier requests its scope. The extended levels already have
+	// it from grailExtendedReadScopes; the set keeps the first occurrence.
+	s.add(ProfilesReadScope)
+	s.add("storage:buckets:read", "storage:bucket-definitions:read")
 	s.addResource("lookup", AccessRead)
 	s.addResource("segment", AccessRead)
 	s.addResource("user", AccessRead)
 	s.addResource("group", AccessRead)
 	s.addResource("analyzer", AccessRead)
+	s.add(CommandScopes["verify analyzer"]...)
 	s.addResource("app", AccessRead)
 	s.addResource("edgeconnect", AccessRead)
 	s.addResource("notification", AccessRead)
@@ -411,10 +500,13 @@ func (s *scopeSet) addReadTier(extended bool) {
 	s.addResource("openpipeline-matcher", AccessRead)
 	s.addResource("openpipeline-dql-processor", AccessRead)
 	s.addResource("preview-processor", AccessRead)
+	s.add(DashboardMigrationScope)
 }
 
 // addMineWrites adds the write/run scopes granted from readwrite-mine upward:
-// modifying one's own resources, running workflows/functions/analyzers.
+// modifying one's own resources, running workflows/functions/analyzers. It
+// includes the bucket write scope, because the safety checker allows create
+// bucket (OperationCreate) from readwrite-mine upward.
 func (s *scopeSet) addMineWrites() {
 	s.addResource("dashboard", AccessWrite, AccessDelete)
 	s.add("document:direct-shares:write", "document:direct-shares:delete", "document:trash.documents:restore")
@@ -426,33 +518,36 @@ func (s *scopeSet) addMineWrites() {
 	s.addResource("extension-config", AccessWrite)
 	s.addResource("lookup", AccessWrite)
 	s.addResource("segment", AccessWrite)
+	s.addResource("bucket", AccessWrite)
 	s.add("iam:service-users:use")
 	s.addResource("analyzer", AccessRun)
 	s.add("davis-copilot:conversations:execute")
 	s.addResource("function", AccessRun)
 	s.addResource("environment-share", AccessClaim)
+	// `share|unshare --environment link` on one's own document lists, creates
+	// and deletes its environment shares.
+	s.add("document:environment-shares:read", "document:environment-shares:write", "document:environment-shares:delete")
 	s.add("email:emails:send", "dev-obs:breakpoints:set")
 }
 
 // addAllExtras adds the scopes that readwrite-all grants on top of
-// readwrite-mine: environment sharing, Grail writes, bucket writes, CoPilot
+// readwrite-mine: document admin access, Grail record writes, CoPilot
 // generation, and app/EdgeConnect lifecycle.
 func (s *scopeSet) addAllExtras() {
-	s.add("document:environment-shares:read", "document:environment-shares:write")
 	s.add(DocumentAdminScope)
-	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write")
-	s.addResource("bucket", AccessWrite)
+	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write", "storage:buckets:write")
 	s.add("davis-copilot:nl2dql:execute", "davis-copilot:dql2nl:execute", "davis-copilot:document-search:execute")
 	s.addResource("app", AccessWrite, AccessDelete)
 	s.addResource("edgeconnect", AccessWrite)
 	s.addResource("notification", AccessWrite)
 }
 
-// addUnrestricted builds the dangerously-unrestricted scope set, which is not a
-// strict superset of readwrite-all: it grants environment shares instead of
-// direct shares and adds destructive Grail/storage scopes.
+// addUnrestricted builds the dangerously-unrestricted scope set: the
+// readwrite-all scopes plus destructive Grail/storage scopes. It grants the
+// direct shares too, because share and unshare are allowed at every level from
+// readwrite-mine upward.
 func (s *scopeSet) addUnrestricted() {
-	// reads (environment shares replace direct shares)
+	// reads
 	s.addResource("workflow", AccessRead)
 	s.addResource("scheduling-rule", AccessRead)
 	s.addResource("dashboard", AccessRead)
@@ -464,8 +559,7 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("extension-config", AccessRead)
 	s.add(QueryScopes...)
 	s.add(grailExtendedReadScopes...)
-	s.addResource("bucket", AccessRead)
-	s.add("storage:bucket-definitions:read")
+	s.add("storage:buckets:read", "storage:bucket-definitions:read")
 	s.addResource("lookup", AccessRead)
 	s.addResource("segment", AccessRead)
 	s.addResource("user", AccessRead)
@@ -480,9 +574,12 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("openpipeline-matcher", AccessRead)
 	s.addResource("openpipeline-dql-processor", AccessRead)
 	s.addResource("preview-processor", AccessRead)
+	s.add(DashboardMigrationScope)
 	// writes / destructive
 	s.addResource("dashboard", AccessWrite, AccessDelete)
-	s.add("document:environment-shares:write")
+	s.add("document:environment-shares:write", "document:environment-shares:delete")
+	s.add(shareScopes...)
+	s.add("document:direct-shares:delete")
 	s.addResource("environment-share", AccessClaim)
 	s.add(DocumentAdminScope)
 	s.add("document:trash.documents:restore", "document:trash.documents:delete")
@@ -492,9 +589,9 @@ func (s *scopeSet) addUnrestricted() {
 	s.addResource("setting", AccessWrite)
 	s.addResource("extension", AccessWrite)
 	s.addResource("extension-config", AccessWrite)
-	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write")
-	s.addResource("bucket", AccessWrite)
-	s.add("storage:bucket-definitions:write", "storage:bucket-definitions:delete", "storage:bucket-definitions:truncate")
+	s.add("storage:logs:write", "storage:events:write", "storage:metrics:write", "storage:buckets:write")
+	s.addResource("bucket", AccessWrite, AccessDelete)
+	s.add("storage:bucket-definitions:truncate")
 	s.add("storage:fieldset-definitions:write")
 	s.addResource("lookup", AccessWrite, AccessDelete)
 	s.addResource("segment", AccessWrite)

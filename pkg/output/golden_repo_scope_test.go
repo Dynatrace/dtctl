@@ -5,7 +5,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
 const (

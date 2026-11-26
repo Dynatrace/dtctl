@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/dql"
+	"github.com/Dynatrace/dtctl/pkg/dql"
 )
 
 // Render builds the filter for dataObject from e. The clauses are OR-ed: one

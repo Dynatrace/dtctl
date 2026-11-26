@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // This file is the Runner author's half of the contract.

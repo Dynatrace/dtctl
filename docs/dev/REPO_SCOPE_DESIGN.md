@@ -1,6 +1,6 @@
 # Repo Scope Design
 
-**Status:** Implemented, experimental since 0.43.0 (`dtctl repo-scope`, `query`/`wait query`/`verify query --repo-scope` and `--no-repo-scope`)
+**Status:** Implemented, experimental since 0.47.0 (`dtctl repo-scope`, `query`/`wait query`/`verify query --repo-scope` and `--no-repo-scope`)
 
 Link a git repository to the entities that run its code, so that a developer, or an agent working in their checkout, can query "this code's" logs and spans without naming a service. User guide: [REPO_SCOPE.md](../REPO_SCOPE.md).
 

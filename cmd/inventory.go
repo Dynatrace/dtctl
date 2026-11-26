@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/segment"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 // inventoryCmd probes the current environment for what data actually exists
@@ -40,6 +40,9 @@ probe, exhausted budget) is reported as unknown, never as absent.
 
 This is about the data in the environment, not the resources you manage —
 for dashboards, workflows, SLOs, and the rest, use 'dtctl get <resource>'.
+Code-level profiling data (method CPU hotspots, lock/IO waits, memory
+allocations per process) is not in Grail and not probed here: use
+'dtctl exec profiling hotspots|allocations PROCESS-xxx'.
 
 Discovery is read-only and budgeted: it runs a small battery of DQL queries
 (data-object catalog, buckets, entity census, metric catalog when needed,
@@ -78,7 +81,10 @@ an instrumentation change or an ingest — use 'dtctl inventory arrivals'.
 			if err != nil {
 				return err
 			}
-			runner := newInventoryRunner(cmd, cfg, c)
+			runner, err := newInventoryRunner(cmd, cfg, c)
+			if err != nil {
+				return err
+			}
 
 			// Segments come from the API, not DQL — fetched here, best-effort. A
 			// failure must stay distinguishable from "no segments exist".
@@ -108,6 +114,9 @@ an instrumentation change or an ingest — use 'dtctl inventory arrivals'.
 			}
 			if segNote != "" {
 				inv.Notes = append(inv.Notes, segNote)
+			}
+			if n := profilingInventoryNote(inv); n != "" {
+				inv.Notes = append(inv.Notes, n)
 			}
 
 			if outputFormat(cmdContext(cmd)) == "table" && !agentMode(cmdContext(cmd)) {
@@ -148,10 +157,15 @@ func loadDefinitionsFile(ctx context.Context, path string) (*inventory.Definitio
 const inventoryMaxResultRecords = 20000
 
 // inventoryRunner adapts the DQL executor to the discovery Runner interface.
-// Every probe carries the scan cap; queries are tagged for observability.
+// Every probe carries the scan cap, and the byte cap when one was set; queries
+// are tagged for observability.
 type inventoryRunner struct {
 	executor    *exec.DQLExecutor
 	scanLimitGB float64
+	// maxResultBytes bounds one probe's response body. Zero leaves it to the
+	// platform, as before the flag existed. The record cap does not bound the
+	// size of a row, so a custom probe can return a large body without it.
+	maxResultBytes int64
 }
 
 func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunResult, error) {
@@ -159,6 +173,7 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 	resp, err := r.executor.ExecuteQueryWithContext(ctx, dql, exec.DQLExecuteOptions{
 		DefaultScanLimitGbytes: r.scanLimitGB,
 		MaxResultRecords:       inventoryMaxResultRecords,
+		MaxResultBytes:         r.maxResultBytes,
 		ClientContext:          "inventory",
 	})
 	if err != nil {
@@ -292,10 +307,23 @@ func topCensusTypes(census map[string]int64, n int) string {
 // whichever question it is answering.
 func addInventoryDiscoveryFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArray("definitions", nil, "Capability-definitions file merged over the built-in set (repeatable, later files win)")
+	markFileFlag(cmd, "definitions", fileValuePath)
 	cmd.Flags().Bool("no-builtin-definitions", false, "Start from an empty capability set instead of the built-in one")
 	cmd.Flags().Int("budget-queries", 100, "Discovery budget: max queries")
 	cmd.Flags().Float64("budget-seconds", 300, "Discovery budget: max cumulative query seconds — a query that would overrun it is cut off")
 	cmd.Flags().Float64("scan-limit-gbytes", 25, "Scan cap applied to every discovery probe")
+	cmd.Flags().Int64("max-result-bytes", 0, "Result-size cap in bytes applied to every discovery probe (0 = platform default)")
+}
+
+// inventoryMaxResultBytes reads --max-result-bytes. A negative value is
+// refused rather than dropped: only a positive limit reaches the request, so
+// -1 would run every probe with no byte cap while the caller believed one held.
+func inventoryMaxResultBytes(cmd *cobra.Command) (int64, error) {
+	v, _ := cmd.Flags().GetInt64("max-result-bytes")
+	if v < 0 {
+		return 0, fmt.Errorf("--max-result-bytes must not be negative (got %d); use 0 for the platform default", v)
+	}
+	return v, nil
 }
 
 // inventoryDefinitions builds the capability set a run evaluates.
@@ -323,12 +351,17 @@ func inventoryBudget(cmd *cobra.Command) (int, float64) {
 	return queries, seconds
 }
 
-func newInventoryRunner(cmd *cobra.Command, cfg *config.Config, c *client.Client) *inventoryRunner {
+func newInventoryRunner(cmd *cobra.Command, cfg *config.Config, c *client.Client) (*inventoryRunner, error) {
 	scanLimitGB, _ := cmd.Flags().GetFloat64("scan-limit-gbytes")
-	return &inventoryRunner{
-		executor:    newDQLExecutorFromConfig(cmdContext(cmd), cfg, c),
-		scanLimitGB: scanLimitGB,
+	maxResultBytes, err := inventoryMaxResultBytes(cmd)
+	if err != nil {
+		return nil, err
 	}
+	return &inventoryRunner{
+		executor:       newDQLExecutorFromConfig(cmdContext(cmd), cfg, c),
+		scanLimitGB:    scanLimitGB,
+		maxResultBytes: maxResultBytes,
+	}, nil
 }
 
 // inventoryCancelContext cancels discovery cleanly on Ctrl+C, so a run aborts
@@ -357,4 +390,19 @@ func init() {
 	// stability.Effective takes the weakest level along the path. Promoting
 	// this line promotes the subcommands with it; check them before you do.
 	inventoryCmd.AddCommand(inventoryArrivalsCmd)
+}
+
+// profilingInventoryNote points at code-level profiling, which the inventory
+// cannot see: its data is not in Grail, so no capability probe covers it. Agents
+// learn the environment from this command, and without the note they grepped it
+// for profiling, found nothing, and told the user there was no profiling data.
+// Omitted only when the census shows no processes at all.
+func profilingInventoryNote(inv *inventory.Inventory) string {
+	if inv == nil {
+		return ""
+	}
+	if inv.EntityTypes != nil && inv.EntityTypes["PROCESS"] == 0 && inv.EntityTypes["PROCESS_GROUP_INSTANCE"] == 0 {
+		return ""
+	}
+	return "code-level profiling (per-method CPU hotspots, lock/IO/wait time, memory allocations of a process) is not in Grail, so this inventory does not probe it — run dtctl exec profiling hotspots|allocations PROCESS-xxx (experimental; see dtctl exec profiling --help)"
 }

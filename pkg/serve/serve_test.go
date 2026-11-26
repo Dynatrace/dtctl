@@ -16,9 +16,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/aidetect"
-	"github.com/dynatrace-oss/dtctl/pkg/engine"
-	"github.com/dynatrace-oss/dtctl/sdk/session"
+	"github.com/Dynatrace/dtctl/pkg/aidetect"
+	"github.com/Dynatrace/dtctl/pkg/engine"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 // newDynatraceMock is a minimal fake Dynatrace environment for handler tests.

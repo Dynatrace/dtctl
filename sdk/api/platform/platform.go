@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Handler handles Platform Management API resources.

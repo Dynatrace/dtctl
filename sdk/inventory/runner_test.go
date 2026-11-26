@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/api/query"
 )
 
 // TestTruncationCauseOf pins the classification a Runner depends on. Getting

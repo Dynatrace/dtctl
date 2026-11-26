@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Regression tests for https://github.com/dynatrace-oss/dtctl/issues/491
+// Regression tests for https://github.com/Dynatrace/dtctl/issues/491
 //
 // apply looks the object up to decide between create and update. Only a 404
 // means "create". A 403, a 5xx or a network error says nothing about whether

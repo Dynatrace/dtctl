@@ -7,8 +7,8 @@ import (
 	"context"
 	"testing"
 
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // TestQueryMetricMetadataEnrichment verifies that requesting metric-metadata

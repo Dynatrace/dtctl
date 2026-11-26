@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/exec"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	resapi "github.com/dynatrace-oss/dtctl/pkg/resources/api"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	resapi "github.com/Dynatrace/dtctl/pkg/resources/api"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // describeAPICmd projects one API's specification.

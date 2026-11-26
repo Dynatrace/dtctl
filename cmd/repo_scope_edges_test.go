@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
 func TestRepoScopeAgentSetAndHumanDeleteLastEntry(t *testing.T) {

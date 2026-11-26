@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/matcherverify"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/resources/matcherverify"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // verifyOpenPipelineMatcherCmd validates a DQL matcher expression against the
@@ -123,6 +123,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", `read the matcher from a file ("-" for stdin)`)
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("context", "", `stage context, e.g. "processing" or "ROUTING_RULE"`)
 	stability.MarkFlag(c, "context", stability.Experimental, pre10Since)
 	c.Flags().String("config-id", "", `configuration scope, e.g. "logs"`)

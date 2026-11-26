@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 type Handler struct {

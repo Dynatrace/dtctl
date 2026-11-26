@@ -5,7 +5,7 @@
     Downloads the latest dtctl release from GitHub and installs it to
     %LOCALAPPDATA%\dtctl. Adds the directory to the user PATH if needed.
 .EXAMPLE
-    irm https://raw.githubusercontent.com/dynatrace-oss/dtctl/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/Dynatrace/dtctl/main/install.ps1 | iex
 #>
 
 $ErrorActionPreference = 'Stop'

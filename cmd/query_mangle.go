@@ -160,7 +160,7 @@ func quoteMangleWarning(query string) string {
 	b.WriteString("  | filter loglevel == \"INFO\"\n")
 	b.WriteString("  '@ | dtctl query\n\n")
 	b.WriteString("Or read it from a file: dtctl query -f query.dql\n")
-	b.WriteString("Details: https://github.com/dynatrace-oss/dtctl/blob/main/docs/WINDOWS.md#quoting\n")
+	b.WriteString("Details: https://github.com/Dynatrace/dtctl/blob/main/docs/WINDOWS.md#quoting\n")
 	return b.String()
 }
 

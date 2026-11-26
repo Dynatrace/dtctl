@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdkslo "github.com/dynatrace-oss/dtctl/sdk/api/slo"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdkslo "github.com/Dynatrace/dtctl/sdk/api/slo"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Re-export SDK types that don't need table tags as aliases.

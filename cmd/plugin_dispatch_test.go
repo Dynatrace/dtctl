@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/version"
+	"github.com/Dynatrace/dtctl/pkg/version"
 )
 
 func TestSplitPluginArgs(t *testing.T) {

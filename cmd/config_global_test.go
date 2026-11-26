@@ -9,7 +9,7 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // chdirWithLocalConfig puts the test in a directory holding a .dtctl.yaml and
@@ -115,5 +115,43 @@ func TestSetContextWithoutGlobalWritesLocalConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(globalPath); !os.IsNotExist(err) {
 		t.Errorf("global config should not exist without --global (stat err = %v)", err)
+	}
+}
+
+// TestSetContextUsageTrackingRefusesLocalConfig: only the global config can opt
+// a context into the usage ledger, so turning it on in a discovered .dtctl.yaml
+// is refused (and the file left alone), while --global and turning it off work.
+func TestSetContextUsageTrackingRefusesLocalConfig(t *testing.T) {
+	projectDir, globalPath := chdirWithLocalConfig(t)
+	localPath := filepath.Join(projectDir, config.LocalConfigName)
+	before, err := os.ReadFile(localPath)
+	if err != nil {
+		t.Fatalf("read local config: %v", err)
+	}
+
+	on, off := true, false
+	err = setContext(context.Background(), "my-environment", contextSettings{usageTracking: &on})
+	if err == nil || !strings.Contains(err.Error(), "--global") {
+		t.Fatalf("setContext(--usage-tracking) on a local config: err = %v, want a refusal pointing at --global", err)
+	}
+	if after, _ := os.ReadFile(localPath); string(after) != string(before) {
+		t.Errorf("refused write modified the local config:\n%s", after)
+	}
+
+	if err := setContext(context.Background(), "my-environment", contextSettings{usageTracking: &off}); err != nil {
+		t.Errorf("turning tracking off in a local config: %v", err)
+	}
+
+	if err := setContext(context.Background(), "my-environment", contextSettings{
+		environment:   "https://abc12345.apps.dynatrace.com",
+		tokenRef:      "my-token",
+		global:        true,
+		usageTracking: &on,
+	}); err != nil {
+		t.Fatalf("setContext(--usage-tracking --global): %v", err)
+	}
+	globalData, err := os.ReadFile(globalPath)
+	if err != nil || !strings.Contains(string(globalData), "usage-tracking: true") {
+		t.Errorf("global config should carry usage-tracking: true (err %v):\n%s", err, globalData)
 	}
 }

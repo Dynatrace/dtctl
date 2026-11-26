@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Handler handles Davis CoPilot resources

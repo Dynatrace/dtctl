@@ -1,6 +1,6 @@
 # Filter AST Conversion — Implementation Plan
 
-**Issue**: [#132](https://github.com/dynatrace-oss/dtctl/issues/132) — Segment filter field requires JSON AST, not DQL strings  
+**Issue**: [#132](https://github.com/Dynatrace/dtctl/issues/132) — Segment filter field requires JSON AST, not DQL strings  
 **Date**: 2026-04-09
 
 ---

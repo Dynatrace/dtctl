@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 func init() {
@@ -36,7 +36,7 @@ Quick Reference:
   dangerously-unrestricted    Dev environments, bucket management     Full access token
 
 For the full list of scopes per safety level, see:
-  https://github.com/dynatrace-oss/dtctl/blob/main/docs/TOKEN_SCOPES.md
+  https://github.com/Dynatrace/dtctl/blob/main/docs/TOKEN_SCOPES.md
 
 For creating platform tokens, see:
   https://docs.dynatrace.com/docs/manage/identity-access-management/access-tokens-and-oauth-clients/platform-tokens`,

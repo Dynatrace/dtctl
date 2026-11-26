@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // viewerPaths maps a document type to the app path that renders it, relative
@@ -30,4 +30,11 @@ func UIURL(baseURL, docType, id string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s/ui/apps/%s/%s", strings.TrimRight(baseURL, "/"), path, httpclient.PathSegment(id))
+}
+
+// ShareURL returns the link that hands out an environment share: whoever opens
+// it in the environment's UI claims the share. ParseShareRef reads it back.
+// Trailing slashes on baseURL are dropped, as in UIURL.
+func ShareURL(baseURL, shareID string) string {
+	return fmt.Sprintf("%s/ui/document/v0/#share=%s", strings.TrimRight(baseURL, "/"), shareID)
 }

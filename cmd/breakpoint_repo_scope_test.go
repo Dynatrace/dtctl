@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/livedebugger"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // breakpointScope links the test repository on the test server: checkout

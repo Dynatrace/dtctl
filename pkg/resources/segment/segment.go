@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	sdksegment "github.com/dynatrace-oss/dtctl/sdk/api/segment"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	sdksegment "github.com/Dynatrace/dtctl/sdk/api/segment"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // ErrNotFound is returned when a segment is not found (HTTP 404).

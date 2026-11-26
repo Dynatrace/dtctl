@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/lookup"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/lookup"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // createLookupCmd creates a lookup table
@@ -201,6 +201,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "path to data file or manifest, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("path", "", "lookup file path (e.g., /lookups/grail/pm/error_codes)")
 	c.Flags().String("lookup-field", "", "name of the lookup key field")
 	c.Flags().String("display-name", "", "display name for the lookup table")

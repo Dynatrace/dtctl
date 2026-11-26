@@ -1,4 +1,4 @@
-[#2]:
+[2]:
   - appId: example.app
     appName: Example App
     description: Open a thing
@@ -7,32 +7,28 @@
     name: View thing
     properties:
       note:
-        acceptedKeys[#1]: note
+        acceptedKeys[1]: note
         required: false
         type: ""
       tags:
-        acceptedKeys[#1]: tags
+        acceptedKeys[1]: tags
         required: false
         schema:
           items:
             type: string
-          type[#2]: string,array
+          type[2]: string,array
         type: string|array
-        types[#2]: string,array
+        types[2]: string,array
       thing:
-        acceptedKeys[#2]: dt.entity,thing
+        acceptedKeys[2]: dt.entity,thing
         description: The thing to open
         required: true
-        schemas:
-          dt.entity:
-            pattern: "^(?:THING-|WIDGET-)[0-9A-F]{16}$"
-            type: string
-          thing:
-            pattern: "^(?:THING-|WIDGET-)[0-9A-F]{16}$"
-            type: string
+        schemas[2:]{pattern,type}:
+          dt.entity: "^(?:THING-|WIDGET-)[0-9A-F]{16}$",string
+          thing: "^(?:THING-|WIDGET-)[0-9A-F]{16}$",string
         type: string
-        types[#1]: string
-    requiredProps[#1]: thing
+        types[1]: string
+    requiredProps[1]: thing
   - appId: example.app
     appName: Example App
     deprecated: true
@@ -42,16 +38,16 @@
     intentId: view-thing-legacy
     properties:
       id:
-        acceptedKeys[#1]: id
+        acceptedKeys[1]: id
         format: uuid
         required: true
         schema:
           format: uuid
           type: string
         type: string
-        types[#1]: string
+        types[1]: string
       unused:
-        acceptedKeys[#0]:
+        acceptedKeys: []
         required: true
         type: ""
-    requiredProps[#2]: id,unused
+    requiredProps[2]: id,unused

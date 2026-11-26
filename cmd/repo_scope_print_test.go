@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/reposcope"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
 func TestRepoScopeDiscoveryLimitsProposedLines(t *testing.T) {

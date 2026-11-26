@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
+	"slices"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/vfs"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
 // Session is a per-invocation target + credential override for embedded
@@ -66,6 +68,30 @@ type Session struct {
 	// passes any floor, it merely has a removal date. Off by default, because
 	// a host that has not asked to be broken early should not be.
 	NoDeprecated bool
+	// Profile, when non-nil, is a command profile the host defines. It works
+	// like a profile from a config file and is pinned for the run: an Env
+	// entry naming another profile is an error. See config.Profile.Validate.
+	Profile *config.Profile
+
+	// Transport, when non-nil, carries every platform request this invocation
+	// sends, in place of the process-wide connection pool. It is how a host
+	// points a session at a stand-in environment — an httptest server's
+	// Client().Transport, or an *http.Transport with its own TLS
+	// configuration — without the invocation knowing it is not talking to
+	// Dynatrace. Everything above the transport (base URL, bearer token,
+	// User-Agent, retries, request-path guard) is unchanged, so the bytes a
+	// command prints are the bytes it would print against a real environment.
+	//
+	// The RoundTripper is shared by every client the invocation builds, and,
+	// when the host reuses it, by overlapping invocations: it must be safe for
+	// concurrent use, as http.RoundTripper requires.
+	Transport http.RoundTripper
+
+	// parseOnly marks the session Parse runs under: it has no environment and
+	// no token, and newClientFromConfig refuses it, so a command line analysed
+	// without running can never reach the platform or fall back to the host's
+	// credentials. The request-shape checks still apply.
+	parseOnly bool
 }
 
 // SessionDefaultMinStability is the floor a session-backed invocation gets
@@ -92,10 +118,10 @@ func newSessionTokenRef() string {
 }
 
 func (s *Session) validate() error {
-	if s.EnvironmentURL == "" {
+	if s.EnvironmentURL == "" && !s.parseOnly {
 		return fmt.Errorf("session: EnvironmentURL is required")
 	}
-	if s.Token == "" {
+	if s.Token == "" && !s.parseOnly {
 		return fmt.Errorf("session: Token is required")
 	}
 	if s.SafetyLevel != "" {
@@ -129,6 +155,11 @@ func (s *Session) validate() error {
 	}
 	if _, err := stability.ParseExceptions(s.StabilityExceptions); err != nil {
 		return fmt.Errorf("session: %w", err)
+	}
+	if s.Profile != nil {
+		if err := s.Profile.Validate(); err != nil {
+			return fmt.Errorf("session: %w", err)
+		}
 	}
 	return nil
 }
@@ -171,6 +202,13 @@ func (s *Session) syntheticConfig() *config.Config {
 			Name:  tokenRef,
 			Token: s.Token,
 		}},
+	}
+	if s.Profile != nil {
+		// A copy, so the config does not share the caller's slice.
+		cfg.Profiles = map[string]config.Profile{
+			s.Profile.Name: {Description: s.Profile.Description, Commands: slices.Clone(s.Profile.Commands)},
+		}
+		cfg.Contexts[0].Context.Profile = s.Profile.Name
 	}
 	// The inline token must win unconditionally; no host credential store should
 	// be consulted for a synthetic session config.
@@ -239,6 +277,12 @@ func applyRunEnvironment(ctx context.Context, opts RunOptions) (cleanup func(), 
 		if err := opts.Session.validate(); err != nil {
 			return nil, err
 		}
+		if p := opts.Session.Profile; p != nil {
+			if v := opts.Env[config.ProfileEnvVar]; v != "" && v != p.Name {
+				return nil, fmt.Errorf("session: Env sets %s=%q, but the session defines profile %q",
+					config.ProfileEnvVar, v, p.Name)
+			}
+		}
 	}
 
 	// A concurrent invocation records its
@@ -284,6 +328,11 @@ func applyRunEnvironment(ctx context.Context, opts RunOptions) (cleanup func(), 
 	}
 	for key, value := range opts.Env {
 		set(key, value)
+	}
+	// Pinned here, so it holds for every caller of Run and Parse. An Env
+	// entry naming another profile was refused above.
+	if opts.Session != nil && opts.Session.Profile != nil {
+		set(config.ProfileEnvVar, opts.Session.Profile.Name)
 	}
 
 	if concurrent {

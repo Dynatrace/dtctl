@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 func TestDiscoverTermEvidenceAndMalformedRows(t *testing.T) {

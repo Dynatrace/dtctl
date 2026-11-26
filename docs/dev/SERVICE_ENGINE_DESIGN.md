@@ -114,6 +114,71 @@ runs either one serialized invocation or any number of concurrent ones, never a
 mix. It is off unless a host asks for it; what it guarantees, what it costs and
 what it does not cover are in [CONCURRENT_EXECUTION.md](CONCURRENT_EXECUTION.md).
 
+### Injecting the HTTP transport
+
+`Session.Transport`, reached through `engine.New(limits, engine.WithTransport(rt))`,
+replaces the process-wide connection pool for every client an invocation
+builds. It exists so a host can test the success path of its own integration
+against a stand-in environment — an `httptest` server, usually over TLS with a
+certificate only `srv.Client().Transport` trusts — and so a host with its own
+TLS or proxy requirements can supply an `*http.Transport` configured for them.
+
+It is a seam under the request, not a way around it: the request still names
+the environment and carries the token, and dtctl still adds its User-Agent,
+retries and request-path guard above `rt`, so the `Result` is byte-identical to
+what the same command line produces against a real environment. It is
+per-`Engine`, not per-`Request`, and `dtctl serve http` does not expose it — a
+caller of the reference server must not choose where the server's requests go.
+The package-level `Execute` keeps the default pool.
+
+### Analysing a command line without running it (`Parse`)
+
+`engine.Parse` reports what a command line means without running it: its verb
+and resource, the files it reads and writes (as `Request.Files` names them),
+whether it reads `Request.Stdin` (as data, or to answer a confirmation prompt
+the command line does not skip), and its required scopes with how certain they
+are (`none`, `known`, `per_call` for `exec api`, `input_dependent` for `apply`
+and `diff`), and the flags and positional arguments it recognized (flags by long
+name, only those the command line set). A host uses it as a preflight: to attach
+the files a command needs, or to tell a caller which scopes it will need, before
+it runs anything.
+
+It runs Execute's pipeline and stops where the command body would start. It
+builds a fresh tree, applies the same surface masks (`applySurface`: profile,
+blocked commands, stability floor, deprecation), lets cobra parse and validate
+the command line and run the pre-run hooks, and replaces every command body with
+a hook that records what cobra resolved. A command line Execute would refuse
+returns a `*UsageError` with the error Execute prints; validation inside a
+command body is the one thing Parse cannot see. A refusal of the surface
+(profile, floor, blocked command) is printed by Execute as plain text even under
+`--agent`, so for those the `Code` is Parse's classification only. A command
+line that asks for help (`--help`, or a group that only prints its usage) runs
+nothing: Parse sets `Help`, and `Verb`/`Resource` name the command whose help it
+is, not a command to run.
+
+It needs no token, reads no file and calls no platform API. It runs under a
+parse-only session, which has no environment or token and which
+`newClientFromConfig` refuses, so a command that tried to reach the platform
+would fail rather than fall back to the host's credentials. It takes no
+execution slot and takes `runMu` shared, like a concurrent invocation, so it
+never waits for concurrent executions but does wait for a serialized one (the
+context bounds the wait). One call
+costs about 1.4 ms and 1.1 MiB allocated, almost all of it building the tree
+(`BenchmarkParse`).
+
+What a command reads is declared next to its flags (`markFileFlag`,
+`markWritesTo`, `markInputWithoutArgs`, `markArgumentFlag`, and `markPrompts`
+for a confirmation prompt), and the guards in
+`cmd/file_flags_test.go` run every command on a recording filesystem, so a file
+flag without a declaration fails a test. `TestParseAgreesWithExecute` runs the
+same command lines through both and holds Parse to every file Execute reads.
+Only the literal `-` (and `@-`) means stdin: `./-` and `/-` name a file called
+`-`, which Execute opens through the filesystem, so Parse reports it as one.
+
+`Scopes: none` means the catalog names no scopes for the command. For the local
+commands that is the answer; for a command the catalog is still missing scopes
+for, it under-reports.
+
 ### Upstream connections are pooled across requests
 
 Every request builds its own client, but all of them send through one
@@ -153,8 +218,11 @@ Do not conflate these; each answers a different question.
 | Environment | Which commands *make sense* here at all? | `BlockedCommands` mask | `unsupported_in_service` |
 | Capability | Which *host abilities* may this process use? | `cmd.Capabilities` gates | `capability_disabled` |
 
-The masks compose — profile, stability and environment all apply to a run. The
-environment mask additionally guards non-runnable parents, so a blocked
+The masks compose — profile, stability and environment all apply to a run. A
+request selects a preset (`Request.Profile`), or the host sets its own profile
+for the engine (`engine.WithProfileDefinition`) — see
+[COMMAND_PROFILES_DESIGN.md](COMMAND_PROFILES_DESIGN.md#host-defined-profiles-in-the-engine).
+The environment mask additionally guards non-runnable parents, so a blocked
 `config` cannot answer with its own help text and exit 0.
 
 #### The stability floor defaults *stricter* in the engine
@@ -331,7 +399,7 @@ The service is not a perfect mirror, and the differences are intentional:
 
 ## Consuming `pkg/engine` from another module
 
-`pkg/engine` lives in the **root** module, `github.com/dynatrace-oss/dtctl` — not
+`pkg/engine` lives in the **root** module, `github.com/Dynatrace/dtctl` — not
 in `sdk/`, and it cannot move there: `engine.Execute` runs the real command tree,
 so it depends on `cmd/`, which depends on every `pkg/resources/*`, which depends
 back on `sdk/api/*`. The SDK is deliberately the opposite kind of artifact (a few
@@ -340,11 +408,11 @@ typed API wrappers, 8 direct dependencies, no CLI concerns); the engine pulls in
 choices, not two doors to the same room.
 
 ```go
-import "github.com/dynatrace-oss/dtctl/pkg/engine"
+import "github.com/Dynatrace/dtctl/pkg/engine"
 ```
 
 ```bash
-go get github.com/dynatrace-oss/dtctl@latest
+go get github.com/Dynatrace/dtctl@latest
 ```
 
 That works only because of a coupling worth stating explicitly, since it broke
@@ -390,7 +458,8 @@ both tags exist.
 ## Maturity
 
 `pkg/engine` is the stable half: a Go caller opts into it at compile time, and
-the isolation rules above are enforced by guard tests.
+the isolation rules above are enforced by guard tests. `Parse` and its types are
+the exception: experimental until a second host uses them.
 
 `dtctl serve` is **development-tier** (see [STABILITY.md](../STABILITY.md)) and
 registered only when opted into — `dtctl config set development.serve on` or

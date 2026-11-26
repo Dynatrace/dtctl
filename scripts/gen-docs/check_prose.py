@@ -41,7 +41,7 @@ LINK_SKIP = ("dev", "site")
 # the same documentation, both hand-edited, is exactly the drift that put wrong
 # flags on docs.dynatrace.com for months.
 SITE_DOCS = pathlib.Path("site/_docs")
-REDIRECT_PREFIX = "https://github.com/dynatrace-oss/dtctl/blob/main/"
+REDIRECT_PREFIX = "https://github.com/Dynatrace/dtctl/blob/main/"
 
 # A long flag. Case-sensitive on purpose: a few flags are camelCase
 # (`--serviceAccountId`, `--hostPatterns`), and a lowercase-only pattern would

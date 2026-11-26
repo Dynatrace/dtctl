@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/cmd/testutil"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 const dqlProcessorVerifyPath = "/platform/openpipeline/v1/dqlProcessor/verify"

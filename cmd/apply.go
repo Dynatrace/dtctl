@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/apply"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/suggest"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/apply"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // applyCmd represents the apply command
@@ -319,19 +319,27 @@ resources in sync with their file definitions.
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing resource definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
 	c.Flags().Bool("dry-run", false, "preview changes without applying")
 	c.Flags().Bool("show-diff", false, "show diff of changes when updating existing resources")
 	c.Flags().Bool("no-hooks", false, "skip pre-apply and post-apply hooks")
 	c.Flags().String("id", "", "override or inject resource ID (use with --write-id to stamp ID into file)")
 	c.Flags().Bool("write-id", false, "write the created resource ID back into the source file for idempotent future applies")
+	markWritesTo(c, "write-id", "file")
 	c.Flags().String("type", "", "document type (e.g. launchpad, acme:config); forces the file to be applied as a document of this type")
 	c.Flags().StringArray("label", []string{}, "document classification label (repeatable); replaces the document's labels, overriding any in the payload (labels cannot be cleared, only replaced)")
 	c.Flags().Bool("create-snapshot", false, "snapshot the document's current state before updating it, so the previous version stays available via 'dtctl history'/'dtctl restore' (documents only)")
 	c.Flags().String("snapshot-description", "", "description for the snapshot created by --create-snapshot (max 128 characters)")
 	c.Flags().String("share-environment", "", "share the applied notebook/dashboard with everyone in the environment (values: 'read' or 'read-write'; bare --share-environment defaults to 'read')")
 	c.Flags().Lookup("share-environment").NoOptDefVal = "read"
+	// It bundles two things the Document API keeps apart, neither of them part
+	// of the document apply writes: an environment share link (a grant to other
+	// users) and isPrivate=false (a property of the document). `share document
+	// --environment link|public` does each on its own.
+	_ = c.Flags().MarkDeprecated("share-environment", shareEnvironmentDeprecation)
 	stability.MarkStable(c)
+	markScopesInputDependent(c)
 	markFlagRequiredNonEmpty(c, "file")
 	return c
 }
@@ -339,6 +347,11 @@ resources in sync with their file definitions.
 func init() {
 	rootCmd.AddCommand(applyCmd)
 }
+
+// shareEnvironmentDeprecation is apply --share-environment's deprecation
+// note. pflag prints it after "Flag --share-environment has been deprecated, ".
+const shareEnvironmentDeprecation = "in 0.46.0, removal planned in 0.48.0: " +
+	"apply the file, then use `dtctl share document <id> --environment link,public [--access read-write]`"
 
 // validateShareEnvironmentValue rejects any --share-environment value outside
 // the empty string, "read", or "read-write".
@@ -351,8 +364,11 @@ func validateShareEnvironmentValue(v string) error {
 	}
 }
 
-// ensureEnvironmentShareForResults walks apply results and creates an environment share for every notebook/dashboard.
-// Other resource types are silently skipped — environment shares only apply to documents.
+// ensureEnvironmentShareForResults walks apply results and opens every notebook/dashboard to
+// the environment the way `share document --environment link,public` does: an environment
+// share link at the access level, and isPrivate=false. A link at another level is left
+// alone; a document can have one per level. Other resource types are silently skipped —
+// environment shares only apply to documents.
 //
 // Per-document failures do not abort the walk: we attempt a share for every eligible
 // result and return a combined error at the end so multi-document applies are partially
@@ -371,7 +387,7 @@ func ensureEnvironmentShareForResults(ctx context.Context, c *client.Client, res
 		if base.ID == "" {
 			continue
 		}
-		if _, err := handler.EnsureEnvironmentShare(base.ID, access); err != nil {
+		if err := shareAppliedDocument(handler, base.ID, access); err != nil {
 			output.FprintWarning(currentStderr(ctx), "failed to share %s %q with environment: %v", base.ResourceType, base.ID, err)
 			errs = append(errs, fmt.Errorf("document %q: %w", base.ID, err))
 			continue
@@ -389,6 +405,19 @@ func ensureEnvironmentShareForResults(ctx context.Context, c *client.Client, res
 		ids = append(ids, e.Error())
 	}
 	return fmt.Errorf("%d documents failed to share: %s", len(errs), strings.Join(ids, "; "))
+}
+
+// shareAppliedDocument ensures the document's environment share link at the
+// access level, then makes it public: the link first, so a failure to make it
+// public leaves the narrower of the two in place.
+func shareAppliedDocument(handler *document.Handler, id, access string) error {
+	if _, err := handler.EnsureEnvironmentLink(id, access); err != nil {
+		return err
+	}
+	if err := handler.SetPrivate(id, false); err != nil {
+		return fmt.Errorf("environment share created, but making the document public failed: %w", err)
+	}
+	return nil
 }
 
 // Declared stable: the invocation and output contract of this command is

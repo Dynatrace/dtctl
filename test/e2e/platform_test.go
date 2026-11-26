@@ -6,8 +6,8 @@ package e2e
 import (
 	"testing"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/platform"
-	"github.com/dynatrace-oss/dtctl/test/integration"
+	"github.com/Dynatrace/dtctl/pkg/resources/platform"
+	"github.com/Dynatrace/dtctl/test/integration"
 )
 
 // TestPlatformReadLifecycle exercises the platform management handler methods

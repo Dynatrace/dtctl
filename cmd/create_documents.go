@@ -7,12 +7,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/document"
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
-	"github.com/dynatrace-oss/dtctl/pkg/util/format"
-	"github.com/dynatrace-oss/dtctl/pkg/util/template"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/document"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/util/format"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
 
 // createDocumentCmd creates a document of any type from a file
@@ -87,6 +87,7 @@ Examples:
 		},
 	}
 	c.Flags().StringP("file", "f", "", "file containing document definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("type", "", "document type (e.g. launchpad, my-app:config); extracted from payload if not provided")
 	c.Flags().String("name", "", "name for the document (extracted from content if not provided)")
 	c.Flags().String("description", "", "description for the document")
@@ -124,6 +125,7 @@ Examples:
 		RunE:    createDocumentRunE("notebook"),
 	}
 	c.Flags().StringP("file", "f", "", "file containing notebook definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("name", "", "name for the notebook (extracted from content if not provided)")
 	c.Flags().String("description", "", "description for the notebook")
 	c.Flags().String("id", "", "custom ID for the notebook (auto-generated if not provided)")
@@ -179,6 +181,7 @@ See also:
 		RunE:    createDocumentRunE("dashboard"),
 	}
 	c.Flags().StringP("file", "f", "", "file containing dashboard definition, or - for stdin (required)")
+	markFileFlag(c, "file", fileValuePath)
 	c.Flags().String("name", "", "name for the dashboard (extracted from content if not provided)")
 	c.Flags().String("description", "", "description for the dashboard")
 	c.Flags().String("id", "", "custom ID for the dashboard (auto-generated if not provided)")

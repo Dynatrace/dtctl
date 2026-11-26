@@ -14,12 +14,12 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/awsmonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azureconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/azuremonitoringconfig"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpconnection"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/gcpmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/awsmonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpconnection"
+	"github.com/Dynatrace/dtctl/pkg/resources/gcpmonitoringconfig"
 )
 
 // Synthetic fixture identities served by the mock environment. Names and IDs

@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/safety"
-	"github.com/dynatrace-oss/dtctl/sdk/api/apispec"
+	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/sdk/api/apispec"
 )
 
 // Classification is dtctl's verdict on what a generic request may do, and why.

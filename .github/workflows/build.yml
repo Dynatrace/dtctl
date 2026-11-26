@@ -36,9 +36,9 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.11'
 
       - name: Get version info
         id: version
@@ -64,12 +64,12 @@ jobs:
           fi
           
           go build \
-            -ldflags "-s -w -X github.com/dynatrace-oss/dtctl/pkg/version.Version=${{ steps.version.outputs.version }} -X github.com/dynatrace-oss/dtctl/pkg/version.Commit=${{ steps.version.outputs.commit }} -X github.com/dynatrace-oss/dtctl/pkg/version.Date=${{ steps.version.outputs.date }}" \
+            -ldflags "-s -w -X github.com/Dynatrace/dtctl/pkg/version.Version=${{ steps.version.outputs.version }} -X github.com/Dynatrace/dtctl/pkg/version.Commit=${{ steps.version.outputs.commit }} -X github.com/Dynatrace/dtctl/pkg/version.Date=${{ steps.version.outputs.date }}" \
             -o "bin/${BINARY_NAME}" \
             .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dtctl-${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/*

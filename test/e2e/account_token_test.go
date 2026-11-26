@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/platformtoken"
-	sdkauth "github.com/dynatrace-oss/dtctl/sdk/auth"
-	"github.com/dynatrace-oss/dtctl/sdk/httpclient"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/resources/platformtoken"
+	sdkauth "github.com/Dynatrace/dtctl/sdk/auth"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // setupAccountTokenTest resolves account credentials in priority order:

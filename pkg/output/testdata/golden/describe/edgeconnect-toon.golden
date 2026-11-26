@@ -1,4 +1,4 @@
-hostPatterns[#2]: *.prod.example.invalid,api.example.invalid
+hostPatterns[2]: *.prod.example.invalid,api.example.invalid
 id: ec-a1b2c3d4
 managedByDynatraceOperator: true
 metadata:

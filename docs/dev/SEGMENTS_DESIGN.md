@@ -2,7 +2,7 @@
 
 Full-featured segments support for dtctl: CRUD management + DQL query-time filtering.
 
-Tracking issue: [#115 — Segments support when executing DQL queries](https://github.com/dynatrace-oss/dtctl/issues/115)
+Tracking issue: [#115 — Segments support when executing DQL queries](https://github.com/Dynatrace/dtctl/issues/115)
 
 ---
 
@@ -181,7 +181,7 @@ variables:
 
 ## Part 2: Segments in DQL Query Execution
 
-This is the core of issue [#115](https://github.com/dynatrace-oss/dtctl/issues/115).
+This is the core of issue [#115](https://github.com/Dynatrace/dtctl/issues/115).
 
 ### 2.1 API Integration — `pkg/exec/dql.go`
 

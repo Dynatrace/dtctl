@@ -20,7 +20,7 @@ Dynatrace dashboards and notebooks are managed as documents. dtctl supports the 
 | get | dashboards | `dtctl get dashboards` | Display one or many resources | no | read |
 | history | dashboard | `dtctl history dashboard` | Show version history of resources | no | read |
 | restore | dashboard | `dtctl restore dashboard` | Restore resources to a previous version | yes | write |
-| share | dashboard | `dtctl share dashboard` | Share documents with users or groups | yes | write |
+| share | dashboard | `dtctl share dashboard` | Share documents with users, groups, or the environment | yes | write |
 | unshare | dashboard | `dtctl unshare dashboard` | Remove sharing from documents | yes | write |
 | create | notebook | `dtctl create notebook` | Create resources from files | yes | write |
 | delete | notebook | `dtctl delete notebook` | Delete resources | yes | delete |
@@ -29,7 +29,7 @@ Dynatrace dashboards and notebooks are managed as documents. dtctl supports the 
 | get | notebooks | `dtctl get notebooks` | Display one or many resources | no | read |
 | history | notebook | `dtctl history notebook` | Show version history of resources | no | read |
 | restore | notebook | `dtctl restore notebook` | Restore resources to a previous version | yes | write |
-| share | notebook | `dtctl share notebook` | Share documents with users or groups | yes | write |
+| share | notebook | `dtctl share notebook` | Share documents with users, groups, or the environment | yes | write |
 | unshare | notebook | `dtctl unshare notebook` | Remove sharing from documents | yes | write |
 
 
@@ -45,6 +45,15 @@ These commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`
 | delete | `document:documents:delete` |
 | read | `document:documents:read` |
 | write | `document:documents:write` |
+
+These commands call other endpoints than the resource's, so they need these scopes instead of the ones for their access level. Some flags add a scope; see [Flags that need an extra scope](../TOKEN_SCOPES.md#flags-that-need-an-extra-scope).
+
+| Command | Scopes |
+| --- | --- |
+| `dtctl share dashboard` | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
+| `dtctl unshare dashboard` | `document:documents:read`, `document:direct-shares:read` |
+| `dtctl share notebook` | `document:documents:read`, `document:direct-shares:read`, `document:direct-shares:write` |
+| `dtctl unshare notebook` | `document:documents:read`, `document:direct-shares:read` |
 <!-- GENERATED:dashboards-notebooks:end -->
 
 ## Output
@@ -121,6 +130,11 @@ Share or revoke access:
 dtctl share dashboard dash-123 --user user@example.com --access read-write
 dtctl share dashboard dash-123 --user viewer@example.com --access read
 dtctl unshare dashboard dash-123 --user user@example.com
+
+# Everyone in the environment: a claimable link, or public read access
+dtctl share dashboard dash-123 --environment link
+dtctl share dashboard dash-123 --environment public
+dtctl share dashboard dash-123 --environment link,public   # both
 ```
 
 View and restore version history (Dynatrace keeps document snapshots):

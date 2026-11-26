@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	"github.com/dynatrace-oss/dtctl/pkg/resources/analyzer"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/resources/analyzer"
 )
 
 // shapeEffect reports what shapeAnalyzerForAgent changed, so the caller can name the

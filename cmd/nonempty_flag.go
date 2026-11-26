@@ -35,6 +35,12 @@ func (v *nonEmptyStringValue) Set(value string) error {
 // (resetFlagSet) calls it instead of Set(DefValue), which the empty check
 // would reject.
 func (v *nonEmptyStringValue) Reset() {
+	// A wrapped value with reset semantics of its own (singleUseStringValue)
+	// keeps them: Set(defValue) would mark it as already provided.
+	if rv, ok := v.Value.(interface{ Reset() }); ok {
+		rv.Reset()
+		return
+	}
 	_ = v.Value.Set(v.defValue)
 }
 
@@ -66,12 +72,7 @@ func (v *nonEmptySliceValue) Reset() {
 // error. It is the whole fix for a flag that is optional, or required only in
 // some modes: an absent flag keeps whatever the command does without it.
 func rejectEmptyFlag(cmd *cobra.Command, name string) {
-	flag := cmd.Flags().Lookup(name)
-	if flag == nil {
-		// Persistent flags only join cmd.Flags() once cobra parses, so a
-		// global flag has to be looked up where it was declared.
-		flag = cmd.PersistentFlags().Lookup(name)
-	}
+	flag := lookupOwnFlag(cmd, name)
 	if flag == nil {
 		panic(fmt.Sprintf("rejectEmptyFlag: %s has no --%s flag", cmd.Name(), name))
 	}

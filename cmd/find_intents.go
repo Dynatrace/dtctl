@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dynatrace-oss/dtctl/pkg/resources/appengine"
-	"github.com/dynatrace-oss/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/resources/appengine"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 )
 
 // findIntentsCmd finds intents that match given data
@@ -114,6 +114,7 @@ Examples:
 	}
 	c.Flags().StringVar(&findIntentsData, "data", "", "data as comma-separated key=value pairs")
 	c.Flags().StringVar(&findIntentsDataFile, "data-file", "", "JSON file containing data (use - for stdin)")
+	markFileFlag(c, "data-file", fileValuePath)
 	c.Flags().IntVar(&findIntentsLimit, "limit", 0, "limit number of results (0 for unlimited)")
 	stability.MarkStable(c)
 	return c

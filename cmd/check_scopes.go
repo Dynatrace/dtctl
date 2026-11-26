@@ -7,16 +7,18 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 
-	"github.com/dynatrace-oss/dtctl/pkg/auth"
-	"github.com/dynatrace-oss/dtctl/pkg/client"
-	"github.com/dynatrace-oss/dtctl/pkg/commands"
-	"github.com/dynatrace-oss/dtctl/pkg/config"
-	"github.com/dynatrace-oss/dtctl/pkg/output"
-	resapi "github.com/dynatrace-oss/dtctl/pkg/resources/api"
+	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/commands"
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/output"
+	resapi "github.com/Dynatrace/dtctl/pkg/resources/api"
 )
 
 // scope-check verdict statuses.
@@ -221,6 +223,11 @@ func verbResource(c *cobra.Command) (verb, resource string) {
 	verb = node.Name()
 	if c != node {
 		resource = c.Name()
+		// A leaf under a scope group takes the group's scopes: the catalog
+		// lists the group (`exec profiling`), not each of its leaves.
+		if inScopeGroup(c) && c.Parent() != node {
+			resource = c.Parent().Name()
+		}
 	}
 	return verb, resource
 }
@@ -240,7 +247,55 @@ const (
 	// scopeRequirementPerCall: the scopes are a property of the invocation, not of
 	// the command, so the catalog cannot hold them.
 	scopeRequirementPerCall
+	// scopeRequirementInputDependent: the command's resource kind comes from its
+	// input file (apply), so the scopes are decided by the file's content and the
+	// command line alone cannot name them.
+	scopeRequirementInputDependent
 )
+
+// String names the requirement the way ParseResult.Scopes reports it.
+func (r scopeRequirement) String() string {
+	switch r {
+	case scopeRequirementKnown:
+		return "known"
+	case scopeRequirementPerCall:
+		return "per_call"
+	case scopeRequirementInputDependent:
+		return "input_dependent"
+	}
+	return "none"
+}
+
+// annotationScopes marks a command whose required scopes the catalog cannot
+// hold. Its only value is scopesInputDependent. Namespaced like pkg/stability's
+// keys.
+const (
+	annotationScopes     = "dtctl.io/scopes"
+	scopesInputDependent = "input-dependent"
+)
+
+// annotationScopeGroup marks a command group whose subcommands share its
+// required scopes, so scope checks look the group up in the catalog rather than
+// each leaf. Opt-in per group: `exec profiling` is one, while other three-level
+// commands keep their own lookup.
+const annotationScopeGroup = "dtctl.io/scope-group"
+
+// markScopeGroup declares that cmd's subcommands take cmd's catalog scopes.
+func markScopeGroup(cmd *cobra.Command) {
+	setCommandAnnotation(cmd, annotationScopeGroup, "true")
+}
+
+// inScopeGroup reports whether c is a leaf of a scope group.
+func inScopeGroup(c *cobra.Command) bool {
+	p := c.Parent()
+	return p != nil && p.Annotations[annotationScopeGroup] != ""
+}
+
+// markScopesInputDependent declares that cmd's resource kind, and so its
+// required scopes, come from the content of its input file.
+func markScopesInputDependent(cmd *cobra.Command) {
+	setCommandAnnotation(cmd, annotationScopes, scopesInputDependent)
+}
 
 // perCallScopeCommands are `<verb> <resource>` leaves whose required scopes
 // depend on their arguments.
@@ -254,7 +309,9 @@ var perCallScopeCommands = map[string]bool{
 }
 
 // flagScopeRequirements are scopes that a flag adds to its command's catalog
-// requirement, keyed by `<verb> <resource>` and then by flag name.
+// requirement, keyed by `<verb> <resource>` and then by flag name. A key of the
+// form `<flag>=<value>` applies only when the flag is set to that value (or,
+// for a list flag, includes it), for a flag whose values reach different APIs.
 //
 // The catalog keys scopes by (verb, resource), so it cannot express "this flag
 // reaches a second API". `get documents --admin-access` lists documents as their
@@ -280,6 +337,15 @@ var flagScopeRequirements = map[string]map[string][]string{
 	"get dashboards": {"admin-access": {auth.DocumentAdminScope}},
 	"get notebooks":  {"admin-access": {auth.DocumentAdminScope}},
 
+	// --environment link (alone or in link,public) works on environment
+	// shares, a second API next to the documents one: share lists and creates
+	// them, unshare lists and deletes them (see unshareFlagScopes). --environment
+	// public only calls the document's :makePublic/:makePrivate, which the
+	// documents scopes cover.
+	"share document":  {"environment=link": environmentShareWriteScopes},
+	"share dashboard": {"environment=link": environmentShareWriteScopes},
+	"share notebook":  {"environment=link": environmentShareWriteScopes},
+
 	// Activating a version touches extension *definitions*;
 	// --with-configurations additionally reads every monitoring configuration of
 	// the extension and writes each one back against the new version's schema.
@@ -289,13 +355,40 @@ var flagScopeRequirements = map[string]map[string][]string{
 	"update extensions": {"with-configurations": {
 		"extensions:configurations:read", "extensions:configurations:write",
 	}},
+
+	// Removing recipients writes a direct share; --all deletes it;
+	// --environment link deletes environment shares.
+	"unshare document":  unshareFlagScopes,
+	"unshare dashboard": unshareFlagScopes,
+	"unshare notebook":  unshareFlagScopes,
+}
+
+var unshareFlagScopes = map[string][]string{
+	"all":   {"document:direct-shares:delete"},
+	"user":  {"document:direct-shares:write"},
+	"group": {"document:direct-shares:write"},
+
+	"environment=link": environmentShareDeleteScopes,
 }
 
 // scopesForInvocation is requiredScopesFor plus the scopes that the flags set on
 // this particular invocation contribute. It is what both callers want: the
 // requirement of the command line in front of us, not of the command in general.
 func scopesForInvocation(c *cobra.Command, verb, resource string) ([]string, scopeRequirement) {
+	if c.Annotations[annotationScopes] == scopesInputDependent {
+		return nil, scopeRequirementInputDependent
+	}
 	required, req := requiredScopesIn(c.Root(), verb, resource)
+	if req == scopeRequirementNone && inScopeGroup(c) {
+		// The catalog indexes a verb's direct resources only, so a scope
+		// group's leaves are not in it; their scopes are the group's, from the
+		// same canonical table the catalog reads.
+		if v, ok := scopeCatalog()[verb]; ok {
+			if s := auth.ScopesForCommand(verb, resource, auth.Access(v.Access)); len(s) > 0 {
+				required, req = s, scopeRequirementKnown
+			}
+		}
+	}
 	extra := flagContributedScopes(c, verb, resource)
 	if len(extra) == 0 || req != scopeRequirementKnown {
 		// Augmenting anything but a known requirement would invent one: a per-call
@@ -317,19 +410,25 @@ func flagContributedScopes(c *cobra.Command, verb, resource string) []string {
 		return nil
 	}
 	var extra []string
-	for name, scopes := range byFlag {
+	for key, scopes := range byFlag {
+		name, value, byValue := strings.Cut(key, "=")
 		f := c.Flags().Lookup(name)
 		if f == nil {
 			continue
 		}
-		if f.Value.Type() == "bool" {
-			if on, err := c.Flags().GetBool(name); err != nil || !on {
-				continue
-			}
-		} else if !f.Changed || f.Value.String() == "" {
-			continue
+		var on bool
+		switch {
+		case byValue:
+			on = f.Changed && flagHasValue(f, value)
+		case f.Value.Type() == "bool":
+			v, err := c.Flags().GetBool(name)
+			on = err == nil && v
+		default:
+			on = f.Changed && f.Value.String() != ""
 		}
-		extra = append(extra, scopes...)
+		if on {
+			extra = append(extra, scopes...)
+		}
 	}
 	return extra
 }
@@ -426,21 +525,35 @@ func unionScopes(lists ...[]string) []string {
 	return out
 }
 
+// scopeCatalog is the commands catalog's verbs, which the scope lookups read.
+// It is built once per process, because the catalog is deterministic for a
+// binary and rebuilding it was a cost every preflight paid. It is built from a
+// fresh tree rather than from the one an invocation runs: a run masks its tree
+// (profile, stability floor), and the catalog leaves masked commands out. It
+// holds the verbs alone, not a full commands.Build: plugin discovery reads the
+// directories on PATH, and Parse promises no I/O.
+var scopeCatalog = sync.OnceValue(func() map[string]*commands.Verb {
+	return commands.BuildVerbs(newCommandTree(withInvocation(context.Background(), &invocation{concurrent: true})).root)
+})
+
 // requiredScopesFor looks up a command's required scopes from the catalog (the
 // single source of truth), and reports what kind of answer that is.
 func requiredScopesFor(verb, resource string) ([]string, scopeRequirement) {
-	return requiredScopesIn(rootCmd, verb, resource)
+	return requiredScopesIn(nil, verb, resource)
 }
 
-// requiredScopesIn is requiredScopesFor against the catalog of the tree root
-// heads, so a concurrent invocation reads its own tree rather than the
-// singleton.
+// requiredScopesIn is requiredScopesFor for a command of the tree under root.
+// A development-tier verb is attached to the singleton only when its feature
+// is enabled, so the shared catalog, built from a fresh tree, does not have
+// it: its scopes are looked up in root's own catalog instead.
 func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, scopeRequirement) {
 	if perCallScopeCommands[verb+" "+resource] {
 		return nil, scopeRequirementPerCall
 	}
-	listing := commands.Build(root)
-	v, ok := listing.Verbs[verb]
+	v, ok := scopeCatalog()[verb]
+	if !ok && root != nil && attachedDevelopmentVerb(root, verb) {
+		v, ok = commands.BuildVerbs(root)[verb]
+	}
 	if !ok {
 		return nil, scopeRequirementNone
 	}
@@ -453,6 +566,17 @@ func requiredScopesIn(root *cobra.Command, verb, resource string) ([]string, sco
 		return v.RequiredScopes, scopeRequirementKnown
 	}
 	return nil, scopeRequirementNone
+}
+
+// attachedDevelopmentVerb reports whether verb is a development-tier command
+// attached under root.
+func attachedDevelopmentVerb(root *cobra.Command, verb string) bool {
+	for _, dc := range developmentCommands {
+		if dc.cmd.Name() == verb && dc.cmd.Parent() == root {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvePerCallScopes resolves the scopes this specific invocation needs, for a
@@ -537,6 +661,18 @@ func computeScopeVerdict(ctx context.Context, verb, resource string, required []
 				"not knowable in advance",
 			"dtctl describe api <name> --operation '<METHOD> <path>'  -- the scope the " +
 				"specification declares for that endpoint",
+		}
+		return res
+	case scopeRequirementInputDependent:
+		// The resource kinds are in the file, which a verdict on the command line
+		// does not read. "No scopes required" would be the false assurance the
+		// verdict exists to prevent.
+		res.Status = scopeStatusUnknown
+		res.RequiredScopes = []string{}
+		res.Suggestions = []string{
+			"this command's required scopes depend on the resource kinds in its input file, " +
+				"so they are not knowable from the command line",
+			"dtctl commands --full  -- the scopes each resource kind needs",
 		}
 		return res
 	}
@@ -663,4 +799,17 @@ func subtractScopes(required, granted []string) []string {
 	}
 	sort.Strings(missing)
 	return missing
+}
+
+// flagHasValue reports whether f is set to value or, for a list flag, lists it.
+func flagHasValue(f *pflag.Flag, value string) bool {
+	if sv, ok := f.Value.(pflag.SliceValue); ok {
+		for _, v := range sv.GetSlice() {
+			if strings.TrimSpace(v) == value {
+				return true
+			}
+		}
+		return false
+	}
+	return f.Value.String() == value
 }

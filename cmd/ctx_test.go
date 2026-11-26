@@ -10,7 +10,7 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/dynatrace-oss/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
 // setupCtxTestConfig creates a temp config with contexts for testing.

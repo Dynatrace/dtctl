@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dynatrace-oss/dtctl/pkg/dql"
-	sdkquery "github.com/dynatrace-oss/dtctl/sdk/api/query"
-	"github.com/dynatrace-oss/dtctl/sdk/inventory"
+	"github.com/Dynatrace/dtctl/pkg/dql"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 // fakeRunner answers discovery queries from fixtures, keyed by the data

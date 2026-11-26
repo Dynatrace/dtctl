@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dynatrace-oss/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/output"
 )
 
 // Compaction advice (#578). Compaction is the agent-mode default, so when it

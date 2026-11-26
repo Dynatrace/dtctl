@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 24 experimental, 14 development
+- commands: 269 stable, 29 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 967
+- entries below (commands + flags): 1008
 
 ## Surface
 
@@ -334,6 +334,7 @@ config set-context                   stable
   --safety-level                     stable
   --stability-exception              stable
   --token-ref                        stable
+  --usage-tracking                   experimental  since 0.43.0  (declared)
 config set-credentials               stable
   --global                           stable
   --token                            stable
@@ -376,8 +377,8 @@ create azure monitoring              stable
 create breakpoint                    experimental  since 0.39.0
   --dry-run                          experimental
   --filters                          experimental
-  --no-repo-scope                    experimental  since 0.43.0  (declared)
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --no-repo-scope                    experimental  since 0.47.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
   --yes                              experimental
 create bucket                        stable
   --display-name                     stable
@@ -481,6 +482,7 @@ ctx set                              stable
   --safety-level                     stable
   --stability-exception              stable
   --token-ref                        stable
+  --usage-tracking                   experimental  since 0.43.0  (declared)
 ctx token                            stable
 delete                               stable
 delete anomaly-detector              stable
@@ -502,7 +504,7 @@ delete azure monitoring              stable
 delete breakpoint                    experimental  since 0.39.0
   --all                              experimental
   --dry-run                          experimental
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
   --yes                              experimental
 delete bucket                        stable
   --confirm                          stable
@@ -552,6 +554,7 @@ delete workflow                      stable
   --dry-run                          stable
   --yes                              stable
 describe                             stable
+describe action                      development  (opt-in key: actions)
 describe analyzer                    stable
   --doc                              stable
 describe anomaly-detector            stable
@@ -570,7 +573,7 @@ describe azure                       stable
 describe azure connection            stable
 describe azure monitoring            stable
 describe breakpoint                  experimental  since 0.39.0
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
 describe bucket                      stable
 describe dashboard                   stable
 describe document                    stable
@@ -720,9 +723,30 @@ exec function                        stable
   --file                             stable
   --method                           stable
   --payload                          stable
+  --sdk-major-versions               stable  (declared)
 exec preview-processor               stable
   --config-id                        stable
   --file                             stable
+exec profiling                       experimental  since 0.47.0
+exec profiling allocations           experimental  since 0.47.0
+  --app-only                         experimental
+  --default-timeframe-end            experimental
+  --default-timeframe-start          experimental
+  --limit                            experimental
+  --raw                              experimental
+  --survivors-only                   experimental
+exec profiling hotspots              experimental  since 0.47.0
+  --app-only                         experimental
+  --default-timeframe-end            experimental
+  --default-timeframe-start          experimental
+  --focus                            experimental
+  --leaf-type                        experimental
+  --limit                            experimental
+  --raw                              experimental
+  --show-waiting                     experimental
+  --sort                             experimental
+  --state                            experimental
+  --view                             experimental
 exec slo                             stable
   --timeout                          experimental  since 0.39.0  (declared)
 exec workflow                        experimental  since 0.39.0
@@ -739,6 +763,10 @@ find intents                         stable
 get                                  stable
   --fields                           experimental  since 0.40.0  (declared)
   --limit                            experimental  since 0.40.0  (declared)
+get actions                          development  (opt-in key: actions)
+  --app                              development
+  --filter                           development
+  --name                             development
 get analyzers                        stable
   --filter                           stable
 get anomaly-detectors                stable
@@ -758,7 +786,7 @@ get azure monitoring                 stable
 get azure monitoring-feature-sets    stable
 get azure monitoring-locations       stable
 get breakpoints                      experimental  since 0.39.0
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
 get buckets                          stable
 get copilot-skills                   stable
 get dashboards                       stable
@@ -843,7 +871,7 @@ get snapshots                        experimental  since 0.39.0
   --max-result-records               experimental
   --metadata                         experimental
   --no-progress                      experimental
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
 get trash                            stable
   --deleted-after                    stable
   --deleted-before                   stable
@@ -896,12 +924,14 @@ inventory                            experimental  since 0.39.0
   --budget-queries                   experimental
   --budget-seconds                   experimental
   --definitions                      experimental
+  --max-result-bytes                 experimental
   --no-builtin-definitions           experimental
   --scan-limit-gbytes                experimental
 inventory arrivals                   experimental
   --budget-queries                   experimental
   --budget-seconds                   experimental
   --definitions                      experimental
+  --max-result-bytes                 experimental
   --no-builtin-definitions           experimental
   --no-sample                        experimental
   --require                          experimental
@@ -951,9 +981,9 @@ query                                stable
   --metadata                         stable
   --no-progress                      stable
   --no-query-limits                  stable
-  --no-repo-scope                    experimental  since 0.43.0  (declared)
+  --no-repo-scope                    experimental  since 0.47.0  (declared)
   --precision                        experimental  since 0.40.0  (declared)
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
   --segment                          stable
   --segment-var                      stable
   --segments-file                    stable
@@ -966,7 +996,7 @@ query                                stable
   --timezone                         stable
   --typed                            stable
   --width                            stable
-repo-scope                           experimental  since 0.43.0
+repo-scope                           experimental  since 0.47.0
 repo-scope current                   experimental
 repo-scope delete                    experimental
 repo-scope describe                  experimental
@@ -1012,18 +1042,21 @@ share                                stable
 share dashboard                      stable
   --access                           stable
   --dry-run                          stable
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
 share document                       stable
   --access                           stable
   --dry-run                          stable
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
 share notebook                       stable
   --access                           stable
   --dry-run                          stable
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --no-notify                        experimental  since 0.40.0  (declared)
   --user                             stable
@@ -1052,18 +1085,21 @@ unshare dashboard                    stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --user                             stable
 unshare document                     stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --user                             stable
 unshare notebook                     stable
   --access                           stable
   --all                              stable
   --dry-run                          stable
+  --environment                      experimental  since 0.46.0  (declared)
   --group                            stable
   --user                             stable
 update                               stable
@@ -1099,7 +1135,7 @@ update breakpoint                    experimental  since 0.39.0
   --enabled                          experimental
   --filters                          experimental
   --log-message                      experimental
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
   --yes                              experimental
 update document                      stable
   --create-snapshot                  stable
@@ -1136,6 +1172,11 @@ update gcp monitoring                experimental  since 0.39.0
   --locationFiltering                experimental  since 0.39.0  (declared)
   --name                             experimental
 update settings                      stable
+usage                                experimental  since 0.43.0
+  --all-contexts                     experimental
+usage reset                          experimental  since 0.43.0
+  --all-contexts                     experimental
+  --yes                              experimental
 verify                               stable
 verify analyzer                      stable
   --file                             stable
@@ -1154,8 +1195,8 @@ verify query                         stable
   --fail-on-warn                     stable
   --file                             stable
   --locale                           stable
-  --no-repo-scope                    experimental  since 0.43.0  (declared)
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --no-repo-scope                    experimental  since 0.47.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
   --set                              stable
   --timezone                         stable
 version                              stable
@@ -1177,9 +1218,9 @@ wait query                           stable
   --max-result-records               stable
   --min-interval                     stable
   --no-query-limits                  stable
-  --no-repo-scope                    experimental  since 0.43.0  (declared)
+  --no-repo-scope                    experimental  since 0.47.0  (declared)
   --quiet                            stable
-  --repo-scope                       experimental  since 0.43.0  (declared)
+  --repo-scope                       experimental  since 0.47.0  (declared)
   --set                              stable
   --timeout                          stable
   --timezone                         stable
