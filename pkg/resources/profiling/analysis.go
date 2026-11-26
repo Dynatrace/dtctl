@@ -2,6 +2,8 @@ package profiling
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
 )
@@ -15,7 +17,7 @@ type HotspotsRequest struct {
 	Window Window
 	// LeafType picks which CPU samples to attribute: LeafTypeTotal (also the
 	// zero value), LeafTypeService or LeafTypeBackground.
-	LeafType string
+	LeafType LeafType
 	// ShowWaiting includes the samples of waiting (non-running) threads.
 	ShowWaiting bool
 }
@@ -36,7 +38,9 @@ type AllocationsRequest struct {
 // unlimited.
 //
 // A result is safe for concurrent use: no method changes it, and what a method
-// returns belongs to the caller.
+// returns belongs to the caller. That holds for its methods; the exported
+// fields are plain values, set once when the result is built, and must not be
+// written while another goroutine reads the result.
 type Hotspots struct {
 	// Entity is the id the analysis was asked for, as the caller passed it
 	// (APIEntityID gives the id the API was asked about).
@@ -68,9 +72,13 @@ type Allocations struct {
 	result interface{} // as Hotspots.result
 }
 
-// Hotspots runs a hotspots analysis and returns it ready to be read. An error
-// is best passed to ClassifyError before it is shown.
+// Hotspots runs a hotspots analysis and returns it ready to be read. A window
+// that is empty or longer than MaxWindow is refused before a request is sent.
+// An error is best passed to ClassifyError before it is shown.
 func (h *Handler) Hotspots(ctx context.Context, r HotspotsRequest) (*Hotspots, error) {
+	if err := r.Window.check(); err != nil {
+		return nil, &sdkcla.Error{Phase: sdkcla.PhaseValidate, Err: err}
+	}
 	resp, err := h.sdk.Run(ctx, sdkcla.Payload{
 		Kind:        sdkcla.KindHotspots,
 		EntityID:    r.Entity,
@@ -82,12 +90,19 @@ func (h *Handler) Hotspots(ctx context.Context, r HotspotsRequest) (*Hotspots, e
 	if err != nil {
 		return nil, err
 	}
+	if err := checkResult(resp.Status, resp.Result); err != nil {
+		return nil, err
+	}
 	return newHotspots(resp), nil
 }
 
-// Allocations runs an allocations analysis and returns it ready to be read. An
-// error is best passed to ClassifyError before it is shown.
+// Allocations runs an allocations analysis and returns it ready to be read. It
+// refuses the windows Hotspots refuses. An error is best passed to
+// ClassifyError before it is shown.
 func (h *Handler) Allocations(ctx context.Context, r AllocationsRequest) (*Allocations, error) {
+	if err := r.Window.check(); err != nil {
+		return nil, &sdkcla.Error{Phase: sdkcla.PhaseValidate, Err: err}
+	}
 	resp, err := h.sdk.Run(ctx, sdkcla.Payload{
 		Kind:          sdkcla.KindAllocations,
 		EntityID:      r.Entity,
@@ -96,6 +111,9 @@ func (h *Handler) Allocations(ctx context.Context, r AllocationsRequest) (*Alloc
 		SurvivorsOnly: r.SurvivorsOnly,
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := checkResult(resp.Status, resp.Result); err != nil {
 		return nil, err
 	}
 	return newAllocations(resp), nil
@@ -109,16 +127,116 @@ func newAllocations(resp *sdkcla.Response) *Allocations {
 	return &Allocations{Entity: resp.EntityID, Status: resp.Status, PollCount: resp.PollCount, result: resp.Result}
 }
 
+// The verdicts of the API a result carries in its Status.
+const (
+	statusCompleted = "completed"
+	statusNoData    = "no-data"
+)
+
+// ErrMalformedResult is in the chain of the error for a document that is not
+// an analysis result: what HotspotsFromRaw and AllocationsFromRaw return for a
+// document Raw did not write, and what a Handler returns when the API answers
+// a completed analysis with something other than a JSON object.
+var ErrMalformedResult = errors.New("profiling: malformed analysis result")
+
+// checkResult reports whether result is what an analysis with this status
+// carries: a JSON object when it completed, nothing when there was no data.
+// Read as it is, any other document would have no rows in any view and so
+// pass for a process without samples.
+func checkResult(status string, result interface{}) error {
+	switch status {
+	case statusCompleted:
+		if _, ok := result.(map[string]interface{}); !ok {
+			return fmt.Errorf("%w: the result of a completed analysis is %s, not an object", ErrMalformedResult, jsonKind(result))
+		}
+	case statusNoData:
+		if result != nil {
+			return fmt.Errorf("%w: an analysis without data carries a result", ErrMalformedResult)
+		}
+	default:
+		return fmt.Errorf("%w: status %q, want %s or %s", ErrMalformedResult, status, statusCompleted, statusNoData)
+	}
+	return nil
+}
+
+// jsonKind names the JSON type of a decoded value.
+func jsonKind(v interface{}) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case []interface{}:
+		return "an array"
+	case string:
+		return "a string"
+	case float64:
+		return "a number"
+	case bool:
+		return "a boolean"
+	}
+	return fmt.Sprintf("a %T", v)
+}
+
+// HotspotsFromRaw rebuilds a hotspots analysis from the document its Raw
+// returned, so that an analysis kept as JSON (`dtctl exec profiling hotspots
+// --raw -o json` prints that document) can be read again without running it.
+// raw is typically that JSON, decoded. The result keeps a copy: raw stays the
+// caller's. A document of another kind of analysis, or one that Raw did not
+// write, is an error that wraps ErrMalformedResult.
+func HotspotsFromRaw(raw map[string]interface{}) (*Hotspots, error) {
+	e, err := openEnvelope(sdkcla.KindHotspots, raw)
+	if err != nil {
+		return nil, err
+	}
+	return &Hotspots{Entity: e.entity, Status: e.status, PollCount: e.pollCount, result: e.result}, nil
+}
+
+// AllocationsFromRaw rebuilds an allocations analysis from the document its
+// Raw returned, as HotspotsFromRaw does for a hotspots analysis.
+func AllocationsFromRaw(raw map[string]interface{}) (*Allocations, error) {
+	e, err := openEnvelope(sdkcla.KindAllocations, raw)
+	if err != nil {
+		return nil, err
+	}
+	return &Allocations{Entity: e.entity, Status: e.status, PollCount: e.pollCount, result: e.result}, nil
+}
+
+// envelope is what the document of rawEnvelope holds.
+type envelope struct {
+	entity, status string
+	pollCount      int
+	result         interface{}
+}
+
+// openEnvelope reads a document rawEnvelope built for an analysis of kind. The
+// result it returns is a copy.
+func openEnvelope(kind sdkcla.Kind, raw map[string]interface{}) (envelope, error) {
+	if got, _ := raw["kind"].(string); got != string(kind) {
+		return envelope{}, fmt.Errorf("%w: kind %q, want %s", ErrMalformedResult, got, kind)
+	}
+	e := envelope{}
+	e.status, _ = raw["status"].(string)
+	if err := checkResult(e.status, raw["result"]); err != nil {
+		return envelope{}, err
+	}
+	e.entity, _ = raw["entityId"].(string)
+	polls, _ := raw["pollCount"].(float64)
+	e.pollCount = count(polls)
+	e.result = compactResult(raw["result"])
+	return e, nil
+}
+
 // Raw is the API's whole result under the envelope keys status, kind (the
 // API's name for the analysis), entityId, pollCount and result, without the
 // timeseries data points and the fields that only carry chart rendering.
 // Large: megabytes for a busy process. Every call builds a new document, which
-// the caller may change.
+// the caller may change. Every number in it is a float64, as in a document
+// decoded from JSON. HotspotsFromRaw reads the document back.
 func (h *Hotspots) Raw() map[string]interface{} {
 	return rawEnvelope(sdkcla.KindHotspots, h.Entity, h.Status, h.PollCount, h.result)
 }
 
-// Raw is the API's whole result, as Hotspots.Raw gives it.
+// Raw is the API's whole result, as Hotspots.Raw gives it. AllocationsFromRaw
+// reads the document back.
 func (a *Allocations) Raw() map[string]interface{} {
 	return rawEnvelope(sdkcla.KindAllocations, a.Entity, a.Status, a.PollCount, a.result)
 }
@@ -178,8 +296,8 @@ type AllocationView struct {
 func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
 	v := AllocationView{Rows: allocationStacks(a.result, appOnly, bySurvivors)}
 	for _, r := range v.Rows {
-		v.AllocatedBytes = satAdd(v.AllocatedBytes, int64(r.AllocBytes))
-		v.SurvivedBytes = satAdd(v.SurvivedBytes, int64(r.SurvivedBytes))
+		v.AllocatedBytes = satAdd(v.AllocatedBytes, r.AllocBytes)
+		v.SurvivedBytes = satAdd(v.SurvivedBytes, r.SurvivedBytes)
 	}
 	switch {
 	case len(v.Rows) > 0:
@@ -213,17 +331,33 @@ func (h *Hotspots) Functions(appOnly bool, state State, by SortKey) (FunctionVie
 }
 
 // Focus reads the analysis as one function's callers and callees, counting
-// the samples of state. pattern names the function: an exact frame label, or a
-// substring of exactly one. A pattern that matches no function is a
-// *NoMatchError and one that matches several an *AmbiguousMatchError; an
-// unknown state is an error that wraps ErrUnknownState. An analysis with
-// nothing to match against is not an error: the view's Empty says why.
+// the samples of state. pattern names the function as a person types it: an
+// exact frame label, or a substring of exactly one. It is matched against the
+// functions that have samples in state, so a label without any there is not
+// found as itself and can match a longer one as a substring; the view's
+// Function says which function was focused. FocusExact takes a label only.
+//
+// A pattern that matches no function is a *NoMatchError, one that matches
+// several an *AmbiguousMatchError and an empty one ErrEmptyPattern; an unknown
+// state is an error that wraps ErrUnknownState. An analysis with nothing to
+// match against is not an error: the view's Empty says why.
 func (h *Hotspots) Focus(appOnly bool, state State, pattern string) (FocusView, error) {
+	return h.focus(appOnly, state, pattern, false)
+}
+
+// FocusExact is Focus for a caller that holds a frame label, such as the
+// Function of a row: function names that frame and nothing else, so a label
+// without samples in state is a *NoMatchError, never another function.
+func (h *Hotspots) FocusExact(appOnly bool, state State, function string) (FocusView, error) {
+	return h.focus(appOnly, state, function, true)
+}
+
+func (h *Hotspots) focus(appOnly bool, state State, pattern string, exact bool) (FocusView, error) {
 	state, err := ParseState(string(state))
 	if err != nil {
 		return FocusView{}, err
 	}
-	v, err := hotspotFocus(h.result, appOnly, state, pattern)
+	v, err := hotspotFocus(h.result, appOnly, state, pattern, exact)
 	if err != nil {
 		return FocusView{}, err
 	}
@@ -297,8 +431,14 @@ func compactResult(v interface{}) interface{} {
 			}
 			if k == "dataPoints" {
 				if arr, ok := child.([]interface{}); ok {
-					out["dataPointsCount"] = len(arr)
+					// A float64, as every other number in the document is.
+					out["dataPointsCount"] = float64(len(arr))
 					continue
+				}
+			}
+			if k == "dataPointsCount" {
+				if _, ok := val["dataPoints"].([]interface{}); ok {
+					continue // the points are there to be counted
 				}
 			}
 			out[k] = compactResult(child)

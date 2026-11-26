@@ -34,7 +34,7 @@ func TestHotspotViews_CyclicTreeTerminates(t *testing.T) {
 	if len(hotspotFunctions(cyclicHotspots(), false, "running", "self").Rows) == 0 {
 		t.Fatal("functions view: want rows for the reachable nodes")
 	}
-	if _, err := hotspotFocus(cyclicHotspots(), false, "running", "main"); err != nil {
+	if _, err := hotspotFocus(cyclicHotspots(), false, "running", "main", false); err != nil {
 		t.Fatalf("focus view: %v", err)
 	}
 }

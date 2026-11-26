@@ -26,11 +26,13 @@ const SurvivedNote = "survived_bytes/survived_count are summed over every GC an 
 // AllocationRow is one row of the allocations stack view: an allocation path,
 // allocation site first, with its own share of the window's allocations.
 // SurvivedBytes and SurvivedCount are summed per GC survived (SurvivedNote).
+// The figures are int64, as the view's totals are: a byte count outgrows an
+// int on a 32-bit platform.
 type AllocationRow struct {
-	AllocBytes    int    `json:"alloc_bytes" table:"ALLOC_BYTES"`
-	SurvivedBytes int    `json:"survived_bytes" table:"SURVIVED_BYTES"`
-	AllocCount    int    `json:"alloc_count" table:"ALLOC_COUNT"`
-	SurvivedCount int    `json:"survived_count" table:"SURVIVED_COUNT"`
+	AllocBytes    int64  `json:"alloc_bytes" table:"ALLOC_BYTES"`
+	SurvivedBytes int64  `json:"survived_bytes" table:"SURVIVED_BYTES"`
+	AllocCount    int64  `json:"alloc_count" table:"ALLOC_COUNT"`
+	SurvivedCount int64  `json:"survived_count" table:"SURVIVED_COUNT"`
 	Stack         string `json:"stack" table:"STACK"`
 }
 
@@ -216,8 +218,8 @@ func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 
 	type line struct {
 		path                  string
-		allocSize, survSize   int
-		allocCount, survCount int
+		allocSize, survSize   int64
+		allocCount, survCount int64
 	}
 	var all []*line
 	byPath := map[string]*line{}
@@ -230,7 +232,7 @@ func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 	// leaf-only fold would drop that. Summed over the tree, the shares add
 	// back up to the roots. Paths that coincide (recursion, or --app-only
 	// dropping the frames that told them apart) are merged into one line.
-	selfOf := func(n *mnode, key string) int {
+	selfOf := func(n *mnode, key string) int64 {
 		v := intVal(n.ai, key)
 		for _, cid := range n.children {
 			if c := nodeMap[cid]; c != nil {
@@ -268,10 +270,10 @@ func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 					byPath[key] = l
 					all = append(all, l)
 				}
-				l.allocSize = satAddInt(l.allocSize, self.allocSize)
-				l.survSize = satAddInt(l.survSize, self.survSize)
-				l.allocCount = satAddInt(l.allocCount, self.allocCount)
-				l.survCount = satAddInt(l.survCount, self.survCount)
+				l.allocSize = satAdd(l.allocSize, self.allocSize)
+				l.survSize = satAdd(l.survSize, self.survSize)
+				l.allocCount = satAdd(l.allocCount, self.allocCount)
+				l.survCount = satAdd(l.survCount, self.survCount)
 			}
 		}
 		for _, cid := range n.children {

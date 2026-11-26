@@ -25,12 +25,29 @@ import (
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
-// Leaf-type selections for hotspots, re-exported from the SDK.
+// LeafType selects which CPU samples a hotspots analysis attributes. The zero
+// value counts as LeafTypeTotal. The type and its values are the SDK's.
+type LeafType = sdkcla.LeafType
+
 const (
-	LeafTypeTotal      = sdkcla.LeafTypeTotal
-	LeafTypeService    = sdkcla.LeafTypeService
+	// LeafTypeTotal attributes every sample.
+	LeafTypeTotal = sdkcla.LeafTypeTotal
+	// LeafTypeService attributes the samples taken inside a traced service
+	// context.
+	LeafTypeService = sdkcla.LeafTypeService
+	// LeafTypeBackground attributes the samples taken outside any service
+	// context.
 	LeafTypeBackground = sdkcla.LeafTypeBackground
 )
+
+// ErrUnknownLeafType is the error for a LeafType that is none of the
+// constants.
+var ErrUnknownLeafType = sdkcla.ErrUnknownLeafType
+
+// ParseLeafType returns the LeafType named s, LeafTypeTotal for the empty
+// string. A name that is none of the constants is an error that wraps
+// ErrUnknownLeafType.
+func ParseLeafType(s string) (LeafType, error) { return sdkcla.ParseLeafType(s) }
 
 // APIEntityID is the id the API is asked about for entityID: PROCESS-<id>
 // becomes PROCESS_GROUP_INSTANCE-<id> (the same entity), classic ids pass

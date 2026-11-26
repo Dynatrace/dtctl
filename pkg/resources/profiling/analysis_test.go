@@ -3,6 +3,7 @@ package profiling
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -26,9 +27,9 @@ func allocationsOf(env map[string]interface{}) *Allocations {
 	return newAllocations(&sdkcla.Response{Status: "completed", Kind: sdkcla.KindAllocations, EntityID: testEntity, Result: env})
 }
 
-func survnode(id float64, name string, app bool, alloc, surv int, children ...interface{}) map[string]interface{} {
+func survnode(id float64, name string, app bool, alloc, surv float64, children ...interface{}) map[string]interface{} {
 	n := memnode(id, name, app, alloc, 1, children...)
-	n["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(surv)
+	n["allocationInfo"].(map[string]interface{})["survivorSize"] = surv
 	return n
 }
 
@@ -121,7 +122,7 @@ func TestHandler_Hotspots(t *testing.T) {
 		"status": "completed", "kind": "methodHotspots", "entityId": testEntity, "pollCount": float64(2),
 		"result": map[string]interface{}{
 			"dataRootNodeId": "0",
-			"timeseries":     map[string]interface{}{"dataPointsCount": 3},
+			"timeseries":     map[string]interface{}{"dataPointsCount": float64(3)},
 			"dataNodes": []interface{}{
 				map[string]interface{}{"id": "0", "methodName": "", "samples": map[string]interface{}{"RUNNING": float64(0)}, "childIds": []interface{}{"A"}},
 				map[string]interface{}{"id": "A", "className": "app.Main", "methodName": "main", "apiInfo": map[string]interface{}{"systemApi": true},
@@ -457,5 +458,115 @@ func TestResults_ConcurrentReaders(t *testing.T) {
 	}
 	for i := 0; i < 8; i++ {
 		<-done
+	}
+}
+
+// A handler takes the windows ResolveWindow gives: one that ends after its
+// start and is at most MaxWindow long. Any other is refused with
+// ResolveWindow's own errors before a request is sent, so a Window built by
+// hand cannot ask for more than the command can.
+func TestHandler_RefusesAWindowItDoesNotTake(t *testing.T) {
+	h, requests := analysisAPI(t)
+	ctx := context.Background()
+	sixHours := Window{From: 1_700_000_000_000, To: 1_700_000_000_000 + 6*3600*1000}
+
+	_, err := h.Hotspots(ctx, HotspotsRequest{Entity: testEntity, Window: sixHours})
+	var tooLong *WindowTooLongError
+	if !errors.As(err, &tooLong) || tooLong.Requested != sixHours || tooLong.Max != MaxWindow {
+		t.Errorf("Hotspots over six hours: err = %v, want a *WindowTooLongError for %+v over %s", err, sixHours, MaxWindow)
+	}
+	_, err = h.Allocations(ctx, AllocationsRequest{Entity: testEntity, Window: sixHours})
+	if !errors.As(err, &tooLong) {
+		t.Errorf("Allocations over six hours: err = %v, want a *WindowTooLongError", err)
+	}
+	for _, w := range []Window{{}, {From: 5, To: 5}, {From: 2000, To: 1000}} {
+		if _, err := h.Hotspots(ctx, HotspotsRequest{Entity: testEntity, Window: w}); !errors.Is(err, ErrWindowEmpty) {
+			t.Errorf("Hotspots over %+v: err = %v, want ErrWindowEmpty", w, err)
+		}
+		if _, err := h.Allocations(ctx, AllocationsRequest{Entity: testEntity, Window: w}); !errors.Is(err, ErrWindowEmpty) {
+			t.Errorf("Allocations over %+v: err = %v, want ErrWindowEmpty", w, err)
+		}
+	}
+	if len(*requests) != 0 {
+		t.Errorf("requests = %q, want none for a window the handler refuses", *requests)
+	}
+
+	// Exactly MaxWindow is taken, and so is a window that starts at the epoch.
+	if _, err := h.Allocations(ctx, AllocationsRequest{Entity: testEntity, Window: Window{From: 0, To: MaxWindow.Milliseconds()}}); err != nil {
+		t.Fatalf("Allocations over the first MaxWindow of the epoch: %v", err)
+	}
+	const submit = "/platform-reserved/codelevelanalysis/v0.1/memoryallocation/PROCESS_GROUP_INSTANCE-0000000000000001?from=0&to=7200000"
+	if len(*requests) != 1 || (*requests)[0] != submit {
+		t.Errorf("requests = %q, want only %q", *requests, submit)
+	}
+}
+
+// Every number of the document Raw returns is a float64, as in any decoded
+// JSON document, also the two it writes itself.
+func TestRaw_NumbersAreFloat64(t *testing.T) {
+	var result interface{}
+	if err := json.Unmarshal([]byte(`{"timeseries":{"dataPoints":[1,2,3]},"dataNodes":[]}`), &result); err != nil {
+		t.Fatal(err)
+	}
+	raw := rawEnvelope(sdkcla.KindHotspots, testEntity, "completed", 2, result)
+	if _, ok := raw["pollCount"].(float64); !ok {
+		t.Errorf("pollCount is a %T, want a float64", raw["pollCount"])
+	}
+	got := raw["result"].(map[string]interface{})["timeseries"].(map[string]interface{})["dataPointsCount"]
+	if got != float64(3) {
+		t.Errorf("dataPointsCount = %#v, want float64(3)", got)
+	}
+}
+
+// A document that holds both the data points and a count of them (one that
+// went through Raw once and had points added) gets the count of its points,
+// every time.
+func TestCompactResult_CountsTheDataPointsItDrops(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		got := compactResult(map[string]interface{}{"dataPoints": []interface{}{1.0, 2.0}, "dataPointsCount": float64(9)})
+		if want := map[string]interface{}{"dataPointsCount": float64(2)}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("compactResult = %#v, want %#v", got, want)
+		}
+	}
+}
+
+// A completed analysis whose result is not a JSON object is not an analysis.
+// Read as one it would have no rows in any view, and so pass for a process
+// that was idle.
+func TestHandler_RefusesAResultThatIsNoObject(t *testing.T) {
+	body := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	c, err := client.NewForTesting(srv.URL, "dt0c01.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(c)
+	window := Window{From: 1000, To: 2000}
+	for in, want := range map[string]string{
+		`[1,2]`:  "profiling: malformed analysis result: the result of a completed analysis is an array, not an object",
+		`"gone"`: "profiling: malformed analysis result: the result of a completed analysis is a string, not an object",
+		`null`:   "profiling: malformed analysis result: the result of a completed analysis is null, not an object",
+		`7`:      "profiling: malformed analysis result: the result of a completed analysis is a number, not an object",
+	} {
+		body = in
+		hs, err := h.Hotspots(context.Background(), HotspotsRequest{Entity: testEntity, Window: window})
+		if hs != nil || !errors.Is(err, ErrMalformedResult) || err.Error() != want {
+			t.Errorf("Hotspots answered with %s: %v, %v; want the error %q", in, hs, err, want)
+		}
+		a, err := h.Allocations(context.Background(), AllocationsRequest{Entity: testEntity, Window: window})
+		if a != nil || !errors.Is(err, ErrMalformedResult) || err.Error() != want {
+			t.Errorf("Allocations answered with %s: %v, %v; want the error %q", in, a, err, want)
+		}
+		if _, ok := ClassifyError(err); ok {
+			t.Errorf("ClassifyError classifies %v, which is not a failure a caller can act on", err)
+		}
+	}
+	body = `{}`
+	if hs, err := h.Hotspots(context.Background(), HotspotsRequest{Entity: testEntity, Window: window}); err != nil || hs.Stacks(false).Empty != EmptyNoSamples {
+		t.Errorf("Hotspots answered with an empty object: %v, want a result without samples", err)
 	}
 }

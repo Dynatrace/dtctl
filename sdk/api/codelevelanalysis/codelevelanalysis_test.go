@@ -21,14 +21,14 @@ import (
 
 func TestEncodeLeafType(t *testing.T) {
 	cases := []struct {
-		in      string
+		in      LeafType
 		want    string
 		wantErr bool
 	}{
 		{"", "", false},
 		{LeafTypeTotal, "", false},
 		{LeafTypeBackground, "42\x110", false},
-		{"ambient", "42\x110", false},
+		{"ambient", "", true}, // the API's own word for background; not a name here
 		{LeafTypeService, "42\x111", false},
 		{"bogus", "", true},
 	}
@@ -48,7 +48,7 @@ func TestEncodeLeafType(t *testing.T) {
 // expects: background -> 42%110, service -> 42%111, total -> omitted.
 func TestLeafTypeWireEncoding(t *testing.T) {
 	cases := []struct {
-		leafType     string
+		leafType     LeafType
 		wantContains string // "" means servicefilter must be absent
 	}{
 		{LeafTypeTotal, ""},
@@ -614,6 +614,10 @@ func TestValidateTimeframeLength(t *testing.T) {
 		{math.MinInt64, 1_700_000_000_000, "codelevelanalysis: timeframe must not exceed 24 hours"},
 		{-1, math.MaxInt64, "codelevelanalysis: timeframe must not exceed 24 hours"},
 		{2, 1, "codelevelanalysis: from/to must be epoch-millis with to > from"},
+		{5, 5, "codelevelanalysis: from/to must be epoch-millis with to > from"},
+		// The epoch itself is a bound like any other.
+		{0, 1000, ""},
+		{-1000, 0, ""},
 	}
 	for _, tc := range cases {
 		err := validate(Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: tc.from, To: tc.to})
@@ -768,5 +772,30 @@ func TestLeafTypeTotalOverridesRawServiceFilter(t *testing.T) {
 	p := Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2, ServiceFilter: "42\x110", LeafType: LeafTypeTotal}
 	if got, want := buildSubmitPath(p), basePath+"/methodhotspots/PROCESS_GROUP-ABC?from=1&to=2"; got != want {
 		t.Errorf("buildSubmitPath = %q, want %q", got, want)
+	}
+}
+
+func TestParseLeafType(t *testing.T) {
+	for in, want := range map[string]LeafType{
+		"": LeafTypeTotal, "total": LeafTypeTotal, "service": LeafTypeService, "background": LeafTypeBackground,
+	} {
+		if got, err := ParseLeafType(in); err != nil || got != want {
+			t.Errorf("ParseLeafType(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"ambient", "Total", "nope"} {
+		got, err := ParseLeafType(in)
+		if !errors.Is(err, ErrUnknownLeafType) || got != "" {
+			t.Errorf("ParseLeafType(%q) = %q, %v; want an error that wraps ErrUnknownLeafType", in, got, err)
+		}
+	}
+	_, err := ParseLeafType("nope")
+	if want := `codelevelanalysis: unknown leaf type "nope": use total, service, or background`; err.Error() != want {
+		t.Errorf("err = %q, want %q", err, want)
+	}
+	// Run refuses what ParseLeafType refuses, with the same error.
+	err = validate(Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2, LeafType: "ambient"})
+	if !errors.Is(err, ErrUnknownLeafType) {
+		t.Errorf("validate(leaf type ambient) = %v, want an error that wraps ErrUnknownLeafType", err)
 	}
 }

@@ -118,6 +118,9 @@ func TestResolveWindow_Errors(t *testing.T) {
 			text: "profiling: the window ends in the future"},
 		{name: "end alone, in the future", end: "now()+1ms", is: ErrWindowEndInFuture,
 			text: "profiling: the window ends in the future"},
+		// The start is derived from the end here, so the end is what is wrong.
+		{name: "end alone, far in the future", end: "now()+3h", is: ErrWindowEndInFuture,
+			text: "profiling: the window ends in the future"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -207,9 +207,10 @@ func strVal(m map[string]interface{}, key string) string {
 	return v
 }
 
-func intVal(m map[string]interface{}, key string) int {
+// intVal is the count under key, as count reads one.
+func intVal(m map[string]interface{}, key string) int64 {
 	v, _ := m[key].(float64)
-	return count(v)
+	return max(floatInt64(v), 0)
 }
 
 // count is the count a JSON number stands for. A negative one is no count: it
@@ -217,17 +218,22 @@ func intVal(m map[string]interface{}, key string) int {
 // minus its children's.
 func count(v float64) int { return max(floatInt(v), 0) }
 
-// floatInt is the integer a JSON number stands for, held at the nearest int
-// where it has none: converting a float64 out of range does not fail but gives
-// an arbitrary value.
-func floatInt(v float64) int {
+// floatInt64 is the integer a JSON number stands for, held at the nearest
+// int64 where it has none: converting a float64 out of range does not fail but
+// gives an arbitrary value.
+func floatInt64(v float64) int64 {
 	switch {
-	case v >= float64(math.MaxInt): // 2^63, the first value an int cannot hold
-		return math.MaxInt
-	case v <= float64(math.MinInt):
-		return math.MinInt
+	case v >= float64(math.MaxInt64): // 2^63, the first value an int64 cannot hold
+		return math.MaxInt64
+	case v <= float64(math.MinInt64):
+		return math.MinInt64
 	case v != v: // NaN
 		return 0
 	}
-	return int(v)
+	return int64(v)
+}
+
+// floatInt is floatInt64 for an int, which is narrower on a 32-bit platform.
+func floatInt(v float64) int {
+	return int(min(max(floatInt64(v), math.MinInt), math.MaxInt))
 }

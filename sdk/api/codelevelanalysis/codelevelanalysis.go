@@ -87,6 +87,10 @@ const (
 	KindAllocationDetails Kind = "memoryAllocationDetails"
 )
 
+// LeafType selects which CPU samples a hotspots or threads analysis
+// attributes. The zero value counts as LeafTypeTotal.
+type LeafType string
+
 // Leaf-type filter values (hotspots/threads). The code-level analysis API
 // splits every CPU sample by whether the thread was inside a traced service
 // context (SERVICE) or not (background, historically called "ambient"). The two
@@ -98,10 +102,27 @@ const (
 // AMBIENT_LEAF_TYPE control (ordinal 42) from its value — AMBIENT(background)=0,
 // SERVICE=1. Omitting servicefilter entirely selects BOTH (the clean total).
 const (
-	LeafTypeTotal      = "total"      // omit the filter -> background + service (clean total)
-	LeafTypeService    = "service"    // only samples taken while in a traced service context
-	LeafTypeBackground = "background" // only samples taken outside any service context
+	LeafTypeTotal      LeafType = "total"      // omit the filter -> background + service (clean total)
+	LeafTypeService    LeafType = "service"    // only samples taken while in a traced service context
+	LeafTypeBackground LeafType = "background" // only samples taken outside any service context
 )
+
+// ErrUnknownLeafType is the error for a LeafType that is none of the
+// constants.
+var ErrUnknownLeafType = errors.New("codelevelanalysis: unknown leaf type")
+
+// ParseLeafType returns the LeafType named s, LeafTypeTotal for the empty
+// string. A name that is none of the constants is an error that wraps
+// ErrUnknownLeafType.
+func ParseLeafType(s string) (LeafType, error) {
+	switch LeafType(s) {
+	case "", LeafTypeTotal:
+		return LeafTypeTotal, nil
+	case LeafTypeService, LeafTypeBackground:
+		return LeafType(s), nil
+	}
+	return "", fmt.Errorf("%w %q: use total, service, or background", ErrUnknownLeafType, s)
+}
 
 const (
 	ambientLeafTypeOrdinal = "42"   // AMBIENT_LEAF_TYPE enum ordinal
@@ -112,17 +133,18 @@ const (
 // value. An empty selection (or "total") returns "" so the caller omits the
 // param and gets the clean background+service total. The returned string is
 // left un-escaped; url.Values.Encode escapes the \x11 as %11 on the wire.
-func encodeLeafType(leafType string) (string, error) {
+func encodeLeafType(leafType LeafType) (string, error) {
+	leafType, err := ParseLeafType(string(leafType))
+	if err != nil {
+		return "", err
+	}
 	switch leafType {
-	case "", LeafTypeTotal:
-		return "", nil
-	case LeafTypeBackground, "ambient":
+	case LeafTypeBackground:
 		return ambientLeafTypeOrdinal + leafTypeControlSep + "0", nil
 	case LeafTypeService:
 		return ambientLeafTypeOrdinal + leafTypeControlSep + "1", nil
-	default:
-		return "", fmt.Errorf("codelevelanalysis: unknown leaf type %q: use total, service, or background", leafType)
 	}
+	return "", nil
 }
 
 // EligibleEntity reports whether id is a process-level entity the code-level
@@ -163,10 +185,11 @@ type Payload struct {
 	From     int64  `json:"from"`
 	To       int64  `json:"to"`
 	// LeafType selects which CPU samples to attribute (hotspots/threads):
-	// "total" (default), "service", or "background". It is the friendly form of
-	// ServiceFilter and, when set, decides the servicefilter param via the
-	// control-char encoding ("total" sends none). See LeafType* consts.
-	LeafType string `json:"leafType,omitempty"`
+	// LeafTypeTotal (default), LeafTypeService, or LeafTypeBackground. It is
+	// the friendly form of ServiceFilter and, when set, decides the
+	// servicefilter param via the control-char encoding (LeafTypeTotal sends
+	// none).
+	LeafType LeafType `json:"leafType,omitempty"`
 	// ServiceFilter is the raw servicefilter wire value — an escape hatch for
 	// SDK callers who already hold an encoded filter. LeafType takes precedence
 	// when both are set.
@@ -395,7 +418,7 @@ func validate(p Payload) error {
 	if _, err := encodeLeafType(p.LeafType); err != nil {
 		return err
 	}
-	if p.From == 0 || p.To == 0 || p.To <= p.From {
+	if p.To <= p.From {
 		return fmt.Errorf("codelevelanalysis: from/to must be epoch-millis with to > from")
 	}
 	// To is after From here, so a negative difference is one that overflowed.

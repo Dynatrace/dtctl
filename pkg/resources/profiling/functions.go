@@ -173,8 +173,12 @@ func (v FocusView) Rows(limit int) []FocusRow {
 	return rows
 }
 
-// NoMatchError is the error Focus returns when its pattern matches no function
-// of the view.
+// ErrEmptyPattern is the error Focus and FocusExact return for an empty
+// pattern, which names no function (as a substring it would match them all).
+var ErrEmptyPattern = errors.New("profiling: empty focus pattern")
+
+// NoMatchError is the error Focus and FocusExact return when the pattern
+// matches no function of the view.
 type NoMatchError struct {
 	Pattern string
 }
@@ -390,14 +394,17 @@ func hotspotFunctions(raw interface{}, appOnly bool, state State, sortBy SortKey
 }
 
 // hotspotFocus builds the callers/callees view of one function. pattern names
-// the function: an exact frame label, or a substring of exactly one label. The
-// view has no function when the result has no samples to show.
-func hotspotFocus(raw interface{}, appOnly bool, state State, pattern string) (FocusView, error) {
+// the function: an exact frame label, or unless exact a substring of exactly
+// one label. The view has no function when the result has no samples to show.
+func hotspotFocus(raw interface{}, appOnly bool, state State, pattern string, exact bool) (FocusView, error) {
+	if pattern == "" {
+		return FocusView{}, ErrEmptyPattern
+	}
 	t := hotspotFunctions(raw, appOnly, state, SortByTotal)
 	if len(t.Rows) == 0 {
 		return FocusView{}, nil
 	}
-	function, err := matchFunction(t.Rows, pattern)
+	function, err := matchFunction(t.Rows, pattern, exact)
 	if err != nil {
 		return FocusView{}, err
 	}
@@ -431,16 +438,16 @@ func hotspotFocus(raw interface{}, appOnly bool, state State, pattern string) (F
 }
 
 // matchFunction resolves a focus pattern against the function labels: an exact
-// label wins, otherwise the pattern must be a substring of exactly one label.
-// rows must be sorted by total samples, the order an *AmbiguousMatchError
-// lists its candidates in.
-func matchFunction(rows []FunctionRow, pattern string) (string, error) {
+// label wins, otherwise the pattern must be a substring of exactly one label,
+// and with exact only the label itself will do. rows must be sorted by total
+// samples, the order an *AmbiguousMatchError lists its candidates in.
+func matchFunction(rows []FunctionRow, pattern string, exact bool) (string, error) {
 	var matches []string
 	for _, r := range rows {
 		if r.Function == pattern {
 			return r.Function, nil
 		}
-		if strings.Contains(r.Function, pattern) {
+		if !exact && strings.Contains(r.Function, pattern) {
 			matches = append(matches, r.Function)
 		}
 	}

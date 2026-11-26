@@ -16,7 +16,8 @@ type FailureReason string
 const (
 	// FailureInvalidInput: the request was refused before it was sent: an
 	// entity that is not eligible (EligibleEntity), an unknown leaf type, or
-	// a window the API does not take.
+	// a window a Handler does not take (errors.Is and errors.As find
+	// ErrWindowEmpty and the *WindowTooLongError).
 	FailureInvalidInput FailureReason = "invalid_input"
 	// FailureBadRequest: the API rejected the request parameters (400).
 	FailureBadRequest FailureReason = "bad_request"
@@ -52,15 +53,17 @@ type Failure struct {
 }
 
 // ClassifyError recognizes the failures of an analysis that a caller can act
-// on. It reports false for every other error (a failed connection, a cancelled
-// context, a status with no meaning of its own here such as 401), which is
-// then best shown as it is.
+// on, in an error that Handler.Hotspots or Handler.Allocations returned. It
+// reports false for every other error: a failed connection, a cancelled
+// context, a status with no meaning of its own here such as 401, and any
+// error that did not come from an analysis, whose status means something
+// else. Such an error is best shown as it is.
 func ClassifyError(err error) (Failure, bool) {
 	var runErr *sdkcla.Error
-	phase := sdkcla.PhaseSubmit // an API error from elsewhere has no phase
-	if errors.As(err, &runErr) {
-		phase = runErr.Phase
+	if !errors.As(err, &runErr) {
+		return Failure{}, false
 	}
+	phase := runErr.Phase
 	if phase == sdkcla.PhaseValidate {
 		return Failure{Reason: FailureInvalidInput, Message: runErr.Error()}, true
 	}

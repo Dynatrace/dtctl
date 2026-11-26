@@ -306,11 +306,11 @@ func TestToCollapsed_AppOnlyNodeJSKeepsOwnFiles(t *testing.T) {
 
 // memnode is a memory-tree node: the tree is inverted (the allocation site is
 // the root, its callers below it) and allocationInfo is cumulative.
-func memnode(id float64, name string, app bool, alloc, count int, children ...interface{}) map[string]interface{} {
+func memnode(id float64, name string, app bool, alloc, count float64, children ...interface{}) map[string]interface{} {
 	return map[string]interface{}{
 		"id": id, "name": name, "childIds": children,
 		"apiInfo":        map[string]interface{}{"systemApi": app},
-		"allocationInfo": map[string]interface{}{"allocationSize": float64(alloc), "allocationCount": float64(count)},
+		"allocationInfo": map[string]interface{}{"allocationSize": alloc, "allocationCount": count},
 	}
 }
 

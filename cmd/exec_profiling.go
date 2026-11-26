@@ -185,7 +185,7 @@ func newProfilingHotspotsCmd() *cobra.Command {
 		},
 	}
 	addProfilingCommonFlags(c, f)
-	c.Flags().StringVar(&f.leafType, "leaf-type", profiling.LeafTypeTotal, "CPU sample scope: total, service, or background")
+	c.Flags().StringVar(&f.leafType, "leaf-type", string(profiling.LeafTypeTotal), "CPU sample scope: total, service, or background")
 	c.Flags().BoolVar(&f.showWaiting, "show-waiting", false, "include waiting (non-running) samples")
 	c.Flags().StringVar(&f.view, "view", "stacks", "stacks (one row per call stack) or functions (one row per function, self and total)")
 	c.Flags().StringVar(&f.focus, "focus", "", "show this function's callers and callees (an exact frame, or a substring of exactly one)")
@@ -256,7 +256,7 @@ func addProfilingCommonFlags(c *cobra.Command, f *profilingFlags) {
 type profilingRun struct {
 	kind     string // hotspots or allocations
 	entity   string
-	leafType string
+	leafType profiling.LeafType
 	status   string
 	window   profiling.Window
 }
@@ -283,10 +283,7 @@ func (r *profilingRun) annotate(ap *output.AgentPrinter, view, state string) *ou
 		p.APIEntity = api
 	}
 	if r.kind == "hotspots" {
-		p.LeafType = r.leafType
-		if p.LeafType == "" {
-			p.LeafType = profiling.LeafTypeTotal
-		}
+		p.LeafType = string(r.leafType)
 	}
 	ctx.Profile = p
 	return p
@@ -301,9 +298,8 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	if !profiling.EligibleEntity(entityID) {
 		return fmt.Errorf("invalid entity %q: profiling takes a process id, PROCESS-xxx (classic PROCESS_GROUP-xxx and PROCESS_GROUP_INSTANCE-xxx ids work too; SERVICE ids do not).\nFind a process id:\n  %s", entityID, profilingFindIDsHint)
 	}
-	switch f.leafType {
-	case "", profiling.LeafTypeTotal, profiling.LeafTypeService, profiling.LeafTypeBackground:
-	default:
+	leafType, err := profiling.ParseLeafType(f.leafType)
+	if err != nil {
 		return fmt.Errorf("invalid --leaf-type %q: use total, service, or background", f.leafType)
 	}
 	state, sortKey, err := profilingViewOptions(f)
@@ -330,7 +326,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return err
 	}
 
-	run := &profilingRun{kind: kind, entity: entityID, leafType: f.leafType, window: window}
+	run := &profilingRun{kind: kind, entity: entityID, leafType: leafType, window: window}
 	h := profiling.NewHandler(c)
 	progress := output.NewProgressReporterTo(true, agentMode(ctx), currentStderr(ctx))
 	progress.Update(output.ProgressState{Label: fmt.Sprintf("running %s analysis", kind)})
@@ -355,7 +351,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	hs, err := h.Hotspots(cmd.Context(), profiling.HotspotsRequest{
 		Entity:      entityID,
 		Window:      window,
-		LeafType:    f.leafType,
+		LeafType:    leafType,
 		ShowWaiting: f.showWaiting,
 	})
 	progress.Stop()

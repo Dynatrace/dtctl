@@ -14,7 +14,8 @@ import (
 // 2h, the 2h after a start, or the 2h before an end.
 const DefaultWindow = 2 * time.Hour
 
-// MaxWindow caps the analysis window. The API itself accepts up to 24h, but an
+// MaxWindow caps the analysis window, for ResolveWindow and for a Handler
+// alike. The API itself accepts up to 24h, but an
 // analysis reads every sample in its window and holds the result in memory on
 // the server, so its cost grows with the window, and the server only runs a
 // few analyses per environment at a time. 2h is enough to localize a hotspot;
@@ -22,6 +23,10 @@ const DefaultWindow = 2 * time.Hour
 const MaxWindow = 2 * time.Hour
 
 // Window is an analysis window in epoch milliseconds, from From up to To.
+// ResolveWindow builds one from a requested timeframe. A Window built by hand
+// must end after its start and be at most MaxWindow long, or a Handler refuses
+// it; that it lies in the past is ResolveWindow's check alone, since a Handler
+// has no clock, and is otherwise left to the API.
 type Window struct {
 	From int64
 	To   int64
@@ -47,10 +52,10 @@ func (w Window) Span() time.Duration {
 // analysed. A window over MaxWindow is a *WindowTooLongError and a bound that
 // could not be read a *WindowBoundError.
 var (
-	// ErrWindowStartInFuture: the window starts now or later.
+	// ErrWindowStartInFuture: the start that was asked for is now or later.
 	ErrWindowStartInFuture = errors.New("profiling: the window starts in the future")
-	// ErrWindowEndInFuture: the window starts in the past and ends later than
-	// now.
+	// ErrWindowEndInFuture: the window ends later than now, and its start is
+	// in the past or was not given.
 	ErrWindowEndInFuture = errors.New("profiling: the window ends in the future")
 	// ErrWindowEmpty: the window ends at or before its start.
 	ErrWindowEmpty = errors.New("profiling: the window ends at or before its start")
@@ -80,8 +85,8 @@ func (e *WindowBoundError) Error() string {
 
 func (e *WindowBoundError) Unwrap() error { return e.Err }
 
-// WindowTooLongError is the error ResolveWindow returns for a window longer
-// than MaxWindow. The window is refused rather than shortened; Requested holds
+// WindowTooLongError is the error ResolveWindow and a Handler return for a
+// window longer than MaxWindow. The window is refused rather than shortened; Requested holds
 // it as asked for, so a caller can narrow it and say that it did.
 type WindowTooLongError struct {
 	Requested Window
@@ -134,19 +139,34 @@ func ResolveWindow(start, end string, now time.Time) (Window, error) {
 	}
 
 	if from >= nowMs {
+		if start == "" {
+			// The start was derived from the end, so the end is what the
+			// caller gave and what lies in the future.
+			return Window{}, ErrWindowEndInFuture
+		}
 		return Window{}, ErrWindowStartInFuture
 	}
 	if to > nowMs {
 		return Window{}, ErrWindowEndInFuture
 	}
-	if to <= from {
-		return Window{}, ErrWindowEmpty
-	}
 	w := Window{From: from, To: to, Default: start == "" && end == ""}
-	if w.Span() > MaxWindow {
-		return Window{}, &WindowTooLongError{Requested: w, Max: MaxWindow}
+	if err := w.check(); err != nil {
+		return Window{}, err
 	}
 	return w, nil
+}
+
+// check reports why an analysis does not run on w: ErrWindowEmpty, or a
+// *WindowTooLongError. It needs no clock, so it is also what a Handler applies
+// to the window of a request.
+func (w Window) check() error {
+	if w.To <= w.From {
+		return ErrWindowEmpty
+	}
+	if w.Span() > MaxWindow {
+		return &WindowTooLongError{Requested: w, Max: MaxWindow}
+	}
+	return nil
 }
 
 // satAdd and satSub are a+b and a-b, held at the nearest int64 where the exact

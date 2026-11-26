@@ -52,9 +52,10 @@ func TestClassifyError(t *testing.T) {
 			want: Failure{Reason: FailureInvalidInput, Message: `codelevelanalysis: unknown leaf type "nope": use total, service, or background`}},
 		{name: "wrapped again by the caller", err: fmt.Errorf("profile: %w", api(sdkcla.PhasePoll, 404)), ok: true,
 			want: Failure{Reason: FailureTaskExpired, StatusCode: 404, Message: "the API's message"}},
-		// An API error that did not come through an analysis has no phase.
-		{name: "404 without a phase", err: httpclient.NewAPIError(404, "the API's message", ""), ok: true,
-			want: Failure{Reason: FailureNotFound, StatusCode: 404, Message: "the API's message"}},
+		// An API error that did not come through an analysis is not one of
+		// its failures: a 404 from another API names no process.
+		{name: "an API error from elsewhere", err: httpclient.NewAPIError(404, "the API's message", "")},
+		{name: "a 429 from elsewhere", err: fmt.Errorf("list: %w", httpclient.NewAPIError(429, "the API's message", ""))},
 		{name: "401 is left to generic handling", err: api(sdkcla.PhaseSubmit, 401)},
 		{name: "409 is left to generic handling", err: api(sdkcla.PhaseSubmit, 409)},
 		{name: "a transport error", err: &sdkcla.Error{Phase: sdkcla.PhaseSubmit, Err: errors.New("codelevelanalysis: submit: connection refused")}},
@@ -112,9 +113,14 @@ func TestClassifyError_ThroughTheHandler(t *testing.T) {
 		t.Errorf("an unknown leaf type: %+v, %v; want %+v", got, ok, want)
 	}
 	_, err = h.Allocations(ctx, AllocationsRequest{Entity: testEntity, Window: Window{From: 2000, To: 1000}})
-	want = Failure{Reason: FailureInvalidInput, Message: "codelevelanalysis: from/to must be epoch-millis with to > from"}
+	want = Failure{Reason: FailureInvalidInput, Message: "profiling: the window ends at or before its start"}
 	if got, ok := ClassifyError(err); !ok || got != want {
 		t.Errorf("an inverted window: %+v, %v; want %+v", got, ok, want)
+	}
+	_, err = h.Hotspots(ctx, HotspotsRequest{Entity: testEntity, Window: Window{From: 0, To: 6 * 3600 * 1000}})
+	want = Failure{Reason: FailureInvalidInput, Message: "profiling: the window is 6h0m0s long, over the limit of 2h0m0s"}
+	if got, ok := ClassifyError(err); !ok || got != want {
+		t.Errorf("a window over the limit: %+v, %v; want %+v", got, ok, want)
 	}
 	if requests != 0 {
 		t.Errorf("%d requests were sent for input the SDK refuses", requests)

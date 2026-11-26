@@ -343,3 +343,53 @@ func TestParseStateAndSortKey(t *testing.T) {
 		t.Error("States() hands out shared storage")
 	}
 }
+
+// An empty pattern names no function. As a substring it would match every
+// one, and so focus whichever function a profile of one happens to hold.
+func TestFocus_EmptyPattern(t *testing.T) {
+	one := hotspotsOf(hotspotsResult("0", hnode("0", "C", "only", true, 3, 0)))
+	for name, h := range map[string]*Hotspots{"one function": one, "several": hotspotsOf(fnTree()), "no samples": hotspotsOf(hotspotsResult("0"))} {
+		if got, err := h.Focus(false, StateRunning, ""); !errors.Is(err, ErrEmptyPattern) || !reflect.DeepEqual(got, FocusView{}) {
+			t.Errorf("%s: Focus with an empty pattern = %+v, %v; want ErrEmptyPattern", name, got, err)
+		}
+		if got, err := h.FocusExact(false, StateRunning, ""); !errors.Is(err, ErrEmptyPattern) || !reflect.DeepEqual(got, FocusView{}) {
+			t.Errorf("%s: FocusExact with an empty pattern = %+v, %v; want ErrEmptyPattern", name, got, err)
+		}
+	}
+}
+
+// C.run has running samples only and C.runHandler the lock samples. A pattern
+// is matched against the functions with samples in the state, so Focus on
+// C.run in the lock state finds C.runHandler as its one substring match.
+// FocusExact takes the label and nothing else.
+func TestFocusExact(t *testing.T) {
+	h := hotspotsOf(hotspotsResult("0",
+		hnode("0", "", "", false, 4, 6, "A", "B"),
+		hnode("A", "C", "run", true, 4, 0),
+		hnode("B", "C", "runHandler", true, 0, 6),
+	))
+
+	if got, err := h.Focus(false, StateLock, "C.run"); err != nil || got.Function != "C.runHandler" {
+		t.Errorf("Focus(lock, C.run) = %q, %v; want its one substring match, C.runHandler", got.Function, err)
+	}
+	_, err := h.FocusExact(false, StateLock, "C.run")
+	var noMatch *NoMatchError
+	if !errors.As(err, &noMatch) || noMatch.Pattern != "C.run" {
+		t.Errorf("FocusExact(lock, C.run): err = %v, want a *NoMatchError for C.run", err)
+	}
+	if _, err := h.FocusExact(false, StateRunning, "run"); !errors.As(err, &noMatch) {
+		t.Errorf("FocusExact(running, run): err = %v, want a *NoMatchError: a substring is not a label", err)
+	}
+
+	want := FocusView{Function: "C.run", Total: 4, Self: 4, Callers: []FocusRow{{Relation: "caller", Samples: 4, Share: 100, Function: RootCaller}}}
+	if got, err := h.FocusExact(false, StateRunning, "C.run"); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("FocusExact(running, C.run) = %+v, %v\nwant %+v", got, err, want)
+	}
+	// Like Focus, it checks its state and reports an empty analysis in the view.
+	if _, err := h.FocusExact(false, "cpu", "C.run"); !errors.Is(err, ErrUnknownState) {
+		t.Errorf("FocusExact with an unknown state: err = %v, want ErrUnknownState", err)
+	}
+	if got, err := h.FocusExact(false, StateDiskIO, "C.run"); err != nil || !reflect.DeepEqual(got, FocusView{Empty: EmptyState}) {
+		t.Errorf("FocusExact(disk_io, C.run) = %+v, %v; want an empty view saying %q", got, err, EmptyState)
+	}
+}
