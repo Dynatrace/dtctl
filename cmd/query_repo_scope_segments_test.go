@@ -400,3 +400,97 @@ func TestQueryRepoScope_SegmentVariableErrorNamesTheEntry(t *testing.T) {
 	require.Equal(t, "error", detail.Code)
 	require.Contains(t, detail.Message, `-S "other-2?region=your-value-here"`)
 }
+
+// An entry that references only segments still scopes: what a scoped query
+// says about an empty result, a wait's outcome and a failure holds for it,
+// though it inserted no filter.
+func TestQueryRepoScope_SegmentsOnlyEntryIsAScope(t *testing.T) {
+	const (
+		timeseries = "timeseries avg(dt.host.cpu.usage)"
+		noRecords  = `{"state":"SUCCEEDED","result":{"records":[]}}`
+		applying   = "applying repo scope tools: segments plain-1 (use --no-repo-scope to ignore it)\n"
+	)
+	inTools := func(t *testing.T, respond func(*http.Request, string) (int, string)) {
+		segmentRecorder(t, respond)
+		repo := chdirTestRepo(t, segmentScope)
+		writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
+		chdirSubdir(t, "tools")
+	}
+
+	inTools(t, answer(http.StatusOK, noRecords))
+	code, stdout, stderr := runRepoScoped([]string{"query", timeseries, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, applying+"0 records under repo scope tools; compare with --no-repo-scope\n", stderr)
+	require.Equal(t, "0 records under repo scope tools: run the same query with --no-repo-scope to tell whether the scope or the query filtered everything out",
+		agentEnvelope(t, stdout).Context.Suggestions[0])
+
+	poll := []string{"--max-attempts", "2", "--min-interval", "1ms", "--max-interval", "1ms"}
+	code, _, stderr = runRepoScoped(append([]string{"wait", "query", timeseries, "--for=any"}, poll...), RunOptions{})
+	require.Equal(t, 2, code, stderr)
+	require.True(t, strings.HasSuffix(stderr, "condition not met under repo scope tools; compare with --no-repo-scope\n"), stderr)
+	code, _, stderr = runRepoScoped(append([]string{"wait", "query", timeseries, "--for=none"}, poll...), RunOptions{})
+	require.Zero(t, code, stderr)
+	require.True(t, strings.HasSuffix(stderr, "0 records under repo scope tools; compare with --no-repo-scope\n"), stderr)
+
+	inTools(t, answer(http.StatusBadRequest, `{"error":{"code":400,"message":"no","details":{"errorType":"FILTER_SEGMENT_NOT_FOUND"}}}`))
+	code, stdout, _ = runRepoScoped([]string{"query", timeseries, "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, []string{
+		"repo scope tools also sent the filter segments plain-1; if the failure names a segment or one of its variables, correct the entry's segments in .dtctl-repo-scope.yaml",
+		"retry with --no-repo-scope to run the query exactly as typed",
+	}, agentError(t, stdout).Suggestions)
+}
+
+// Off is off for the whole entry, by the environment as by the flag, and so
+// is a stability floor that hides the flags: no segment is read, none is
+// sent, the cluster filter is not inserted, and nothing is said.
+func TestQueryRepoScope_OffLeavesSegmentsAndClusterBehind(t *testing.T) {
+	const scope = `environments:
+  127.0.0.1:
+    - name: checkout
+      workloads:
+        - cluster-uid: 11111111-2222-3333-4444-555555555555
+          namespace: payments
+          name: checkout
+      segments:
+        - id: plain-1
+`
+	for name, tc := range map[string]struct {
+		env   map[string]string
+		floor bool
+	}{
+		"DTCTL_NO_REPO_SCOPE=1":        {env: map[string]string{noRepoScopeEnv: "1"}},
+		"a floor that hides the flags": {floor: true},
+	} {
+		for _, argv := range [][]string{
+			{"query", repoScopeTypedQuery, "--agent"},
+			{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"},
+		} {
+			t.Run(name+"/"+argv[0], func(t *testing.T) {
+				srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+				chdirTestRepo(t, scope)
+				if tc.floor {
+					writeIsolatedConfig(t, stableFloorConfig(srv.URL))
+				}
+				code, stdout, stderr := runRepoScoped(argv, RunOptions{Env: tc.env})
+				require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+				body, reads := srv.executed(t)
+				require.Equal(t, repoScopeTypedQuery, srv.first(t))
+				require.Empty(t, reads, "no segment is read")
+				require.NotContains(t, body, "filterSegments")
+				require.NotContains(t, stderr, "repo scope")
+				require.NotContains(t, stdout, "repo_scope")
+			})
+		}
+	}
+
+	// The same file with nothing turned off does all three.
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, scope)
+	code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	body, reads := srv.executed(t)
+	require.Equal(t, []string{"plain-1"}, reads)
+	require.Contains(t, body, `k8s.cluster.uid == \"11111111-2222-3333-4444-555555555555\"`)
+	require.Contains(t, body, `"filterSegments":[{"id":"plain-1"}]`)
+}

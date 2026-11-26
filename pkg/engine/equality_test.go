@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,6 +72,98 @@ func TestEngineOutputEqualsCLI(t *testing.T) {
 				"stderr must be byte-identical to the CLI")
 		})
 	}
+}
+
+// TestEngineNeverAppliesARepoScope: a service request has no working
+// directory, so an entry of the repository the host process happens to stand
+// in must not reach it, least of all its filter segments, which travel
+// beside the query where no rewritten text would show them. The CLI in the
+// same directory applies the entry; the engine's bytes equal the CLI's with
+// the scope turned off, and it reads and sends no segment.
+func TestEngineNeverAppliesARepoScope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the dtctl binary; skipped in -short mode")
+	}
+	var mu sync.Mutex
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path+" "+string(body))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/query:execute") {
+			_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":{"records":[{"content":"hello"}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"uid":"plain-1","name":"a segment"}`))
+	}))
+	t.Cleanup(srv.Close)
+	sent := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		all := strings.Join(requests, "\n")
+		requests = nil
+		return all
+	}
+
+	exe := buildCLI(t) // before the chdir: it builds from a relative path
+	repo := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".dtctl-repo-scope.yaml"), []byte(`environments:
+  127.0.0.1:
+    - name: checkout
+      workloads:
+        - cluster-uid: 11111111-2222-3333-4444-555555555555
+          namespace: payments
+          name: checkout
+      segments:
+        - id: plain-1
+`), 0o644))
+	t.Chdir(repo)
+
+	cfgPath := writeCLIConfig(t, srv.URL)
+	cli := func(env map[string]string) (int, string, string) {
+		c := exec.Command(exe, "query", "fetch logs", "--agent")
+		c.Dir = repo
+		env["DTCTL_CONFIG"], env["DTCTL_DISABLE_KEYRING"] = cfgPath, "1"
+		c.Env = scrubbedEnviron(env)
+		var stdout, stderr bytes.Buffer
+		c.Stdout, c.Stderr = &stdout, &stderr
+		runErr := c.Run()
+		code := 0
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			code = exitErr.ExitCode()
+		} else {
+			require.NoError(t, runErr)
+		}
+		return code, stdout.String(), stderr.String()
+	}
+
+	code, stdout, stderr := cli(map[string]string{})
+	require.Zero(t, code, stderr)
+	scoped := sent()
+	require.Contains(t, scoped, "GET /platform/storage/filter-segments/v1/filter-segments/plain-1", "the CLI applies the entry here")
+	require.Contains(t, scoped, `"filterSegments":[{"id":"plain-1"}]`)
+	require.Contains(t, stdout, `"repo_scope"`)
+
+	cliCode, cliStdout, cliStderr := cli(map[string]string{"DTCTL_NO_REPO_SCOPE": "1"})
+	unscoped := sent()
+
+	res, err := engine.Execute(context.Background(), engine.Request{
+		Command:        `query "fetch logs" --agent`,
+		EnvironmentURL: srv.URL,
+		Token:          "tenant-token",
+	})
+	require.NoError(t, err)
+	fromEngine := sent()
+	require.NotContains(t, fromEngine, "filter-segments")
+	require.NotContains(t, fromEngine, "filterSegments")
+	require.NotContains(t, fromEngine, "k8s.cluster.uid")
+	require.Equal(t, unscoped, fromEngine, "the engine sends what the CLI sends with the scope off")
+	require.Equal(t, cliCode, res.ExitCode)
+	require.Equal(t, normalizeEnvelope(cliStdout), normalizeEnvelope(string(res.Stdout)))
+	require.Equal(t, normalizeEnvelope(cliStderr), normalizeEnvelope(string(res.Stderr)))
 }
 
 // buildCLI compiles the real dtctl binary once per test run.
