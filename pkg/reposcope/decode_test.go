@@ -48,6 +48,8 @@ func TestDecode_MalformedIsRefused(t *testing.T) {
 		{"an environment without a value", "environments:\n  " + prodHost + ":\n",
 			`environment "` + prodHost + `" on line 2 has no value`},
 		{"null environments", "environments:\n", "environments on line 1 has no value"},
+		{"an empty apiVersion", "apiVersion: ''\n" + scopeDoc("name: checkout", "service-names: [checkout]"),
+			"apiVersion on line 1 has no value"},
 		{"a null apiVersion", "apiVersion:\n" + scopeDoc("name: checkout", "service-names: [checkout]"),
 			"apiVersion on line 1 has no value"},
 

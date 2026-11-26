@@ -101,7 +101,7 @@ func otherVersion(root *yaml.Node) *InvalidError {
 	}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		k, v := root.Content[i], root.Content[i+1]
-		if k.Value == "apiVersion" && k.Kind == yaml.ScalarNode && v.Kind == yaml.ScalarNode && !isNull(v) && v.Value != apiVersion {
+		if k.Value == "apiVersion" && k.Kind == yaml.ScalarNode && v.Kind == yaml.ScalarNode && v.Value != "" && !isNull(v) && v.Value != apiVersion {
 			return invalid(fmt.Sprintf("apiVersion %q on line %d is not supported (this dtctl reads %q)", v.Value, k.Line, apiVersion),
 				"upgrade dtctl to read this file")
 		}
@@ -262,7 +262,10 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 		p := place{key, k.Line}
 		switch key {
 		case "apiVersion":
-			f.APIVersion, err = text(v, p)
+			// Left out, the version is v1; written, it says which.
+			if f.APIVersion, err = text(v, p); err == nil && f.APIVersion == "" {
+				err = noValue(p)
+			}
 		case "environments":
 			f.Environments = map[string][]Entry{}
 			err = r.mapping(v, p, func(host string, k, v *yaml.Node) (err *InvalidError) {
