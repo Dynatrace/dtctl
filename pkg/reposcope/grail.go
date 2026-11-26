@@ -51,8 +51,10 @@ const (
 )
 
 // scopedObject is a data object a repo scope filters, and the entity id its
-// records carry: spans the service, logs the process group. Both carry
-// service.name and the Kubernetes workload.
+// records carry: spans the service, logs the process group. Both are also
+// filtered on service.name and the Kubernetes workload, which a record may
+// lack: logs in particular can carry the process group alone, which is why
+// discovery looks a candidate's logs up by it (DiscoveryReport.checkLogs).
 type scopedObject struct {
 	name    string
 	idField string

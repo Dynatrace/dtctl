@@ -242,14 +242,15 @@ func idsColumn(ids []string, count int64, sampled bool) string {
 
 // printRepoScopeNoMatch reports a discovery that found nothing: what it
 // tried, what it sent, and what to do instead. A sampled retry the record
-// query made unnecessary was never tried, so it is left out.
+// query made unnecessary was never tried, so it is left out, as is the
+// process-group lookup, which needs a candidate.
 func printRepoScopeNoMatch(w io.Writer, r *reposcope.DiscoveryReport, p repoScopeProposal, took string) {
 	fmt.Fprintf(w, "No entity matched unit %q on %s\n", r.Unit, r.Environment)
 	if len(r.Queries) > 0 {
 		fmt.Fprintln(w, "Tried:")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, q := range r.Queries {
-			if q.SampledRetry() && q.Skipped && q.Cause == "" {
+			if (q.SampledRetry() || q.ProcessGroupCheck()) && q.Skipped && q.Cause == "" {
 				continue
 			}
 			first, _, _ := strings.Cut(q.DQL, "\n")

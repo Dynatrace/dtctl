@@ -72,6 +72,11 @@
       "purpose": "process groups by entity name",
       "dataObject": "dt.entity.process_group",
       "dql": "fetch dt.entity.process_group, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200"
+    },
+    {
+      "purpose": "logs by process group",
+      "dataObject": "logs",
+      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(\u003cprocess groups the candidate's spans carried\u003e))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200"
     }
   ],
   "sent": [

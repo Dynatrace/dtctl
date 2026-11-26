@@ -105,7 +105,7 @@ func singleGo(t *testing.T) *Plan {
 
 func TestPlan(t *testing.T) {
 	p := singleGo(t)
-	require.Len(t, p.Queries, 10)
+	require.Len(t, p.Queries, 11)
 	assert.Equal(t, ".", p.Unit)
 	assert.Equal(t, []string{"checkout", "checkout-service", "checkout.service", "checkout_service", "checkoutservice"}, p.Sent)
 
@@ -148,6 +148,17 @@ func TestPlan(t *testing.T) {
 			"| limit 200",
 	}, p.Queries[8])
 	assert.Equal(t, "dt.entity.process_group", p.Queries[9].DataObject)
+	// The ids of the last query are the environment's answer, so the plan
+	// can only show where they go.
+	assert.Equal(t, Query{
+		Purpose:    "logs by process group",
+		DataObject: "logs",
+		DQL: "fetch logs, from:now()-24h, scanLimitGBytes:5\n" +
+			"| filter in(dt.entity.process_group, array(<process groups the candidate's spans carried>))\n" +
+			"| summarize records = count(), by:{dt.entity.process_group}\n" +
+			"| limit 200",
+	}, p.Queries[10])
+	assert.True(t, p.Queries[10].ProcessGroupCheck())
 }
 
 // Each record query is followed by its sampled retries, coarsest first. They
@@ -162,7 +173,7 @@ func TestPlan_IncludesSamplingRungs(t *testing.T) {
 	assert.Equal(t, []string{
 		"spans  0", "spans 1h 100000", "spans 24h 100000", "spans 24h 1000",
 		"logs  0", "logs 1h 100000", "logs 24h 100000", "logs 24h 1000",
-		"dt.entity.service  0", "dt.entity.process_group  0",
+		"dt.entity.service  0", "dt.entity.process_group  0", "logs  0",
 	}, got)
 	for i, first := range []string{
 		"fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000",
@@ -183,7 +194,7 @@ func TestPlan_IncludesSamplingRungs(t *testing.T) {
 	r, err := Discover(context.Background(), runner, p, prodHost)
 	require.NoError(t, err)
 	assert.Len(t, runner.sent, 2, "neither record query was capped")
-	for _, i := range []int{1, 2, 3, 5, 6, 7} {
+	for _, i := range []int{1, 2, 3, 5, 6, 7, 10} {
 		assert.True(t, r.Queries[i].Skipped, r.Queries[i].Purpose)
 		assert.Empty(t, r.Queries[i].Cause, "a retry nothing needed is no gap")
 	}
@@ -222,7 +233,7 @@ func TestPlan_Terms(t *testing.T) {
 
 	p, err = PlanDiscovery(fixture(t, "no-signals"), ".", []string{" BillingEngine ", ""})
 	require.NoError(t, err)
-	require.Len(t, p.Queries, 10)
+	require.Len(t, p.Queries, 11)
 	assert.Equal(t, []string{"BillingEngine", "billing-engine", "billing.engine", "billing_engine", "billingengine"}, p.Sent,
 		"a term is sent as given, lowercased, and in its variants")
 }
@@ -279,7 +290,7 @@ func TestPlan_SendsTheNameAsWritten(t *testing.T) {
 	assert.Equal(t, []string{"BillingEngine", "billing-engine", "billing.engine", "billing_engine", "billingengine"}, p.Sent,
 		"a spelling with a space is not sent; its variants are")
 	for _, q := range p.Queries {
-		if !q.fallback() {
+		if !q.fallback() && !q.ProcessGroupCheck() {
 			assert.Contains(t, q.DQL, `"BillingEngine"`, q.Purpose)
 		}
 	}
@@ -388,6 +399,7 @@ func TestDiscover_UnknownObjectAloneIsNotPartial(t *testing.T) {
 func TestDiscover_TruncatedCapsTheVerdict(t *testing.T) {
 	runner := &fakeRunner{answers: map[string][]answer{
 		"spans": {{records: rows(t, "spans-checkout"), truncation: inventory.TruncationTimeout}},
+		"logs":  {{records: rows(t, "logs-checkout")}},
 	}}
 	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
 	require.NoError(t, err)
@@ -415,7 +427,7 @@ func TestDiscover_FullPageCapsTheVerdict(t *testing.T) {
 	assert.True(t, r.Queries[0].Truncated)
 	assert.Equal(t, causeRowLimit, r.Queries[0].Cause)
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
-	assert.Len(t, r.Notes, 1)
+	assert.Equal(t, "spans returned 200 rows, the most a discovery query reads, so the verdict is capped at ambiguous", r.Notes[0])
 
 	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
 		"spans": {{records: []map[string]interface{}{
@@ -464,6 +476,7 @@ func TestDiscover_ManyIDsAreOneCandidate(t *testing.T) {
 func TestDiscover_CollectedArrayCapIsNotACutPage(t *testing.T) {
 	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
 		"spans": {{records: serviceNames(3), truncation: inventory.TruncationResultLimit}},
+		"logs":  {{records: serviceNames(3)}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	assert.False(t, r.Partial)
@@ -951,6 +964,7 @@ func TestDiscover_SampledRungFillsThePage(t *testing.T) {
 func TestDiscover_SamplingRefusedByGrail(t *testing.T) {
 	runner := &fakeRunner{answers: map[string][]answer{
 		"spans": {capped(rows(t, "spans-checkout")), {records: rows(t, "spans-checkout-sampled")}},
+		"logs":  {{records: rows(t, "logs-checkout")}},
 	}}
 	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
 	require.NoError(t, err)
@@ -1020,4 +1034,160 @@ func TestDiscover_RanksSampledCandidatesByHits(t *testing.T) {
 	assert.Equal(t, int64(30), r.Candidates[0].SpansSampled)
 	assert.Equal(t, "checkout", r.Candidates[1].ServiceName)
 	assert.Equal(t, "12 sampled span hits in 1h (1 in 100000 requested)", r.Candidates[1].Evidence[len(r.Candidates[1].Evidence)-1])
+}
+
+// pgLogs is the process-group lookup's answer: one row per value of the
+// field, a string or, for a log several processes wrote, an array.
+func pgLogs(n int, group interface{}) map[string]interface{} {
+	return map[string]interface{}{fieldProcessGroup: group, fieldRecords: fmt.Sprint(n)}
+}
+
+// Logs need not carry the workload or a service name: OneAgent may enrich
+// them with the process group alone. The record queries then find the
+// candidate's spans and none of its logs, and a workload binding would reach
+// no log at all. The process group its spans carried, read whole, is looked
+// up once, with the filter a process-group binding renders.
+func TestDiscover_LogsFoundByProcessGroup(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "spans-checkout")}},
+		"logs":  {{}, {records: []map[string]interface{}{pgLogs(5000, pgID), pgLogs(12, collected(pgID, "PROCESS_GROUP-00000000000000AA"))}}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	require.Len(t, runner.sent, 3)
+	assert.Equal(t, "fetch logs, from:now()-24h, scanLimitGBytes:5\n"+
+		`| filter in(dt.entity.process_group, array("`+pgID+`"))`+"\n"+
+		"| summarize records = count(), by:{dt.entity.process_group}\n"+
+		"| limit 200", runner.sent[2])
+	e := &Entry{Name: "checkout", ProcessGroups: []string{pgID}}
+	f, _, _ := Render(e, objectLogs)
+	assert.Contains(t, runner.sent[2], "| filter "+f.Expr+"\n", "what it counts is what the binding reaches")
+	assert.Equal(t, runner.sent[2], r.Queries[10].DQL)
+	assert.False(t, r.Queries[10].Skipped)
+	assert.Equal(t, 2, r.Queries[10].Rows)
+
+	require.Len(t, r.Candidates, 1)
+	c := r.Candidates[0]
+	assert.Zero(t, c.Logs)
+	assert.Equal(t, int64(5012), c.LogsByProcessGroup)
+	assert.Equal(t, "5012 logs in 24h carry its process group, none its workload or service name", c.Evidence[len(c.Evidence)-1])
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.False(t, r.Partial)
+	assert.Equal(t, []string{
+		"candidate 1 has spans, but no logs carry its k8s.workload.name or service.name; its logs carry the process group, so a process-group binding is what reaches them",
+	}, r.Notes)
+}
+
+// A candidate with spans whose logs are found by nothing is said to have
+// none, rather than left looking like one whose logs were never asked for.
+func TestDiscover_LogsFoundByNothing(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{"spans": {{records: rows(t, "spans-checkout")}}}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	require.Len(t, runner.sent, 3)
+	assert.Zero(t, r.Candidates[0].LogsByProcessGroup)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.Equal(t, []string{
+		"candidate 1 has spans, but no logs in 24h carry its k8s.workload.name, service.name or process group, so a scoped fetch logs returns nothing",
+	}, r.Notes)
+}
+
+// The lookup sends ids, so it runs only on ids a binding could use: all of a
+// candidate's, read whole, and no other workload's. And only once the logs
+// query has shown the logs to be absent, which a capped or sampled read has
+// not. Without it the report still says the candidate's logs were missed.
+func TestDiscover_LogsLookupNeedsWholeIDs(t *testing.T) {
+	spans := func(edit func(row map[string]interface{})) []map[string]interface{} {
+		out := rows(t, "spans-checkout")
+		edit(out[0])
+		return out
+	}
+	const unchecked = "candidate 1 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group"
+	for name, tc := range map[string]struct {
+		answers map[string][]answer
+		sent    int
+		note    string
+	}{
+		"more process groups than listed": {
+			answers: map[string][]answer{"spans": {{records: spans(func(row map[string]interface{}) { row[fieldProcessGroupCount] = "51" })}}},
+			sent:    2, note: unchecked,
+		},
+		"no process group": {
+			answers: map[string][]answer{"spans": {{records: spans(func(row map[string]interface{}) {
+				row[fieldProcessGroupCount], row[fieldProcessGroups] = "0", collected()
+			})}}},
+			sent: 2, note: unchecked,
+		},
+		"spans cut short": {
+			answers: map[string][]answer{"spans": {{records: rows(t, "spans-checkout"), truncation: inventory.TruncationTimeout}}},
+			sent:    2, note: unchecked,
+		},
+		"logs cut short": {
+			answers: map[string][]answer{
+				"spans": {{records: rows(t, "spans-checkout")}},
+				"logs":  {{truncation: inventory.TruncationTimeout}},
+			},
+			sent: 2,
+		},
+		"logs sampled": {
+			answers: map[string][]answer{
+				"spans": {{records: rows(t, "spans-checkout")}},
+				"logs":  {capped(nil), sampledAnswer(nil, 1_000_000_000)},
+			},
+			sent: 3,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := &fakeRunner{answers: tc.answers}
+			r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+			require.NoError(t, err)
+			assert.Len(t, runner.sent, tc.sent)
+			assert.True(t, r.Queries[10].Skipped)
+			assert.NotContains(t, strings.Join(runner.sent, "\n"), "PROCESS_GROUP-")
+			if tc.note == "" {
+				assert.NotContains(t, strings.Join(r.Notes, "\n"), "no logs")
+			} else {
+				assert.Contains(t, r.Notes, tc.note)
+			}
+		})
+	}
+
+	// Two workloads on one process group: a binding by it would select both.
+	other := rows(t, "spans-checkout")[0]
+	other[fieldWorkload], other[fieldServiceName] = "checkout-service", "checkout-service"
+	runner := &fakeRunner{answers: map[string][]answer{"spans": {{records: append(rows(t, "spans-checkout"), other)}}}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Len(t, runner.sent, 2)
+	assert.Contains(t, r.Notes, strings.NewReplacer("candidate 1 has", "candidates 1 and 2 have", "its", "their").Replace(unchecked))
+}
+
+// A lookup that fails or is cut short has missed a binding, never a
+// candidate: the verdict stands, and the logs it did find still count.
+func TestDiscover_LogsLookupFailureIsNotPartial(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "spans-checkout")}},
+		"logs":  {{}, {err: fmt.Errorf("boom\nsecond line")}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.False(t, r.Partial)
+	assert.Equal(t, causeError, r.Queries[10].Cause)
+	assert.Equal(t, []string{
+		"logs by process group failed, so the result may be incomplete: boom",
+		"candidate 1 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group",
+	}, r.Notes)
+
+	runner = &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: rows(t, "spans-checkout")}},
+		"logs":  {{}, capped([]map[string]interface{}{pgLogs(40, pgID)})},
+	}}
+	r, err = Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.True(t, r.Queries[10].Truncated)
+	assert.Equal(t, int64(40), r.Candidates[0].LogsByProcessGroup, "a capped scan proves the logs it found")
 }

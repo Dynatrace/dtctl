@@ -41,8 +41,9 @@ func newRepoScopeDiscoverCmd() *cobra.Command {
 Reads names from the repository (Kubernetes manifests, Helm charts, Dockerfiles,
 build files and the origin remote) and compares them to k8s.workload.name and
 service.name in the last 24 hours of spans and logs; entity names are searched
-only when the records find nothing. It names every value before sending it,
-and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
+only when the records find nothing. When a candidate's spans match and no logs
+do, its logs are looked up once by the process group the spans carried. It
+names every value before sending it, and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
 that saves it. Test content (test, testdata, e2e, examples and similar
 directories, and files such as Dockerfile.test) is not read, and a name that
 starts with test, mock or fixture is not sent unless given with --term.
@@ -302,6 +303,8 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 		switch {
 		case q.SampledRetry():
 			label += fmt.Sprintf(" (only if the scan cap stops query %d)", record)
+		case q.ProcessGroupCheck():
+			label += " (only if a candidate's spans match and no logs do; the ids are the ones the environment returned)"
 		case !slices.Contains(reposcope.DataObjects(), q.DataObject):
 			label += " (only if the record queries find nothing)"
 		default:
@@ -322,9 +325,12 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 //
 // The workload and the service name lead because they are what the records
 // carry by design; the entity ids are deprecated fields and are proposed only
-// for a candidate the other two cannot select. A service name another
-// candidate also reports is left out: it would select that candidate's
-// records as well, and the bindings are alternatives.
+// for a candidate the other two cannot select, or whose logs they cannot
+// reach: discovery found those logs by the candidate's process groups
+// (LogsByProcessGroup), and without that binding the entry would return its
+// spans and none of its logs. A service name another candidate also reports
+// is left out: it would select that candidate's records as well, and the
+// bindings are alternatives.
 //
 // When any record query was sampled, a candidate gets its workload binding
 // only, whether its own records were sampled or read whole: another
@@ -355,6 +361,8 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 		if len(bindings) == 0 {
 			return ""
 		}
+	} else if c.LogsByProcessGroup > 0 {
+		flag("--process-group", c.ProcessGroups...)
 	}
 	return repoScopeSetLine(exec.ShellQuote(c.Name), bindings, repoScopeDir(r, c), selectors)
 }

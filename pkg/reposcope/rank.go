@@ -3,6 +3,7 @@ package reposcope
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,12 @@ type Candidate struct {
 	Logs         int64 `json:"logs,omitempty" yaml:"logs,omitempty"`
 	SpansSampled int64 `json:"spansSampled,omitempty" yaml:"spansSampled,omitempty"`
 	LogsSampled  int64 `json:"logsSampled,omitempty" yaml:"logsSampled,omitempty"`
+	// LogsByProcessGroup counts the logs that carry one of ProcessGroups,
+	// over the discovery window. It is set only for a candidate whose spans
+	// matched while no logs carried its workload or service name: a binding
+	// by those reaches none of its logs, and a process-group binding reaches
+	// these.
+	LogsByProcessGroup int64 `json:"logsByProcessGroup,omitempty" yaml:"logsByProcessGroup,omitempty"`
 	// Sampled reports that some of the candidate's records were read by a
 	// sampled retry, so a candidate quieter than the stated floor could
 	// have been missed beside it.
@@ -74,6 +81,10 @@ type Candidate struct {
 	sources map[string]bool
 	matched string  // the token an entity matched
 	rate    float64 // records, or sampled hits, per hour: see before
+	// logsMissed is spans matched and, in a logs query that read the whole
+	// window, no logs did; logsChecked is the process-group lookup having
+	// answered for it. See DiscoveryReport.checkLogs.
+	logsMissed, logsChecked bool
 }
 
 // tier is how well a candidate's name matches, best first. Records found by
@@ -284,6 +295,80 @@ func (d *discovery) explain(c *Candidate) {
 	if counts := d.counts(c); counts != "" {
 		c.Evidence = append(c.Evidence, counts)
 	}
+	if c.LogsByProcessGroup > 0 {
+		c.Evidence = append(c.Evidence, fmt.Sprintf("%d logs in %s carry its process group, none its workload or service name",
+			c.LogsByProcessGroup, discoveryWindow))
+	}
+}
+
+// ownsProcessGroups reports whether c's process groups can stand for it: all
+// of them are listed, read whole, and no candidate of another workload
+// carries one. A binding by them then selects no other candidate's records.
+func (d *discovery) ownsProcessGroups(c *Candidate) bool {
+	if len(c.ProcessGroups) == 0 || c.ProcessGroupsCapped || c.Sampled {
+		return false
+	}
+	for _, o := range d.records {
+		if o.Namespace == c.Namespace && o.Workload == c.Workload {
+			continue
+		}
+		if slices.ContainsFunc(o.ProcessGroups, func(id string) bool { return slices.Contains(c.ProcessGroups, id) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// logsNotes say, for the candidates whose spans matched and no logs did, what
+// an entry for them reaches: one note per outcome, naming its candidates by
+// rank.
+func logsNotes(cs []*Candidate) []string {
+	var covered, nowhere, unchecked []int
+	for _, c := range cs {
+		switch {
+		case !c.logsMissed:
+		case c.LogsByProcessGroup > 0:
+			covered = append(covered, c.Rank)
+		case c.logsChecked:
+			nowhere = append(nowhere, c.Rank)
+		default:
+			unchecked = append(unchecked, c.Rank)
+		}
+	}
+	var notes []string
+	if who, whose := ranked(covered); who != "" {
+		notes = append(notes, fmt.Sprintf("%s spans, but no logs carry %s %s or %s; %s logs carry the process group, so a process-group binding is what reaches them",
+			who, whose, fieldWorkload, fieldServiceName, whose))
+	}
+	if who, whose := ranked(nowhere); who != "" {
+		notes = append(notes, fmt.Sprintf("%s spans, but no logs in %s carry %s %s, %s or process group, so a scoped fetch logs returns nothing",
+			who, discoveryWindow, whose, fieldWorkload, fieldServiceName))
+	}
+	if who, whose := ranked(unchecked); who != "" {
+		notes = append(notes, fmt.Sprintf("%s spans, but no logs carry %s %s or %s, so an entry bound by those reaches no logs; if %s logs carry a process group, bind it with --process-group",
+			who, whose, fieldWorkload, fieldServiceName, whose))
+	}
+	return notes
+}
+
+// ranked names candidates by rank as the subject of a note, with the
+// possessive that refers back to them: "candidate 1 has" and "its",
+// "candidates 1, 2 and 3 have" and "their", or past five just how many.
+func ranked(ranks []int) (who, whose string) {
+	switch n := len(ranks); {
+	case n == 0:
+		return "", ""
+	case n == 1:
+		return fmt.Sprintf("candidate %d has", ranks[0]), "its"
+	case n > 5:
+		return fmt.Sprintf("%d candidates have", n), "their"
+	default:
+		names := make([]string, n)
+		for i, r := range ranks {
+			names[i] = strconv.Itoa(r)
+		}
+		return fmt.Sprintf("candidates %s and %s have", strings.Join(names[:n-1], ", "), names[n-1]), "their"
+	}
 }
 
 // counts is a record candidate's evidence line for its record counts. Counts
@@ -407,7 +492,12 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.MatchedDir = d.dirSource != "" && c.sources[d.dirSource]
 		c.Rank, c.Tier = i+1, c.tier.String()
 		c.Name = entryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
-		c.tier, c.sources, c.matched, c.rate = 0, nil, "", 0
+	}
+	for _, n := range logsNotes(all) {
+		r.note(n)
+	}
+	for i, c := range all {
+		c.tier, c.sources, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, nil, "", 0, false, false
 		r.Candidates[i] = *c
 	}
 	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial)

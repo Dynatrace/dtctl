@@ -15,7 +15,7 @@ candidates[1]:
     workload: checkout
 dir: .
 environment: abc12345.apps.dynatrace.com
-queries[10]:
+queries[11]:
   - dataObject: spans
     dql: "fetch spans, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\"))\n| summarize {records = count(),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n    by:{k8s.namespace.name, k8s.workload.name, service.name}\n| sort records desc\n| limit 200"
     purpose: spans by workload or service name
@@ -68,6 +68,9 @@ queries[10]:
     dql: "fetch dt.entity.process_group, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200"
     purpose: process groups by entity name
     skipped: true
+  - dataObject: logs
+    dql: "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(<process groups the candidate's spans carried>))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200"
+    purpose: logs by process group
 sent[1]: checkout
 unit: .
 verdict: match

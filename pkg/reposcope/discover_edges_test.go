@@ -57,6 +57,7 @@ func TestDiscoverTruncationNotes(t *testing.T) {
 		t.Run(string(tc.cause), func(t *testing.T) {
 			runner := &fakeRunner{answers: map[string][]answer{
 				"spans": {{records: rows(t, "spans-checkout"), truncation: tc.cause}},
+				"logs":  {{records: rows(t, "logs-checkout")}},
 			}}
 			r, err := Discover(t.Context(), runner, singleGo(t), prodHost)
 			require.NoError(t, err)

@@ -96,6 +96,19 @@ type Query struct {
 	step int64
 }
 
+// purposeProcessGroupLogs names the one query whose text depends on what the
+// record queries returned.
+const purposeProcessGroupLogs = "logs by process group"
+
+// processGroupPlaceholder stands in a plan for ids only a run knows.
+const processGroupPlaceholder = "<process groups the candidate's spans carried>"
+
+// ProcessGroupCheck reports the query that looks for a candidate's logs by
+// process group, run only when its spans matched and no logs did.
+func (q *Query) ProcessGroupCheck() bool {
+	return q.Purpose == purposeProcessGroupLogs
+}
+
 // fallback reports an entity-table query, run only when the record queries
 // found nothing.
 func (q *Query) fallback() bool {
@@ -140,7 +153,10 @@ type Plan struct {
 // service name, counting and collecting the entity ids of each. Each is
 // followed by its sampled retries, run only when the scan cap stops it. The
 // entity-table queries search entity names and run only when the record
-// queries find nothing.
+// queries find nothing. The last query looks for logs by the process groups a
+// candidate's spans carried, and runs only when the records leave a candidate
+// with spans and no logs; its ids come from the environment's own answer, so
+// the plan shows it with a placeholder.
 func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 	s, err := extract(repo, dir)
 	if err != nil {
@@ -164,6 +180,7 @@ func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 	p.Queries = append(p.Queries,
 		entityQuery(objectServices, "services by entity name", p.Sent),
 		entityQuery(objectProcessGroups, "process groups by entity name", p.Sent),
+		processGroupLogsQuery(nil),
 	)
 	return p, nil
 }
@@ -249,6 +266,22 @@ func recordDQL(fetch, records string, values []string) string {
 	}, "\n")
 }
 
+// processGroupLogsQuery counts the logs that carry one of ids. Its filter is
+// the one a process-group binding renders, so what it counts is what a scoped
+// fetch logs would reach. Without ids it is the plan's placeholder.
+func processGroupLogsQuery(ids []string) Query {
+	list := processGroupPlaceholder
+	if len(ids) > 0 {
+		list = quotedList(ids)
+	}
+	return Query{Purpose: purposeProcessGroupLogs, DataObject: objectLogs, DQL: strings.Join([]string{
+		fmt.Sprintf("fetch %s, from:now()-%s, scanLimitGBytes:%d", objectLogs, discoveryWindow, ScanLimitGB),
+		fmt.Sprintf("| filter in(%s, array(%s))", fieldProcessGroup, list),
+		fmt.Sprintf("| summarize %s = count(), by:{%s}", fieldRecords, fieldProcessGroup),
+		fmt.Sprintf("| limit %d", discoveryRowLimit),
+	}, "\n")}
+}
+
 func entityQuery(object, purpose string, values []string) Query {
 	clauses := make([]string, len(values))
 	for i, v := range values {
@@ -317,6 +350,10 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 		case q.SampledRetry():
 			// Decided together with the record query it retries.
 			continue
+		case q.ProcessGroupCheck():
+			// Decided once the record queries have answered.
+			q.Skipped = true
+			continue
 		case q.fallback() && len(d.records) > 0:
 			q.Skipped = true
 			continue
@@ -340,6 +377,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 	for _, n := range r.samplingNotes() {
 		r.note(n)
 	}
+	r.checkLogs(ctx, runner, d)
 	d.finish(r)
 	return r, ctx.Err()
 }
@@ -360,6 +398,96 @@ func (r *DiscoveryReport) runFallback(ctx context.Context, runner inventory.Runn
 		return
 	}
 	r.fold(q, res, d)
+}
+
+// checkLogs looks at the candidates whose spans matched and no logs did.
+// The record queries find logs by workload and service name, and logs need
+// not carry either: OneAgent may enrich them with the process group alone. A
+// workload binding then reaches the candidate's spans and none of its logs,
+// which reads exactly like a quiet service.
+//
+// It applies only when the logs query read the whole window, since a capped or
+// sampled read has not shown the logs to be absent. A candidate whose process
+// groups are known in full, and are no other workload's, is then looked up by
+// them in one query; the others are only reported.
+func (r *DiscoveryReport) checkLogs(ctx context.Context, runner inventory.Runner, d *discovery) {
+	q := r.processGroupCheck()
+	switch {
+	case q == nil:
+		return
+	case ctx.Err() != nil:
+		// Like every query the cancellation kept from running.
+		q.Cause = failureCause(ctx, ctx.Err())
+		r.note(failureNote(q))
+		return
+	case !r.readWhole(objectLogs, d):
+		return
+	}
+	spansWhole := r.readWhole(objectSpans, d)
+	var checked []*Candidate
+	var ids []string
+	for _, c := range d.records {
+		if c.Spans == 0 || c.Logs > 0 {
+			continue
+		}
+		c.logsMissed = true
+		if spansWhole && d.ownsProcessGroups(c) {
+			checked = append(checked, c)
+			for _, id := range c.ProcessGroups {
+				ids = addSorted(ids, id)
+			}
+		}
+	}
+	if len(ids) == 0 || len(ids) > discoveryIDLimit {
+		return
+	}
+	*q = processGroupLogsQuery(ids)
+	res, err := runner.RunQuery(ctx, q.DQL)
+	if err != nil {
+		// What this query misses is a binding, never a candidate, so its
+		// failure does not make the report partial.
+		q.Cause = failureCause(ctx, err)
+		q.Error, _, _ = strings.Cut(err.Error(), "\n")
+		r.note(failureNote(q))
+		return
+	}
+	q.Rows = len(res.Records)
+	cut := res.Truncated || q.Rows >= discoveryRowLimit
+	if cut {
+		q.Truncated, q.Cause, q.truncation = true, causeTruncated, res.TruncationCause
+	}
+	for _, c := range checked {
+		for _, rec := range res.Records {
+			rowIDs, _ := idsField(rec, fieldProcessGroup, processGroupRe)
+			if slices.ContainsFunc(rowIDs, func(id string) bool { return slices.Contains(c.ProcessGroups, id) }) {
+				c.LogsByProcessGroup += countField(rec, fieldRecords)
+			}
+		}
+		// A cut answer proves the logs it found, not the absence of others.
+		c.logsChecked = !cut || c.LogsByProcessGroup > 0
+	}
+}
+
+// processGroupCheck is the planned logs-by-process-group query.
+func (r *DiscoveryReport) processGroupCheck() *Query {
+	for i := range r.Queries {
+		if r.Queries[i].ProcessGroupCheck() {
+			return &r.Queries[i]
+		}
+	}
+	return nil
+}
+
+// readWhole reports whether the record query for object answered for the
+// whole window: it ran, nothing cut it short, and no sampled retry stood in.
+func (r *DiscoveryReport) readWhole(object string, d *discovery) bool {
+	for i := range r.Queries {
+		q := &r.Queries[i]
+		if q.DataObject == object && !q.SampledRetry() && !q.ProcessGroupCheck() {
+			return !q.Skipped && q.Error == "" && q.Cause == "" && d.samples[object] == nil
+		}
+	}
+	return false
 }
 
 // runRecordQuery runs a record query and, when the scan cap stopped it, its

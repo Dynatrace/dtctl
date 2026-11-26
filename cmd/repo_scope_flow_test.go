@@ -226,6 +226,7 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		respond func(*http.Request, string) (int, string)
 	}{
 		{"discover-match", rowsByObject(checkoutRows)},
+		{"discover-logs-by-process-group", workloadlessLogs},
 		{"discover-sampled", cappedThenSampled(sampledCheckoutRows)},
 		{"discover-sampled-empty", cappedThenSampled(nil)},
 		{"discover-many-ids", rowsByObject(manyIDRows())},
@@ -247,6 +248,51 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 			testutil.AssertGolden(t, "repo-scope/"+tc.golden, out.String())
 		})
 	}
+}
+
+// processGroupLogsQuery is the text discovery sends to find a candidate's
+// logs by the process group its spans carried.
+func processGroupLogsQuery(id string) string {
+	return "fetch logs, from:now()-24h, scanLimitGBytes:5\n" +
+		`| filter in(dt.entity.process_group, array("` + id + `"))` + "\n" +
+		"| summarize records = count(), by:{dt.entity.process_group}\n" +
+		"| limit 200"
+}
+
+// workloadlessLogs is an environment whose logs carry the process group and
+// neither the workload nor a service name: the logs record query matches
+// nothing, and the lookup by process group finds them.
+func workloadlessLogs(r *http.Request, query string) (int, string) {
+	switch {
+	case strings.HasPrefix(query, "fetch logs") && strings.Contains(query, "by:{dt.entity.process_group}"):
+		return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[{"dt.entity.process_group":"` + flowProcessGroup + `","records":"5012"}]}}`
+	case strings.HasPrefix(query, "fetch logs"):
+		return rowsByObject(nil)(r, query)
+	}
+	return rowsByObject(checkoutRows)(r, query)
+}
+
+// A workload binding reaches no log that does not carry the workload. When
+// the candidate's spans matched and its logs are found only by the process
+// group those spans carried, the proposed line binds the process group too,
+// and saving it gives an entry that filters logs on it.
+func TestRepoScopeDiscoverBindsTheProcessGroupLogsCarry(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", workloadlessLogs)
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, []string{recordQuery("spans"), recordQuery("logs"), processGroupLogsQuery(flowProcessGroup)}, srv.queries())
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Equal(t, int64(5012), report.Candidates[0].LogsByProcessGroup)
+	const line = flowSetCommand + " --process-group " + flowProcessGroup
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	require.Equal(t, "confirm with the user, then: "+line, suggestions[0])
+	require.Contains(t, report.Notes, "candidate 1 has spans, but no logs carry its k8s.workload.name or service.name; its logs carry the process group, so a process-group binding is what reaches them")
+
+	runSetCommand(t, line)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, `fetch logs   | filter (in(dt.entity.process_group, array("`+flowProcessGroup+`")) or `)
 }
 
 // A sampled match is complete at its floor, but a quieter candidate sharing
@@ -343,13 +389,16 @@ func TestRepoScopeDiscoverDryRunNeedsNoToken(t *testing.T) {
 	require.Contains(t, stdout, "\n2. spans by workload or service name (sampled 1-in-100000 over 1h) (only if the scan cap stops query 1)\n")
 	require.Contains(t, stdout, "\n8. logs by workload or service name (sampled 1-in-1000 over 24h) (only if the scan cap stops query 5)\n")
 	require.Contains(t, stdout, "\n9. services by entity name (only if the record queries find nothing)\n")
+	require.Contains(t, stdout, "\n11. logs by process group (only if a candidate's spans match and no logs do; the ids are the ones the environment returned)\n"+
+		"   fetch logs, from:now()-24h, scanLimitGBytes:5\n"+
+		"   | filter in(dt.entity.process_group, array(<process groups the candidate's spans carried>))\n")
 
 	code, stdout, stderr = runRepoScoped([]string{"--dry-run", "repo-scope", "discover", "--agent"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
 	require.Equal(t, true, plan["dry_run"])
 	payload := plan["payload"].([]interface{})
-	require.Len(t, payload, 10)
+	require.Len(t, payload, 11)
 	require.Equal(t, recordQuery("spans"), payload[0].(map[string]interface{})["dql"])
 
 	t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))

@@ -156,5 +156,12 @@ queries:
       | sort nameLength asc
       | limit 200
     skipped: true
+  - purpose: logs by process group
+    dataObject: logs
+    dql: |-
+      fetch logs, from:now()-24h, scanLimitGBytes:5
+      | filter in(dt.entity.process_group, array(<process groups the candidate's spans carried>))
+      | summarize records = count(), by:{dt.entity.process_group}
+      | limit 200
 sent:
   - checkout
