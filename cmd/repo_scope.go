@@ -150,8 +150,10 @@ Examples:
 	c.Flags().StringArrayVar(&services, "service", nil, "service id, SERVICE-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&processGroups, "process-group", nil, "process group id, PROCESS_GROUP-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&serviceNames, "service-name", nil, "OpenTelemetry service.name (repeatable)")
-	c.Flags().StringVar(&clusterUID, "cluster-uid", "", "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
-	c.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace of the --workload names")
+	// Both qualify every --workload, so a second value is refused: taking the
+	// last one would rebind the workloads named before it.
+	c.Flags().Var(&singleUseStringValue{value: &clusterUID}, "cluster-uid", "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
+	c.Flags().Var(&singleUseStringValue{value: &namespace}, "namespace", "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
 	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
 	c.Flags().StringArrayVar(&segments, "segment", nil, `existing filter segment a query under the entry also sends, by the id 'dtctl get segments' lists (repeatable, max 10)

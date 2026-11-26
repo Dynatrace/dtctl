@@ -332,6 +332,31 @@ func TestRepoScopeSetPathIsADirectoryOfTheRepository(t *testing.T) {
 	require.Equal(t, "services/Billing", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[2].Path)
 }
 
+// --namespace and --cluster-uid qualify every --workload of the command, so
+// a second one cannot mean the workloads after it: it is refused, where the
+// last one used to rebind the workloads named before it.
+func TestRepoScopeSetTakesOneNamespaceAndCluster(t *testing.T) {
+	const uid = "11111111-2222-3333-4444-555555555555"
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, monorepoScope)
+	before := readScopeFile(t, repo)
+	for _, args := range [][]string{
+		{"--namespace", "a", "--workload", "one", "--namespace", "b", "--workload", "two"},
+		{"--namespace", "a", "--workload", "one", "--cluster-uid", uid, "--cluster-uid", "22222222-2222-3333-4444-555555555555"},
+	} {
+		code, _, stderr := runRepoScoped(append([]string{"repo-scope", "set", "two"}, args...), RunOptions{})
+		require.NotZero(t, code, stderr)
+		require.Contains(t, stderr, "flag can only be provided once")
+		require.Equal(t, before, readScopeFile(t, repo))
+	}
+	// The refusal is of one command line, not of the next one.
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "two", "--namespace", "a", "--workload", "one"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "two", "--namespace", "b", "--workload", "one"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []reposcope.Workload{{Namespace: "b", Name: "one"}}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[2].Workloads)
+}
+
 // --cluster-uid qualifies the --workload names, as --namespace does.
 func TestRepoScopeSetClusterUID(t *testing.T) {
 	const uid = "11111111-2222-3333-4444-555555555555"
