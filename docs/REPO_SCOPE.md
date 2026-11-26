@@ -337,7 +337,7 @@ The cluster narrows the workload it is written on, and nothing else. A service n
 
 `dtctl repo-scope describe <name>` prints the exact filter for each.
 
-`segments` are not alternatives: each one, and the filter, must hold (see [Filter segments](#filter-segments)). Ids and variable values are checked like every other value, and travel beside the query, never in its text.
+`segments` are not alternatives: each one, and the filter, must hold (see [Filter segments](#filter-segments)). Ids and variable values are checked like every other value, and travel beside the query, never in its text. A variable value cannot hold `,`, `&` or `=`: dtctl prints a segment the way `--segment` takes it, and those separate its values there.
 
 The file spells its keys in kebab-case (`process-groups`, `service-names`); the JSON and YAML that `-o json`, `-o yaml` and agent mode print for a result use camelCase (`processGroups`, `serviceNames`), except an entry in YAML output, which keeps the file's spelling.
 

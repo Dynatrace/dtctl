@@ -75,7 +75,9 @@ func (s Segment) VariableNames() []string {
 }
 
 // String renders the reference in the spelling query --segment takes:
-// "id", or "id?name=value,value&name=value" with the variables by name.
+// "id", or "id?name=value,value&name=value" with the variables by name. A
+// valid segment reads back from it unchanged: validation refuses a value
+// holding one of the separators.
 func (s Segment) String() string {
 	var vars []string
 	for _, name := range s.VariableNames() {
@@ -305,6 +307,9 @@ func segmentValueProblem(v string) string {
 		return "is empty"
 	case n > maxSegmentValueRunes:
 		return fmt.Sprintf("is longer than %d characters", maxSegmentValueRunes)
+	case strings.ContainsAny(v, ",&="):
+		// String must read back as the reference it renders.
+		return "must not contain , & or =, which separate values where a segment is spelt as --segment takes it"
 	}
 	for _, r := range v {
 		if !unicode.IsPrint(r) {
