@@ -52,6 +52,15 @@ func TestExecProfiling_PlainPrintsOnlyJSON(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(stdout), &rows), "stdout is not one JSON document:\n%s", stdout)
 			require.Len(t, rows, tc.rows)
 			require.JSONEq(t, tc.first, string(rows[0]))
+
+			// Naming the table beside --plain changes nothing: -o table and
+			// -o wide are the table --plain turns into JSON.
+			for _, format := range []string{"table", "wide"} {
+				code, got, stderr := runProfilingStreams(t, append(tc.args, "--plain", "-o", format)...)
+				require.Zero(t, code, stderr)
+				require.Empty(t, stderr)
+				require.Equal(t, stdout, got, "-o %s", format)
+			}
 		})
 	}
 
@@ -61,7 +70,14 @@ func TestExecProfiling_PlainPrintsOnlyJSON(t *testing.T) {
 		code, stdout, stderr := runProfilingStreams(t, append(args, "--plain")...)
 		require.Zero(t, code, stderr)
 		require.JSONEq(t, `[]`, stdout, args)
-		require.Equal(t, "# no stacks for "+testProcess+": no profiling samples in the window (status=completed) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result\n", stderr)
+		const note = "# no stacks for " + testProcess + ": no profiling samples in the window (status=completed) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result\n"
+		require.Equal(t, note, stderr)
+		for _, format := range []string{"table", "wide"} {
+			code, got, stderr := runProfilingStreams(t, append(args, "--plain", "-o", format)...)
+			require.Zero(t, code, stderr)
+			require.Equal(t, stdout, got, "-o %s", format)
+			require.Equal(t, note, stderr, "-o %s", format)
+		}
 	}
 }
 
@@ -227,6 +243,14 @@ func TestProfilingAPIError(t *testing.T) {
 			require.Equal(t, tc.suggestions, diag.Suggestions)
 			require.Equal(t, tc.code, output.ClassifyHTTPError(diag.StatusCode))
 			require.Same(t, tc.err, diag.Err)
+			// The envelope the command prints for it in agent mode.
+			require.Equal(t, &output.ErrorDetail{
+				Code:        tc.code,
+				Message:     "the API's message",
+				Operation:   "run profiling analysis",
+				StatusCode:  diag.StatusCode,
+				Suggestions: tc.suggestions,
+			}, errorToDetail(context.Background(), got))
 		})
 	}
 	// Every reason the package names is in the table.
