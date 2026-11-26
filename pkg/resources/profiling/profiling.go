@@ -7,7 +7,7 @@
 // the returned Hotspots or Allocations read it as rows (Stacks, Functions,
 // Focus) or whole (Raw). Each kind of analysis has its own result type, so a
 // view is only there for the kind it reads. ClassifyError says what to do about
-// an API failure, and WhyEmpty why a view has no rows. The HTTP calls are the SDK's
+// an API failure, and a view without rows says why in its Empty field. The HTTP calls are the SDK's
 // (sdk/api/codelevelanalysis); this package adds the window rules, the folds
 // and the advice. Advice and notes are worded for a dtctl user and name dtctl
 // flags.

@@ -72,7 +72,9 @@ com.example.ManufacturerController.issueCreditCard;...reserveSlot  running=2   l
   by `--limit` like the table. `--raw` prints the API's whole compacted result instead
   (megabytes for a busy process).
 - An empty result prints one `# no stacks for …` line saying why: no samples in
-  the window, or `--app-only` removed every frame.
+  the window, or `--app-only` removed every frame. A per-function view of a
+  window that has samples, but none in the `--state` it counts, prints
+  `# no <state> samples for …` instead.
 
 ### Agent envelope
 

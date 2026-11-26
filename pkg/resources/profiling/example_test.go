@@ -64,10 +64,8 @@ func Example() {
 	}
 
 	// A view without rows says why.
-	if fns := analysis.Functions(false, "lock", "self"); fns == nil {
-		reason, note := analysis.WhyEmpty(false, "lock")
-		fmt.Println(reason)
-		fmt.Println(note)
+	if fns := analysis.Functions(false, "lock", "self"); fns.Empty != "" {
+		fmt.Println("no functions:", fns.Empty)
 	}
 
 	// Output:
@@ -75,6 +73,5 @@ func Example() {
 	// 10 running samples
 	//  8 app.Main.main;lib.Json.parse
 	//  2 app.Main.main
-	// no_state_samples
-	// no lock samples for PROCESS-0000000000000001 in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting
+	// no functions: no_state_samples
 }

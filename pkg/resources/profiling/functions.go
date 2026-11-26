@@ -74,6 +74,8 @@ type FunctionTable struct {
 	// Samples is the number of counted samples in the window, the base of the
 	// percentages.
 	Samples int
+	// Empty says why there are no rows, and is empty when there are some.
+	Empty EmptyReason
 }
 
 // FocusRow is one line of the focus (callers/callees) view.
@@ -222,21 +224,21 @@ func newFuncWalk(raw interface{}, appOnly bool, state, focus string) (*funcWalk,
 }
 
 // hotspotFunctions builds the functions view of a hotspots result, counting the
-// samples of the given state. sortBy is "self" (default) or "total". It returns
-// nil when the result has no samples to show.
-func hotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) *FunctionTable {
+// samples of the given state. sortBy is "self" (default) or "total". The table
+// has no rows when the result has no samples to show.
+func hotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) FunctionTable {
+	var t FunctionTable
 	w, root := newFuncWalk(raw, appOnly, state, "")
 	if w == nil {
-		return nil
+		return t
 	}
 	w.walk(root, "", 0, false, "")
 
-	t := &FunctionTable{}
 	for _, a := range w.funcs {
 		t.Samples += a.self
 	}
 	if t.Samples == 0 {
-		return nil
+		return t
 	}
 	for label, a := range w.funcs {
 		if a.total == 0 {
@@ -274,7 +276,7 @@ func hotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) *Func
 // label, and how many callers and callees there were before the limit.
 func hotspotFocus(raw interface{}, appOnly bool, state, pattern string, limit int) (rows []FocusRow, function string, nCallers, nCallees int, err error) {
 	t := hotspotFunctions(raw, appOnly, state, "total")
-	if t == nil {
+	if len(t.Rows) == 0 {
 		return nil, "", 0, 0, fmt.Errorf("no %s samples in the window to focus on", state)
 	}
 	function, err = matchFunction(t.Rows, pattern)

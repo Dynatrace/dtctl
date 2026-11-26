@@ -29,7 +29,7 @@ func fnTree() map[string]interface{} {
 
 func TestHotspotFunctions_SelfAndTotal(t *testing.T) {
 	got := hotspotFunctions(fnTree(), false, "running", "self")
-	if got == nil || got.Samples != 100 {
+	if got.Samples != 100 {
 		t.Fatalf("table = %+v", got)
 	}
 	want := []FunctionRow{
@@ -101,7 +101,7 @@ func TestHotspotFunctions_AppOnly(t *testing.T) {
 
 func TestHotspotFunctions_State(t *testing.T) {
 	lock := hotspotFunctions(fnTree(), false, "lock", "self")
-	if lock == nil || lock.Samples != 5 || len(lock.Rows) != 3 {
+	if lock.Samples != 5 || len(lock.Rows) != 3 {
 		t.Fatalf("lock table = %+v", lock)
 	}
 	if r := lock.Rows[0]; r.Function != "lib.wrap" || r.Self != 5 || r.Total != 5 {
@@ -111,8 +111,8 @@ func TestHotspotFunctions_State(t *testing.T) {
 	if all.Samples != 105 {
 		t.Errorf("all samples = %d, want 105", all.Samples)
 	}
-	if hotspotFunctions(fnTree(), false, "disk_io", "self") != nil {
-		t.Error("no disk_io samples: want nil")
+	if got := hotspotFunctions(fnTree(), false, "disk_io", "self"); got.Rows != nil || got.Samples != 0 {
+		t.Errorf("no disk_io samples: want no rows, got %+v", got)
 	}
 }
 

@@ -157,6 +157,53 @@ func TestExecProfiling_FunctionsViewEmptyState(t *testing.T) {
 	require.Contains(t, out, "# no disk_io samples for")
 }
 
+// A view without rows prints one line saying why, and the reason is the one
+// that holds: no samples at all, none in the counted state, or --app-only.
+func TestExecProfiling_EmptyViewSaysWhy(t *testing.T) {
+	// Ten LOCK samples on one library frame, and nothing running.
+	const lockedLib = `{"dataRootNodeId":"0","dataNodes":[
+	 {"id":"0","className":"","methodName":"","samples":{"RUNNING":0},"childIds":["A"]},
+	 {"id":"A","className":"lib.Pool","methodName":"take","apiInfo":{"systemApi":false},"samples":{"RUNNING":0,"LOCK":10},"childIds":[]}]}`
+	const noNodes = `{"dataRootNodeId":"0","dataNodes":[]}`
+	const (
+		noSamples = "# no stacks for " + testProcess + ": no profiling samples in the window (status=completed) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result\n"
+		appOnly   = "# no stacks for " + testProcess + ": --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only\n"
+		noRunning = "# no running samples for " + testProcess + " in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting\n"
+		noDiskIO  = "# no disk_io samples for " + testProcess + " in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting\n"
+	)
+	cases := []struct {
+		name, tree string
+		args       []string
+		want       string
+	}{
+		{"stacks, nothing sampled", noNodes, nil, noSamples},
+		{"stacks, app-only removed them", lockedLib, []string{"--app-only"}, appOnly},
+		{"functions, nothing sampled", noNodes, []string{"--view", "functions"}, noSamples},
+		{"functions, nothing sampled, another state", noNodes, []string{"--view", "functions", "--state", "lock"}, noSamples},
+		{"functions, nothing running", lockedLib, []string{"--view", "functions"}, noRunning},
+		{"functions, nothing running, app-only", lockedLib, []string{"--view", "functions", "--app-only"}, noRunning},
+		{"functions, no samples in the state", lockedLib, []string{"--view", "functions", "--state", "disk_io"}, noDiskIO},
+		{"functions, app-only removed the state's frames", lockedLib, []string{"--view", "functions", "--state", "lock", "--app-only"}, appOnly},
+		{"focus, nothing sampled, another state", noNodes, []string{"--focus", "take", "--state", "offcpu"}, noSamples},
+		{"focus, nothing running", lockedLib, []string{"--focus", "take"}, noRunning},
+		{"focus, app-only removed the state's frames", lockedLib, []string{"--focus", "take", "--state", "lock", "--app-only"}, appOnly},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			newProfilingAPI(t, http.StatusOK, tc.tree)
+			code, out := runProfilingCmd(t, append([]string{"hotspots", testProcess}, tc.args...)...)
+			require.Zero(t, code, out)
+			require.Equal(t, tc.want, out)
+		})
+	}
+
+	// The agent envelope carries the same line as its warning.
+	newProfilingAPI(t, http.StatusOK, lockedLib)
+	env := runProfilingAgent(t, "hotspots", testProcess, "--view", "functions", "--state", "lock", "--app-only")
+	require.Empty(t, env.Result)
+	require.Equal(t, []string{strings.TrimSuffix(strings.TrimPrefix(appOnly, "# "), "\n")}, env.Context.Warnings)
+}
+
 // In agent mode the per-function view rides in the envelope: the hints as
 // suggestions, the analysis as context.profile fields, no trailing # lines.
 func TestExecProfiling_FunctionsViewAgent(t *testing.T) {

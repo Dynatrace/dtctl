@@ -206,8 +206,9 @@ func TestHotspots_Stacks(t *testing.T) {
 		t.Errorf("Stacks(true) = %+v\nwant %+v", got, want)
 	}
 
-	if got := hotspotsOf(hotspotsResult("0")).Stacks(false); got.Rows != nil || got.Samples != 0 {
-		t.Errorf("empty analysis: %+v", got)
+	want = StackView{Empty: EmptyNoSamples}
+	if got := hotspotsOf(hotspotsResult("0")).Stacks(false); !reflect.DeepEqual(got, want) {
+		t.Errorf("empty analysis: %+v, want %+v", got, want)
 	}
 }
 
@@ -246,57 +247,115 @@ func TestAllocations_Stacks(t *testing.T) {
 	}
 }
 
-func TestWhyEmpty(t *testing.T) {
-	// A tree whose frames are all library code.
-	libOnly := hotspotsResult("0",
+// A view without rows says why, and the reason comes from the data in a fixed
+// order: no samples at all, then none in the counted state, then removed by
+// appOnly. The view carries it, so it cannot be asked for with other
+// arguments than the view was read with.
+func TestEmptyReason(t *testing.T) {
+	// Ten LOCK samples on one library frame, and nothing running.
+	lockedLib := hotspotsOf(hotspotsResult("0",
+		hnode("0", "", "", false, 0, 0, "A"),
+		hnode("A", "lib", "take", false, 0, 10),
+	))
+	// Running samples on library frames only.
+	libOnly := hotspotsOf(hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "lib", "run", false, 10, 0),
-	)
+	))
 	noData := newHotspots(&sdkcla.Response{Status: "no-data", Kind: sdkcla.KindHotspots, EntityID: testEntity})
-	const (
-		noSamples = "no stacks for " + testEntity + ": no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result"
-		appOnly   = "no stacks for " + testEntity + ": --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only"
-		noState   = "no %s samples for " + testEntity + " in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting"
-	)
-	cases := []struct {
+	noNodes := hotspotsOf(hotspotsResult("0"))
+	full := hotspotsOf(fnTree())
+
+	stacks := []struct {
 		name    string
 		h       *Hotspots
 		appOnly bool
-		state   string
-		reason  EmptyReason
-		note    string
+		want    EmptyReason
 	}{
-		{name: "no data at all", h: noData, reason: EmptyNoSamples, note: fmt.Sprintf(noSamples, "no-data")},
-		{name: "no data, app-only", h: noData, appOnly: true, reason: EmptyNoSamples, note: fmt.Sprintf(noSamples, "no-data")},
-		{name: "completed without nodes", h: hotspotsOf(hotspotsResult("0")), reason: EmptyNoSamples, note: fmt.Sprintf(noSamples, "completed")},
-		{name: "app-only removed every frame", h: hotspotsOf(libOnly), appOnly: true, reason: EmptyAppOnly, note: appOnly},
-		{name: "running state reads like the stack view", h: hotspotsOf(libOnly), appOnly: true, state: "running", reason: EmptyAppOnly, note: appOnly},
-		{name: "a state without samples", h: hotspotsOf(fnTree()), state: "disk_io", reason: EmptyState, note: fmt.Sprintf(noState, "disk_io")},
+		{"rows", full, false, ""},
+		{"rows, app-only", full, true, ""},
+		{"no data", noData, false, EmptyNoSamples},
+		{"no data, app-only", noData, true, EmptyNoSamples},
+		{"completed without nodes, app-only", noNodes, true, EmptyNoSamples},
+		{"only library frames", libOnly, false, ""},
+		{"only library frames, app-only", libOnly, true, EmptyAppOnly},
+		{"only lock samples", lockedLib, false, ""},
+		{"only lock samples, app-only", lockedLib, true, EmptyAppOnly},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			reason, note := tc.h.WhyEmpty(tc.appOnly, tc.state)
-			if reason != tc.reason {
-				t.Errorf("reason = %q, want %q", reason, tc.reason)
+	for _, tc := range stacks {
+		t.Run("stacks: "+tc.name, func(t *testing.T) {
+			view := tc.h.Stacks(tc.appOnly)
+			if view.Empty != tc.want {
+				t.Errorf("Empty = %q, want %q", view.Empty, tc.want)
 			}
-			if note != tc.note {
-				t.Errorf("note = %q\nwant   %q", note, tc.note)
+			if (len(view.Rows) == 0) != (tc.want != "") {
+				t.Errorf("%d rows with Empty = %q", len(view.Rows), view.Empty)
 			}
 		})
 	}
 
-	t.Run("allocations, app-only removed every frame", func(t *testing.T) {
-		a := allocationsOf(allocationsResult([]interface{}{float64(1)}, survnode(1, "Buf.grow", false, 10, 0)))
-		if reason, note := a.WhyEmpty(true); reason != EmptyAppOnly || note != appOnly {
-			t.Errorf("WhyEmpty = %q, %q", reason, note)
-		}
-	})
-	t.Run("allocations, nothing allocated", func(t *testing.T) {
-		a := allocationsOf(allocationsResult([]interface{}{}))
-		if reason, note := a.WhyEmpty(false); reason != EmptyNoSamples || note != fmt.Sprintf(noSamples, "completed") {
-			t.Errorf("WhyEmpty = %q, %q", reason, note)
-		}
-	})
+	functions := []struct {
+		name    string
+		h       *Hotspots
+		appOnly bool
+		state   string
+		want    EmptyReason
+	}{
+		{"rows", full, false, "running", ""},
+		{"rows in another state", full, true, "lock", ""},
+		// The analysis has no samples at all: that, whatever the state.
+		{"no data, lock", noData, false, "lock", EmptyNoSamples},
+		{"no data, lock, app-only", noData, true, "lock", EmptyNoSamples},
+		{"no data, running", noData, false, "running", EmptyNoSamples},
+		{"completed without nodes, all", noNodes, false, "all", EmptyNoSamples},
+		// There are samples, but none in the counted state.
+		{"a state without samples", full, false, "disk_io", EmptyState},
+		{"a state without samples, app-only", full, true, "disk_io", EmptyState},
+		{"running, with only lock samples", lockedLib, false, "running", EmptyState},
+		{"running, with only lock samples, app-only", lockedLib, true, "running", EmptyState},
+		{"lock, with only running samples, app-only", libOnly, true, "lock", EmptyState},
+		// The state has samples, and appOnly removed every frame under them.
+		{"lock on a library frame, app-only", lockedLib, true, "lock", EmptyAppOnly},
+		{"offcpu on a library frame, app-only", lockedLib, true, "offcpu", EmptyAppOnly},
+		{"running on library frames, app-only", libOnly, true, "running", EmptyAppOnly},
+		{"lock on a library frame", lockedLib, false, "lock", ""},
+	}
+	for _, tc := range functions {
+		t.Run("functions: "+tc.name, func(t *testing.T) {
+			view := tc.h.Functions(tc.appOnly, tc.state, "self")
+			if view.Empty != tc.want {
+				t.Errorf("Empty = %q, want %q", view.Empty, tc.want)
+			}
+			if (len(view.Rows) == 0) != (tc.want != "") {
+				t.Errorf("%d rows with Empty = %q", len(view.Rows), view.Empty)
+			}
+		})
+	}
+
+	libAllocations := allocationsOf(allocationsResult([]interface{}{float64(1)}, survnode(1, "Buf.grow", false, 10, 0)))
+	allocations := []struct {
+		name    string
+		a       *Allocations
+		appOnly bool
+		want    EmptyReason
+	}{
+		{"rows", libAllocations, false, ""},
+		{"only library frames, app-only", libAllocations, true, EmptyAppOnly},
+		{"nothing allocated", allocationsOf(allocationsResult([]interface{}{})), false, EmptyNoSamples},
+		{"nothing allocated, app-only", allocationsOf(allocationsResult([]interface{}{})), true, EmptyNoSamples},
+		{"no data", newAllocations(&sdkcla.Response{Status: "no-data", Kind: sdkcla.KindAllocations, EntityID: testEntity}), true, EmptyNoSamples},
+	}
+	for _, tc := range allocations {
+		t.Run("allocations: "+tc.name, func(t *testing.T) {
+			view := tc.a.Stacks(tc.appOnly, false)
+			if view.Empty != tc.want {
+				t.Errorf("Empty = %q, want %q", view.Empty, tc.want)
+			}
+			if (len(view.Rows) == 0) != (tc.want != "") {
+				t.Errorf("%d rows with Empty = %q", len(view.Rows), view.Empty)
+			}
+		})
+	}
 }
 
 // Raw hands out a document of the caller's own: changing it does not reach the
@@ -341,7 +400,7 @@ func TestResults_ConcurrentReaders(t *testing.T) {
 				if got := h.Stacks(j%2 == 0); got.Samples != 100 {
 					t.Errorf("Stacks: %d samples, want 100", got.Samples)
 				}
-				if got := h.Functions(false, "running", "self"); got == nil || got.Samples != 100 {
+				if got := h.Functions(false, "running", "self"); got.Samples != 100 {
 					t.Errorf("Functions: %+v", got)
 				}
 				if _, fn, _, _, err := h.Focus(false, "running", "wrap", 0); err != nil || fn != "lib.wrap" {

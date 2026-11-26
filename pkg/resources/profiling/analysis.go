@@ -2,7 +2,6 @@ package profiling
 
 import (
 	"context"
-	"fmt"
 
 	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
 )
@@ -143,6 +142,8 @@ type StackView struct {
 	Rows []StackRow
 	// Samples is the number of running samples over all rows.
 	Samples int
+	// Empty says why there are no rows, and is empty when there are some.
+	Empty EmptyReason
 }
 
 // Stacks reads the analysis as one row per unique call stack. appOnly keeps
@@ -151,6 +152,9 @@ func (h *Hotspots) Stacks(appOnly bool) StackView {
 	v := StackView{Rows: hotspotStacks(h.result, appOnly)}
 	for _, r := range v.Rows {
 		v.Samples += r.Running
+	}
+	if len(v.Rows) == 0 {
+		v.Empty = h.whyEmpty("")
 	}
 	return v
 }
@@ -164,6 +168,8 @@ type AllocationView struct {
 	// SurvivedBytes is summed per GC survived and is not a size (SurvivedNote).
 	AllocatedBytes int64
 	SurvivedBytes  int64
+	// Empty says why there are no rows, and is empty when there are some.
+	Empty EmptyReason
 }
 
 // Stacks reads the analysis as one row per unique allocation path. appOnly
@@ -175,14 +181,24 @@ func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
 		v.AllocatedBytes += int64(r.AllocBytes)
 		v.SurvivedBytes += int64(r.SurvivedBytes)
 	}
+	switch {
+	case len(v.Rows) > 0:
+	case len(allocationStacks(a.result, false, false)) == 0:
+		v.Empty = EmptyNoSamples
+	default:
+		v.Empty = EmptyAppOnly
+	}
 	return v
 }
 
 // Functions reads the analysis as one row per function, counting the samples
-// of state (one of States). sortBy is "self" (default) or "total". It returns
-// nil when there are no samples of that state.
-func (h *Hotspots) Functions(appOnly bool, state, sortBy string) *FunctionTable {
-	return hotspotFunctions(h.result, appOnly, state, sortBy)
+// of state (one of States). sortBy is "self" (default) or "total".
+func (h *Hotspots) Functions(appOnly bool, state, sortBy string) FunctionTable {
+	t := hotspotFunctions(h.result, appOnly, state, sortBy)
+	if len(t.Rows) == 0 {
+		t.Empty = h.whyEmpty(state)
+	}
+	return t
 }
 
 // Focus reads the analysis as one function's callers and callees. pattern
@@ -194,44 +210,36 @@ func (h *Hotspots) Focus(appOnly bool, state, pattern string, limit int) (rows [
 	return hotspotFocus(h.result, appOnly, state, pattern, limit)
 }
 
-// EmptyReason names why a view of an analysis has no rows. The values are
-// stable.
+// EmptyReason names why a view of an analysis has no rows. A view carries the
+// reason for the arguments it was read with. The values follow the tier of
+// `dtctl exec profiling` (docs/STABILITY.md): while the command is
+// experimental, they may change with it.
 type EmptyReason string
 
 const (
 	// EmptyNoSamples: the window holds no samples for the entity at all.
 	EmptyNoSamples EmptyReason = "no_samples"
-	// EmptyAppOnly: there are stacks, but appOnly removed every frame.
-	EmptyAppOnly EmptyReason = "app_only"
-	// EmptyState: a per-function view counted a thread state other than
-	// running, and the window has no samples in it.
+	// EmptyState: the window holds samples, but none in the thread state a
+	// per-function view counted.
 	EmptyState EmptyReason = "no_state_samples"
+	// EmptyAppOnly: there are samples to show, but appOnly removed every
+	// frame they are on.
+	EmptyAppOnly EmptyReason = "app_only"
 )
 
-// WhyEmpty explains a view that came back without rows: the reason, and one
-// line saying what to try, worded for a dtctl user. appOnly is what the view
-// was read with; state is the thread state a per-function view counted, and
-// empty for the stack view.
-func (h *Hotspots) WhyEmpty(appOnly bool, state string) (EmptyReason, string) {
-	if state != "" && state != "running" {
-		return EmptyState, fmt.Sprintf("no %s samples for %s in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting", state, h.Entity)
+// whyEmpty says why a view that has no rows has none. state is the thread
+// state a per-function view counted, and empty for the stack view. The reason
+// is read from the data, in a fixed order: no samples at all, then none in
+// that state, and only then appOnly, which is all that is left to have removed
+// them.
+func (h *Hotspots) whyEmpty(state string) EmptyReason {
+	if len(hotspotStacks(h.result, false)) == 0 {
+		return EmptyNoSamples
 	}
-	// Running samples absent from a per-function view means what an empty
-	// stack view means.
-	return whyNoStacks(h.Entity, h.Status, appOnly && len(hotspotStacks(h.result, false)) > 0)
-}
-
-// WhyEmpty explains a stack view that came back without rows, as
-// Hotspots.WhyEmpty does.
-func (a *Allocations) WhyEmpty(appOnly bool) (EmptyReason, string) {
-	return whyNoStacks(a.Entity, a.Status, appOnly && len(allocationStacks(a.result, false, false)) > 0)
-}
-
-func whyNoStacks(entity, status string, removedByAppOnly bool) (EmptyReason, string) {
-	if removedByAppOnly {
-		return EmptyAppOnly, fmt.Sprintf("no stacks for %s: --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only", entity)
+	if state != "" && hotspotFunctions(h.result, false, state, "").Samples == 0 {
+		return EmptyState
 	}
-	return EmptyNoSamples, fmt.Sprintf("no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result", entity, status)
+	return EmptyAppOnly
 }
 
 // visualOnlyKeys are fields that carry UI rendering metadata with no

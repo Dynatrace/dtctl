@@ -424,9 +424,8 @@ func profilingLimit(ctx context.Context, f *profilingFlags, def int) int {
 // stack.
 func renderProfilingStacks(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags) error {
 	view := h.Stacks(f.appOnly)
-	if len(view.Rows) == 0 {
-		_, note := h.WhyEmpty(f.appOnly, "")
-		return printProfilingEmpty(ctx, run, "stacks", "", []profiling.StackRow{}, note)
+	if view.Empty != "" {
+		return printProfilingEmpty(ctx, run, "stacks", "", []profiling.StackRow{}, view.Empty)
 	}
 	rows := capProfilingRows(view.Rows, profilingLimit(ctx, f, profilingStacksDefaultLimit))
 	return printProfilingStacks(ctx, run, profilingStackOutput{
@@ -447,9 +446,8 @@ func renderProfilingStacks(ctx context.Context, run *profilingRun, h *profiling.
 // unique allocation path.
 func renderProfilingAllocations(ctx context.Context, run *profilingRun, a *profiling.Allocations, f *profilingFlags) error {
 	view := a.Stacks(f.appOnly, f.survivorsOnly)
-	if len(view.Rows) == 0 {
-		_, note := a.WhyEmpty(f.appOnly)
-		return printProfilingEmpty(ctx, run, "stacks", "", []profiling.AllocationRow{}, note)
+	if view.Empty != "" {
+		return printProfilingEmpty(ctx, run, "stacks", "", []profiling.AllocationRow{}, view.Empty)
 	}
 	key := "allocated"
 	if f.survivorsOnly {
@@ -551,9 +549,8 @@ func renderProfilingRaw(ctx context.Context, run *profilingRun, raw map[string]i
 // printer, so a table, -o json/csv/yaml, --jq and the agent envelope all work.
 func renderProfilingFunctions(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags) error {
 	t := h.Functions(f.appOnly, f.state, f.sortBy)
-	if t == nil {
-		_, note := h.WhyEmpty(f.appOnly, f.state)
-		return printProfilingEmpty(ctx, run, "functions", f.state, []profiling.FunctionRow{}, note)
+	if t.Empty != "" {
+		return printProfilingEmpty(ctx, run, "functions", f.state, []profiling.FunctionRow{}, t.Empty)
 	}
 	limit := profilingLimit(ctx, f, profilingFunctionsDefaultLimit)
 	rows := capProfilingRows(t.Rows, limit)
@@ -579,9 +576,8 @@ func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.H
 	limit := profilingLimit(ctx, f, profilingFocusDefaultLimit)
 	rows, fn, nCallers, nCallees, err := h.Focus(f.appOnly, f.state, f.focus, limit)
 	if err != nil {
-		if h.Functions(f.appOnly, f.state, "self") == nil {
-			_, note := h.WhyEmpty(f.appOnly, f.state)
-			return printProfilingEmpty(ctx, run, "focus", f.state, []profiling.FocusRow{}, note)
+		if t := h.Functions(f.appOnly, f.state, "self"); t.Empty != "" {
+			return printProfilingEmpty(ctx, run, "focus", f.state, []profiling.FocusRow{}, t.Empty)
 		}
 		return err
 	}
@@ -633,11 +629,12 @@ func printProfilingRows(ctx context.Context, run *profilingRun, view, state stri
 	return nil
 }
 
-// printProfilingEmpty prints a view that has no rows. A table gets the note in
-// place of the rows; the agent envelope gets an empty result with the note in
-// context.warnings; structured formats get the empty list on stdout and the
-// note on stderr.
-func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state string, empty interface{}, note string) error {
+// printProfilingEmpty prints a view that has no rows, with a note saying why.
+// A table gets the note in place of the rows; the agent envelope gets an empty
+// result with the note in context.warnings; structured formats get the empty
+// list on stdout and the note on stderr.
+func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state string, empty interface{}, reason profiling.EmptyReason) error {
+	note := profilingEmptyNote(reason, run, state)
 	if agentMode(ctx) {
 		p := newPrinterCtx(ctx)
 		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
@@ -653,6 +650,18 @@ func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state str
 	}
 	fmt.Fprintf(currentStderr(ctx), "# %s\n", note)
 	return newPrinterCtx(ctx).PrintList(empty)
+}
+
+// profilingEmptyNote says why a view has no rows and what to try, in one line.
+// state is the thread state a per-function view counted.
+func profilingEmptyNote(reason profiling.EmptyReason, run *profilingRun, state string) string {
+	switch reason {
+	case profiling.EmptyState:
+		return fmt.Sprintf("no %s samples for %s in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting", state, run.entity)
+	case profiling.EmptyAppOnly:
+		return fmt.Sprintf("no stacks for %s: --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only", run.entity)
+	}
+	return fmt.Sprintf("no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result", run.entity, run.status)
 }
 
 // profilingAPIError adds profiling-specific advice to the API failures a
