@@ -395,6 +395,7 @@ on update, the current message is preserved. Passing an empty string
 - source locations resolve all matching breakpoints in the current workspace
 - `--dry-run` is supported
 - at least one of `--condition`, `--log-message`, or `--enabled` is required
+- name the breakpoint before `--enabled`, or write the value as `--enabled=false`: `--enabled false` with no breakpoint named before it leaves `false` where the identifier goes, and an argument that reads as a boolean there (`true`, `false`, `1`, `0`, `t`, `f`) is refused. A breakpoint whose identifier is such a word is named before the flag and is never refused
 
 ## 6. Delete breakpoints
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -216,13 +217,26 @@ func TestUpdateBreakpoint_DryRunNeedsItsContext(t *testing.T) {
 
 // "--enabled false" with no identifier before it leaves the flag bare and
 // "false" as the only argument, where the breakpoint identifier goes. A lone
-// argument that reads as a boolean is that mistake and names no breakpoint,
-// so nothing is sent.
+// argument that reads as a boolean and stands after the flag is that
+// mistake and names no breakpoint, so nothing is sent.
+//
+// An identifier is whatever the rule was created with, so "1" or "t" can be
+// one. Before the flag it is the identifier and is never refused. After it,
+// "--enabled 1" and "--enabled=true 1" cannot be told from the mistake once
+// the flags are parsed, so both are refused and the message says where such
+// an identifier goes.
 func TestUpdateBreakpoint_EnabledValueIsNotAnIdentifier(t *testing.T) {
 	for _, argv := range [][]string{
 		{"update", "breakpoint", "--enabled", "false"},
 		{"update", "breakpoint", "--repo-scope", "checkout", "--enabled", "false"},
 		{"update", "breakpoint", "--enabled", "TRUE"},
+		{"update", "breakpoint", "--enabled", "1"},
+		{"update", "breakpoint", "--enabled", "--condition", "a==1", "f"},
+		{"update", "breakpoint", "--enabled=true", "1"},
+		// Two arguments after the flag: the first is where its value would
+		// be, and reading it as the identifier would enable a breakpoint
+		// called "false" for a caller who meant to disable breakpoint 1.
+		{"update", "breakpoint", "--enabled", "false", "1"},
 	} {
 		t.Run(strings.Join(argv[2:], " "), func(t *testing.T) {
 			srv := newLiveDebuggerStub(t, "readwrite-all")
@@ -232,12 +246,43 @@ func TestUpdateBreakpoint_EnabledValueIsNotAnIdentifier(t *testing.T) {
 			require.Equal(t, 2, code, stdout)
 			detail := agentError(t, stdout)
 			require.Equal(t, "validation_error", detail.Code)
-			require.Equal(t, fmt.Sprintf(`%q was read as the breakpoint identifier, so no breakpoint is named: name it first, as in dtctl update breakpoint <id|filename:line> --enabled=%s`, argv[len(argv)-1], strings.ToLower(argv[len(argv)-1])), detail.Message)
+			token := argv[len(argv)-1]
+			if token == "1" && argv[len(argv)-2] == "false" {
+				token = "false"
+			}
+			value, err := strconv.ParseBool(token)
+			require.NoError(t, err)
+			require.Equal(t, fmt.Sprintf(`%q follows --enabled, where it reads as the flag's value, so no breakpoint is named: name it first, as in dtctl update breakpoint <id|filename:line> --enabled=%t; a breakpoint whose identifier is %q goes before the flag as well`,
+				token, value, token), detail.Message)
 			require.Empty(t, srv.ops())
 		})
 	}
 
-	// The spellings that name a breakpoint still do.
+	// The spellings that name a breakpoint still do, an identifier that
+	// reads as a boolean among them.
+	for _, tc := range []struct {
+		argv    []string
+		id      string
+		enabled bool
+	}{
+		{[]string{"update", "breakpoint", "dtctl-rule-0001", "--enabled", "false"}, "dtctl-rule-0001", false},
+		{[]string{"update", "breakpoint", "dtctl-rule-0001", "--enabled=false"}, "dtctl-rule-0001", false},
+		{[]string{"update", "breakpoint", "dtctl-rule-0001", "--enabled"}, "dtctl-rule-0001", true},
+		{[]string{"update", "breakpoint", "1", "--enabled"}, "1", true},
+		{[]string{"update", "breakpoint", "t", "--enabled=false"}, "t", false},
+		{[]string{"update", "breakpoint", "true", "--enabled", "false"}, "true", false},
+		{[]string{"update", "breakpoint", "0", "--condition", "a==1", "--enabled"}, "0", true},
+	} {
+		t.Run(strings.Join(tc.argv[2:], " "), func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readwrite-all")
+			srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+			chdirTestRepo(t, breakpointScope)
+			code, stdout, stderr := runRepoScoped(append(tc.argv, "--plain", "--dry-run"), RunOptions{})
+			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+			require.Contains(t, breakpointMessage(t, stdout), fmt.Sprintf("Dry run: would update breakpoint %s (", tc.id))
+			require.Contains(t, breakpointMessage(t, stdout), fmt.Sprintf("enabled=%t)", tc.enabled))
+		})
+	}
 	for _, argv := range [][]string{
 		{"update", "breakpoint", "dtctl-rule-0001", "--enabled", "false"},
 		{"update", "breakpoint", "dtctl-rule-0001", "--enabled=false"},

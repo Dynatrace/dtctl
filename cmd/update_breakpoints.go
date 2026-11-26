@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 	"github.com/Dynatrace/dtctl/pkg/safety"
@@ -24,6 +25,7 @@ const (
 var updateBreakpointCmd = newUpdateBreakpointCmd()
 
 func newUpdateBreakpointCmd() *cobra.Command {
+	enabledFlag := &enabledFlagValue{}
 	c := &cobra.Command{
 		Use:     "breakpoint [<id|filename:line>]",
 		Aliases: []string{"breakpoints", "bp"},
@@ -62,7 +64,9 @@ Examples:
   # Enable a breakpoint
 	 dtctl update breakpoint OrderController.java:306 --enabled true
 
-  # Disable a breakpoint
+  # Disable a breakpoint (name it before --enabled, or write --enabled=false:
+  # a boolean that follows the flag with no breakpoint named before it is
+  # refused, since it would be read as the identifier)
 	 dtctl update breakpoint OrderController.java:306 --enabled false
 
   # Update workspace filters
@@ -85,6 +89,20 @@ Examples:
 
 			conditionChanged := cmd.Flags().Changed("condition")
 			logMessageChanged := cmd.Flags().Changed("log-message")
+			// "--enabled false" leaves the flag bare and "false" as an
+			// argument, where the breakpoint identifier goes. An argument
+			// that reads as a boolean and is the first after the flag, with
+			// none before it, is that mistake: no breakpoint is named, and
+			// enabling a rule called "false" helps nobody. An identifier is
+			// whatever a rule was created with, so one that reads as a
+			// boolean exists; before the flag it is never refused. After
+			// it, it cannot be told from the mistake.
+			if len(args) > 0 && enabledFlag.set && enabledFlag.argsBefore == 0 {
+				if value, err := strconv.ParseBool(strings.TrimSpace(args[0])); err == nil {
+					return &invalidInputError{fmt.Errorf(`%q follows --enabled, where it reads as the flag's value, so no breakpoint is named: name it first, as in dtctl update breakpoint <id|filename:line> --enabled=%t; a breakpoint whose identifier is %q goes before the flag as well`,
+						args[0], value, args[0])}
+				}
+			}
 			enabled, enabledChanged, err := getOptionalBoolFlag(cmd, "enabled", trailingArgs)
 			if err != nil {
 				return err
@@ -199,12 +217,6 @@ Examples:
 			condition, _ := cmd.Flags().GetString("condition")
 			logMessage, _ := cmd.Flags().GetString("log-message")
 			identifier := strings.TrimSpace(args[0])
-			// "--enabled false" leaves the flag bare and "false" as the only
-			// argument: the value, read as the identifier. No breakpoint is
-			// named then, and enabling a rule called "false" helps nobody.
-			if value, err := strconv.ParseBool(identifier); enabledChanged && len(args) == 1 && err == nil {
-				return &invalidInputError{fmt.Errorf(`%q was read as the breakpoint identifier, so no breakpoint is named: name it first, as in dtctl update breakpoint <id|filename:line> --enabled=%t`, args[0], value)}
-			}
 
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -329,7 +341,8 @@ Examples:
 	}
 	c.Flags().String("condition", "", `Condition expression (e.g. "a==1 && b!='bbb'", "'val' in arr", "x>0 && y<=10")`)
 	c.Flags().String("log-message", "", `Log message template with {variable} placeholders (e.g. "Hit on {frame.filename}:{frame.line} value={newTodoRecord.title}")`)
-	c.Flags().String("enabled", "", "Enable or disable the breakpoint")
+	enabledFlag.flags = c.Flags()
+	c.Flags().Var(enabledFlag, "enabled", "Enable or disable the breakpoint; name the breakpoint before the flag, or write the value as --enabled=false")
 	c.Flags().String("filters", "", "workspace filters to apply (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
 	markPrompts(c, "yes", "dry-run")
@@ -615,6 +628,34 @@ func describeBreakpointEdits(conditionChanged bool, condition string, logMessage
 	}
 	return strings.Join(changes, ", ")
 }
+
+// enabledFlagValue is the value of --enabled, a string flag that is "true"
+// when given bare, together with where on the line it was given: pflag
+// collects the arguments it has passed so far, so the count at the moment
+// the flag is set is the number of arguments written before it.
+type enabledFlagValue struct {
+	value      string
+	flags      *pflag.FlagSet
+	set        bool
+	argsBefore int
+}
+
+func (v *enabledFlagValue) String() string { return v.value }
+func (v *enabledFlagValue) Type() string   { return "string" }
+func (v *enabledFlagValue) Set(s string) error {
+	// The last occurrence gives the value, as for any string flag, and the
+	// first one the place: an identifier before any --enabled was not
+	// written where a value of it would be.
+	if !v.set {
+		v.set, v.argsBefore = true, v.flags.NArg()
+	}
+	v.value = s
+	return nil
+}
+
+// Reset returns the flag to its default between invocations; Set would
+// record a place.
+func (v *enabledFlagValue) Reset() { v.value, v.set, v.argsBefore = "", false, 0 }
 
 func getOptionalBoolFlag(cmd *cobra.Command, flagName string, trailingArgs []string) (bool, bool, error) {
 	flag := cmd.Flags().Lookup(flagName)
