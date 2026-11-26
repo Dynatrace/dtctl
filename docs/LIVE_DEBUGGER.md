@@ -65,7 +65,7 @@ dtctl update breakpoint --filters k8s.namespace.name:prod --yes
 
 ### Notes
 
-- `--filters` (or `--repo-scope`, see below) is required for `dtctl update breakpoint`
+- `dtctl update breakpoint` without a breakpoint identifier sets the workspace filters and needs `--filters` (or `--repo-scope`, see below); with an identifier it edits that breakpoint and takes neither as a filter source
 - filter values are mapped to the Live Debugger workspace filter set payload
 - repeated keys are supported
 - changing filters re-scopes all existing breakpoints, so you are prompted to
@@ -92,7 +92,9 @@ An entry renders one filter set per Kubernetes namespace (with that namespace's
 workloads), then one for its service names and one for its process group ids
 (`dt.entity.process_group`). Service ids are never sent: a workspace does not
 honour `dt.entity.service`. Only a one-set entry can be pasted into
-`--filters`; `--repo-scope <name>` sends every set.
+`--filters`, and only when none of its values holds a `,`, which `--filters`
+reads as the end of a pair; `--repo-scope <name>` sends every set, whatever
+its values hold.
 
 Filters set from an entry are not the entry. What they leave out, and what
 they carry unverified, the commands say on every path that sets or previews
@@ -484,7 +486,16 @@ Live Debugger mutating commands follow `dtctl` safety conventions:
 - delete operations use delete safety checks
 - destructive delete operations support confirmation bypass with `-y`
 - filter changes prompt for confirmation because they re-scope existing breakpoints; bypass with `-y`/`--yes`
-- supported mutating commands provide `--dry-run`
+- supported mutating commands provide `--dry-run`, which needs no safety
+  level and changes nothing. `create breakpoint --dry-run` and both forms of
+  `update breakpoint --dry-run` send no request at all. `delete breakpoint
+  --dry-run` has to read what it would delete, so it sends the two reads
+  `get breakpoints` sends (the workspace, then its breakpoints) and nothing
+  else; the first of them creates the workspace, empty, when it does not
+  exist yet. It also asks its confirmation before it previews, unless `--yes`
+- when the repository's scope file is there and does not load, every
+  mutating command, and its dry run, is refused before anything is sent (see
+  [Which workspace a command works in](#which-workspace-a-command-works-in))
 
 ## Example workflow
 

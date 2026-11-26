@@ -251,3 +251,27 @@ func TestUpdateBreakpoint_EnabledValueIsNotAnIdentifier(t *testing.T) {
 		require.Len(t, srv.mutations(), 1)
 	}
 }
+
+// A dry run of delete has to read what it would delete, so it sends the two
+// reads get breakpoints sends and nothing else, and needs no safety level.
+// The first of them is the one request that finds a workspace, and creates
+// an empty one where there is none: the user guide says so.
+func TestDeleteBreakpoint_DryRunOnlyReads(t *testing.T) {
+	for _, argv := range [][]string{
+		{"delete", "breakpoint", "--all"},
+		{"delete", "breakpoint", "A.java:1"},
+		{"delete", "breakpoint", "dtctl-rule-0001"},
+	} {
+		t.Run(argv[2], func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readonly")
+			srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+			chdirTestRepo(t, breakpointScope)
+
+			code, stdout, stderr := runRepoScoped(append(argv, "--plain", "--dry-run", "--yes"), RunOptions{})
+			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+			require.Contains(t, breakpointMessage(t, stdout), "Dry run: would delete")
+			require.Equal(t, []string{"GetOrCreateWorkspaceV2", "GetWorkspaceRules"}, srv.ops())
+			require.Empty(t, srv.mutations())
+		})
+	}
+}
