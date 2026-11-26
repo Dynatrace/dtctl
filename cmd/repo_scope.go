@@ -64,7 +64,15 @@ Examples:
   # Run one query unscoped
   dtctl query 'fetch logs | limit 20' --no-repo-scope
 `,
-		Args: cobra.NoArgs,
+		// A word after the group is a subcommand that does not exist. Cobra
+		// would say so too, and the root would then suggest one of its own
+		// commands for it.
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			return enhanceCommandError(cmd, fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath()))
+		},
 		RunE: listRepoScopes,
 	}
 	// Experimental: the bindings a file can carry, how they render into DQL
@@ -131,6 +139,20 @@ Examples:
 			if len(entryPaths) == 1 {
 				entry.Path = path.Clean(filepath.ToSlash(entryPaths[0]))
 			}
+			// Said here rather than by a flag group, whose error carries
+			// neither the usage exit code nor a code an agent can read.
+			switch {
+			case len(workloads) > 0 && namespace == "":
+				return &reposcope.InvalidError{
+					Source: "repo-scope set",
+					Msg:    "--workload names a workload of a namespace; pass --namespace with it",
+				}
+			case namespace != "" && len(workloads) == 0:
+				return &reposcope.InvalidError{
+					Source: "repo-scope set",
+					Msg:    "--namespace qualifies the --workload names; pass --workload with it",
+				}
+			}
 			if clusterUID != "" && len(workloads) == 0 {
 				return &reposcope.InvalidError{
 					Source: "repo-scope set",
@@ -150,10 +172,8 @@ Examples:
 	c.Flags().StringArrayVar(&services, "service", nil, "service id, SERVICE-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&processGroups, "process-group", nil, "process group id, PROCESS_GROUP-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&serviceNames, "service-name", nil, "OpenTelemetry service.name (repeatable)")
-	// Both qualify every --workload, so a second value is refused: taking the
-	// last one would rebind the workloads named before it.
-	c.Flags().Var(&singleUseStringValue{value: &clusterUID}, "cluster-uid", "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
-	c.Flags().Var(&singleUseStringValue{value: &namespace}, "namespace", "Kubernetes namespace of the --workload names")
+	c.Flags().Var(&repoScopeWorkloadQualifier{singleUseStringValue{value: &clusterUID}, "cluster-uid"}, "cluster-uid", "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
+	c.Flags().Var(&repoScopeWorkloadQualifier{singleUseStringValue{value: &namespace}, "namespace"}, "namespace", "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
 	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
 	c.Flags().StringArrayVar(&segments, "segment", nil, `existing filter segment a query under the entry also sends, by the id 'dtctl get segments' lists (repeatable, max 10)
@@ -161,8 +181,27 @@ bind its variables inline: "ID?var=val&var2=val1,val2"`)
 	for _, name := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "segment", "path"} {
 		rejectEmptyFlag(c, name)
 	}
-	c.MarkFlagsRequiredTogether("namespace", "workload")
 	return c
+}
+
+// repoScopeWorkloadQualifier is the value of set's --namespace and
+// --cluster-uid. Each qualifies every --workload of the command, so a second
+// value is refused: taking the last one would rebind the workloads named
+// before it.
+type repoScopeWorkloadQualifier struct {
+	singleUseStringValue
+	flag string
+}
+
+func (v *repoScopeWorkloadQualifier) Set(value string) error {
+	if v.set {
+		return &reposcope.InvalidError{
+			Source:      "repo-scope set",
+			Msg:         fmt.Sprintf("--%s takes one value, for every --workload of the command", v.flag),
+			Suggestions: []string{"an entry whose workloads differ in it is written in " + reposcope.FileName + " by hand"},
+		}
+	}
+	return v.singleUseStringValue.Set(value)
 }
 
 var repoScopeCurrentCmd = newRepoScopeCurrentCmd()

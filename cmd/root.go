@@ -561,6 +561,12 @@ func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool
 // Execute and Parse share it, so both report a command line the same way.
 func classifyCommandLineError(root *cobra.Command, err error, devSignpost bool) error {
 	errStr := err.Error()
+	// A group that answered for its own subcommands has already typed the
+	// error; the root would suggest one of its commands in their place.
+	var typedCmdErr *suggest.CommandError
+	if errors.As(err, &typedCmdErr) {
+		return err
+	}
 	if strings.Contains(errStr, "unknown command") {
 		// A disabled development feature explains itself only to a caller who
 		// has already demonstrated knowledge of the mechanism, and never in
@@ -1393,6 +1399,18 @@ func exitCodeForError(err error) int {
 
 	var cmdErr *suggest.CommandError
 	if errors.As(err, &cmdErr) {
+		return client.ExitUsageError
+	}
+
+	// A repo scope entry that does not exist, and a repo scope value or file
+	// that is refused: the exits of not_found and of a usage error, to match
+	// the codes agent mode reports for them.
+	var repoScopeNotFound *reposcope.NotFoundError
+	if errors.As(err, &repoScopeNotFound) {
+		return client.ExitNotFoundError
+	}
+	var repoScopeInvalid *reposcope.InvalidError
+	if errors.As(err, &repoScopeInvalid) {
 		return client.ExitUsageError
 	}
 

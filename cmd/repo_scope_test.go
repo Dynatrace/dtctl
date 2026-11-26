@@ -316,7 +316,7 @@ func TestRepoScopeSetPathIsADirectoryOfTheRepository(t *testing.T) {
 		"services/link":      `--path: "services/link" is a symbolic link, which is not followed; name the directory it points to`,
 	} {
 		code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "billing", "--agent", "--service-name", "billing", "--path", dir}, RunOptions{})
-		require.NotZero(t, code, dir)
+		require.Equal(t, client.ExitUsageError, code, dir)
 		detail := agentError(t, stdout)
 		require.Equal(t, "validation_error", detail.Code)
 		require.Equal(t, message, detail.Message)
@@ -345,8 +345,8 @@ func TestRepoScopeSetTakesOneNamespaceAndCluster(t *testing.T) {
 		{"--namespace", "a", "--workload", "one", "--cluster-uid", uid, "--cluster-uid", "22222222-2222-3333-4444-555555555555"},
 	} {
 		code, _, stderr := runRepoScoped(append([]string{"repo-scope", "set", "two"}, args...), RunOptions{})
-		require.NotZero(t, code, stderr)
-		require.Contains(t, stderr, "flag can only be provided once")
+		require.Equal(t, client.ExitUsageError, code, stderr)
+		require.Regexp(t, `repo-scope set: --(namespace|cluster-uid) takes one value, for every --workload of the command`, stderr)
 		require.Equal(t, before, readScopeFile(t, repo))
 	}
 	// The refusal is of one command line, not of the next one.
