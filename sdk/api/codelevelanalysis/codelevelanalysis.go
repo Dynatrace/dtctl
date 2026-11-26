@@ -35,13 +35,22 @@ const (
 // Retry-After; it doubles with every attempt. A variable so tests can shorten it.
 var throttleBaseWait = 5 * time.Second
 
-// Kind maps user-facing shorthand to the API kind strings.
-var Kind = map[string]string{
-	"hotspots":       "methodHotspots",
-	"threads":        "threadAnalysis",
-	"memory":         "memoryAllocation",
-	"memory-details": "memoryAllocationDetails",
-}
+// Kind names an analysis by its API name, which is also the kind a Response
+// reports.
+type Kind string
+
+const (
+	// KindHotspots is the method CPU hotspots analysis.
+	KindHotspots Kind = "methodHotspots"
+	// KindThreads is the per-thread analysis.
+	KindThreads Kind = "threadAnalysis"
+	// KindAllocations is the memory allocation analysis: where memory is
+	// allocated, and what survived GC.
+	KindAllocations Kind = "memoryAllocation"
+	// KindAllocationDetails is the memory allocation analysis of one
+	// allocated type and allocating method (Payload.Type, Payload.Method).
+	KindAllocationDetails Kind = "memoryAllocationDetails"
+)
 
 // Leaf-type filter values (hotspots/threads). The code-level analysis API
 // splits every CPU sample by whether the thread was inside a traced service
@@ -112,7 +121,8 @@ func NormalizeEntityID(id string) string {
 }
 
 type Payload struct {
-	Kind     string `json:"kind"`
+	// Kind is the analysis to run: one of the Kind constants.
+	Kind     Kind   `json:"kind"`
 	EntityID string `json:"entityId"`
 	From     int64  `json:"from"`
 	To       int64  `json:"to"`
@@ -137,7 +147,7 @@ type Payload struct {
 
 type Response struct {
 	Status    string      `json:"status"` // "completed" | "no-data"
-	Kind      string      `json:"kind"`
+	Kind      Kind        `json:"kind"`
 	EntityID  string      `json:"entityId"`
 	PollCount int         `json:"pollCount"`
 	Result    interface{} `json:"result"`
@@ -302,6 +312,12 @@ func parseResult(p Payload, pollCount int, body []byte) (*Response, error) {
 }
 
 func validate(p Payload) error {
+	switch p.Kind {
+	case KindHotspots, KindThreads, KindAllocations, KindAllocationDetails:
+	default:
+		return fmt.Errorf("codelevelanalysis: unknown kind %q: use %s, %s, %s, or %s", string(p.Kind),
+			KindHotspots, KindThreads, KindAllocations, KindAllocationDetails)
+	}
 	if p.EntityID == "" {
 		return fmt.Errorf("codelevelanalysis: entityId is required")
 	}
@@ -317,7 +333,7 @@ func validate(p Payload) error {
 	if p.To-p.From > 24*60*60*1000 {
 		return fmt.Errorf("codelevelanalysis: timeframe must not exceed 24 hours")
 	}
-	if p.Kind == "memoryAllocationDetails" && (p.Type == "" || p.Method == "") {
+	if p.Kind == KindAllocationDetails && (p.Type == "" || p.Method == "") {
 		return fmt.Errorf("codelevelanalysis: memoryAllocationDetails requires type and method")
 	}
 	return nil
@@ -340,8 +356,9 @@ func buildSubmitPath(p Payload) string {
 		}
 	}
 
+	path := "memoryallocationdetails"
 	switch p.Kind {
-	case "methodHotspots", "threadAnalysis":
+	case KindHotspots, KindThreads:
 		// LeafType wins when set; otherwise fall back to a raw ServiceFilter.
 		// Both encoders were already validated in validate(), so the error here
 		// is impossible — ignore it to keep this path total.
@@ -351,21 +368,21 @@ func buildSubmitPath(p Payload) string {
 		}
 		setIfSet("servicefilter", serviceFilter)
 		setIfTrue("showWaiting", p.ShowWaiting)
-		path := "methodhotspots"
-		if p.Kind == "threadAnalysis" {
+		path = "methodhotspots"
+		if p.Kind == KindThreads {
 			path = "threadanalysis"
 		}
-		return fmt.Sprintf("%s/%s/%s", basePath, path, entity) + "?" + params.Encode()
 
-	case "memoryAllocation":
+	case KindAllocations:
 		setIfSet("problemId", p.ProblemID)
 		setIfTrue("survivorsOnly", p.SurvivorsOnly)
 		setIfSet("typeFilter", p.TypeFilter)
 		setIfSet("apiFilter", p.APIFilter)
 		setIfSet("methodFqnFilter", p.MethodFQNFilter)
-		return fmt.Sprintf("%s/memoryallocation/%s", basePath, entity) + "?" + params.Encode()
+		path = "memoryallocation"
 
-	case "memoryAllocationDetails":
+	default:
+		// KindAllocationDetails: validate admits no other kind.
 		setIfSet("problemId", p.ProblemID)
 		setIfSet("type", p.Type)
 		setIfSet("method", p.Method)
@@ -373,8 +390,6 @@ func buildSubmitPath(p Payload) string {
 		setIfSet("typeFilter", p.TypeFilter)
 		setIfSet("apiFilter", p.APIFilter)
 		setIfSet("methodFqnFilter", p.MethodFQNFilter)
-		return fmt.Sprintf("%s/memoryallocationdetails/%s", basePath, entity) + "?" + params.Encode()
 	}
-
-	panic(fmt.Sprintf("codelevelanalysis: unsupported kind %q", p.Kind))
+	return fmt.Sprintf("%s/%s/%s", basePath, path, entity) + "?" + params.Encode()
 }

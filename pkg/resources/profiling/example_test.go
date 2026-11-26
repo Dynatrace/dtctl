@@ -45,7 +45,7 @@ func Example() {
 	}
 
 	analysis, err := profiling.NewHandler(c).Analyze(context.Background(), profiling.Payload{
-		Kind:     profiling.Kind["hotspots"],
+		Kind:     profiling.KindHotspots,
 		EntityID: "PROCESS-0000000000000001",
 		From:     window.From,
 		To:       window.To,

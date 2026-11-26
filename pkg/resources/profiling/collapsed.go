@@ -43,7 +43,7 @@ type AllocationRow struct {
 // frames the profiler did not classify as application code (apiInfo.systemApi)
 // from each path — see nodeIsApp. Returns empty string for unsupported kinds or
 // missing data.
-func ToCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
+func ToCollapsed(kind Kind, raw interface{}, top int, appOnly bool) string {
 	switch kind {
 	case "memoryAllocation", "memoryAllocationDetails":
 		return FoldAllocations(capRows(AllocationStacks(raw, appOnly, false), top), false)

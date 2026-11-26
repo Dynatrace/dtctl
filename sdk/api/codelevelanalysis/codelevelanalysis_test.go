@@ -456,3 +456,48 @@ func TestPollRidesOutTransportErrors(t *testing.T) {
 		})
 	}
 }
+
+// A kind the API does not have is refused before any request is sent. It used
+// to pass validation and panic while the request path was built.
+func TestRunRejectsUnknownKind(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"))
+	if err != nil {
+		t.Fatalf("httpclient.New: %v", err)
+	}
+	for _, kind := range []Kind{"", "hotspots", "methodhotspots"} {
+		_, err := NewHandler(c).Run(context.Background(), Payload{Kind: kind, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2})
+		want := `codelevelanalysis: unknown kind "` + string(kind) + `": use methodHotspots, threadAnalysis, memoryAllocation, or memoryAllocationDetails`
+		if err == nil || err.Error() != want {
+			t.Errorf("Run(kind=%q) err = %v, want %q", kind, err, want)
+		}
+	}
+	if requests != 0 {
+		t.Errorf("sent %d requests, want none", requests)
+	}
+}
+
+// Every kind constant names its endpoint.
+func TestKindsBuildTheirPaths(t *testing.T) {
+	cases := map[Kind]string{
+		KindHotspots:          "/methodhotspots/PROCESS_GROUP-ABC?",
+		KindThreads:           "/threadanalysis/PROCESS_GROUP-ABC?",
+		KindAllocations:       "/memoryallocation/PROCESS_GROUP-ABC?",
+		KindAllocationDetails: "/memoryallocationdetails/PROCESS_GROUP-ABC?",
+	}
+	for kind, want := range cases {
+		p := Payload{Kind: kind, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2, Type: "t", Method: "m"}
+		if err := validate(p); err != nil {
+			t.Errorf("validate(kind=%q): %v", kind, err)
+		}
+		if path := buildSubmitPath(p); !strings.Contains(path, want) {
+			t.Errorf("kind %q: path %q does not contain %q", kind, path, want)
+		}
+	}
+}

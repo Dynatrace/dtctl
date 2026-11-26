@@ -9,7 +9,7 @@ import (
 
 // hotspotsAnalysis wraps a hotspots envelope built by the fold tests' helpers.
 func hotspotsAnalysis(env map[string]interface{}) *Analysis {
-	return NewAnalysis(&Response{Status: "completed", Kind: Kind["hotspots"], EntityID: "PROCESS-0000000000000001", Result: env["result"]})
+	return NewAnalysis(&Response{Status: "completed", Kind: KindHotspots, EntityID: "PROCESS-0000000000000001", Result: env["result"]})
 }
 
 func survnode(id float64, name string, app bool, alloc, surv int, children ...interface{}) map[string]interface{} {
@@ -19,7 +19,7 @@ func survnode(id float64, name string, app bool, alloc, surv int, children ...in
 }
 
 func allocationsAnalysis(env map[string]interface{}) *Analysis {
-	return NewAnalysis(&Response{Status: "completed", Kind: Kind["memory"], EntityID: "PROCESS-0000000000000001", Result: env["result"]})
+	return NewAnalysis(&Response{Status: "completed", Kind: KindAllocations, EntityID: "PROCESS-0000000000000001", Result: env["result"]})
 }
 
 func TestWhyEmpty_NoSamples(t *testing.T) {
@@ -63,8 +63,8 @@ func TestNewAnalysis_RawEqualsTheEncodedResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, resp := range []*Response{
-		{Status: "completed", Kind: Kind["hotspots"], EntityID: "PROCESS-0000000000000001", PollCount: 3, Result: result},
-		{Status: "no-data", Kind: Kind["memory"], EntityID: "PROCESS_GROUP-0000000000000001", PollCount: 1},
+		{Status: "completed", Kind: KindHotspots, EntityID: "PROCESS-0000000000000001", PollCount: 3, Result: result},
+		{Status: "no-data", Kind: KindAllocations, EntityID: "PROCESS_GROUP-0000000000000001", PollCount: 1},
 	} {
 		b, err := json.Marshal(resp)
 		if err != nil {
@@ -161,7 +161,7 @@ func TestWhyEmpty(t *testing.T) {
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "lib", "run", false, 10, 0),
 	)
-	noSamples := NewAnalysis(&Response{Status: "no-data", Kind: Kind["hotspots"], EntityID: entity})
+	noSamples := NewAnalysis(&Response{Status: "no-data", Kind: KindHotspots, EntityID: entity})
 	cases := []struct {
 		name     string
 		a        *Analysis

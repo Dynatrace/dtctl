@@ -249,9 +249,9 @@ func addProfilingCommonFlags(c *cobra.Command, f *profilingFlags) {
 }
 
 // profilingAPIKinds maps a kind subcommand to the API kind it runs.
-var profilingAPIKinds = map[string]string{
-	"hotspots":    profiling.Kind["hotspots"],
-	"allocations": profiling.Kind["memory"],
+var profilingAPIKinds = map[string]profiling.Kind{
+	"hotspots":    profiling.KindHotspots,
+	"allocations": profiling.KindAllocations,
 }
 
 // profilingRun is what one analysis was run on, for the agent envelope.

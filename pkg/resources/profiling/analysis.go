@@ -8,8 +8,8 @@ import (
 // Analysis is the result of one analysis. Its methods read it as the views
 // `dtctl exec profiling` prints; each returns every row, unlimited.
 type Analysis struct {
-	// Kind is the API kind that ran: Kind["hotspots"] or Kind["memory"].
-	Kind string
+	// Kind is the analysis that ran: KindHotspots or KindAllocations.
+	Kind Kind
 	// Entity is the id the analysis was asked for, as the caller passed it
 	// (APIEntityID gives the id the API was asked about).
 	Entity string
@@ -41,7 +41,7 @@ func NewAnalysis(resp *Response) *Analysis {
 		Status: resp.Status,
 		envelope: compactResult(map[string]interface{}{
 			"status":   resp.Status,
-			"kind":     resp.Kind,
+			"kind":     string(resp.Kind),
 			"entityId": resp.EntityID,
 			// A float64, as every other number in the decoded document is.
 			"pollCount": float64(resp.PollCount),

@@ -20,8 +20,15 @@ import (
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
-// Kind maps user-facing shorthand to API kind strings.
-var Kind = sdkcla.Kind
+// Kind names an analysis by its API name.
+type Kind = sdkcla.Kind
+
+// The analyses `dtctl exec profiling` runs. The allocations analysis is the
+// API's memoryAllocation, which the command also takes as `memory`.
+const (
+	KindHotspots    = sdkcla.KindHotspots
+	KindAllocations = sdkcla.KindAllocations
+)
 
 // Leaf-type selections for hotspots, re-exported from the SDK.
 const (
