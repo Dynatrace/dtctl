@@ -308,7 +308,7 @@ Server mode (`dtctl serve`, `pkg/engine`) has no working directory: the `repo-sc
 
 [dtui](https://github.com/dynatrace-oss/dtui) has a project file of its own, `.dtui.yaml`, which among other things lists the filter segments it applies to every view. The two files are separate and do different jobs:
 
-- `.dtctl-repo-scope.yaml` binds directories of a repository to the entities that run them. dtctl writes it, and it never selects an environment.
+- `.dtctl-repo-scope.yaml` binds directories of a repository to the entities that run them. dtctl writes it, and it never selects an environment. dtui does not read it yet; when it does, it is meant to go through dtctl's own package rather than a second parser, so both tools apply the same file the same way.
 - `.dtui.yaml` sets dtui's environment, start view, timeframe, presets and segments. dtctl does not read it.
 
 To query with the segments your `.dtui.yaml` names, pass them yourself; they combine with the repo scope, and a record has to match both:
