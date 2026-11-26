@@ -224,7 +224,7 @@ func TestRepoScopeFlow(t *testing.T) {
 	runSetCommand(t, flowSetCommand)
 	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, "checkout  (whole repository · 127.0.0.1)\n", stdout)
+	require.Equal(t, "checkout  (whole repository · 127.0.0.1; the cluster narrows the workloads only: service names select records of every cluster)\n", stdout)
 	require.Len(t, srv.queries(), 4, "only discover talks to the environment")
 }
 
@@ -979,7 +979,7 @@ func TestRepoScopeDiscoverSingleModuleSubdirectory(t *testing.T) {
 	t.Chdir(repo)
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, "checkout  (whole repository · 127.0.0.1)\n", stdout)
+	require.Equal(t, "checkout  (whole repository · 127.0.0.1; the cluster narrows the workloads only: service names select records of every cluster)\n", stdout)
 }
 
 // A match no binding selects alone, a workload whose records carry no
