@@ -32,7 +32,8 @@ func Example() {
 `), 0o644))
 
 	loc, ok, err := reposcope.Locate(dir)
-	if err != nil || !ok {
+	must(err)
+	if !ok {
 		panic("not in a repository")
 	}
 	file, err := reposcope.Load(loc)
