@@ -159,7 +159,15 @@ Examples:
 			// the workspace must have its own, and hint says afterwards when
 			// they are not the covering entry's.
 			var hint string
+			var changed *workspaceFiltersChange
 			if filterSets != nil {
+				// Read before the write: a create that fails after it says
+				// what the filters were.
+				before, err := livedebugger.WorkspaceFilterSets(workspaceResp)
+				if err != nil {
+					return err
+				}
+				changed = &workspaceFiltersChange{workspace: workspace.name, before: before, after: filterSummary, scopeName: scopeName, location: location}
 				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, filterSets,
 					workspaceFilterChange{creating: true, skipConfirm: skipConfirm})
 				if err != nil {
@@ -176,6 +184,12 @@ Examples:
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "createRuleV2", createResp)
+				}
+				// The filters, if this run set them, stay set: undoing them
+				// is a second write that can fail too and re-scopes the
+				// workspace once more. The error says what was changed.
+				if changed != nil {
+					return changed.thenFailed(err)
 				}
 				return err
 			}

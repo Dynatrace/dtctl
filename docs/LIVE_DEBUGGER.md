@@ -258,7 +258,12 @@ breakpoints, so `dtctl` prompts for confirmation unless you pass `--yes` (`-y`).
 - when `--filters` changes the workspace filters, existing breakpoints are re-scoped too, so you are prompted to confirm unless you pass `--yes` (`-y`)
 - `--repo-scope <name>` sets the filters from a repo scope entry instead; nothing is set from an entry you did not name (see [Filters from the repo scope](#filters-from-the-repo-scope))
 - otherwise, when `--filters` is omitted, the workspace must already have filters configured
-- `--dry-run` is supported
+- setting the filters and creating the breakpoint are two requests. When the
+  second fails after the first, the filters stay as set and are not rolled
+  back: the error names the workspace, its filters before and after, and the
+  commands that show them, restore them where one command can, and try the
+  create again (in agent mode these are the first `error.suggestions`)
+- `--dry-run` is supported and sends nothing
 
 Example:
 

@@ -790,6 +790,18 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		return detail
 	}
 
+	// filtersChangedError — a create breakpoint that failed after it set the
+	// workspace's filters. Like ScopedQueryError it wraps the failure, which
+	// decides the code; the message says what was changed, and how to see
+	// and restore it comes first among the suggestions.
+	var changedErr *filtersChangedError
+	if errors.As(err, &changedErr) {
+		detail := errorToDetail(ctx, changedErr.err)
+		detail.Message = changedErr.Headline()
+		detail.Suggestions = append(changedErr.Suggestions(), detail.Suggestions...)
+		return detail
+	}
+
 	// diagnostic.Error — wraps API errors with operation context and suggestions
 	var diagErr *diagnostic.Error
 	if errors.As(err, &diagErr) {
