@@ -496,8 +496,9 @@ type DiscoveryReport struct {
 	Sent  []string `json:"sent" yaml:"sent"`
 	Notes []string `json:"notes,omitempty" yaml:"notes,omitempty"`
 	// Partial is a query that failed, timed out, was truncated or never ran
-	// because the run was cancelled, a sample that matched nothing, or a
-	// repository too large to read whole (Plan.Truncated), so a "none" is
+	// because the run was cancelled, a sample that matched nothing or less
+	// than the capped scan it replaced had seen, or a repository too large
+	// to read whole (Plan.Truncated), so a "none" is
 	// not evidence that nothing runs this code. A sample that matched is
 	// complete at the floor its note states, so it is not partial, but it
 	// is never a match either: see SampledRecords.
@@ -675,7 +676,10 @@ func (r *DiscoveryReport) readWhole(object string, d *discovery) bool {
 // problem is one sampling solves: a timeout or a consumption limit would
 // stop the retry too. The capped rows are kept aside rather than folded,
 // because counts from a partial scan are not comparable with a sample's;
-// they stand only when no retry answers.
+// they stand only when no retry answers. When one does, the identities the
+// capped rows name and the sample did not return are still candidates (see
+// addCapped), and the result is partial: the capped scan saw something the
+// sample missed, in a part of the window nobody knows the size of.
 func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.Runner, q *Query, rungs []*Query, d *discovery) {
 	res, err := runner.RunQuery(ctx, q.DQL)
 	if err != nil {
@@ -686,6 +690,11 @@ func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.R
 	if res.Truncated && res.TruncationCause == inventory.TruncationScanLimit {
 		q.Rows, q.Truncated, q.Cause, q.truncation = len(res.Records), true, causeTruncated, res.TruncationCause
 		if r.sample(ctx, runner, rungs, d) {
+			if d.addCapped(q.DataObject, res.Records) {
+				r.Partial = true
+				r.note(fmt.Sprintf("the %s scan the %d GB cap stopped saw candidates the sample did not return; they are listed without a count, and the result is partial",
+					q.DataObject, ScanLimitGB))
+			}
 			return
 		}
 	} else {

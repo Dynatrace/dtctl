@@ -96,3 +96,66 @@ func TestDiscover_ProcessGroupSharedByServicesWithoutAWorkload(t *testing.T) {
 		"candidate 1 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group",
 	}, r.Notes)
 }
+
+// The query the scan cap stopped still returned rows, and each names an
+// identity that exists. When a sampled retry answers, the ones it did not
+// return are kept as candidates, without the count a partial scan cannot
+// give, and the result is partial. They were thrown away, so a second cluster
+// the capped scan had already shown disappeared from the report.
+func TestDiscover_SampledRetryKeepsWhatTheCappedScanSaw(t *testing.T) {
+	const otherCluster = "99999999-2222-3333-4444-555555555555"
+	row := func(uid string, records float64) map[string]interface{} {
+		return map[string]interface{}{fieldClusterUID: uid, fieldNamespace: "payments", fieldWorkload: "checkout",
+			fieldServiceName: "checkout", fieldRecords: records, fieldProcessGroups: collected(pgID), fieldProcessGroupCount: float64(1)}
+	}
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {
+			capped([]map[string]interface{}{row(clusterUID, 4000), row(otherCluster, 9000)}),
+			sampledAnswer([]map[string]interface{}{row(clusterUID, 17)}, 100_000_000),
+		},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	require.Len(t, r.Candidates, 2)
+	found, seen := r.Candidates[0], r.Candidates[1]
+	assert.Equal(t, []string{clusterUID, otherCluster}, []string{found.ClusterUID, seen.ClusterUID})
+	assert.Equal(t, int64(17), found.SpansSampled)
+	assert.Empty(t, found.CappedScan)
+	assert.Equal(t, []string{"spans"}, seen.CappedScan)
+	assert.Equal(t, []int64{0, 0}, []int64{seen.Spans, seen.SpansSampled}, "a partial scan's count is not one")
+	assert.Empty(t, seen.ProcessGroups, "nor are its ids all of them")
+	assert.Equal(t, "seen in the spans scan the 5 GB cap stopped, not in the sample that replaced it", seen.Evidence[len(seen.Evidence)-1])
+	assert.True(t, found.WorkloadShared)
+	assert.True(t, r.Partial)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Contains(t, r.Notes, "the spans scan the 5 GB cap stopped saw candidates the sample did not return; they are listed without a count, and the result is partial")
+
+	// What the sample returned is not listed twice, and a row the capped
+	// scan saw of a candidate another query counted joins it.
+	runner = &fakeRunner{answers: map[string][]answer{
+		"spans": {
+			capped([]map[string]interface{}{row(clusterUID, 4000), row(otherCluster, 9000)}),
+			sampledAnswer([]map[string]interface{}{row(clusterUID, 17)}, 100_000_000),
+		},
+		"logs": {{records: []map[string]interface{}{row(otherCluster, 50)}}},
+	}}
+	r, err = Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 2)
+	for _, c := range r.Candidates {
+		if c.ClusterUID == otherCluster {
+			assert.Equal(t, []string{"spans"}, c.CappedScan)
+			assert.Equal(t, int64(50), c.Logs)
+		}
+	}
+
+	runner = &fakeRunner{answers: map[string][]answer{
+		"spans": {capped([]map[string]interface{}{row(clusterUID, 4000)}), sampledAnswer([]map[string]interface{}{row(clusterUID, 17)}, 100_000_000)},
+	}}
+	r, err = Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.Empty(t, r.Candidates[0].CappedScan)
+	assert.False(t, r.Partial)
+}

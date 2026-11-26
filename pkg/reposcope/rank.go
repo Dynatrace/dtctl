@@ -78,6 +78,12 @@ type Candidate struct {
 	// by those reaches none of its logs, and a process-group binding reaches
 	// these.
 	LogsByProcessGroup int64 `json:"logsByProcessGroup,omitempty" yaml:"logsByProcessGroup,omitempty"`
+	// CappedScan are the data objects (spans, logs) whose records of this
+	// candidate were seen only by the query the scan cap stopped: the sampled
+	// retry that replaced it did not return the candidate. It exists, but a
+	// partial scan gives no count and not all of its ids, so none are
+	// reported for that object.
+	CappedScan []string `json:"cappedScan,omitempty" yaml:"cappedScan,omitempty"`
 	// Sampled reports that some of the candidate's records were read by a
 	// sampled retry, so a candidate quieter than the stated floor could
 	// have been missed beside it.
@@ -179,24 +185,9 @@ func newDiscovery(p *Plan) *discovery {
 // addRecord folds one aggregate row of a record query into its candidate;
 // sampled is a row a sampled retry read.
 func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled bool) {
-	key := recordKey{
-		cluster:     stringField(rec, fieldClusterUID),
-		namespace:   stringField(rec, fieldNamespace),
-		workload:    stringField(rec, fieldWorkload),
-		serviceName: stringField(rec, fieldServiceName),
-	}
-	if key.workload == "" && key.serviceName == "" {
-		return
-	}
-	c := d.records[key]
+	c := d.candidate(rec)
 	if c == nil {
-		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName, cluster: key.cluster, tier: d.recordTier(key)}
-		if clusterUIDRe.MatchString(key.cluster) {
-			c.ClusterUID = key.cluster
-		} else {
-			c.ClusterRefused = key.cluster
-		}
-		d.records[key] = c
+		return
 	}
 	if c.ClusterName == "" {
 		c.ClusterName = stringField(rec, fieldAnyClusterName)
@@ -232,6 +223,56 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 	} else {
 		*logs += n
 	}
+}
+
+// candidate is the candidate a row of a record query belongs to, new when the
+// row is the first of its identity, or nil for a row that names neither a
+// workload nor a service name.
+func (d *discovery) candidate(rec map[string]interface{}) *Candidate {
+	key := recordKey{
+		cluster:     stringField(rec, fieldClusterUID),
+		namespace:   stringField(rec, fieldNamespace),
+		workload:    stringField(rec, fieldWorkload),
+		serviceName: stringField(rec, fieldServiceName),
+	}
+	if key.workload == "" && key.serviceName == "" {
+		return nil
+	}
+	c := d.records[key]
+	if c == nil {
+		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName, cluster: key.cluster, tier: d.recordTier(key)}
+		if clusterUIDRe.MatchString(key.cluster) {
+			c.ClusterUID = key.cluster
+		} else {
+			c.ClusterRefused = key.cluster
+		}
+		d.records[key] = c
+	}
+	return c
+}
+
+// addCapped keeps the identities in the rows of a record query the scan cap
+// stopped, once a sampled retry has answered in its place: each row names a
+// workload or service that exists, whether or not the sample returned it. One
+// the sample did not return becomes or joins a candidate marked CappedScan,
+// with no count and no ids, since a partial scan has neither in full. It
+// reports whether there was one.
+func (d *discovery) addCapped(object string, recs []map[string]interface{}) (added bool) {
+	for _, rec := range recs {
+		if c := d.candidate(rec); c != nil && c.sampledHits(object) == 0 {
+			c.CappedScan = addSorted(c.CappedScan, object)
+			added = true
+		}
+	}
+	return added
+}
+
+// sampledHits is the records of object a sampled retry matched for c.
+func (c *Candidate) sampledHits(object string) int64 {
+	if object == objectSpans {
+		return c.SpansSampled
+	}
+	return c.LogsSampled
 }
 
 // foldServiceless joins a candidate whose records carry no service name into
@@ -317,6 +358,13 @@ func (c *Candidate) absorb(o *Candidate) {
 	c.ProcessGroupsCapped = c.ProcessGroupsCapped || o.ProcessGroupsCapped
 	if c.ClusterName == "" {
 		c.ClusterName = o.ClusterName
+	}
+	// What only the capped scan saw of o is not news when the sample
+	// returned c for the same object.
+	for _, object := range o.CappedScan {
+		if c.sampledHits(object) == 0 {
+			c.CappedScan = addSorted(c.CappedScan, object)
+		}
 	}
 }
 
@@ -460,6 +508,9 @@ func (d *discovery) explain(c *Candidate) {
 	}
 	if counts := d.counts(c); counts != "" {
 		c.Evidence = append(c.Evidence, counts)
+	}
+	for _, object := range c.CappedScan {
+		c.Evidence = append(c.Evidence, fmt.Sprintf("seen in the %s scan the %d GB cap stopped, not in the sample that replaced it", object, ScanLimitGB))
 	}
 	if c.LogsByProcessGroup > 0 {
 		c.Evidence = append(c.Evidence, fmt.Sprintf("%d logs in %s carry its process group, none its workload or service name",
