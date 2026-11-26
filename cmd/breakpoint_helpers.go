@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -260,10 +261,7 @@ func workspaceName(cmd *cobra.Command, cfg *config.Config) (string, error) {
 		return "no-project", nil
 	}
 	if scope != nil && (err != nil || scope.loc.Exists) {
-		repo := reposcope.RepositoryName(reposcope.RepoFS(scope.loc))
-		if repo == "" {
-			repo = filepath.Base(scope.loc.Root)
-		}
+		repo := repositoryWorkspace(scope.loc)
 		if err != nil {
 			output.FprintWarning(currentStderr(ctx), "%v; the Live Debugger workspace is named after the repository", err)
 			return repo, nil
@@ -276,11 +274,35 @@ func workspaceName(cmd *cobra.Command, cfg *config.Config) (string, error) {
 		}
 		return repo, nil
 	}
-	project := filepath.Base(cwd)
-	if project == "" || project == "." || project == string(filepath.Separator) {
-		return "no-project", nil
+	return directoryWorkspace(cwd), nil
+}
+
+// plainRepositoryName is what a repository name may be to name a workspace:
+// letters, digits, ".", "_" and "-".
+var plainRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// repositoryWorkspace is the name the workspaces of a linked checkout start
+// with: the origin remote's repository name, so every clone uses the same
+// one, or the checkout directory's when there is no origin to read (a
+// worktree) or its last segment is not a plain name. The remote is text from
+// a file, and the name is sent to the environment and printed: a query
+// string, a quote or a parent directory in it names no repository.
+func repositoryWorkspace(loc reposcope.Location) string {
+	repo := reposcope.RepositoryName(reposcope.RepoFS(loc))
+	if !plainRepositoryName.MatchString(repo) || repo == "." || repo == ".." {
+		return directoryWorkspace(loc.Root)
 	}
-	return project, nil
+	return repo
+}
+
+// directoryWorkspace names a workspace after a directory: its base name, or
+// "no-project" for a directory that has none, the root.
+func directoryWorkspace(dir string) string {
+	base := filepath.Base(dir)
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return "no-project"
+	}
+	return base
 }
 
 func parseFilters(input string) (map[string][]string, error) {

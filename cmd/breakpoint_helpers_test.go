@@ -623,6 +623,17 @@ func TestWorkspaceName(t *testing.T) {
 	}
 }
 
+func TestDirectoryWorkspace(t *testing.T) {
+	for dir, want := range map[string]string{
+		filepath.Join("home", "dev", "storefront"): "storefront",
+		string(filepath.Separator):                 "no-project",
+		".":                                        "no-project",
+		"":                                         "no-project",
+	} {
+		require.Equal(t, want, directoryWorkspace(dir), "%q", dir)
+	}
+}
+
 func TestIsDebugVerbose(t *testing.T) {
 	originalDebugMode := debugMode(context.Background())
 	originalVerbosity := verbosity(context.Background())
