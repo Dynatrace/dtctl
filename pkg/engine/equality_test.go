@@ -187,6 +187,30 @@ func TestEngineNeverAppliesARepoScope(t *testing.T) {
 	require.Empty(t, sent())
 }
 
+// A command the service does not support says so at every floor. The floor
+// masks what is below it too, and its answer would advise lowering a floor
+// that then answers that the command is unsupported.
+func TestEngineUnsupportedCommandsSaySoAtEveryFloor(t *testing.T) {
+	for name := range engine.UnsupportedCommands() {
+		for _, floor := range []string{"", "experimental"} {
+			res, err := engine.Execute(context.Background(), engine.Request{
+				Command:        name + " --agent",
+				EnvironmentURL: "https://x.example.invalid",
+				Token:          "t",
+				MinStability:   floor,
+			})
+			require.NoError(t, err)
+			require.NotZero(t, res.ExitCode)
+			// A development command is not registered at all, and reads as
+			// any other name dtctl does not know.
+			if strings.Contains(string(res.Stdout), `"code":"unknown_command"`) {
+				continue
+			}
+			require.Contains(t, string(res.Stdout), `"code":"unsupported_in_service"`, "%s at floor %q", name, floor)
+		}
+	}
+}
+
 // buildCLI compiles the real dtctl binary once per test run.
 func buildCLI(t *testing.T) string {
 	t.Helper()

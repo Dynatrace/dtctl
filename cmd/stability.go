@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/Dynatrace/dtctl/pkg/commands"
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/suggest"
@@ -388,6 +389,9 @@ func applyStabilityFloor(root *cobra.Command, p stability.Policy) {
 		if cmd == root {
 			return // never mask the root command itself
 		}
+		if alreadyMasked(cmd) {
+			return
+		}
 		path := commandPathRelative(cmd, root)
 		if lvl := stability.Effective(cmd); !p.AllowsCommand(path, lvl) {
 			maskBelowFloor(cmd, &StabilityError{Command: path, Level: lvl, Floor: floor})
@@ -395,6 +399,15 @@ func applyStabilityFloor(root *cobra.Command, p stability.Policy) {
 		}
 		blockBelowFloorFlags(cmd, root, path, p, floor)
 	})
+}
+
+// alreadyMasked reports whether an earlier surface stage masked cmd. The
+// stages only narrow, so the stage that removed a command is the one that
+// answers for it: a later one that masked it again would replace the reason
+// with its own, and a command the service does not support would advise
+// lowering a floor behind which it is still unsupported.
+func alreadyMasked(cmd *cobra.Command) bool {
+	return cmd.Annotations[commands.MaskedAnnotation] == "true"
 }
 
 // DeprecatedError reports that a deprecated command or flag was invoked by a
@@ -460,6 +473,9 @@ func (e *DeprecatedError) Error() string { return e.Headline() }
 func applyNoDeprecated(root *cobra.Command) {
 	walkCommands(root, func(cmd *cobra.Command) {
 		if cmd == root {
+			return
+		}
+		if alreadyMasked(cmd) {
 			return
 		}
 		path := commandPathRelative(cmd, root)
