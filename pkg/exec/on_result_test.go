@@ -79,6 +79,37 @@ func TestStreamCollector_OnResultStreamed(t *testing.T) {
 	assert.Same(t, result, got, "called with the response")
 }
 
+// A streamed result of one row is the shape of an ungrouped aggregation, and
+// a caller reads its answer from that row. The collector wrote the row out,
+// so it keeps the only one and hands it to the hook, as the buffered paths
+// do; from the second row on it holds none.
+func TestStreamCollector_OnResultStreamedSingleRow(t *testing.T) {
+	for _, n := range []int{1, 2} {
+		result, _ := sampleResult(false)
+		result.Records = nil
+		var got *DQLQueryResponse
+		opts := DQLExecuteOptions{OutputFormat: "jsonl", OnResult: func(_ int, r *DQLQueryResponse) { got = r }}
+		var out, errOut bytes.Buffer
+		e := (&DQLExecutor{}).WithStreams(&out, &errOut)
+		plan, ok := e.planStream(opts)
+		require.True(t, ok)
+		rows := []map[string]interface{}{{"n": "0"}, {"n": "1"}}[:n]
+		col := feed(t, e, plan, opts, rows)
+		require.True(t, col.streaming, "control: -o jsonl streams from the first row")
+
+		require.NoError(t, col.finish("fetch logs | summarize n = count()", result, opts))
+		require.NotNil(t, got)
+		if n == 1 {
+			assert.Equal(t, rows, got.GetRecords())
+			assert.Empty(t, result.Records, "the response itself is left as it was decoded")
+		} else {
+			assert.Same(t, result, got)
+			assert.Empty(t, got.GetRecords())
+		}
+		col.abort()
+	}
+}
+
 // A result that stays small takes the buffered replay, which reports its
 // rows the same way.
 func TestStreamCollector_OnResultBufferedReplay(t *testing.T) {

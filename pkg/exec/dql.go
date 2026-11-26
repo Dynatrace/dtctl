@@ -286,7 +286,8 @@ type DQLExecuteOptions struct {
 	// path, after them on the streaming path), and once per attempt under
 	// wait's polling, which prints no response itself. On the streaming path
 	// the response's records were streamed, not kept, so n is the count to
-	// read; a result small enough to stay buffered still carries them.
+	// read; a result small enough to stay buffered still carries them, and
+	// so does a streamed result of exactly one row.
 	// Unlike Decorate it runs for every output format.
 	OnResult func(n int, result *DQLQueryResponse)
 

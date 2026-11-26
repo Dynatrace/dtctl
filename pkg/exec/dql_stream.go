@@ -261,7 +261,11 @@ type streamCollector struct {
 	bufBytes  int64
 	streaming bool
 
-	rows    int
+	rows int
+	// only is the row of a streamed result that has exactly one, as it was
+	// decoded. Such a result is the shape of an ungrouped aggregation, whose
+	// answer is in the row, so OnResult is handed it as on the buffered path.
+	only    map[string]interface{}
 	stats   *output.StatsAccumulator
 	compact *output.CompactionAccumulator
 	sample  []map[string]interface{}
@@ -305,6 +309,15 @@ func (c *streamCollector) observe(row map[string]interface{}) error {
 			}
 		}
 		return nil
+	}
+	return c.emit(row)
+}
+
+// emit transforms and writes one row, keeping it while it is the only one.
+func (c *streamCollector) emit(row map[string]interface{}) error {
+	c.only = nil
+	if c.rows == 0 {
+		c.only = row
 	}
 	return c.write(c.transform(row))
 }
@@ -354,7 +367,7 @@ func (c *streamCollector) startStreaming() error {
 	buffered := c.buf
 	c.buf, c.bufBytes = nil, 0
 	for _, row := range buffered {
-		if err := c.write(c.transform(row)); err != nil {
+		if err := c.emit(row); err != nil {
 			return err
 		}
 	}
@@ -423,15 +436,22 @@ func (c *streamCollector) finish(query string, result *DQLQueryResponse, opts DQ
 		return c.e.printRecords(query, result, orEmptyRows(c.buf), opts)
 	}
 	opts.seriesAdvice = defaultSeriesAdvice(c.effect, opts)
+	// The rows were streamed, not kept, except a single one.
+	reported := result
+	if c.only != nil {
+		held := *result
+		held.Records = []map[string]interface{}{c.only}
+		reported = &held
+	}
 	if c.plan.kind == sinkJSONL {
 		if err := c.flushStdout(); err != nil {
 			return err
 		}
-		opts.report(c.rows, result)
+		opts.report(c.rows, reported)
 		// The rows are already on stdout; the notifications follow on stderr.
 		return c.e.finishStreamedJSONL(query, result)
 	}
-	opts.report(c.rows, result)
+	opts.report(c.rows, reported)
 	return c.e.finishStreamedSpill(query, result, c, opts)
 }
 

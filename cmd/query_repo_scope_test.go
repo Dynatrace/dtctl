@@ -509,6 +509,16 @@ func TestQueryRepoScope_ZeroCountHint(t *testing.T) {
 			require.True(t, strings.HasSuffix(stderr, hint), stderr)
 			require.True(t, strings.HasPrefix(suggestions[0], "0 records under repo scope checkout: "), suggestions[0])
 		})
+		// The same on every path a result takes to the output: -o jsonl
+		// streams its rows instead of holding them.
+		for _, format := range []string{"json", "jsonl"} {
+			t.Run(tc.name+" as "+format, func(t *testing.T) {
+				newDQLRecorder(t, "readonly", answer(http.StatusOK, tc.body))
+				code, _, stderr := runRepoScoped([]string{"query", tc.query, "--plain", "--no-agent", "-o", format}, RunOptions{})
+				require.Zero(t, code, stderr)
+				require.Equal(t, tc.hinted, strings.Contains(stderr, hint), stderr)
+			})
+		}
 	}
 }
 
