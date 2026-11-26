@@ -1668,6 +1668,8 @@ func runBrowserLogin(t *testing.T, args ...string) (stderr string, oauthConfig *
 	t.Helper()
 	viper.Reset()
 	resetAuthLoginFlags(t)
+	// The command is shared by every test: leave no flag value behind.
+	t.Cleanup(func() { resetAuthLoginFlags(t) })
 	// Any of these would select the client credentials grant.
 	t.Setenv(envLoginClientID, "")
 	t.Setenv(envLoginClientSecret, "")
@@ -1763,6 +1765,8 @@ func runClientCredentialsLogin(t *testing.T, args ...string) (stderr string, run
 	t.Helper()
 	viper.Reset()
 	resetAuthLoginFlags(t)
+	// The command is shared by every test: leave no flag value behind.
+	t.Cleanup(func() { resetAuthLoginFlags(t) })
 	t.Setenv(config.EnvTokenStorage, "file")
 	setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 	t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
