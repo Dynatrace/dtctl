@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -518,6 +519,78 @@ func TestRepoScopeDiscoverPathAndTerm(t *testing.T) {
 	code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", "--path", "services/billing", "--dry-run", "--agent"}, RunOptions{})
 	require.NotZero(t, code)
 	require.Equal(t, "validation_error", agentError(t, stdout).Code)
+}
+
+// A --path is taken in the spelling the repository holds the directory in.
+// On a volume that ignores case, Services/Checkout opens services/checkout,
+// but the unit is found by comparing paths, so the typed spelling lost the
+// unit and sent "Checkout" as a name of the whole repository.
+func TestRepoScopeDiscoverPathInAnotherCase(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	repo := chdirTestRepo(t, "")
+	writeRepoFiles(t, repo, map[string]string{
+		"go.mod":                   "module example.invalid/platform\n",
+		"services/checkout/go.mod": "module example.invalid/checkout-service\n",
+	})
+	for _, dir := range []string{"services/checkout", "Services/Checkout", "SERVICES/checkout/"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--path", dir, "--dry-run", "--agent"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+		require.Equal(t, map[string]interface{}{"unit": "services/checkout",
+			"sent": "checkout, checkout-service, checkout.service, checkout_service, checkoutservice"}, plan["details"], dir)
+	}
+}
+
+func TestRepoScopeOnDiskDir(t *testing.T) {
+	repo := fstest.MapFS{
+		"services/checkout/go.mod": {Data: []byte("module example.invalid/checkout\n")},
+		"Docs/a.md":                {Data: []byte("x\n")},
+		"docs/b.md":                {Data: []byte("x\n")},
+		"link":                     {Mode: fs.ModeSymlink, Data: []byte("services")},
+		"README":                   {Data: []byte("x\n")},
+	}
+	for dir, want := range map[string]string{
+		".":                 ".",
+		"services":          "services",
+		"Services/CHECKOUT": "services/checkout",
+		"docs":              "docs",
+		"Docs":              "Docs",
+	} {
+		got, err := repoScopeOnDiskDir(repo, dir)
+		require.NoError(t, err, dir)
+		require.Equal(t, want, got, dir)
+	}
+	for dir, want := range map[string]string{
+		"DOCS":                     `"DOCS" is not a directory of this repository`, // two directories differ from it only in case
+		"services/ledger":          `"services/ledger" is not a directory of this repository`,
+		"README":                   `"README" is not a directory of this repository`,
+		"README/x":                 `"README/x" is not a directory of this repository`,
+		"../elsewhere":             `"../elsewhere" is not a directory of this repository`,
+		"/services":                `"/services" is not a directory of this repository`,
+		"link":                     `"link" is a symbolic link, which discovery does not follow; name the directory it points to`,
+		"link/checkout":            `"link" is a symbolic link, which discovery does not follow; name the directory it points to`,
+		"services/checkout/go.mod": `"services/checkout/go.mod" is not a directory of this repository`,
+	} {
+		_, err := repoScopeOnDiskDir(repo, dir)
+		require.EqualError(t, err, want, dir)
+	}
+}
+
+// A --path that is a symbolic link is refused. The walk does not follow
+// links, so the directory behind one was never read: its name was sent with
+// the root's names, as a name of the whole repository.
+func TestRepoScopeDiscoverRefusesASymlinkedPath(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	repo := chdirCheckoutRepo(t)
+	writeRepoFiles(t, repo, map[string]string{"services/ledger/go.mod": "module example.invalid/ledger\n"})
+	if err := os.Symlink(filepath.Join("services", "ledger"), filepath.Join(repo, "linkdir")); err != nil {
+		t.Skipf("cannot create a symbolic link here: %v", err)
+	}
+	code, stdout, _ := runRepoScoped([]string{"repo-scope", "discover", "--path", "linkdir", "--dry-run", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	detail := agentError(t, stdout)
+	require.Equal(t, "validation_error", detail.Code)
+	require.Equal(t, `--path: "linkdir" is a symbolic link, which discovery does not follow; name the directory it points to`, detail.Message)
 }
 
 // A repository with more source files than discovery reads: the dry run says

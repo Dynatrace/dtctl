@@ -107,14 +107,13 @@ func discoveryPlans(ctx context.Context, dir string, terms []string) ([]*reposco
 		return nil, err
 	}
 	repo := reposcope.RepoFS(loc)
-	start := loc.RelDir
+	start, source := loc.RelDir, "the working directory"
 	if dir != "" {
-		start = path.Clean(filepath.ToSlash(dir))
-		// fs.Stat also refuses a path that leaves the repository root.
-		if info, err := fs.Stat(repo, start); err != nil || !info.IsDir() {
-			return nil, &reposcope.InvalidError{Source: "--path", Msg: fmt.Sprintf("%q is not a directory of this repository", dir),
-				Suggestions: []string{"name the directory relative to the repository root, e.g. services/checkout"}}
-		}
+		start, source = path.Clean(filepath.ToSlash(dir)), "--path"
+	}
+	if start, err = repoScopeOnDiskDir(repo, start); err != nil {
+		return nil, &reposcope.InvalidError{Source: source, Msg: err.Error(),
+			Suggestions: []string{"name the directory relative to the repository root, e.g. services/checkout"}}
 	}
 	plan, err := reposcope.PlanDiscovery(repo, start, terms)
 	if err != nil {
@@ -137,6 +136,55 @@ func discoveryPlans(ctx context.Context, dir string, terms []string) ([]*reposco
 		}
 	}
 	return plans, nil
+}
+
+// repoScopeOnDiskDir is dir, a slash-separated directory of repo, in the
+// spelling the repository holds it in, found by listing each directory on the
+// way. Discovery finds a directory's unit by comparing paths, and a volume
+// that ignores case opens Services/Checkout for services/checkout, so the
+// spelling a user typed must not be the one compared. A name that differs
+// from an entry only in case is that entry when it is the only such one.
+//
+// A symbolic link on the way is refused: the walk does not follow links, so
+// what lies behind one would not be read, and its name would be sent as a
+// name of whatever unit holds the link.
+func repoScopeOnDiskDir(repo fs.FS, dir string) (string, error) {
+	notDir := fmt.Errorf("%q is not a directory of this repository", dir)
+	if !fs.ValidPath(dir) {
+		return "", notDir
+	}
+	at := "."
+	for _, name := range strings.Split(dir, "/") {
+		if name == "." {
+			continue // dir is the root
+		}
+		entries, err := fs.ReadDir(repo, at)
+		if err != nil {
+			return "", notDir
+		}
+		var exact, folded []fs.DirEntry
+		for _, e := range entries {
+			switch {
+			case e.Name() == name:
+				exact = append(exact, e)
+			case strings.EqualFold(e.Name(), name):
+				folded = append(folded, e)
+			}
+		}
+		if len(exact) == 0 {
+			exact = folded
+		}
+		switch {
+		case len(exact) != 1:
+			return "", notDir
+		case exact[0].Type()&fs.ModeSymlink != 0:
+			return "", fmt.Errorf("%q is a symbolic link, which discovery does not follow; name the directory it points to", path.Join(at, exact[0].Name()))
+		case !exact[0].IsDir():
+			return "", notDir
+		}
+		at = path.Join(at, exact[0].Name())
+	}
+	return at, nil
 }
 
 // runDiscovery sends each plan's queries and prints what they found, a
