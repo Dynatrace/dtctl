@@ -15,6 +15,9 @@ const (
 	stgHost  = "stg98765.apps.dynatrace.com"
 	svcID    = "SERVICE-0123456789ABCDEF"
 	pgID     = "PROCESS_GROUP-FEDCBA9876543210"
+	// clusterUID is a k8s.cluster.uid: the UID of a cluster's kube-system
+	// namespace.
+	clusterUID = "11111111-2222-3333-4444-555555555555"
 )
 
 // readFixture reads a file under testdata/scope.
@@ -91,6 +94,7 @@ func TestCheck(t *testing.T) {
 		{name: "workload name with a dot", doc: entry("name: checkout", "workloads: [{namespace: payments, name: checkout.v2}]")},
 		{name: "workload name longer than a DNS label", doc: entry("name: checkout", "workloads: [{namespace: payments, name: "+strings.Repeat("a", 64)+"}]")},
 		{name: "workload name at its longest", doc: entry("name: checkout", "workloads: [{namespace: payments, name: "+strings.Repeat("a", 253)+"}]")},
+		{name: "workload in a cluster", doc: entry("name: checkout", "workloads: [{cluster-uid: "+clusterUID+", namespace: payments, name: checkout}]")},
 		{name: "a leading document marker", doc: "---\n" + entry("name: checkout", "service-names: [checkout]")},
 		{name: "a trailing document marker", doc: entry("name: checkout", "service-names: [checkout]") + "---\n"},
 		{name: "a trailing document holding a comment", doc: entry("name: checkout", "service-names: [checkout]") + "---\n# end\n"},
@@ -182,6 +186,10 @@ func TestCheck(t *testing.T) {
 			msg: "holds more than one YAML document"},
 		{name: "a second document holding only a list", doc: entry("name: checkout", "service-names: [checkout]") + "---\n- checkout\n",
 			msg: "holds more than one YAML document"},
+		{name: "cluster uid in capitals", doc: entry("name: checkout", "workloads: [{cluster-uid: ABCDEF01-2222-3333-4444-555555555555, namespace: payments, name: checkout}]"),
+			msg: `workloads[0] cluster-uid "ABCDEF01-2222-3333-4444-555555555555" is not a Kubernetes cluster uid (a lowercase UUID, the value of k8s.cluster.uid)`},
+		{name: "cluster name for a uid", doc: entry("name: checkout", "workloads: [{cluster-uid: prod-eu, namespace: payments, name: checkout}]"),
+			msg: `workloads[0] cluster-uid "prod-eu" is not a Kubernetes cluster uid`},
 		{name: "wrong shape", doc: entry("name: checkout", "services: SERVICE-0123456789ABCDEF"), msg: "does not match the repo scope schema"},
 	}
 	for _, tt := range tests {
@@ -205,6 +213,32 @@ func TestCheck_NoBindingSuggestsWhatToAdd(t *testing.T) {
 	invalidErr := f.check()
 	require.NotNil(t, invalidErr)
 	assert.Equal(t, []string{"add at least one of services, process-groups, service-names or workloads"}, invalidErr.Suggestions)
+}
+
+// A cluster is part of a workload binding, so one entry can bind the same
+// namespace and workload in two clusters, and a file written before the key
+// existed reads and writes back unchanged.
+func TestWorkloadClusterUID(t *testing.T) {
+	const other = "66666666-7777-8888-9999-000000000000"
+	doc := "environments:\n  " + prodHost + ":\n    - name: checkout\n      workloads:\n" +
+		"        - cluster-uid: " + clusterUID + "\n          namespace: payments\n          name: checkout\n" +
+		"        - cluster-uid: " + other + "\n          namespace: payments\n          name: checkout\n" +
+		"        - namespace: batch\n          name: checkout\n"
+	f, invalidErr := decode([]byte(doc))
+	require.Nil(t, invalidErr)
+	assert.Empty(t, f.Warning())
+	workloads := f.Entries(prodHost)[0].Workloads
+	assert.Equal(t, []Workload{
+		{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"},
+		{ClusterUID: other, Namespace: "payments", Name: "checkout"},
+		{Namespace: "batch", Name: "checkout"},
+	}, workloads)
+	assert.Equal(t, "payments/checkout in cluster "+clusterUID, workloads[0].String())
+	assert.Equal(t, "batch/checkout", workloads[2].String())
+
+	out, err := encode(f)
+	require.NoError(t, err)
+	assert.Equal(t, fileHeader+doc, string(out))
 }
 
 func TestUpsertRemove(t *testing.T) {

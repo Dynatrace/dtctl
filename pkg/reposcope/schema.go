@@ -46,14 +46,23 @@ type Entry struct {
 }
 
 // Workload binds one Kubernetes workload. Namespace is required: a workload
-// name alone is not unique across namespaces.
+// name alone is not unique across namespaces. ClusterUID is optional, and
+// narrows the binding to one cluster: the same namespace and workload name
+// can exist in several, and records without Kubernetes enrichment carry no
+// cluster at all. It is the cluster's k8s.cluster.uid, never its name, which
+// is a label somebody chose and can change.
 type Workload struct {
-	Namespace string `yaml:"namespace" json:"namespace"`
-	Name      string `yaml:"name" json:"name"`
+	ClusterUID string `yaml:"cluster-uid,omitempty" json:"clusterUid,omitempty"`
+	Namespace  string `yaml:"namespace" json:"namespace"`
+	Name       string `yaml:"name" json:"name"`
 }
 
-// String renders the workload as namespace/name, the way kubectl users read it.
+// String renders the workload as namespace/name, the way kubectl users read
+// it, followed by the cluster when the binding names one.
 func (w Workload) String() string {
+	if w.ClusterUID != "" {
+		return w.Namespace + "/" + w.Name + " in cluster " + w.ClusterUID
+	}
 	return w.Namespace + "/" + w.Name
 }
 
@@ -65,6 +74,9 @@ var (
 	processGroupRe = regexp.MustCompile(`^PROCESS_GROUP-[0-9A-F]{16}$`)
 	dnsLabelRe     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 	dnsSubdomainRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+	// clusterUIDRe is a Kubernetes object UID as the API server writes one:
+	// k8s.cluster.uid is the UID of the cluster's kube-system namespace.
+	clusterUIDRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 // maxDNSSubdomain bounds a Kubernetes DNS subdomain name. A namespace is a
@@ -170,6 +182,9 @@ func (e *Entry) validate() *InvalidError {
 		}
 	}
 	for i, w := range e.Workloads {
+		if w.ClusterUID != "" && !clusterUIDRe.MatchString(w.ClusterUID) {
+			return invalid(fmt.Sprintf("workloads[%d] cluster-uid %q is not a Kubernetes cluster uid (a lowercase UUID, the value of %s)", i, w.ClusterUID, fieldClusterUID))
+		}
 		if !dnsLabelRe.MatchString(w.Namespace) {
 			return invalid(fmt.Sprintf("workloads[%d] namespace %q is not a Kubernetes namespace name", i, w.Namespace))
 		}

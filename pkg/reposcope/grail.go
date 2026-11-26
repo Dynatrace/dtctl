@@ -19,6 +19,7 @@ const (
 	fieldService      = "dt.entity.service"
 	fieldProcessGroup = "dt.entity.process_group"
 	fieldServiceName  = "service.name"
+	fieldClusterUID   = "k8s.cluster.uid"
 	fieldNamespace    = "k8s.namespace.name"
 	fieldWorkload     = "k8s.workload.name"
 	fieldEntityID     = "id"

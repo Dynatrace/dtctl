@@ -12,9 +12,11 @@ import (
 // dql.Quote. Entity ids always render as in(field, array(…)): a log record
 // written by several processes carries its process groups as an array, and
 // in() is documented to test membership in one where == is not. A service
-// name list renders as in() too, a single name as field == "…". ok is false,
-// with a reason, when the object is not scoped or e binds nothing it is
-// filtered by.
+// name list renders as in() too, a single name as field == "…". A workload is
+// one clause of its own, its fields ANDed: the namespace and the name, and the
+// cluster when the binding names one, so the cluster narrows that workload and
+// nothing else. ok is false, with a reason, when the object is not scoped or e
+// binds nothing it is filtered by.
 func Render(e *Entry, dataObject string) (f dql.Filter, ok bool, reason string) {
 	var obj *scopedObject
 	for i := range scopedObjects {
@@ -35,9 +37,19 @@ func Render(e *Entry, dataObject string) (f dql.Filter, ok bool, reason string) 
 	}
 	compare(obj.idField, obj.ids(e), membership)
 	compare(fieldServiceName, e.ServiceNames, comparison)
+	inCluster := false
 	for _, w := range e.Workloads {
-		clauses = append(clauses, fmt.Sprintf("(%s == %s and %s == %s)",
-			fieldNamespace, dql.Quote(w.Namespace), fieldWorkload, dql.Quote(w.Name)))
+		pair := fmt.Sprintf("%s == %s and %s == %s", fieldNamespace, dql.Quote(w.Namespace), fieldWorkload, dql.Quote(w.Name))
+		if w.ClusterUID != "" {
+			pair = fmt.Sprintf("%s == %s and %s", fieldClusterUID, dql.Quote(w.ClusterUID), pair)
+			inCluster = true
+		}
+		clauses = append(clauses, "("+pair+")")
+	}
+	// The cluster is a bound field only when a workload names one, so a
+	// query's own filter on it overrides the scope only then.
+	if inCluster {
+		f.Fields = append(f.Fields, fieldClusterUID)
 	}
 	if len(e.Workloads) > 0 {
 		f.Fields = append(f.Fields, fieldNamespace, fieldWorkload)

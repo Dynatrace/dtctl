@@ -49,6 +49,16 @@ func TestRender(t *testing.T) {
 			fields: []string{"k8s.namespace.name", "k8s.workload.name"},
 		},
 		{
+			name: "a workload's cluster is part of its pair", object: "logs",
+			entry: Entry{Name: "pair", Workloads: []Workload{
+				{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"},
+				{Namespace: "batch", Name: "checkout"},
+			}},
+			expr: `(k8s.cluster.uid == "11111111-2222-3333-4444-555555555555" and k8s.namespace.name == "payments" and k8s.workload.name == "checkout")` +
+				` or (k8s.namespace.name == "batch" and k8s.workload.name == "checkout")`,
+			fields: []string{"k8s.cluster.uid", "k8s.namespace.name", "k8s.workload.name"},
+		},
+		{
 			// check refuses these characters; Render still quotes them, as
 			// the second line of defence.
 			name: "literals are quoted", object: "spans",
@@ -98,6 +108,20 @@ func TestFilters_FeedInsertFilter(t *testing.T) {
 	got := dql.InsertFilter(`fetch logs | filter loglevel == "ERROR" | limit 20`, Filters(&e))
 	assert.Equal(t, dql.Applied, got.Outcome)
 	assert.Equal(t, `fetch logs | filter (in(dt.entity.process_group, array("PROCESS_GROUP-FEDCBA9876543210")) or service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))`+"\n"+`| filter loglevel == "ERROR" | limit 20`, got.Query)
+}
+
+// The cluster is a bound field only for an entry that binds one: the query's
+// own filter on it then wins, as on the namespace, and without one the scope
+// is ANDed with it.
+func TestFilters_OwnClusterFilter(t *testing.T) {
+	const query = `fetch logs | filter k8s.cluster.uid == "66666666-7777-8888-9999-000000000000"`
+	bound := Entry{Name: "checkout", Workloads: []Workload{{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"}}}
+	got := dql.InsertFilter(query, Filters(&bound))
+	assert.Equal(t, dql.UserFilter, got.Outcome)
+	assert.Equal(t, "the query filters on k8s.cluster.uid itself, and its own filter wins", got.Reason)
+
+	unbound := Entry{Name: "checkout", ServiceNames: []string{"checkout"}}
+	assert.Equal(t, dql.Applied, dql.InsertFilter(query, Filters(&unbound)).Outcome)
 }
 
 func TestFilters(t *testing.T) {
