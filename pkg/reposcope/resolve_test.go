@@ -258,3 +258,45 @@ func TestResolve_StatusIsACopy(t *testing.T) {
 	assert.Equal(t, want, f)
 	assert.Nil(t, f.Entries(stgHost+".invalid"))
 }
+
+// countingFS counts what is asked of the repository.
+type countingFS struct {
+	fstest.MapFS
+	calls int
+}
+
+func (c *countingFS) Open(name string) (fs.File, error) {
+	c.calls++
+	return c.MapFS.Open(name)
+}
+
+func (c *countingFS) Stat(name string) (fs.FileInfo, error) {
+	c.calls++
+	return c.MapFS.Stat(name)
+}
+
+func (c *countingFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	c.calls++
+	return c.MapFS.ReadDir(name)
+}
+
+// The build is read on every scoped query, so it is read only when its
+// answer can matter.
+func TestResolve_ReadsTheBuildOnlyWhenItMatters(t *testing.T) {
+	for _, tc := range []struct {
+		name, host, dir, pick string
+		reads                 bool
+	}{
+		{name: "a name the file does not define", host: prodHost, dir: "webproxy-core", pick: "missing"},
+		{name: "a named entry that covers the directory", host: prodHost, dir: "webproxy/src", pick: "webproxy"},
+		{name: "an environment without entries", host: stgHost, dir: "webproxy-core"},
+		{name: "a named entry that does not cover the directory", host: prodHost, dir: "webproxy-core", pick: "webproxy", reads: true},
+		{name: "no name", host: prodHost, dir: "webproxy/src", reads: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &countingFS{MapFS: fixture(t, "gradle-multi")}
+			_, _ = Resolve(repo, gradleFile(), tc.host, tc.dir, tc.pick)
+			assert.Equal(t, tc.reads, repo.calls > 0, "%d calls", repo.calls)
+		})
+	}
+}

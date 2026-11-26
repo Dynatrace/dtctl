@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
@@ -65,7 +66,9 @@ type Status struct {
 func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 	s := &Status{File: FileName, Environment: host, Dir: relDir, Warning: f.Warning(), Hosts: f.Hosts()}
 	entries := f.Environments[host]
-	build := newGradleCoverage(repo, entries, relDir)
+	// Reading the build walks the repository, and Resolve runs on every
+	// scoped query: it is read when its answer is first needed, if at all.
+	build := sync.OnceValue(func() gradleCoverage { return newGradleCoverage(repo, entries, relDir) })
 	var entry *Entry
 	switch {
 	case name != "":
@@ -81,7 +84,7 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		return s, nil
 	default:
 		var tied []*Entry
-		if entry, tied = closestEntry(entries, relDir, build); tied != nil {
+		if entry, tied = closestEntry(entries, relDir, build()); tied != nil {
 			names := []string{entry.Name}
 			for _, e := range tied {
 				names = append(names, e.Name)
@@ -99,7 +102,7 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		return s, nil
 	}
 	if entry.Path != "" && !covers(entry.Path, relDir) {
-		if build.owns(entry) {
+		if build := build(); build.owns(entry) {
 			s.Reason = fmt.Sprintf("covered through the Gradle build: %s depends on %s", entry.Path, build.module)
 		} else {
 			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", entry.Path, relDir)
