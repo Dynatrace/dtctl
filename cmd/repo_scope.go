@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -404,11 +405,19 @@ func repoScopeReason(s *reposcope.Status) string {
 // detail for a terminal, as is in every other format.
 func showRepoScope(cmd *cobra.Command, verb, name string) error {
 	ctx := cmdContext(cmd)
+	// A Status is one value. A format that prints rows would print its
+	// address, or a row of its fields.
+	format := outputFormat(ctx)
+	terminal := format == "" || format == "table" || format == "wide"
+	if !terminal && !slices.Contains([]string{"json", "yaml", "yml", "toon"}, format) {
+		return &reposcope.InvalidError{Source: "-o " + format,
+			Msg: fmt.Sprintf("repo-scope %s prints one entry, not rows; use -o table, -o json, -o yaml or -o toon", verb)}
+	}
 	status, advice, err := repoScopeStatus(ctx, name)
 	if err != nil {
 		return err
 	}
-	if outputFormat(ctx) == "table" && !agentMode(ctx) {
+	if terminal && !agentMode(ctx) {
 		warnRepoScopeFile(currentStderr(ctx), status.Warning)
 		if verb == "current" {
 			printRepoScopeCurrent(currentStdout(ctx), status)
@@ -574,8 +583,12 @@ func listRepoScopes(cmd *cobra.Command, _ []string) error {
 	case ap != nil:
 		ap.SetTotal(len(entries))
 	}
-	if outputFormat(ctx) == "table" && !plainMode(ctx) && ap == nil {
-		return printer.PrintList(repoScopeRows(entries))
+	if ap == nil {
+		// Every format that prints rows prints the rows of the table; the
+		// others print the entries themselves.
+		if format := outputFormat(ctx); format != "toon" && output.IsTabularFormat(format, plainMode(ctx)) {
+			return printer.PrintList(repoScopeRows(entries))
+		}
 	}
 	if entries == nil {
 		entries = []reposcope.Entry{}

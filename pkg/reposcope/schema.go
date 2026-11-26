@@ -45,17 +45,17 @@ type File struct {
 // two entity ids, whose fields are deprecated, the process group before the
 // service.
 type Entry struct {
-	Name          string     `yaml:"name" json:"name" table:"NAME"`
-	Path          string     `yaml:"path,omitempty" json:"path,omitempty" table:"PATH"`
-	Workloads     []Workload `yaml:"workloads,omitempty" json:"workloads,omitempty" table:"WORKLOADS"`
-	ServiceNames  []string   `yaml:"service-names,omitempty" json:"serviceNames,omitempty" table:"SERVICE-NAMES"`
-	ProcessGroups []string   `yaml:"process-groups,omitempty" json:"processGroups,omitempty" table:"PROCESS-GROUPS"`
-	Services      []string   `yaml:"services,omitempty" json:"services,omitempty" table:"SERVICES"`
+	Name          string     `yaml:"name" json:"name"`
+	Path          string     `yaml:"path,omitempty" json:"path,omitempty"`
+	Workloads     []Workload `yaml:"workloads,omitempty" json:"workloads,omitempty"`
+	ServiceNames  []string   `yaml:"service-names,omitempty" json:"serviceNames,omitempty"`
+	ProcessGroups []string   `yaml:"process-groups,omitempty" json:"processGroups,omitempty"`
+	Services      []string   `yaml:"services,omitempty" json:"services,omitempty"`
 	// Segments are existing filter segments a query under the entry sends
 	// beside its text. Unlike the bindings they are not alternatives: every
 	// one must hold, together with the filter the bindings render. An entry
 	// may hold nothing else.
-	Segments []Segment `yaml:"segments,omitempty" json:"segments,omitempty" table:"SEGMENTS"`
+	Segments []Segment `yaml:"segments,omitempty" json:"segments,omitempty"`
 }
 
 // Segment references one filter segment of the environment by its id, with
