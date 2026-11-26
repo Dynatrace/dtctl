@@ -704,6 +704,9 @@ type tokenPeer struct {
 	// scopes are those a browser login to the context would request: the
 	// most the context can get back by logging in after this login.
 	scopes []string
+	// otherEnvironment says that the context is on another environment of
+	// the tier than the login's.
+	otherEnvironment bool
 }
 
 // contextsSharingToken returns the contexts other than contextName whose
@@ -720,6 +723,7 @@ type tokenPeer struct {
 // global context from its own level, which nothing clamps.
 func contextsSharingToken(cfg *config.Config, global []config.NamedContext, contextName, tokenName, environment string) []tokenPeer {
 	tier := auth.DetectEnvironment(environment)
+	host := urls.Host(environment)
 	shares := func(c *config.Context) bool {
 		return c.TokenRef == tokenName && auth.DetectEnvironment(c.Environment) == tier
 	}
@@ -728,13 +732,13 @@ func contextsSharingToken(cfg *config.Config, global []config.NamedContext, cont
 		nc := &cfg.Contexts[i]
 		if nc.Name != contextName && shares(&nc.Context) {
 			scopes, _, _ := projectLoginScopes(cfg, tokenName, auth.GetScopesForSafetyLevel(cfg.EffectiveSafetyLevelFor(&nc.Context)))
-			peers = append(peers, tokenPeer{fmt.Sprintf("%q", nc.Name), scopes})
+			peers = append(peers, tokenPeer{fmt.Sprintf("%q", nc.Name), scopes, urls.Host(nc.Context.Environment) != host})
 		}
 	}
 	for i := range global {
 		nc := &global[i]
 		if shares(&nc.Context) {
-			peers = append(peers, tokenPeer{fmt.Sprintf("%q (global config)", nc.Name), auth.GetScopesForSafetyLevel(nc.Context.GetEffectiveSafetyLevel())})
+			peers = append(peers, tokenPeer{fmt.Sprintf("%q (global config)", nc.Name), auth.GetScopesForSafetyLevel(nc.Context.GetEffectiveSafetyLevel()), urls.Host(nc.Context.Environment) != host})
 		}
 	}
 	slices.SortFunc(peers, func(a, b tokenPeer) int { return strings.Compare(a.label, b.label) })
@@ -750,14 +754,31 @@ func peerLabels(peers []tokenPeer) []string {
 	return labels
 }
 
-// contextsNarrowedByLogin names the peers whose own login would request a
-// scope that is not in scopes, the set this login requests. Those contexts
-// lose that scope until one of them logs in again. The comparison is by scope
-// set and not by rank: readonly requests read scopes that readwrite-mine does
-// not.
+// contextsOnOtherEnvironments names the peers that are not on the login's
+// environment. The login replaces their token with one requested for its own
+// environment, and dtctl cannot tell whether theirs accepts it, so they are
+// named whatever the scopes are.
+func contextsOnOtherEnvironments(peers []tokenPeer) []string {
+	var names []string
+	for _, p := range peers {
+		if p.otherEnvironment {
+			names = append(names, p.label)
+		}
+	}
+	return names
+}
+
+// contextsNarrowedByLogin names the peers on the login's environment whose
+// own login would request a scope that is not in scopes, the set this login
+// requests. Those contexts lose that scope until one of them logs in again.
+// The comparison is by scope set and not by rank: readonly requests read
+// scopes that readwrite-mine does not.
 func contextsNarrowedByLogin(peers []tokenPeer, scopes []string) []string {
 	var names []string
 	for _, p := range peers {
+		if p.otherEnvironment {
+			continue
+		}
 		if slices.ContainsFunc(p.scopes, func(s string) bool { return !slices.Contains(scopes, s) }) {
 			names = append(names, p.label)
 		}
@@ -765,24 +786,45 @@ func contextsNarrowedByLogin(peers []tokenPeer, scopes []string) []string {
 	return names
 }
 
-// warnContextsNarrowedByLogin tells the user which contexts lose scopes when
-// the login replaces the token they share, and what to do about it. In a
-// project directory (local) a token name of its own is no way out by itself:
-// dtctl refuses a token there that the global config does not bind.
-func warnContextsNarrowedByLogin(w io.Writer, tokenName string, narrowed []string, local bool) {
-	if len(narrowed) == 0 {
-		return
+// warnSharedToken tells the user, before a browser login replaces a stored
+// token, which other contexts use it and what to do about it: narrowed are
+// those that lose scopes (contextsNarrowedByLogin), elsewhere those on another
+// environment than environment, the login's (contextsOnOtherEnvironments). In
+// a project directory (local) a token name of its own is no way out by
+// itself: dtctl refuses a token there that the global config does not bind.
+func warnSharedToken(w io.Writer, tokenName, environment string, narrowed, elsewhere []string, local bool) {
+	if len(narrowed) > 0 {
+		whose, lose := "whose safety level requests", "that context loses"
+		if len(narrowed) > 1 {
+			whose, lose = "whose safety levels request", "those contexts lose"
+		}
+		output.FprintWarning(w, "Token '%s' is also used by %s, %s scopes this login does not. The login replaces the token, so %s them.", tokenName, joinNames(narrowed), whose, lose)
 	}
-	whose, lose, target := "whose safety level requests", "that context loses", "it"
-	if len(narrowed) > 1 {
-		whose, lose, target = "whose safety levels request", "those contexts lose", "one of them"
+	if len(elsewhere) > 0 {
+		which := "which is on another environment"
+		if len(elsewhere) > 1 {
+			which = "which are on other environments"
+		}
+		output.FprintWarning(w, "Token '%s' is also used by %s, %s. The login replaces the token with one requested for %s.", tokenName, joinNames(elsewhere), which, environment)
 	}
-	output.FprintWarning(w, "Token '%s' is also used by %s, %s scopes this login does not. The login replaces the token, so %s them.", tokenName, joinNames(narrowed), whose, lose)
-	if local {
-		output.FprintHint(w, "Log in to %s afterwards to restore its scopes. A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment.", target)
-		return
+
+	const boundNameOnly = "A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment."
+	switch {
+	case len(narrowed) > 0:
+		target := "it"
+		if len(narrowed) > 1 {
+			target = "one of them"
+		}
+		if local {
+			output.FprintHint(w, "Log in to %s afterwards to restore its scopes. %s", target, boundNameOnly)
+			return
+		}
+		output.FprintHint(w, "Log in to %s afterwards to restore its scopes, or give this context its own token with --token-name.", target)
+	case len(elsewhere) > 0 && local:
+		output.FprintHint(w, "%s", boundNameOnly)
+	case len(elsewhere) > 0:
+		output.FprintHint(w, "Give this context its own token with --token-name to leave the stored one as it is.")
 	}
-	output.FprintHint(w, "Log in to %s afterwards to restore its scopes, or give this context its own token with --token-name.", target)
 }
 
 // joinNames joins names the way a sentence lists them: a, b and c.
@@ -1124,7 +1166,8 @@ Non-interactive login (CI/CD):
 					output.FprintInfo(currentStderr(cmdContext(cmd)), "The login requests only scopes that the global binding of token %q (%s) requests too. Left out: %s.", tokenName, boundLevel, strings.Join(scopesLeftOut, ", "))
 				}
 				// Said before the browser opens, while the login can still be abandoned.
-				warnContextsNarrowedByLogin(currentStderr(cmdContext(cmd)), tokenName, contextsNarrowedByLogin(peers, oauthConfig.Scopes), cfg.IsLocal())
+				warnSharedToken(currentStderr(cmdContext(cmd)), tokenName, environment,
+					contextsNarrowedByLogin(peers, oauthConfig.Scopes), contextsOnOtherEnvironments(peers), cfg.IsLocal())
 
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Starting OAuth authentication flow...")
 				tokens, err = authBrowserFlowFunc(ctx, flow)
