@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,13 +19,13 @@ const brokenScope = "environments: [\n"
 // Every command that changes something is refused with what is wrong with
 // the file, its dry run included, before anything is sent.
 func TestBreakpoint_ABrokenScopeFileRefusesEveryChange(t *testing.T) {
-	commands := append(mutatingBreakpointCommands[:len(mutatingBreakpointCommands):len(mutatingBreakpointCommands)], []struct {
+	commands := slices.Concat(mutatingBreakpointCommands, []struct {
 		name string
 		argv []string
 	}{
 		{"create", []string{"create", "breakpoint", "A.java:1"}},
 		{"create with filters", []string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:web"}},
-	}...)
+	})
 	for _, tc := range commands {
 		for _, mode := range []string{"", "--dry-run"} {
 			t.Run(tc.name+mode, func(t *testing.T) {
@@ -32,7 +33,7 @@ func TestBreakpoint_ABrokenScopeFileRefusesEveryChange(t *testing.T) {
 				srv.rules = []interface{}{ruleAt("A.java", 1, "")}
 				root := chdirTestRepo(t, brokenScope)
 				chdirSubdir(t, "src")
-				argv := append(tc.argv, "--agent", "--yes")
+				argv := slices.Concat(tc.argv, []string{"--agent", "--yes"})
 				if mode != "" {
 					argv = append(argv, mode)
 				}
