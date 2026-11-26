@@ -1643,7 +1643,7 @@ func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 		}
 		for _, want := range []string{
 			"Safety level: readonly",
-			`Token 'shared-oauth' is also used by "writer". This login replaces it with the OAuth client's token.`,
+			`Token "shared-oauth" is also used by "writer". This login replaces it with the OAuth client's token.`,
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
@@ -1918,6 +1918,63 @@ func TestAuthLogin_InvalidSafetyLevelFlagHasOneAgentCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestShellWord: a name pasted into a suggested command must stay one
+// argument, and an ordinary name must stay as it is.
+func TestShellWord(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"prod", "prod"},
+		{"team-a_1.eu@corp:x", "team-a_1.eu@corp:x"},
+		{"my ctx", "'my ctx'"},
+		{"a$b", "'a$b'"},
+		{`a"b`, `'a"b'`},
+		{"it's", `'it'\''s'`},
+		{"a;b", "'a;b'"},
+		{"", "''"},
+	}
+	for _, tt := range tests {
+		if got := shellWord(tt.in); got != tt.want {
+			t.Errorf("shellWord(%q) = %s, want %s", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestAuthLogin_RepairCommandsQuoteTheContextName: the refusals of an invalid
+// level suggest commands that take the context's name, which may hold a space.
+func TestAuthLogin_RepairCommandsQuoteTheContextName(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+
+	t.Run("the context's own level", func(t *testing.T) {
+		cfg := config.NewConfig()
+		cfg.SetContextWithOptions("my ctx", envURL, "t-oauth", &config.ContextOptions{SafetyLevel: "read-only"})
+		_, err := loginSafetyLevels(cfg, nil, "my ctx", "t-oauth", config.DefaultSafetyLevel, false)
+		var diagErr *diagnostic.Error
+		if !errors.As(err, &diagErr) {
+			t.Fatalf("err = %T %v, want a diagnostic.Error", err, err)
+		}
+		want := []string{
+			"Give the context a valid level, then log in again: dtctl ctx set 'my ctx' --safety-level <level>",
+			"Or set it with the login: dtctl auth login --context 'my ctx' --safety-level <level>",
+		}
+		if !slices.Equal(diagErr.Suggestions, want) {
+			t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, want)
+		}
+	})
+
+	t.Run("a global context's level", func(t *testing.T) {
+		cfg := config.NewConfig()
+		global := []config.NamedContext{{Name: "my prod", Context: config.Context{Environment: envURL, TokenRef: "t-oauth", SafetyLevel: "read-only"}}}
+		_, err := loginSafetyLevels(cfg, global, "project", "t-oauth", config.DefaultSafetyLevel, false)
+		var diagErr *diagnostic.Error
+		if !errors.As(err, &diagErr) {
+			t.Fatalf("err = %T %v, want a diagnostic.Error", err, err)
+		}
+		want := []string{"Give the global context a valid level: dtctl ctx set 'my prod' --global --safety-level <level>"}
+		if !slices.Equal(diagErr.Suggestions, want) {
+			t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, want)
+		}
+	})
 }
 
 // loginTestContext is one context of a config file written by loginConfigYAML.
@@ -2234,7 +2291,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
 		}
 		for _, want := range []string{
-			`Token 'shared-oauth' is also used by "ro", whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
+			`Token "shared-oauth" is also used by "ro", whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
 			"Log in to it afterwards to restore its scopes, or give this context its own token with --token-name.",
 		} {
 			if !strings.Contains(stderr, want) {
@@ -2267,7 +2324,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
 		}
 		for _, want := range []string{
-			`Token 'shared-oauth' is also used by "admin" and "writer", whose safety levels request scopes this login does not. The login replaces the token, so those contexts lose them.`,
+			`Token "shared-oauth" is also used by "admin" and "writer", whose safety levels request scopes this login does not. The login replaces the token, so those contexts lose them.`,
 			"Log in to one of them afterwards to restore its scopes, or give this context its own token with --token-name.",
 		} {
 			if !strings.Contains(stderr, want) {
@@ -2290,7 +2347,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
 		}
 		for _, want := range []string{
-			`Token 'prod-oauth' is also used by "writer" (global config), whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
+			`Token "prod-oauth" is also used by "writer" (global config), whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
 			"Log in to it afterwards to restore its scopes. A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment.",
 		} {
 			if !strings.Contains(stderr, want) {
@@ -2316,7 +2373,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 			t.Fatalf("%d scopes requested, want 38", got)
 		}
 		for _, want := range []string{
-			`Token 'prod-oauth' is also used by "prod" (global config), whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
+			`Token "prod-oauth" is also used by "prod" (global config), whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
 			"Log in to it afterwards to restore its scopes.",
 		} {
 			if !strings.Contains(stderr, want) {
@@ -2350,7 +2407,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 		t.Cleanup(func() { gFlags.cfgFile = "" })
 	}
 	const (
-		otherEnvironmentWarning = `Token 'shared' is also used by "y", which is on another environment. The login replaces the token with one requested for `
+		otherEnvironmentWarning = `Token "shared" is also used by "y", which is on another environment. The login replaces the token with one requested for `
 		ownTokenHint            = "Give this context its own token with --token-name to leave the stored one as it is."
 	)
 
@@ -2406,7 +2463,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
 		}
 		for _, want := range []string{
-			`Token 'shared' is also used by "admin", whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
+			`Token "shared" is also used by "admin", whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
 			otherEnvironmentWarning + envURL + ".",
 			"Log in to it afterwards to restore its scopes, or give this context its own token with --token-name.",
 		} {
@@ -2435,7 +2492,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
 		}
 		for _, want := range []string{
-			`Token 'prod-oauth' is also used by "second" (global config), which is on another environment. The login replaces the token with one requested for ` + envURL + ".",
+			`Token "prod-oauth" is also used by "second" (global config), which is on another environment. The login replaces the token with one requested for ` + envURL + ".",
 			"A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment.",
 		} {
 			if !strings.Contains(stderr, want) {
@@ -2464,7 +2521,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 		if !errors.Is(runErr, errBrowserLoginStubbed) {
 			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
 		}
-		if want := `Token 'shared' is also used by "y" and "z", which are on other environments. The login replaces the token with one requested for ` + envURL + "."; !strings.Contains(stderr, want) {
+		if want := `Token "shared" is also used by "y" and "z", which are on other environments. The login replaces the token with one requested for ` + envURL + "."; !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)
 		}
 	})
@@ -2476,7 +2533,7 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 		if runErr != nil || !granted {
 			t.Fatalf("login: err %v, granted %v\n%s", runErr, granted, stderr)
 		}
-		if want := `Token 'shared' is also used by "y". This login replaces it with the OAuth client's token.`; !strings.Contains(stderr, want) {
+		if want := `Token "shared" is also used by "y". This login replaces it with the OAuth client's token.`; !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)
 		}
 	})
@@ -2587,7 +2644,7 @@ func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.
 				if strings.Contains(stderr, "is also used by") {
 					t.Errorf("stderr warns about a shared token nobody loses a scope of:\n%s", stderr)
 				}
-			} else if want := "Token 'prod-oauth' is also used by " + tt.wantNarrowed + ", whose safety level requests scopes this login does not."; !strings.Contains(stderr, want) {
+			} else if want := `Token "prod-oauth" is also used by ` + tt.wantNarrowed + ", whose safety level requests scopes this login does not."; !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
 			}
 		})

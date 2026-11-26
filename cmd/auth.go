@@ -572,8 +572,8 @@ func loginSafetyLevels(cfg *config.Config, global []config.NamedContext, context
 				Message: fmt.Sprintf("context %q stores the safety level %q, which is not a valid value (valid values: %s)",
 					contextName, stored, validSafetyLevelList()),
 				Suggestions: []string{
-					fmt.Sprintf("Give the context a valid level, then log in again: dtctl ctx set %s --safety-level <level>", contextName),
-					fmt.Sprintf("Or set it with the login: dtctl auth login --context %s --safety-level <level>", contextName),
+					fmt.Sprintf("Give the context a valid level, then log in again: dtctl ctx set %s --safety-level <level>", shellWord(contextName)),
+					fmt.Sprintf("Or set it with the login: dtctl auth login --context %s --safety-level <level>", shellWord(contextName)),
 				},
 			}
 		}
@@ -596,7 +596,7 @@ func loginSafetyLevels(cfg *config.Config, global []config.NamedContext, context
 					nc.Name, tokenName, nc.Context.SafetyLevel, validSafetyLevelList()),
 			}
 		}
-		refusal.Suggestions = append(refusal.Suggestions, fmt.Sprintf("Give the global context a valid level: dtctl ctx set %s --global --safety-level <level>", nc.Name))
+		refusal.Suggestions = append(refusal.Suggestions, fmt.Sprintf("Give the global context a valid level: dtctl ctx set %s --global --safety-level <level>", shellWord(nc.Name)))
 	}
 	if refusal != nil {
 		return loginLevels{}, refusal
@@ -655,6 +655,19 @@ func projectLoginScopes(cfg *config.Config, tokenName string, scopes []string) (
 		}
 	}
 	return kept, leftOut, bound
+}
+
+// shellWord returns s as one POSIX shell word, for a command that a message
+// suggests: a context name may hold a space, a quote or a dollar sign, and the
+// suggestion must still name that context when it is pasted. A name made only
+// of characters no shell treats specially stays bare, which is the common case.
+func shellWord(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_-./:@%+=,", r))
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // validSafetyLevelList is the list of valid levels as an error message shows it.
@@ -798,14 +811,14 @@ func warnSharedToken(w io.Writer, tokenName, environment string, narrowed, elsew
 		if len(narrowed) > 1 {
 			whose, lose = "whose safety levels request", "those contexts lose"
 		}
-		output.FprintWarning(w, "Token '%s' is also used by %s, %s scopes this login does not. The login replaces the token, so %s them.", tokenName, joinNames(narrowed), whose, lose)
+		output.FprintWarning(w, "Token %q is also used by %s, %s scopes this login does not. The login replaces the token, so %s them.", tokenName, joinNames(narrowed), whose, lose)
 	}
 	if len(elsewhere) > 0 {
 		which := "which is on another environment"
 		if len(elsewhere) > 1 {
 			which = "which are on other environments"
 		}
-		output.FprintWarning(w, "Token '%s' is also used by %s, %s. The login replaces the token with one requested for %s.", tokenName, joinNames(elsewhere), which, environment)
+		output.FprintWarning(w, "Token %q is also used by %s, %s. The login replaces the token with one requested for %s.", tokenName, joinNames(elsewhere), which, environment)
 	}
 
 	const boundNameOnly = "A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment."
@@ -1149,7 +1162,7 @@ Non-interactive login (CI/CD):
 				// The grant's scopes do not follow the safety level, so all there
 				// is to say about a shared token is that it is replaced.
 				if len(peers) > 0 {
-					output.FprintInfo(currentStderr(cmdContext(cmd)), "Token '%s' is also used by %s. This login replaces it with the OAuth client's token.", tokenName, joinNames(peerLabels(peers)))
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "Token %q is also used by %s. This login replaces it with the OAuth client's token.", tokenName, joinNames(peerLabels(peers)))
 				}
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Authenticating with the client credentials grant (no browser)...")
 				tokens, err = authClientCredentialsFunc(ctx, flow, clientID, clientSecret, accountURN, grantScopes)
