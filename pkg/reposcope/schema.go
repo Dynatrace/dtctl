@@ -145,9 +145,9 @@ const (
 // maxSegmentValueRunes bounds one value of a segment variable.
 const maxSegmentValueRunes = 255
 
-// maxDNSSubdomain bounds a Kubernetes DNS subdomain name. A namespace is a
-// DNS label; a workload (a Deployment, StatefulSet, …) is a DNS subdomain, so
-// "checkout.v2" is a valid one.
+// maxDNSSubdomain bounds a DNS name: an environment host, and a Kubernetes
+// DNS subdomain name. A namespace is a DNS label; a workload (a Deployment,
+// StatefulSet, …) is a DNS subdomain, so "checkout.v2" is a valid one.
 const maxDNSSubdomain = 253
 
 // maxServiceNameRunes bounds a service name; Dynatrace stores longer ones
@@ -193,7 +193,7 @@ func (f *File) validateHost(host string) *InvalidError {
 		}
 		return invalid(msg, "key each environment by its lowercase host, e.g. abc12345.apps.dynatrace.com")
 	}
-	if !dnsSubdomainRe.MatchString(host) {
+	if len(host) > maxDNSSubdomain || !dnsSubdomainRe.MatchString(host) {
 		return invalid(fmt.Sprintf("environment %q is not a host name", host))
 	}
 	switch n := len(f.Environments[host]); {

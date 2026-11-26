@@ -129,6 +129,7 @@ func TestCheck(t *testing.T) {
 		{name: "path in composed Unicode", doc: entry("name: checkout", "path: caf\u00e9", "service-names: [checkout]")},
 		{name: "one value under two variables", doc: entry("name: checkout", "segments: [{id: Ab3dEf9hIjk, variables: {env: [prod], stage: [prod]}}]")},
 		{name: "one workload name in two namespaces and two clusters", doc: entry("name: checkout", "workloads: [{namespace: payments, name: checkout}, {namespace: batch, name: checkout}, {cluster-uid: "+clusterUID+", namespace: batch2, name: checkout}]")},
+		{name: "host at its longest", doc: "environments:\n  " + strings.Repeat("a.", 126) + "a:\n    - name: checkout\n      service-names: [checkout]\n"},
 		{name: "a leading document marker", doc: "---\n" + entry("name: checkout", "service-names: [checkout]")},
 		{name: "a trailing document marker", doc: entry("name: checkout", "service-names: [checkout]") + "---\n"},
 		{name: "a trailing document holding a comment", doc: entry("name: checkout", "service-names: [checkout]") + "---\n# end\n"},
@@ -150,6 +151,8 @@ func TestCheck(t *testing.T) {
 		{name: "not a host", doc: "environments:\n  abc_12345:\n    - name: checkout\n      service-names: [checkout]\n",
 			msg: `environment "abc_12345" is not a host name`},
 
+		{name: "host longer than a host name", doc: "environments:\n  " + strings.Repeat("a.", 126) + "ab:\n    - name: checkout\n      service-names: [checkout]\n",
+			msg: `is not a host name`},
 		{name: "name with capitals", doc: entry("name: Checkout", "service-names: [checkout]"),
 			msg: `environments[abc12345.apps.dynatrace.com] entry "Checkout": name "Checkout" must be lowercase letters, digits and dashes (at most 63)`},
 		{name: "missing name", doc: entry("service-names: [checkout]"),
