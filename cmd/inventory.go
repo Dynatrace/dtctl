@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -166,6 +167,10 @@ type inventoryRunner struct {
 	// platform, as before the flag existed. The record cap does not bound the
 	// size of a row, so a custom probe can return a large body without it.
 	maxResultBytes int64
+	// clientContext names the command the queries are sent for, in the
+	// request's client context, which is what an environment's query audit
+	// attributes them by. Empty is inventory, the runner's first user.
+	clientContext string
 }
 
 func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunResult, error) {
@@ -174,7 +179,7 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 		DefaultScanLimitGbytes: r.scanLimitGB,
 		MaxResultRecords:       inventoryMaxResultRecords,
 		MaxResultBytes:         r.maxResultBytes,
-		ClientContext:          "inventory",
+		ClientContext:          cmp.Or(r.clientContext, "inventory"),
 	})
 	if err != nil {
 		return nil, err

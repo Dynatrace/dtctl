@@ -234,7 +234,8 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 
 	runCtx, cancel := inventoryCancelContext(cmd)
 	defer cancel()
-	runner := &scopeCheckedRunner{Runner: &inventoryRunner{executor: newDQLExecutorFromConfig(ctx, cfg, c), scanLimitGB: reposcope.ScanLimitGB}}
+	runner := &scopeCheckedRunner{Runner: &inventoryRunner{executor: newDQLExecutorFromConfig(ctx, cfg, c),
+		scanLimitGB: reposcope.ScanLimitGB, clientContext: "repo-scope-discover"}}
 	selectors := repoScopeSelectors(ctx, cfg)
 	names := repoScopeNames{}
 	// Each plan is a run of its own with its own time bound. After a Ctrl-C

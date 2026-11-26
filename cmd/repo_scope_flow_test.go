@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
@@ -937,6 +938,41 @@ func TestRepoScopeDiscoverChecksScopes(t *testing.T) {
 	require.Zero(t, code, stderr)
 	require.Contains(t, stdout, "  services by entity name            skipped (not authorized)  ")
 	require.Contains(t, stdout, "\n2 of 11 queries ran in ")
+}
+
+// An environment's query audit attributes a query by its client context.
+// Discovery's queries say they are discovery's, not inventory's, whose
+// runner they share.
+func TestRepoScopeDiscoverNamesItselfAsTheClient(t *testing.T) {
+	var mu sync.Mutex
+	var contexts []string
+	newDQLRecorder(t, "readonly", func(r *http.Request, query string) (int, string) {
+		mu.Lock()
+		contexts = append(contexts, r.Header.Get("dt-client-context"))
+		mu.Unlock()
+		return rowsByObject(checkoutRows)(r, query)
+	})
+	chdirCheckoutRepo(t)
+	discoverReport(t)
+	require.Len(t, contexts, 2)
+	for _, c := range contexts {
+		require.Contains(t, c, `"repo-scope-discover"`)
+		require.NotContains(t, c, "inventory")
+	}
+
+	// The runner as inventory builds it still says inventory.
+	var sent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = r.Header.Get("dt-client-context")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":{"records":[]}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := client.NewForTesting(srv.URL, "test-token")
+	require.NoError(t, err)
+	_, err = (&inventoryRunner{executor: exec.NewDQLExecutor(c), scanLimitGB: 5}).RunQuery(context.Background(), "fetch logs | limit 1")
+	require.NoError(t, err)
+	require.Contains(t, sent, `"context":"inventory"`)
 }
 
 // A run interrupted before its first query sent nothing, and says so rather
