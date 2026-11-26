@@ -302,7 +302,9 @@ func TestQueryRepoScope_SegmentsBesideTheUsers(t *testing.T) {
 	requests := srv.requests()
 	body = requests[len(requests)-1]
 	require.Contains(t, body, `{"id":"u8"},{"id":"Ab3dEf9hIjk","variables":[{"name":"environment","values":["production"]}]}]`)
-	require.Equal(t, 10, strings.Count(body[strings.Index(body, `"filterSegments"`):], `"id":`))
+	_, sentSegments, found := strings.Cut(body, `"filterSegments"`)
+	require.True(t, found, body)
+	require.Equal(t, 10, strings.Count(sentSegments, `"id":`))
 
 	args := []string{"query", repoScopeTypedQuery, "--agent"}
 	for _, id := range []string{"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"} {
