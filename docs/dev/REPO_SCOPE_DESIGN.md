@@ -111,6 +111,8 @@ A typo and a newer dtctl's key look the same to the dtctl that reads them, so wh
 
 A value that fails its format is the same case and gets the same treatment: a `cluster-uid` that is not a UUID, edited in by hand, fails the read rather than being dropped from its workload.
 
+So is a constraint written empty. `path`, a workload's `cluster-uid`, `segments` and a segment's `variables` only narrow, and each means its widest when it is left out: the whole repository, every cluster, no segment, the segment as it stands. Read as "left out", `path: ""` would turn an unfinished line into the whole-repository entry and `cluster-uid: ""` into every cluster, so `""`, `[]` and `{}` under those four keys fail the read with the key and its line (`written` in `decode.go`), as a null does under any key. A list of bindings may be empty: bindings are alternatives, and one fewer selects no more. `set` refuses an empty flag value and `Save` leaves an empty key out, so nothing dtctl writes is refused by this.
+
 That makes the rule for `apiVersion: v1`:
 
 - A new document key may be added under v1; an older dtctl warns and applies its entries unchanged. It must not change what an entry selects.
@@ -300,7 +302,7 @@ Candidates are keyed by cluster, namespace, workload and service name, so the re
 
 ## Testing
 
-- `pkg/dql` and `pkg/reposcope`: the scanner and the insertion table, with both invariants on every row, and five fuzz targets: `FuzzInsertFilter`, `FuzzScan`, `FuzzUngroupedCount` and `FuzzQuote` in `pkg/dql` (`go test ./pkg/dql/ -run '^$' -fuzz '^FuzzInsertFilter$' -fuzztime 30s`), and `FuzzDecode` in `pkg/reposcope`, which holds the file's decoder, on any text, to the reader it replaced; schema, store, resolution, rendering, extraction over fixture repositories, and discovery over a fixture runner
+- `pkg/dql` and `pkg/reposcope`: the scanner and the insertion table, with both invariants on every row, and five fuzz targets: `FuzzInsertFilter`, `FuzzScan`, `FuzzUngroupedCount` and `FuzzQuote` in `pkg/dql` (`go test ./pkg/dql/ -run '^$' -fuzz '^FuzzInsertFilter$' -fuzztime 30s`), and `FuzzDecode` in `pkg/reposcope`, which holds the file's decoder, on any text, to the reader it replaced and, because that reader shares its validation, to the text itself: walked as plain YAML nodes, every key inside an entry is one of the format's and every `path`, `cluster-uid`, segment and variable is in the loaded entry exactly when, and as, a line writes it (`requireNothingWider`), and what loads is written back as a file that loads; schema, store, resolution, rendering, extraction over fixture repositories, and discovery over a fixture runner
 - `pkg/output/testdata/golden/repo-scope/` and `cmd/testdata/golden/repo-scope/`: the structured printers, and the terminal output of `current`, `describe`, `discover` and `list`
 - Guards: `TestQueryRepoScope_UnlinkedIsByteIdentical` (outside a linked repository nothing changes; each disabling factor is paired with a positive control), `TestQuery_ScopingOffSendsWhatMainSends` (with scoping off, the same requests in the same order as before the feature, and the same refusals), `TestQueryRepoScope_StableFloor`, `TestRepoScopeCodesAreDocumented`, `TestQueryRepoScope_SegmentUnavailable` (a deleted segment never fails a default-scoped query), `TestRepoScopeDiscoverKeepsNoState` (by each file's mode and sha256), and `cmd/main_test.go`, which fails the run if the checkout's own scope file changed
 

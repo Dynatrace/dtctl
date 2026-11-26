@@ -22,7 +22,10 @@ const fileHeader = "# dtctl repo scope: links this repository to the Dynatrace e
 // never be wider than the file says. So the document is parsed into nodes and
 // read key by key, and nothing in it is read past: a value left empty, a key
 // given twice, a key that is not a plain string and a value of another shape
-// each fail the read, naming the line. An anchor, an alias or a merge key
+// each fail the read, naming the line. Under a key that narrows an entry, a
+// value written empty ("", [] or {}) is a value left empty: read as the key
+// left out, it would give the widest meaning the key has (see written). An
+// anchor, an alias or a merge key
 // fails it too: a committed data file needs none, and each is a way to make a
 // line mean something other than what it shows.
 //
@@ -183,6 +186,37 @@ func noValue(p place) *InvalidError {
 	return invalid(p.String()+" has no value", "write the value, or delete the line")
 }
 
+// written refuses a value spelt empty under a key that narrows: "" for a
+// path or a cluster-uid, [] for segments, {} for a segment's variables. Each
+// of these keys means its widest when it is left out (the whole repository,
+// every cluster, no segment, a segment as it stands), so an empty value read
+// as "left out" would turn an unfinished constraint into none. Save never
+// writes one: it leaves the key out. A list of bindings may be empty, since
+// bindings are alternatives and one fewer selects no more.
+func written(n *yaml.Node, p place) *InvalidError {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		if n.Value != "" {
+			return nil
+		}
+	case yaml.SequenceNode, yaml.MappingNode:
+		if len(n.Content) > 0 {
+			return nil
+		}
+	default:
+		return nil // text, items and mapping say what is wrong with it
+	}
+	return noValue(p)
+}
+
+// constraint reads the text under a key that narrows.
+func constraint(n *yaml.Node, p place) (string, *InvalidError) {
+	if err := written(n, p); err != nil {
+		return "", err
+	}
+	return text(n, p)
+}
+
 // wrongShape refuses a value of another kind than the format has at p.
 func wrongShape(p place, want string) *InvalidError {
 	return invalid(fmt.Sprintf("does not match the repo scope schema: %s must be %s", p, want),
@@ -287,7 +321,7 @@ func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
 		case "name":
 			e.Name, err = text(v, p)
 		case "path":
-			e.Path, err = text(v, p)
+			e.Path, err = constraint(v, p)
 		case "workloads":
 			e.Workloads, err = items(v, p, r.workload)
 		case "service-names":
@@ -297,7 +331,9 @@ func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
 		case "services":
 			e.Services, err = items(v, p, text)
 		case "segments":
-			e.Segments, err = items(v, p, r.segment)
+			if err = written(v, p); err == nil {
+				e.Segments, err = items(v, p, r.segment)
+			}
 		case "annotations":
 			err = r.mapping(v, p, func(name string, k, v *yaml.Node) (err *InvalidError) {
 				if e.Annotations == nil {
@@ -319,7 +355,7 @@ func (r *reader) workload(n *yaml.Node, p place) (w Workload, err *InvalidError)
 		p := place{key, k.Line}
 		switch key {
 		case "cluster-uid":
-			w.ClusterUID, err = text(v, p)
+			w.ClusterUID, err = constraint(v, p)
 		case "namespace":
 			w.Namespace, err = text(v, p)
 		case "name":
@@ -339,6 +375,9 @@ func (r *reader) segment(n *yaml.Node, p place) (s Segment, err *InvalidError) {
 		case "id":
 			s.ID, err = text(v, p)
 		case "variables":
+			if err = written(v, p); err != nil {
+				return err
+			}
 			s.Variables = map[string][]string{}
 			err = r.mapping(v, p, func(name string, k, v *yaml.Node) (err *InvalidError) {
 				s.Variables[name], err = items(v, place{fmt.Sprintf("variable %q", name), k.Line}, text)

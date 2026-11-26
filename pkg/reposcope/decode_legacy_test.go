@@ -203,9 +203,12 @@ func mostly[T any](rng *rand.Rand, bad T, good ...T) T {
 	return pick(rng, good...)
 }
 
-// FuzzDecode holds decode to the legacy reader on whatever the fuzzer writes:
-// it must not panic, must not read what the legacy reader refused, and must
-// read every other file to the same value.
+// FuzzDecode holds decode to two oracles on whatever the fuzzer writes. The
+// legacy reader: decode must not read what it refused, and must read every
+// other file to the same value. And, since the legacy reader shares decode's
+// validation and so its blind spots, the text itself: a file that loads is no
+// wider than its lines (requireNothingWider), and is written back as a file
+// that loads (requireWrittenLoads). It must not panic either.
 func FuzzDecode(f *testing.F) {
 	rng := rand.New(rand.NewPCG(5, 6))
 	for range 40 {
@@ -213,7 +216,13 @@ func FuzzDecode(f *testing.F) {
 	}
 	f.Add("a: &a [b]\n<<: *a\n")
 	f.Add("? [a, b]\n: c\n---\n---\n")
+	f.Add("environments:\n  " + prodHost + ":\n    - name: checkout\n      path: \"\"\n      service-names: [checkout]\n")
+	f.Add("environments:\n  " + prodHost + ":\n    - name: checkout\n      workloads: [{namespace: payments, name: checkout, cluster-uid: ''}]\n")
 	f.Fuzz(func(t *testing.T, doc string) {
+		if got, err := decode([]byte(doc)); err == nil {
+			requireNothingWider(t, doc, got)
+			requireWrittenLoads(t, got)
+		}
 		if len(doc) > 4096 {
 			return // the legacy reader is quadratic in the keys of a mapping
 		}
