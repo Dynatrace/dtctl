@@ -221,7 +221,7 @@ The scope is applied only where dtctl is sure of the result. The query runs exac
 - the entry binds nothing that data object is filtered by (an entry with only `--service` cannot filter logs)
 - a `filter` or `filterOut` stage already compares a field the scope filters on: your own filter wins. Grouping or projecting by such a field (`summarize … by:`, `fields`) is not an override
 - the data object is fetched again inside a subquery (`append`, `join`, `lookup`), which the inserted filter cannot reach
-- dtctl cannot read the text safely: an unterminated string or comment, unbalanced brackets, a single quote, or a `#` outside a string or comment
+- dtctl cannot read the text safely: an unterminated string or comment, unbalanced brackets, a single quote, a `#` outside a string or comment, or a fourth quote right after a triple-quoted string (`"""a""""`)
 
 With `--repo-scope <name>` each of these is an error instead, and nothing is sent: you asked for that entry's rows. To run the query as typed from there, replace `--repo-scope <name>` with `--no-repo-scope`, which is what the error advises: the two flags exclude each other, and dropping the name alone applies the entry that covers the directory. The exception is your own filter on a scoped field, which still wins under a name too: that query succeeds, runs as typed with your filter and no inserted one, and the warning says so.
 

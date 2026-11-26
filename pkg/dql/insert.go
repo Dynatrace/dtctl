@@ -78,7 +78,7 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 	m, ok := Scan(query)
 	if !ok || m.singleQuote || m.typedMask {
 		return refuse(Unscannable, "",
-			"dtctl cannot read the query text safely (an unterminated string or comment, unbalanced brackets, a single quote, or a # outside a string)")
+			"dtctl cannot read the query text safely (an unterminated string or comment, unbalanced brackets, a single quote, a # outside a string, or a fourth quote right after a triple-quoted string)")
 	}
 	first := m.Segments[0]
 	object, ok := leadingFetch(m.Code[:first.End])

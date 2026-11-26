@@ -43,6 +43,18 @@ func TestScan_MasksLiteralsAndComments(t *testing.T) {
 			commands: []string{"fetch", "filter"},
 		},
 		{
+			name:     "a triple-quoted string that starts with a quote",
+			query:    `fetch logs | filter content == """"a|b"""`,
+			code:     `fetch logs | filter content == """####"""`,
+			commands: []string{"fetch", "filter"},
+		},
+		{
+			name:     "an empty triple-quoted string",
+			query:    `fetch logs | filter content == """""" | limit 1`,
+			code:     `fetch logs | filter content == """""" | limit 1`,
+			commands: []string{"fetch", "filter", "limit"},
+		},
+		{
 			name:     "a backtick identifier is masked",
 			query:    "fetch logs | fields `a|b`",
 			code:     "fetch logs | fields `###`",
@@ -165,6 +177,10 @@ func TestScan_Refuses(t *testing.T) {
 		"fetch logs | filter in(a, [1, 2)]",
 		`fetch logs | filter content == "ends in a backslash\`,
 		"fetch logs | fields `ends in an escaped backtick\\`",
+		// A fourth quote after the closing three: the string may end here or
+		// one byte later, and the two readings disagree on what is code.
+		`fetch logs | fieldsAdd x = """a"""" | limit 1 | fieldsAdd y = """"b"""`,
+		`fetch logs | fieldsAdd x = """"""""`,
 	} {
 		t.Run(q, func(t *testing.T) {
 			_, ok := Scan(q)

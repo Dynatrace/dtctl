@@ -65,7 +65,14 @@ var commandWordRe = regexp.MustCompile(`^[\s#]*([A-Za-z_]\w*)`)
 var openingBracket = map[byte]byte{')': '(', ']': '[', '}': '{'}
 
 // Scan returns the masked view of q. ok is false for text no lexical rule
-// should act on: an unterminated literal or comment, or unbalanced brackets.
+// should act on: an unterminated literal or comment, unbalanced brackets, or
+// a triple-quoted string whose closing quotes are followed by a fourth.
+//
+// A run of four or more quotes can end a """ string at its first three or at
+// its last three, and the two readings disagree on what the rest of the
+// query is: code in one, the inside of a string in the other. Dynatrace's
+// published formatter closes at the last three; what Grail does is not known
+// here. So the scan vouches for neither.
 func Scan(q string) (m Masked, ok bool) {
 	code := []byte(q)
 	depth := make([]int, len(q))
@@ -92,6 +99,9 @@ func Scan(q string) (m Masked, ok bool) {
 				return Masked{}, false
 			}
 			next := i + 3 + end + 3
+			if next < len(q) && q[next] == '"' {
+				return Masked{}, false
+			}
 			i = span(i, next, i+3, next-3)
 		case c == '"' || c == '`':
 			close := literalEnd(q, i)

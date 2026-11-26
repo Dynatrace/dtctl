@@ -145,6 +145,9 @@ var insertFilterTests = []struct {
 	{"unterminated identifier", "fetch logs | fields `x", Unscannable, "", ""},
 	{"unbalanced bracket", "fetch logs | filter (a == 1", Unscannable, "", ""},
 	{"single quote", "fetch logs | filter it's", Unscannable, "", ""},
+	// Where a run of four quotes ends a triple-quoted string is Grail's to
+	// say. Read as closing at the first three, the append below is text.
+	{"a fourth quote after a triple-quoted string", `fetch logs | fieldsAdd x = """foo"""" | append [fetch logs] | fieldsAdd y = """"bar"""`, Unscannable, "", ""},
 	// A # outside a literal is the byte the scan masks with, so the scan
 	// could not tell it from a comment: the text after it would be skipped.
 	{"a # glued to the object", "fetch logs#| limit 1", Unscannable, "", ""},
