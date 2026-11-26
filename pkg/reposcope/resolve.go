@@ -167,7 +167,9 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 			if name == "" {
 				s.Selected = SelectedByBuild
 			}
-			s.Reason = fmt.Sprintf("covered through the Gradle build: %s depends on %s", entry.Path, build.module)
+			// The module is a directory's name, which is whatever a clone
+			// carries: quoted, like every path a reason names.
+			s.Reason = fmt.Sprintf("covered through the Gradle build: %q depends on %q", entry.Path, build.module)
 		} else {
 			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", entry.Path, relDir)
 		}

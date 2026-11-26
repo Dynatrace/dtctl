@@ -7,6 +7,7 @@ package cmd
 // that needs no such directory is in repo_scope_shown_test.go.
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,6 +175,31 @@ func TestBreakpointWorkspaceIsSentAsNamedAndShownSafe(t *testing.T) {
 		expectTerminalSafe(t, stdout+stderr, args)
 		if args[1] == "breakpoints" {
 			require.Contains(t, stderr, "workspace: svc\uFFFD[31mRED\uFFFD\uFFFDdone\n")
+		}
+	}
+}
+
+// An entry that covers a directory through the Gradle build says which module
+// the directory is, and a module is named by its directory, which is whatever
+// a clone carries.
+func TestRepoScopeBuildReasonHoldsControlCharacters(t *testing.T) {
+	const module = "li\x1b[31mb"
+	for _, args := range [][]string{
+		{"repo-scope", "current"}, {"repo-scope", "describe"}, {"repo-scope", "list"},
+		{"query", "fetch logs"}, {"verify", "query", "fetch logs"},
+	} {
+		newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+		repo := chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: app\n      path: app-a\n      service-names: [app]\n")
+		writeRepoFiles(t, repo, map[string]string{
+			"settings.gradle":        "include 'app-a', '" + module + "'\n",
+			"app-a/build.gradle":     "dependencies { implementation project(':" + module + "') }\n",
+			module + "/build.gradle": "",
+		})
+		t.Chdir(filepath.Join(repo, module))
+		_, stdout, stderr := runRepoScoped(args, RunOptions{})
+		expectTerminalSafe(t, stdout+stderr, args)
+		if args[1] == "current" {
+			require.Equal(t, "app  (app-a · 127.0.0.1; covered through the Gradle build: \"app-a\" depends on \"li\\x1b[31mb\")\n", stdout)
 		}
 	}
 }

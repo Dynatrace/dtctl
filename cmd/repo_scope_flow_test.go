@@ -868,7 +868,7 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 	runSetCommand(t, line)
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, "webproxy  (webproxy · 127.0.0.1; covered through the Gradle build: webproxy depends on webproxy-api)\n", stdout)
+	require.Equal(t, "webproxy  (webproxy · 127.0.0.1; covered through the Gradle build: \"webproxy\" depends on \"webproxy-api\")\n", stdout)
 
 	// Each deployable is a discovery of its own, with its own queries.
 	for _, dir := range []string{"webproxy-core", "."} {

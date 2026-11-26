@@ -88,13 +88,13 @@ func TestResolve(t *testing.T) {
 		{code: StatusLinked, selected: SelectedByDirectory, name: "a Gradle deployable", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy/src",
 			entry: "webproxy", others: []string{"admin"}},
 		{code: StatusLinked, selected: SelectedByBuild, name: "a library one deployable depends on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-api/src",
-			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-api", others: []string{"admin"}},
+			entry: "webproxy", reason: "covered through the Gradle build: \"webproxy\" depends on \"webproxy-api\"", others: []string{"admin"}},
 		{code: StatusAmbiguousEntry, name: "a library two deployables depend on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core/src/main/kotlin",
 			reason: "covered by entries webproxy and admin", others: []string{"admin", "webproxy"}, ambiguous: true},
 		{code: StatusLinked, selected: SelectedByName, name: "a library two deployables depend on, selected by name", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core",
-			pick: "admin", entry: "admin", reason: "covered through the Gradle build: admin depends on webproxy-core", others: []string{"webproxy"}},
+			pick: "admin", entry: "admin", reason: "covered through the Gradle build: \"admin\" depends on \"webproxy-core\"", others: []string{"webproxy"}},
 		{code: StatusLinked, selected: SelectedByBuild, name: "a library only an entry's deployable is known to depend on", repo: gradle, file: onlyWebproxy, host: prodHost, dir: "webproxy-core",
-			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-core"},
+			entry: "webproxy", reason: "covered through the Gradle build: \"webproxy\" depends on \"webproxy-core\""},
 		{code: StatusNoEntry, name: "the settings directory", repo: gradle, file: gradleFile(), host: prodHost, dir: ".",
 			reason: `no entry covers "."; entries here cover admin, webproxy`, others: []string{"admin", "webproxy"}},
 		{code: StatusLinked, selected: SelectedByName, name: "selected by name outside its build closure", repo: gradle, file: gradleFile(), host: prodHost, dir: "admin", pick: "webproxy",
@@ -443,6 +443,6 @@ func TestResolve_ModuleChoiceIsStable(t *testing.T) {
 	for range 200 {
 		r, err := Resolve(repo, f, prodHost, "lib/src", "")
 		require.NoError(t, err)
-		require.Equal(t, "covered through the Gradle build: app depends on Lib", r.Reason)
+		require.Equal(t, "covered through the Gradle build: \"app\" depends on \"Lib\"", r.Reason)
 	}
 }
