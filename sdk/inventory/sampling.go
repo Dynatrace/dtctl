@@ -323,6 +323,10 @@ func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *C
 	// since that is the rung whose bound is tightest and therefore worth
 	// reporting.
 	var zeroAt int64
+	// flagged records that some rung of this walk confirmed it sampled, which
+	// is the one thing that rules out "this environment does not sample the
+	// object".
+	var flagged bool
 walk:
 	for _, ratio := range samplingLadder {
 		askedAt := clock()
@@ -352,18 +356,29 @@ walk:
 				// response confirms that the window was sampled at this ratio.
 				continue
 			}
-			// The environment declined to sample this object, so that retry
-			// was the original capped query over again and every further rung
-			// would be too. A hit an earlier rung already made stands; without
-			// one, say why the fallback does not apply here.
+			// The response looks like the original capped query run again, so
+			// every further rung would too, and the walk ends here. A hit an
+			// earlier rung already made stands.
 			if hit != nil {
 				break walk
+			}
+			// Without one, say why the fallback does not apply, but only when
+			// that is what the walk saw. A rung that confirmed it sampled
+			// shows the environment does sample this object, and a response
+			// cut short by something other than the scan limit is not the
+			// capped query over again. Neither supports a statement about the
+			// environment, and a bound an earlier rung measured does not
+			// stand next to a response the walk cannot read, so both keep the
+			// capped verdict, which claims nothing.
+			if flagged || (res.Truncated && res.TruncationCause != TruncationScanLimit) {
+				return capped(), nil
 			}
 			sig.State = SignalUnknown
 			sig.Truncation = cause
 			sig.Evidence = samplingRefusedEvidence(def.DataObject, opts.Since, opts.ScanLimitGBytes)
 			return sig, nil
 		}
+		flagged = true
 		if res.Truncated {
 			// Even sampled this rung does not fit, and every rung below it
 			// reads ten times more. Stop descending.

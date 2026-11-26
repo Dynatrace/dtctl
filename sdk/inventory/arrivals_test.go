@@ -1100,21 +1100,43 @@ func TestTruncatedUnflaggedRungIsARefusal(t *testing.T) {
 	}
 }
 
-// TestSampledMissDoesNotOutrankARefusal: a rung that came back unsampled with
-// matches contradicts the bound an earlier miss would report, so the refusal
-// is what the signal says.
-func TestSampledMissDoesNotOutrankARefusal(t *testing.T) {
-	runner := windowRunner()
-	runner.responses = append([]mockResponse{
-		cappedLogs(), sampledRung(100000, 0, 0, ""), refusedRung(10000, 500),
-	}, runner.responses...)
-
-	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
-	if logs.State != SignalUnknown || !strings.Contains(logs.Evidence, "does not support sampling") {
-		t.Errorf("state = %q, evidence = %q, want unknown with the refusal named", logs.State, logs.Evidence)
+// TestRefusalIsClaimedOnlyWhenNothingContradictsIt: "this environment does not
+// support sampling logs" is a statement about the environment, and the walk
+// may make it only on the evidence the comment at the refusal describes: an
+// unflagged response that looks like the capped query run again, in a walk
+// where no rung confirmed that it sampled. After a flagged rung the sentence
+// is false, and after an unflagged rung that was cut short by something other
+// than the scan limit it is unsupported. Both keep the capped verdict, which
+// claims nothing. A bound an earlier flagged miss measured is not reported
+// next to a response that cannot be reconciled with it.
+func TestRefusalIsClaimedOnlyWhenNothingContradictsIt(t *testing.T) {
+	timedOut := func(ratio int64) mockResponse {
+		return mockResponse{match: fmt.Sprintf("samplingRatio:%d |", ratio), truncated: true, cause: TruncationTimeout}
 	}
-	if got := len(sampledCalls(runner)); got != 2 {
-		t.Errorf("ran %d sampled probes, want 2", got)
+	for _, tc := range []struct {
+		name  string
+		rungs []mockResponse
+	}{
+		{"matches without the flag after a flagged miss", []mockResponse{sampledRung(100000, 0, 0, ""), refusedRung(10000, 500)}},
+		{"a timeout without the flag after a flagged miss", []mockResponse{sampledRung(100000, 0, 0, ""), timedOut(10000)}},
+		{"a timeout without the flag on the first rung", []mockResponse{timedOut(100000)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append(append([]mockResponse{cappedLogs()}, tc.rungs...), runner.responses...)
+			opts := windowOpts()
+
+			logs := signalByName(t, discoverWith(t, runner, opts), "logs")
+			if logs.State != SignalUnknown || logs.Truncation != TruncationScanLimit {
+				t.Errorf("state/truncation = %q/%q, want unknown/scan_limit", logs.State, logs.Truncation)
+			}
+			if want := truncatedEvidence("logs", TruncationScanLimit, opts.Since, opts.ScanLimitGBytes); logs.Evidence != want {
+				t.Errorf("evidence = %q, want the capped verdict unchanged: %q", logs.Evidence, want)
+			}
+			if got, want := len(sampledCalls(runner)), len(tc.rungs); got != want {
+				t.Errorf("ran %d sampled probes, want %d: the walk ends on the rung it cannot read", got, want)
+			}
+		})
 	}
 }
 
