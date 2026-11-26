@@ -167,8 +167,14 @@ func TestQueryRepoScope_Environment(t *testing.T) {
 	}{
 		{"CI", map[string]string{"CI": "true", "GITHUB_ACTIONS": "true"}, nil, true},
 		{"opt-out", map[string]string{noRepoScopeEnv: "1"}, nil, false},
+		{"opt-out set to true", map[string]string{noRepoScopeEnv: "true"}, nil, false},
+		{"opt-out set to yes", map[string]string{noRepoScopeEnv: "yes"}, nil, false},
+		{"opt-out set to any other text", map[string]string{noRepoScopeEnv: "on"}, nil, false},
 		{"opt-out set to 0", map[string]string{noRepoScopeEnv: "0"}, nil, true},
 		{"opt-out set to false", map[string]string{noRepoScopeEnv: "false"}, nil, true},
+		{"opt-out set to FALSE", map[string]string{noRepoScopeEnv: "FALSE"}, nil, true},
+		{"opt-out set to no", map[string]string{noRepoScopeEnv: "no"}, nil, true},
+		{"opt-out set to off", map[string]string{noRepoScopeEnv: "off"}, nil, true},
 		{"opt-out and an explicit name", map[string]string{noRepoScopeEnv: "1"}, []string{"--repo-scope", "checkout"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
