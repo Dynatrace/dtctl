@@ -748,6 +748,25 @@ func TestPollBudgetEndsOnTheLastAnswer(t *testing.T) {
 		}
 	})
 
+	// A poll that was throttled early says nothing about the last one: the
+	// analysis was seen running after it.
+	t.Run("throttled once, then still running", func(t *testing.T) {
+		_, err := pollHandler(t, func(w http.ResponseWriter, n int) {
+			if n == 1 {
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		}).Run(context.Background(), ok)
+		if !errors.Is(err, ErrNotCompleted) {
+			t.Fatalf("err = %v, want ErrNotCompleted", err)
+		}
+		var apiErr *httpclient.APIError
+		if errors.As(err, &apiErr) {
+			t.Errorf("err = %v carries the 429 of a poll that was not the last", err)
+		}
+	})
+
 	t.Run("still running", func(t *testing.T) {
 		_, err := pollHandler(t, func(w http.ResponseWriter, _ int) {
 			w.WriteHeader(http.StatusAccepted)
@@ -839,5 +858,41 @@ func TestAllocationDetailsNeedTypeAndMethod(t *testing.T) {
 	// The other kinds take neither.
 	if err := validate(Payload{Kind: KindAllocations, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2}); err != nil {
 		t.Errorf("validate(allocations) = %v", err)
+	}
+}
+
+// A 202 whose body names no token leaves nothing to poll: the submit fails,
+// and no poll is sent with an empty token.
+func TestSubmitAcceptedWithoutAToken(t *testing.T) {
+	for _, body := range []string{``, `{}`, `{"token":""}`} {
+		polls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/result") {
+				polls++
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(body))
+		}))
+		c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, 0, 0))
+		if err != nil {
+			t.Fatalf("httpclient.New: %v", err)
+		}
+		_, err = NewHandler(c).Run(context.Background(), Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2})
+		srv.Close()
+
+		var runErr *Error
+		if !errors.As(err, &runErr) || runErr.Phase != PhaseSubmit {
+			t.Fatalf("body %q: err = %v, want an *Error of the submit phase", body, err)
+		}
+		if want := "codelevelanalysis: submit returned 202 without a progress token"; err.Error() != want {
+			t.Errorf("body %q: err = %q, want %q", body, err, want)
+		}
+		if polls != 0 {
+			t.Errorf("body %q: %d polls were sent without a token", body, polls)
+		}
 	}
 }
