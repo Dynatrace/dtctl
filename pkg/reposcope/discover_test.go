@@ -806,7 +806,7 @@ func TestDiscover_AmbiguousRows(t *testing.T) {
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"])
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["workload"], "the same name in two namespaces")
-	assert.Equal(t, VerdictMatch, r.Verdicts["serviceName"])
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["serviceName"], "one name, but three candidates carry it")
 }
 
 // Rows arrive sorted by record count, which changes with traffic. The result

@@ -1201,6 +1201,11 @@ func TestRepoScopeDiscoverMatchWithoutABinding(t *testing.T) {
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.NotContains(t, stdout, "Save it with")
+	// The records name a workload and no namespace, which is no workload a
+	// file can bind: the table says so, and the verdict names no kind.
+	require.Contains(t, stdout, "\n1  -        checkout (no namespace)  -  ")
+	require.Contains(t, stdout, "\nVerdict: match: one candidate, with no binding that selects it\n")
+	require.Equal(t, reposcope.VerdictNone, report.Verdicts["workload"])
 	require.NotContains(t, stdout, "\n  \n", "no empty line where a set line would be")
 	require.Contains(t, stdout, "\n  dtctl repo-scope set <name> --namespace <namespace> --workload <workload>\n")
 }

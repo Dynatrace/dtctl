@@ -822,6 +822,11 @@ func entryName(raw string) string {
 // candidate carrying two service ids is two services, not one. An id kind
 // also has a count, the candidate's own distinct total, which may exceed the
 // ids it lists.
+//
+// A workload is a namespace and a name, so records that carry the name alone
+// give the kind no value; and it is told apart by the cluster as the records
+// carry it, whether or not a scope file could hold that uid, since two
+// clusters are two workloads either way.
 var verdictKinds = map[string]struct {
 	label  string
 	values func(Candidate) []string
@@ -831,10 +836,10 @@ var verdictKinds = map[string]struct {
 	"processGroup": {"process group", func(c Candidate) []string { return c.ProcessGroups }, func(c Candidate) int64 { return c.ProcessGroupCount }},
 	"serviceName":  {"service name", func(c Candidate) []string { return nonEmpty(c.ServiceName) }, nil},
 	"workload": {"workload", func(c Candidate) []string {
-		if c.Workload == "" {
+		if c.Workload == "" || c.Namespace == "" {
 			return nil
 		}
-		return []string{Workload{ClusterUID: c.ClusterUID, Namespace: c.Namespace, Name: c.Workload}.String()}
+		return []string{strings.Join([]string{c.ClusterUID + c.ClusterRefused, c.Namespace, c.Workload}, "\x00")}
 	}, nil},
 }
 
@@ -864,7 +869,7 @@ func VerdictLabel(kind string) string {
 // a sample read, is never a match: what was not seen could be a second
 // candidate. A kind is tallied by
 // its count where it has one, so a candidate listing one of its 200 service
-// ids is 200 services, not one.
+// ids is 200 services, not one. No kind is a match unless the whole is.
 func verdicts(candidates []Candidate, partial bool) (Verdict, map[string]Verdict) {
 	per := make(map[string]Verdict, len(verdictKinds))
 	for kind, k := range verdictKinds {
@@ -888,6 +893,15 @@ func verdicts(candidates []Candidate, partial bool) (Verdict, map[string]Verdict
 		per[kind] = decide(max(len(distinct), int(most)), exact, partial)
 	}
 	overall := decide(len(candidates), len(candidates) == 1 && candidates[0].Tier == tierExact.String(), partial)
+	if overall != VerdictMatch {
+		// No kind is settled while the candidates are not: the one value of
+		// a kind may be what two candidates share.
+		for kind, v := range per {
+			if v == VerdictMatch {
+				per[kind] = VerdictAmbiguous
+			}
+		}
+	}
 	return overall, per
 }
 

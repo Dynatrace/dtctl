@@ -244,3 +244,49 @@ func TestDiscover_UnexplainedRowIsNotExact(t *testing.T) {
 		"40 spans in 24h",
 	}, c.Evidence)
 }
+
+// A verdict per kind of binding is never better than the overall one: with
+// two candidates there is no kind that is settled.
+func TestDiscover_KindVerdictsFollowTheOverallOne(t *testing.T) {
+	row := func(uid string) map[string]interface{} {
+		return map[string]interface{}{fieldClusterUID: uid, fieldNamespace: "payments", fieldWorkload: "checkout",
+			fieldServiceName: "checkout", fieldRecords: float64(10), fieldProcessGroups: collected(pgID), fieldProcessGroupCount: float64(1)}
+	}
+	// Two clusters a scope file cannot hold: the workload kind used to see
+	// one value, since neither candidate has a cluster uid to tell them by.
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{row("PROD-A"), row("PROD-B")}}},
+		"logs":  {{records: []map[string]interface{}{row("PROD-A"), row("PROD-B")}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 2)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Equal(t, map[string]Verdict{
+		"workload": VerdictAmbiguous, "serviceName": VerdictAmbiguous, "processGroup": VerdictAmbiguous, "service": VerdictNone,
+	}, r.Verdicts)
+
+	// Alone, the same candidate is a match for the kinds it has.
+	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{row("PROD-A")}}},
+		"logs":  {{records: []map[string]interface{}{row("PROD-A")}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.Equal(t, map[string]Verdict{
+		"workload": VerdictMatch, "serviceName": VerdictMatch, "processGroup": VerdictMatch, "service": VerdictNone,
+	}, r.Verdicts)
+}
+
+// A workload is bound by namespace and name. Records that carry the workload
+// name and no namespace give no workload to bind, so that kind has none.
+func TestDiscover_WorkloadWithoutANamespaceIsNoWorkloadBinding(t *testing.T) {
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{{fieldWorkload: "checkout", fieldRecords: float64(10)}}}},
+		"logs":  {{records: []map[string]interface{}{{fieldWorkload: "checkout", fieldRecords: float64(10)}}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.Equal(t, map[string]Verdict{
+		"workload": VerdictNone, "serviceName": VerdictNone, "processGroup": VerdictNone, "service": VerdictNone,
+	}, r.Verdicts)
+}

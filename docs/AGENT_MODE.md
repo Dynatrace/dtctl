@@ -395,7 +395,8 @@ deployable; `context.total` counts the reports. A report's `verdict` is
 the overall answer and `verdicts` has one per kind of binding (`service`,
 `processGroup`, `workload`, `serviceName`). A per-kind verdict can be
 `ambiguous` while the overall one is `match`: a single candidate whose logs
-name two process groups is one candidate but two process groups. Each
+name two process groups is one candidate but two process groups. It is never
+the other way round: no kind is `match` unless the overall verdict is. Each
 candidate's `setCommand` is the line that saves it; a candidate without one has
 no binding that selects it alone, and `suggestions` then says what to do
 instead.

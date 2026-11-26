@@ -212,7 +212,9 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 				matched = append(matched, reposcope.VerdictLabel(kind))
 			}
 		}
-		fmt.Fprintf(w, "Verdict: match: %s\n", strings.Join(matched, ", "))
+		// The one candidate can be without a kind that is settled: records
+		// that name a workload and no namespace give nothing to bind.
+		fmt.Fprintf(w, "Verdict: match: %s\n", cmp.Or(strings.Join(matched, ", "), "one candidate, with no binding that selects it"))
 		if len(p.handLinks) > 0 {
 			fmt.Fprintf(w, "%s No binding selects this candidate alone.\n", took)
 			writeRepoScopeHandLinks(w, p)
@@ -283,7 +285,12 @@ func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 	fmt.Fprintln(tw, "#\tCLUSTER\tWORKLOAD\tSERVICE NAME\tPROCESS GROUP\tSERVICE\tTIER")
 	for _, c := range r.Candidates {
 		workload := ""
-		if c.Workload != "" {
+		switch {
+		case c.Workload != "" && c.Namespace == "":
+			// Not namespace/name with half of it missing: a workload is
+			// bound by both.
+			workload = c.Workload + " (no namespace)"
+		case c.Workload != "":
 			workload = reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}.String()
 		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", c.Rank, cmp.Or(c.ClusterName, c.ClusterUID, "-"), cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"),
