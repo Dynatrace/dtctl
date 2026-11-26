@@ -452,7 +452,19 @@ func TestExtract_Dockerfile(t *testing.T) {
 		{"a jar wins over the interpreter", `ENTRYPOINT ["java", "-Xmx512m", "-jar", "/app/billing-core.jar"]`, "billing-core"},
 		{"CMD extends ENTRYPOINT", "ENTRYPOINT [\"dotnet\"]\nCMD [\"Invoices.Web.dll\"]", "invoices-web"},
 		{"shell form", "CMD node dist/report-builder.js", "report-builder"},
-		{"interpreters and flags are skipped", `CMD ["python3", "-u", "scheduler.py"]`, "scheduler"},
+		{"an interpreter is skipped", `CMD ["python3", "scheduler.py"]`, "scheduler"},
+		{"what follows a flag may be its operand", `CMD ["python3", "-u", "scheduler.py"]`, ""},
+		{"a flag's operand is not a name", `CMD ["-c", "/etc/nginx/tenant-east.conf"]`, ""},
+		{"nor behind an entrypoint", "ENTRYPOINT [\"nginx\"]\nCMD [\"-c\", \"/etc/nginx/tenant-east.conf\"]", ""},
+		{"nor is a module an interpreter is told to run", `CMD ["python", "-m", "acme_secret_module"]`, ""},
+		{"nor inline code", `CMD ["python", "-c", "print(1)"]`, ""},
+		{"nor a directive in shell form", "CMD nginx -g daemon-off", ""},
+		{"nor a file an interpreter preloads", `CMD ["node", "--require", "./tracing.js", "ledger-writer.js"]`, ""},
+		{"nor what follows a supervisor's flag", `ENTRYPOINT ["tini", "-g", "--", "/app/order-api"]`, ""},
+		{"a bare -- is no flag", `ENTRYPOINT ["tini", "--", "/app/order-api"]`, "order-api"},
+		{"flags after the name do not unname it", `ENTRYPOINT ["/app/order-api", "--config", "/etc/tenant-east.yaml"]`, "order-api"},
+		{"a jar on the class path is not the artifact", `CMD ["java", "-cp", "/opt/lib/metrics-agent.jar", "com.example.Main"]`, ""},
+		{"a dll before any flag is the artifact", `CMD ["dotnet", "Invoices.Web.dll", "--urls", "http://0.0.0.0:8080"]`, "invoices-web"},
 		{"the last ENTRYPOINT counts", "ENTRYPOINT [\"/bin/first-thing\"]\nENTRYPOINT [\"/bin/second-thing\"]", "second-thing"},
 		{"nothing but an interpreter", `CMD ["bash"]`, ""},
 		{"a generic name is no token", `ENTRYPOINT ["/app/server"]`, ""},
@@ -475,6 +487,33 @@ func TestExtract_Dockerfile(t *testing.T) {
 			got, _ := dockerEntrypoint("FROM scratch\n"+tt.dockerfile+"\n", "Dockerfile")
 			assert.Equal(t, tt.want, got.value)
 		})
+	}
+}
+
+// What a Dockerfile's flags are given never leaves the machine: a
+// configuration file's name can identify a tenant, and it would count as the
+// unit's own name. Sent is every value the queries carry.
+func TestPlan_DockerfileFlagOperandsAreNotSent(t *testing.T) {
+	for _, dockerfile := range []string{
+		`CMD ["-c", "/etc/nginx/tenant-east.conf"]`,
+		"ENTRYPOINT [\"nginx\"]\nCMD [\"-c\", \"/etc/nginx/tenant-east.conf\"]",
+		`CMD ["python", "-m", "acme_secret_module"]`,
+		`CMD ["python", "-c", "print(1)"]`,
+		"CMD nginx -g daemon-off",
+		`CMD ["node", "--require", "./tracing.js", "server.js"]`,
+		`ENTRYPOINT ["tini", "-g", "--", "/app/order-api"]`,
+		"CMD python -m acme_secret_module",
+	} {
+		p, err := PlanDiscovery(fstest.MapFS{"Dockerfile": {Data: []byte("FROM scratch\n" + dockerfile + "\n")}}, ".", nil)
+		require.NoError(t, err)
+		assert.Empty(t, p.Sent, dockerfile)
+		assert.Empty(t, p.Queries, dockerfile)
+	}
+	p, err := PlanDiscovery(fstest.MapFS{"Dockerfile": {Data: []byte("FROM scratch\nENTRYPOINT [\"/app/order-api\", \"-c\", \"/etc/tenant-east.conf\"]\n")}}, ".", nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"order-api", "order.api", "order_api", "orderapi"}, p.Sent)
+	for _, q := range p.Queries {
+		assert.NotContains(t, q.DQL, "tenant", q.Purpose)
 	}
 }
 

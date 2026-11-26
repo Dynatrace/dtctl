@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -142,9 +141,8 @@ var dockerFromRe = regexp.MustCompile(`(?im)^[ \t]*FROM[ \t]`)
 
 // dockerEntrypoint reads what the image runs. The image is the last stage of
 // the file, so only that stage is read: an earlier one runs a build tool.
-// Docker appends CMD to ENTRYPOINT, so the last of each are read together; a
-// jar, war or dll argument wins, since it names the artifact, and otherwise
-// the first argument that is neither a launcher nor a flag.
+// Docker appends CMD to ENTRYPOINT, so the last of each are read together,
+// and runTarget picks the name out of them.
 func dockerEntrypoint(text, file string) (token, bool) {
 	stage := 0
 	if from := dockerFromRe.FindAllStringIndex(text, -1); len(from) > 0 {
@@ -184,23 +182,36 @@ func splitDockerArgs(args string) []string {
 }
 
 // runTarget picks the name a command line runs, without directory or
-// extension. An argument is never a name when it is a flag, an assignment
-// (KEY=value, --key=value) or a line of its own (the script of sh -c): those
-// carry configuration, credentials among it, and a flag may hold a jar that
-// is an agent rather than the artifact.
+// extension: the first argument that is no launcher, read only up to the first
+// flag. What follows a flag may be its operand (nginx -c <file>, python -m
+// <module>, node --require <file>), and an operand is configuration, which can
+// name a tenant and is never the unit. Past the first flag one argument still
+// counts, the archive java is given with -jar. A bare "--" is no flag: it
+// ends a supervisor's own arguments (tini -- <program>).
+//
+// An argument is never a name when it is an assignment (KEY=value) or a line
+// of its own (the script of sh -c): those carry configuration, credentials
+// among it.
 func runTarget(args []string) string {
-	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool {
-		return strings.HasPrefix(a, "-") || strings.ContainsAny(a, "= \t\r\n")
-	})
-	for _, a := range args {
-		switch path.Ext(a) {
-		case ".jar", ".war", ".dll":
-			return strings.TrimSuffix(path.Base(a), path.Ext(a))
+	stem := func(a string) string { return strings.TrimSuffix(path.Base(a), path.Ext(a)) }
+	for i, a := range args {
+		switch {
+		case a == "--" || strings.ContainsAny(a, "= \t\r\n"):
+			continue
+		case strings.HasPrefix(a, "-"):
+			return jarOperand(args[i:])
+		case !launchers[stem(a)]:
+			return stem(a)
 		}
 	}
-	for _, a := range args {
-		if stem := strings.TrimSuffix(path.Base(a), path.Ext(a)); !launchers[stem] {
-			return stem
+	return ""
+}
+
+// jarOperand is the stem of the archive that follows -jar in args, or "".
+func jarOperand(args []string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if ext := path.Ext(args[i+1]); args[i] == "-jar" && (ext == ".jar" || ext == ".war") {
+			return strings.TrimSuffix(path.Base(args[i+1]), ext)
 		}
 	}
 	return ""
