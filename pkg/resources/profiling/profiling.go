@@ -6,11 +6,17 @@
 // Handler.Hotspots or Handler.Allocations runs the analysis, and the methods of
 // the returned Hotspots or Allocations read it as rows (Stacks, Functions,
 // Focus) or whole (Raw). Each kind of analysis has its own result type, so a
-// view is only there for the kind it reads. ClassifyError says what to do about
-// an API failure, and a view without rows says why in its Empty field. The HTTP calls are the SDK's
-// (sdk/api/codelevelanalysis); this package adds the window rules, the folds
-// and the advice. Advice and notes are worded for a dtctl user and name dtctl
-// flags.
+// view is only there for the kind it reads.
+//
+// What went wrong is reported as a value, not as text to match: ResolveWindow
+// and the views return typed errors, ClassifyError names the reason an
+// analysis failed, and a view without rows says why in its Empty field. The
+// package words none of this for a command line; `dtctl exec profiling` does
+// that in cmd/, where the flag names are.
+//
+// The HTTP calls are the SDK's (sdk/api/codelevelanalysis); this package adds
+// the window rules and the folds. Its API follows the tier of the command
+// (docs/STABILITY.md): while that is experimental, so is this.
 package profiling
 
 import (

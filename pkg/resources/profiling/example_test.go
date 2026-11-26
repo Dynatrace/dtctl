@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 )
 
@@ -24,7 +27,30 @@ func Example() {
 			{"id":"2","className":"lib.Json","methodName":"parse","apiInfo":{"systemApi":false},"samples":{"RUNNING":8},"childIds":[]}]}`)
 	}))
 	defer env.Close()
-	c, err := client.NewForTesting(env.URL, "token")
+
+	// The client comes from the dtctl configuration, as it does for the
+	// command: the current context of ~/.config/dtctl/config, or of the file
+	// DTCTL_CONFIG names. Here that file points at the stand-in.
+	dir, err := os.MkdirTemp("", "profiling-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(exampleConfig(env.URL)), 0o600); err != nil {
+		fmt.Println(err)
+		return
+	}
+	os.Setenv("DTCTL_CONFIG", path)
+	defer os.Unsetenv("DTCTL_CONFIG")
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	c, err := client.NewFromConfig(cfg)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -50,13 +76,14 @@ func Example() {
 	})
 	if err != nil {
 		if f, ok := profiling.ClassifyError(err); ok {
-			fmt.Println(f.Reason, f.Advice)
+			fmt.Println(f.Reason, f.Message)
 			return
 		}
 		fmt.Println(err)
 		return
 	}
 
+	fmt.Printf("%s over %s, after %d polls\n", analysis.Status, window.Span(), analysis.PollCount)
 	stacks := analysis.Stacks(false)
 	fmt.Printf("%d running samples\n", stacks.Samples)
 	for _, row := range stacks.Rows {
@@ -75,8 +102,23 @@ func Example() {
 
 	// Output:
 	// window too long, using its last 2h
+	// completed over 2h0m0s, after 0 polls
 	// 10 running samples
 	//  8 app.Main.main;lib.Json.parse
 	//  2 app.Main.main
 	// no functions: no_state_samples
+}
+
+// exampleConfig is a dtctl configuration with one context for environment.
+func exampleConfig(environment string) string {
+	return fmt.Sprintf(`current-context: example
+contexts:
+  - name: example
+    context:
+      environment: %s
+      token-ref: example
+tokens:
+  - name: example
+    token: dt0c01.EXAMPLE
+`, environment)
 }
