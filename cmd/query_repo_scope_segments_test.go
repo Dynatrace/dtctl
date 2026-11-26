@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Dynatrace/dtctl/pkg/dql"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
@@ -438,6 +440,26 @@ func TestRepoScopedQuery_SegmentsOnlyEntryWithoutSegments(t *testing.T) {
 	require.Equal(t, "segments_not_sent", q.scope.Code)
 	require.Equal(t, "the entry references only filter segments, and verify query checks the query text only", q.scope.Reason)
 	require.Empty(t, q.scope.Segments)
+}
+
+// A binding names its segment as it was typed or by the id that resolved to.
+// A --segment whose typed name happens to be an id the entry lists, while
+// resolving to another segment, is still the user's: the binding is theirs
+// to make and is not refused as aimed at the entry's.
+func TestRepoScopedQuery_SegmentVarNamesTheTypedSegment(t *testing.T) {
+	c := &cobra.Command{}
+	c.Flags().StringArray("segment-var", nil, "")
+	require.NoError(t, c.Flags().Set("segment-var", "plain-1:environment=staging"))
+	q := &repoScopedQuery{
+		scope:    &output.RepoScope{Name: "tools"},
+		segments: []reposcope.Segment{{ID: "plain-1"}},
+	}
+
+	user := []exec.FilterSegmentRef{{ID: "resolved-9"}}
+	require.NoError(t, q.refuseSegmentVars(c, user, map[string]string{"resolved-9": "plain-1"}))
+	require.NoError(t, q.refuseSegmentVars(c, []exec.FilterSegmentRef{{ID: "plain-1"}}, nil))
+	require.ErrorContains(t, q.refuseSegmentVars(c, user, map[string]string{"resolved-9": "another name"}),
+		`--segment-var names segment "plain-1", which repo scope tools references`)
 }
 
 // Whether a segment's variables are all bound is the platform's to say. When
