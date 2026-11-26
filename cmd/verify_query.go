@@ -152,7 +152,9 @@ Examples:
 			if err != nil {
 				return err
 			}
-			// Verifying scans nothing, so the line has no scan limit to weigh.
+			// Verifying scans nothing, so the line has no scan limit to weigh,
+			// and takes the text alone, so the entry's segments stay behind.
+			scoped.withoutSegments()
 			scoped.announce(nil)
 			query = scoped.Query
 

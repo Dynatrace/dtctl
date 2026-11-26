@@ -217,15 +217,27 @@ type RepoScope struct {
 	Name        string `json:"name,omitempty"`
 	File        string `json:"file"`
 	Environment string `json:"environment"`
-	// Applied says the query sent was narrowed; when false it ran as typed.
+	// Applied says the query sent was narrowed, by an inserted filter, by
+	// filter segments or both; when false it ran as typed.
 	Applied    bool   `json:"applied"`
 	DataObject string `json:"data_object,omitempty"`
-	// Filter is the expression inserted after the fetch stage.
+	// Filter is the expression inserted after the fetch stage; empty when
+	// none was.
 	Filter string `json:"filter,omitempty"`
+	// Segments are the filter segments the entry references that were sent
+	// with the query.
+	Segments []RepoScopeSegment `json:"segments,omitempty"`
 	// Code is "applied", or why the scope was not applied; docs/AGENT_MODE.md
 	// lists every code.
 	Code   string `json:"code"`
 	Reason string `json:"reason,omitempty"`
+}
+
+// RepoScopeSegment is one filter segment a repo scope entry sent with a
+// query: its id, and the values of its variables by name.
+type RepoScopeSegment struct {
+	ID        string              `json:"id"`
+	Variables map[string][]string `json:"variables,omitempty"`
 }
 
 // MarkFieldsClipped records on the context that values in fields were clipped

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -9,12 +10,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/dql"
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
+	"github.com/Dynatrace/dtctl/pkg/resources/segment"
 	"github.com/Dynatrace/dtctl/pkg/stability"
+	sdksegment "github.com/Dynatrace/dtctl/sdk/api/segment"
 )
 
 // Repo scoping is on by default inside a linked repository, so it has an
@@ -34,6 +38,9 @@ const (
 	repoScopeAmbiguousEntry = "ambiguous_entry"
 	repoScopeInvalidFile    = "invalid_file"
 	repoScopeNoBinding      = "no_binding"
+	// repoScopeSegmentUnavailable is an entry one of whose filter segments
+	// could not be read: the query runs as typed, without the filter either.
+	repoScopeSegmentUnavailable = "segment_unavailable"
 )
 
 // repoScopeCodes is every context.repo_scope.code; docs/AGENT_MODE.md lists
@@ -41,7 +48,7 @@ const (
 var repoScopeCodes = []string{
 	string(dql.Applied), string(dql.NotFetch), string(dql.UnsupportedObject), repoScopeNoBinding,
 	string(dql.UserFilter), string(dql.Subquery), string(dql.Unscannable), repoScopeNoEntry, repoScopeAmbiguousEntry,
-	repoScopeInvalidFile,
+	repoScopeInvalidFile, repoScopeSegmentUnavailable,
 }
 
 // repoScopeRefusals are the codes for an entry that resolved but cannot narrow
@@ -190,6 +197,21 @@ type repoScopedQuery struct {
 	// scope is nil when no scope resolved, and then nothing is printed and
 	// the envelope gains no key.
 	scope *output.RepoScope
+	// named is the entry --repo-scope asked for, "" for the covering one.
+	named string
+	// filtered says the entry's filter was inserted. scope.Applied is wider:
+	// it also holds for a query narrowed by the entry's segments alone.
+	filtered bool
+	// bound says the entry has bindings, so a filter was attempted; an entry
+	// without them references segments and nothing else.
+	bound bool
+	// segments are the filter segments the entry references, while they are
+	// still to be sent; unsent says a command that sends none dropped them.
+	segments []reposcope.Segment
+	unsent   string
+	// refusedCode and refusedReason are why the filter was not inserted, and
+	// unavailable why a segment could not be read; settle reports them.
+	refusedCode, refusedReason, unavailable string
 	// warning names keys the file holds that this dtctl does not know. The
 	// envelope has one reason field, so scope.Reason carries it too;
 	// notApplied is the reason without it, for stderr, where the warning has
@@ -226,46 +248,181 @@ func applyRepoScope(cmd *cobra.Command, cfg *config.Config, query string) (*repo
 	if err != nil || res == nil {
 		return q, err
 	}
+	q.named, q.warning = name, res.Warning
 	q.scope = res.Scope
 	if q.scope == nil {
-		q.rewrite(res.Status)
-		if name != "" && slices.Contains(repoScopeRefusals, q.scope.Code) {
+		refused := q.rewrite(res.Status)
+		if name != "" && slices.Contains(repoScopeRefusals, refused) {
 			return nil, &reposcope.InvalidError{
 				Source:      "--" + repoScopeFlag,
-				Msg:         fmt.Sprintf("entry %q cannot narrow this query (%s): %s", name, q.scope.Code, q.scope.Reason),
+				Msg:         fmt.Sprintf("entry %q cannot narrow this query (%s): %s", name, refused, q.refusedReason),
 				Suggestions: []string{"drop --" + repoScopeFlag + " to run the query as typed"},
 			}
 		}
+		return q, nil
 	}
-	q.notApplied = q.scope.Reason
-	if res.Warning != "" {
-		q.warning = res.Warning
-		q.scope.Reason = strings.TrimPrefix(q.scope.Reason+"; "+res.Warning, "; ")
-	}
+	q.setReason(q.scope.Reason)
 	return q, nil
 }
 
+// setReason records why the scope, or its filter, was not applied. The
+// envelope has one reason field, so it carries the file's warning too.
+func (q *repoScopedQuery) setReason(reason string) {
+	q.notApplied = reason
+	q.scope.Reason = reason
+	if q.warning != "" {
+		q.scope.Reason = strings.TrimPrefix(reason+"; "+q.warning, "; ")
+	}
+}
+
 // rewrite applies the resolved entry to the query and records the outcome.
-func (q *repoScopedQuery) rewrite(res *reposcope.Status) {
-	rw := dql.InsertFilter(q.Query, reposcope.Filters(res.Entry))
-	q.Query, q.scanBounded = rw.Query, rw.ScanBounded
-	q.scope = &output.RepoScope{
-		Name:        res.Entry.Name,
-		File:        res.File,
-		Environment: res.Environment,
-		Applied:     rw.Outcome == dql.Applied,
-		DataObject:  rw.DataObject,
-		Filter:      rw.Filter,
-		Code:        string(rw.Outcome),
-		Reason:      rw.Reason,
+// It returns the code of a filter that could not be inserted, "" when it was
+// or when the entry has none to insert.
+//
+// The entry's filter and its segments fail apart. A filter that cannot be
+// inserted leaves the segments to be sent, so the scope still narrows the
+// query and reports applied, with the reason for the missing half.
+func (q *repoScopedQuery) rewrite(res *reposcope.Status) (refused string) {
+	e := res.Entry
+	q.segments, q.bound = e.Segments, e.HasBindings()
+	q.scope = &output.RepoScope{Name: e.Name, File: res.File, Environment: res.Environment, Code: string(dql.Applied)}
+	if q.bound {
+		rw := dql.InsertFilter(q.Query, reposcope.Filters(e))
+		q.Query, q.scanBounded, q.filtered = rw.Query, rw.ScanBounded, rw.Outcome == dql.Applied
+		q.scope.DataObject, q.scope.Filter = rw.DataObject, rw.Filter
+		code, reason := string(rw.Outcome), rw.Reason
+		// The rewrite only knows the filters it was given. For an object
+		// repo scopes do filter, the entry is what is missing, and Render
+		// says which binding to add.
+		if rw.Outcome == dql.UnsupportedObject && slices.Contains(reposcope.DataObjects(), rw.DataObject) {
+			_, _, reason = reposcope.Render(e, rw.DataObject)
+			code = repoScopeNoBinding
+		}
+		if !q.filtered {
+			q.refusedCode, q.refusedReason = code, reason
+		}
 	}
-	// The rewrite only knows the filters it was given. For an object repo
-	// scopes do filter, the entry is what is missing, and Render says which
-	// binding to add.
-	if rw.Outcome == dql.UnsupportedObject && slices.Contains(reposcope.DataObjects(), rw.DataObject) {
-		_, _, reason := reposcope.Render(res.Entry, rw.DataObject)
-		q.scope.Code, q.scope.Reason = repoScopeNoBinding, reason
+	q.settle()
+	return q.refusedCode
+}
+
+// settle derives what the envelope says from the two halves: the scope is
+// applied when the filter was inserted or segments are to be sent, and a
+// scope applied by its segments alone says why the filter is missing.
+func (q *repoScopedQuery) settle() {
+	s := q.scope
+	s.Segments = nil
+	for _, seg := range q.segments {
+		s.Segments = append(s.Segments, output.RepoScopeSegment{ID: seg.ID, Variables: seg.Variables})
 	}
+	s.Applied = q.filtered || len(q.segments) > 0
+	switch {
+	case q.unavailable != "":
+		s.Code = repoScopeSegmentUnavailable
+		q.setReason(q.unavailable)
+	case q.filtered || !q.bound:
+		s.Code = string(dql.Applied)
+		q.setReason("")
+	case s.Applied:
+		s.Code = string(dql.Applied)
+		q.setReason(fmt.Sprintf("filter not inserted (%s): %s", q.refusedCode, q.refusedReason))
+	default:
+		s.Code = q.refusedCode
+		q.setReason(q.refusedReason)
+	}
+}
+
+// segmentList spells the entry's segments the way --segment takes them.
+func (q *repoScopedQuery) segmentList() string {
+	return strings.Join(segmentRefs(q.segments), ", ")
+}
+
+// checkSegments reads each filter segment the entry references, once, before
+// anything is sent. The platform fails a query that names a segment it
+// cannot find, so without the check one deleted segment would fail every
+// query run in the repository. When one cannot be read the scope is dropped
+// whole and the query runs as typed: with the filter and without the
+// segment it would return rows that look scoped and are wider than the
+// entry. A named entry is what the caller asked for, so there it is the
+// error.
+//
+// Whether a segment's variables are all bound is not checked: only the
+// platform knows which it requires, and wrapError explains that failure.
+func (q *repoScopedQuery) checkSegments(c *client.Client) error {
+	if q.scope == nil || len(q.segments) == 0 {
+		return nil
+	}
+	handler := segment.NewHandler(c)
+	for _, seg := range q.segments {
+		_, err := handler.Get(seg.ID)
+		if err == nil {
+			continue
+		}
+		reason := fmt.Sprintf("filter segment %s could not be read (%v)", seg.ID, err)
+		if errors.Is(err, sdksegment.ErrNotFound) {
+			reason = fmt.Sprintf("filter segment %s does not exist in this environment, or is not shared with you", seg.ID)
+		}
+		if q.named != "" {
+			return &reposcope.InvalidError{
+				Source: "--" + repoScopeFlag,
+				Msg:    fmt.Sprintf("entry %q cannot be applied: %s", q.named, reason),
+				Suggestions: []string{
+					fmt.Sprintf("correct the entry's segments in %s; list the environment's with: dtctl get segments", reposcope.FileName),
+					"drop --" + repoScopeFlag + " to run the query as typed",
+				},
+			}
+		}
+		q.Query, q.filtered, q.segments, q.unavailable = q.typed, false, nil, reason
+		q.scope.DataObject, q.scope.Filter = "", ""
+		q.settle()
+		return nil
+	}
+	return nil
+}
+
+// withSegments is the segments to send: the user's own, then the entry's. A
+// segment the user also names is sent once, with the user's variables, since
+// what is typed wins over what is committed. More than a query takes is an
+// error: leaving some out would change the rows without saying so.
+func (q *repoScopedQuery) withSegments(user []exec.FilterSegmentRef) ([]exec.FilterSegmentRef, error) {
+	if q.scope == nil || len(q.segments) == 0 {
+		return user, nil
+	}
+	if total := len(user) + len(q.segments); total > maxSegmentsPerQuery {
+		kept := q.segments[:0:0]
+		for _, seg := range q.segments {
+			if !slices.ContainsFunc(user, func(u exec.FilterSegmentRef) bool { return u.ID == seg.ID }) {
+				kept = append(kept, seg)
+			}
+		}
+		if len(user)+len(kept) > maxSegmentsPerQuery {
+			return nil, fmt.Errorf("too many segments: %d given and %d from repo scope %s, maximum is %d per query; give fewer, or pass --%s",
+				len(user), len(kept), q.scope.Name, maxSegmentsPerQuery, noRepoScopeFlag)
+		}
+	}
+	out := slices.Clone(user)
+	for _, seg := range q.segments {
+		if slices.ContainsFunc(user, func(u exec.FilterSegmentRef) bool { return u.ID == seg.ID }) {
+			output.FprintInfo(q.stderr, "repo scope %s: segment %s is also given on the command line; its variables there are used", q.scope.Name, seg.ID)
+			continue
+		}
+		ref := exec.FilterSegmentRef{ID: seg.ID}
+		for _, name := range seg.VariableNames() {
+			ref.Variables = append(ref.Variables, exec.FilterSegmentVariable{Name: name, Values: seg.Variables[name]})
+		}
+		out = append(out, ref)
+	}
+	return out, nil
+}
+
+// withoutSegments is for a command that sends the query text and nothing
+// beside it: the entry's segments are not sent, and announce says so.
+func (q *repoScopedQuery) withoutSegments() {
+	if q.scope == nil || len(q.segments) == 0 {
+		return
+	}
+	q.unsent, q.segments = q.segmentList(), nil
+	q.settle()
 }
 
 // announce writes the line that says what the scope did, and one for keys
@@ -286,14 +443,32 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	}
 	warnRepoScopeFile(q.stderr, q.warning)
 	s := q.scope
-	if s.Applied {
+	if q.unsent != "" {
+		defer output.FprintInfo(q.stderr, "repo scope %s: its segments %s are not checked; verify query sends the query text only", s.Name, q.unsent)
+		if !q.bound {
+			return
+		}
+	}
+	with := ""
+	if len(q.segments) > 0 {
+		with = " with segments " + q.segmentList()
+	}
+	switch {
+	case q.filtered:
 		clause := ""
 		if !q.scanBounded && limits != nil && limits.ScanLimitGbytes <= 0 && limits.SamplingRatio <= 1 {
 			q.unboundedScan, q.scanCapNoticed = true, true
 			clause = "; " + q.scanClause()
 		}
-		output.FprintInfo(q.stderr, "applying repo scope %s to fetch %s: %s (use --%s to ignore it)%s",
-			s.Name, s.DataObject, s.Filter, noRepoScopeFlag, clause)
+		output.FprintInfo(q.stderr, "applying repo scope %s to fetch %s: %s%s (use --%s to ignore it)%s",
+			s.Name, s.DataObject, s.Filter, with, noRepoScopeFlag, clause)
+		return
+	case with != "" && !q.bound:
+		output.FprintInfo(q.stderr, "applying repo scope %s: segments %s (use --%s to ignore it)", s.Name, q.segmentList(), noRepoScopeFlag)
+		return
+	case with != "":
+		output.FprintWarning(q.stderr, "repo scope %s: its filter was not inserted: %s; its segments %s still apply (use --%s to ignore them)",
+			s.Name, q.refusedReason, q.segmentList(), noRepoScopeFlag)
 		return
 	}
 	label := "repo scope"
@@ -376,7 +551,7 @@ func (q *repoScopedQuery) noticeWaitOutcome(met bool, records int64) {
 // repeating them: a scope cannot by itself keep a wide timeframe under the
 // cap, and reading it as a cheaper query is the mistake the line prevents.
 func (q *repoScopedQuery) noticeScanCap(_ int, result *exec.DQLQueryResponse) {
-	if q.scope == nil || !q.scope.Applied || q.scanCapNoticed || !scanCapped(result) {
+	if q.scope == nil || !q.filtered || q.scanCapNoticed || !scanCapped(result) {
 		return
 	}
 	q.scanCapNoticed = true
@@ -445,13 +620,13 @@ func (q *repoScopedQuery) decorate(c *output.ResponseContext, result *exec.DQLQu
 	switch {
 	case q.unboundedScan:
 		c.Suggestions = append(c.Suggestions, q.scanClause())
-	case q.scope.Applied && scanCapped(result):
+	case q.filtered && scanCapped(result):
 		c.Suggestions = append(c.Suggestions, q.scanCapNotice())
 	}
 }
 
-// wrapError marks a failure of a query the scope rewrote, so its report shows
-// the text that was actually sent.
+// wrapError marks a failure of a query the scope rewrote or sent segments
+// with, so its report shows what was actually sent.
 func (q *repoScopedQuery) wrapError(err error) error {
 	if err == nil || q.scope == nil || !q.scope.Applied {
 		return err
@@ -476,11 +651,22 @@ func (e *ScopedQueryError) Error() string { return e.Err.Error() }
 
 func (e *ScopedQueryError) Unwrap() error { return e.Err }
 
-// Suggestions shows what was sent and how to rule the scope out.
+// Suggestions shows what was sent and how to rule the scope out. A segment's
+// missing variable is one failure only the platform can report, so the
+// segments the entry sent are named as well.
 func (e *ScopedQueryError) Suggestions() []string {
-	return []string{
-		fmt.Sprintf("the query ran under repo scope %s, which inserted a filter after fetch %s; the text sent was: %s",
-			e.Scope.Name, e.Scope.DataObject, e.Sent),
-		fmt.Sprintf("retry with --%s to run the query exactly as typed", noRepoScopeFlag),
+	var out []string
+	if e.Scope.Filter != "" {
+		out = append(out, fmt.Sprintf("the query ran under repo scope %s, which inserted a filter after fetch %s; the text sent was: %s",
+			e.Scope.Name, e.Scope.DataObject, e.Sent))
 	}
+	if len(e.Scope.Segments) > 0 {
+		refs := make([]string, len(e.Scope.Segments))
+		for i, s := range e.Scope.Segments {
+			refs[i] = reposcope.Segment{ID: s.ID, Variables: s.Variables}.String()
+		}
+		out = append(out, fmt.Sprintf("repo scope %s also sent the filter segments %s; if the failure names a segment or one of its variables, correct the entry's segments in %s",
+			e.Scope.Name, strings.Join(refs, ", "), reposcope.FileName))
+	}
+	return append(out, fmt.Sprintf("retry with --%s to run the query exactly as typed", noRepoScopeFlag))
 }

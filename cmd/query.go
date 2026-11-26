@@ -297,6 +297,9 @@ Examples:
 			if err != nil {
 				return err
 			}
+			if err := scoped.checkSegments(c); err != nil {
+				return err
+			}
 			query = scoped.Query
 
 			// Query limits resolve flag -> context config -> global config -> server
@@ -438,6 +441,10 @@ Examples:
 				}
 			} else if len(segmentVarFlags) > 0 {
 				return fmt.Errorf("--segment-var requires at least one --segment or --segments-file")
+			}
+			// The repo scope entry's own segments go beside the user's.
+			if segments, err = scoped.withSegments(segments); err != nil {
+				return err
 			}
 
 			clientContext, _ := cmd.Flags().GetString("client-context")

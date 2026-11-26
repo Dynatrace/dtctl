@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -129,6 +131,9 @@ type dqlRecorder struct {
 	// all is every request the server got, answered or not: method, path
 	// and body.
 	all []string
+	// segments are the filter segments the environment holds, by id, with
+	// the status reading one answers; any other id is a 404.
+	segments map[string]int
 }
 
 // newDQLRecorder starts the server and points an isolated config's only
@@ -144,6 +149,30 @@ func newDQLRecorder(t *testing.T, safetyLevel string, respond func(r *http.Reque
 		s.mu.Lock()
 		s.all = append(s.all, fmt.Sprintf("%s %s %s", r.Method, r.URL.RequestURI(), raw))
 		s.mu.Unlock()
+		if id, ok := strings.CutPrefix(r.URL.Path, "/platform/storage/filter-segments/v1/filter-segments/"); ok && r.Method == http.MethodGet {
+			s.mu.Lock()
+			status, known := s.segments[id]
+			s.mu.Unlock()
+			if known {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = fmt.Fprintf(w, `{"uid":%q,"name":"a segment"}`, id)
+				return
+			}
+		}
+		if r.URL.Path == "/platform/storage/filter-segments/v1/filter-segments" && r.Method == http.MethodGet {
+			s.mu.Lock()
+			var list []string
+			for _, id := range slices.Sorted(maps.Keys(s.segments)) {
+				list = append(list, fmt.Sprintf(`{"uid":%q,"name":"a segment"}`, id))
+			}
+			s.mu.Unlock()
+			if list != nil {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"filterSegments":[%s]}`, strings.Join(list, ","))
+				return
+			}
+		}
 		if !strings.HasSuffix(r.URL.Path, "/query:execute") && !strings.HasSuffix(r.URL.Path, "/query:verify") {
 			http.NotFound(w, r)
 			return

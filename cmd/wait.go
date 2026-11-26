@@ -126,6 +126,14 @@ Examples:
 			if err != nil {
 				return err
 			}
+			// Read once here, however often the wait polls.
+			if err := scoped.checkSegments(c); err != nil {
+				return err
+			}
+			segments, err := scoped.withSegments(nil)
+			if err != nil {
+				return err
+			}
 
 			// Parse timing flags
 			timeout, _ := cmd.Flags().GetDuration("timeout")
@@ -179,6 +187,7 @@ Examples:
 				// condition not met yet, so only the scan-cap line applies
 				// here, and the outcome names the scope once below.
 				OnResult: scoped.noticeScanCap,
+				Segments: segments,
 				// ShowProgress is left false: the waiter drives its own per-attempt
 				// progress output on stderr, and a per-query progress bar (plus a
 				// completion summary per attempt) would fight it.

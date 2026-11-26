@@ -336,6 +336,25 @@ still stopped, points at the executor's scan-limit advice.
 | `no_entry` | no entry covers the working directory; pick one with `--repo-scope <name>` |
 | `ambiguous_entry` | several entries cover the working directory as closely; `reason` names them; pick one with `--repo-scope <name>` |
 | `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
+| `segment_unavailable` | a filter segment the entry references could not be read (deleted, not shared with you, or the token lacks `storage:filter-segments:read`); `reason` names it |
+
+An entry may also reference existing filter segments, which the query then
+sends as if `--segment` had been typed. `segments` lists the ones sent, each
+with its `id` and its `variables` by name:
+
+```json
+"repo_scope": {"name": "checkout", "file": ".dtctl-repo-scope.yaml", "environment": "abc12345.apps.dynatrace.com",
+               "applied": true, "data_object": "logs", "filter": "service.name == \"checkout\"",
+               "segments": [{"id": "Ab3dEf9hIjk", "variables": {"environment": ["production"]}}],
+               "code": "applied"}
+```
+
+`applied` is true whenever the query sent was narrowed, by the filter, by
+segments or both. An entry that references only segments has no `filter`. When
+an entry has both and the filter could not be inserted, the segments are still
+sent: `applied` stays true, `filter` is absent, and `reason` starts with
+`filter not inserted (<code>):` and one of the codes above. `wait query` sends
+the segments too; `verify query` does not, and says so on stderr.
 
 When the scope file holds keys this dtctl does not know (a typo, or a newer
 dtctl's), the entry still applies and `reason` names the keys.
@@ -358,7 +377,9 @@ and nothing is sent: the message names the code (`not_fetch`,
 `unsupported_object`, `no_binding`, `subquery` or `unscannable`) and the
 reason. `user_filter` is not an error: the query runs as typed, with
 `applied: false`, because the query's own filter on a scoped field is what was
-asked for. A scoped query that fails keeps the query's own error code and
+asked for. A segment the named entry references that cannot be read is a
+`validation_error` as well, and more segments than a query takes (ten, the
+entry's and `--segment`'s together) is an error in every case. A scoped query that fails keeps the query's own error code and
 position, which points into the text that was sent; `suggestions` shows that
 text and the `--no-repo-scope` retry.
 
