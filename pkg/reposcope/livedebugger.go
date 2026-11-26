@@ -65,10 +65,14 @@ func LiveDebuggerFilters(e *Entry) (sets []map[string][]string, ok bool, reason 
 		}
 	}
 	switch {
+	// The reasons name what an entry binds, never a flag that binds it: the
+	// file is as often written by hand, and this package knows no command.
 	case len(sets) == 0 && !e.HasBindings() && len(e.Segments) > 0:
-		return nil, false, fmt.Sprintf("entry %q references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so bind --namespace/--workload or --process-group", e.Name)
+		return nil, false, fmt.Sprintf("entry %q references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so it needs a workload or a process group to set filters", e.Name)
+	case len(sets) == 0 && len(e.Services) > 0 && len(e.Segments) > 0:
+		return nil, false, fmt.Sprintf("entry %q binds service ids, which Live Debugger does not honour as a workspace label, and references filter segments, which narrow queries only; it needs a workload or a process group to set filters", e.Name)
 	case len(sets) == 0 && len(e.Services) > 0:
-		return nil, false, fmt.Sprintf("entry %q binds only service ids, which Live Debugger does not honour as a workspace label; bind --namespace/--workload or --process-group", e.Name)
+		return nil, false, fmt.Sprintf("entry %q binds only service ids, which Live Debugger does not honour as a workspace label; it needs a workload or a process group to set filters", e.Name)
 	case len(sets) == 0:
 		return nil, false, fmt.Sprintf("entry %q binds nothing a Live Debugger filter can carry (%s, %s with %s, or %s)",
 			e.Name, fieldServiceName, fieldNamespace, fieldWorkload, fieldProcessGroup)

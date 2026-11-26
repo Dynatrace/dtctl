@@ -6,5 +6,5 @@ Segments:       plain-1
 Filters:
   none: entry "tools" references only filter segments, which are sent with every query run under it
 Live Debugger filters:
-  none: entry "tools" references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so bind --namespace/--workload or --process-group
+  none: entry "tools" references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so it needs a workload or a process group to set filters
 Other entries:  billing

@@ -10,5 +10,5 @@ Filters:
   fetch spans  | filter (in(dt.entity.service, array("SERVICE-0123456789ABCDEF")))
   every query run under the entry is sent with its segments
 Live Debugger filters:
-  none: entry "billing" binds only service ids, which Live Debugger does not honour as a workspace label; bind --namespace/--workload or --process-group
+  none: entry "billing" binds service ids, which Live Debugger does not honour as a workspace label, and references filter segments, which narrow queries only; it needs a workload or a process group to set filters
 Other entries:  tools

@@ -95,12 +95,17 @@ func TestLiveDebuggerFilters_NothingToCarry(t *testing.T) {
 	sets, ok, reason := LiveDebuggerFilters(&Entry{Name: "ids", Services: []string{svcID}})
 	assert.False(t, ok)
 	assert.Nil(t, sets)
-	assert.Equal(t, `entry "ids" binds only service ids, which Live Debugger does not honour as a workspace label; bind --namespace/--workload or --process-group`, reason)
+	assert.Equal(t, `entry "ids" binds only service ids, which Live Debugger does not honour as a workspace label; it needs a workload or a process group to set filters`, reason)
 
 	sets, ok, reason = LiveDebuggerFilters(&Entry{Name: "segments", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}})
 	assert.False(t, ok)
 	assert.Nil(t, sets)
-	assert.Equal(t, `entry "segments" references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so bind --namespace/--workload or --process-group`, reason)
+	assert.Equal(t, `entry "segments" references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so it needs a workload or a process group to set filters`, reason)
+
+	// Segments beside the service ids are named too: neither is a label.
+	_, ok, reason = LiveDebuggerFilters(&Entry{Name: "both", Services: []string{svcID}, Segments: []Segment{{ID: "Ab3dEf9hIjk"}}})
+	assert.False(t, ok)
+	assert.Equal(t, `entry "both" binds service ids, which Live Debugger does not honour as a workspace label, and references filter segments, which narrow queries only; it needs a workload or a process group to set filters`, reason)
 
 	sets, ok, reason = LiveDebuggerFilters(&Entry{Name: "empty"})
 	assert.False(t, ok)
