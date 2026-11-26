@@ -116,6 +116,45 @@ func TestExtractReadsAFileWithAByteOrderMark(t *testing.T) {
 	}
 }
 
+// A directory is often named for its place in a layout, not for what runs
+// from it. Such a name is not sent, whether it is the directory discovery was
+// asked about or a unit's own; a directory named like a service still is.
+func TestExtractLayoutDirectoriesNameNothing(t *testing.T) {
+	root := fstest.MapFS{
+		"go.mod":                       {Data: []byte("module example.invalid/checkout\n")},
+		"internal/handlers/handler.go": {Data: []byte("package handlers\n")},
+		"deploy/values.txt":            {Data: []byte("x\n")},
+		"src/main.go":                  {Data: []byte("package main\n")},
+		"Services/ledger/main.go":      {Data: []byte("package main\n")},
+	}
+	for dir, want := range map[string][]string{
+		"internal":          {"checkout"},
+		"internal/handlers": {"checkout"},
+		"deploy":            {"checkout"},
+		"src":               {"checkout"},
+		"Services":          {"checkout"},
+		"Services/ledger":   {"checkout", "ledger"},
+	} {
+		p, err := PlanDiscovery(root, dir, nil)
+		require.NoError(t, err)
+		require.Equal(t, want, p.Sent, dir)
+	}
+
+	// A unit's own directory name is held to the same words.
+	units := fstest.MapFS{
+		"python/pyproject.toml": {Data: []byte("[project]\nname = \"fraud-scoring\"\n")},
+		"src/go.mod":            {Data: []byte("module example.invalid/checkout\n")},
+	}
+	for dir, want := range map[string][]string{
+		"python": {"project fraud-scoring python/pyproject.toml:2"},
+		"src":    {"module checkout src/go.mod:1"},
+	} {
+		p, err := PlanDiscovery(units, dir, nil)
+		require.NoError(t, err)
+		require.Equal(t, want, tokenLines(p.tokens), dir)
+	}
+}
+
 func TestExtractExplicitAssemblyName(t *testing.T) {
 	p, err := PlanDiscovery(fstest.MapFS{"Fallback.csproj": {Data: []byte("<Project>\n<AssemblyName>InvoiceWorker</AssemblyName>\n</Project>")}}, ".", nil)
 	require.NoError(t, err)

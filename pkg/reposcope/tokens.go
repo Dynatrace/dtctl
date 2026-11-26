@@ -49,6 +49,20 @@ func (t token) source() string {
 var stopWords = keySet("app", "api", "server", "service", "svc", "web", "worker", "main",
 	"backend", "frontend", "test", "demo", "example", "default", "system", "k8s", "chart")
 
+// layoutWords are what a directory is called for its place in a repository
+// rather than for what runs from it: where the sources, the packages, the
+// deployment descriptors or one language's code are kept. A directory token
+// is held to them besides stopWords, and no other kind is: a workload really
+// called core or tools is named so by a manifest or a build file, while
+// src/, internal/ or deploy/ is only where a developer happens to stand.
+var layoutWords = keySet("internal", "src", "source", "sources", "cmd", "pkg", "lib", "libs", "bin",
+	"deploy", "deployment", "deployments", "handlers", "services", "apps", "applications",
+	"packages", "modules", "components", "projects", "config", "configs", "scripts", "tools",
+	"util", "utils", "common", "shared", "core", "docs", "charts", "helm", "kubernetes",
+	"manifests", "infra", "infrastructure", "overlays", "base", "templates", "public", "static",
+	"assets", "resources", "java", "python", "dotnet", "golang", "node", "nodejs", "ruby", "php",
+	"rust", "kotlin", "scala", "typescript", "javascript")
+
 // testWords name test content. A repository keeps its tests' manifests,
 // Dockerfiles and build files beside the real ones, and the names in them
 // describe what the tests deploy, not what runs: test-platform-service-a is a

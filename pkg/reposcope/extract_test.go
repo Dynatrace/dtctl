@@ -127,19 +127,19 @@ func TestExtract_Fixtures(t *testing.T) {
 			name:   "camel-case",
 			dir:    "dotnet",
 			unit:   "dotnet",
-			tokens: []string{"dir dotnet dotnet/", "assembly invoice-renderer dotnet/InvoiceRenderer.csproj"},
+			tokens: []string{"assembly invoice-renderer dotnet/InvoiceRenderer.csproj"},
 		},
 		{
 			name:   "camel-case",
 			dir:    "java",
 			unit:   "java",
-			tokens: []string{"dir java java/", "artifact payment-service java/pom.xml:8"},
+			tokens: []string{"artifact payment-service java/pom.xml:8"},
 		},
 		{
 			name:   "camel-case",
 			dir:    "python",
 			unit:   "python",
-			tokens: []string{"dir python python/", "project fraud-scoring python/pyproject.toml:5"},
+			tokens: []string{"project fraud-scoring python/pyproject.toml:5"},
 		},
 		{
 			name:   "no-signals",
@@ -278,8 +278,8 @@ func TestExtract_Fixtures(t *testing.T) {
 func TestExtract_TokensCarryTheirVariants(t *testing.T) {
 	s, err := extract(fixture(t, "camel-case"), "java")
 	require.NoError(t, err)
-	require.Len(t, s.tokens, 2)
-	assert.Equal(t, []string{"payment-service", "payment_service", "payment.service", "paymentservice", "paymentService"}, s.tokens[1].variants,
+	require.Len(t, s.tokens, 1)
+	assert.Equal(t, []string{"payment-service", "payment_service", "payment.service", "paymentservice", "paymentService"}, s.tokens[0].variants,
 		"the repository's own spelling comes last")
 }
 

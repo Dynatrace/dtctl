@@ -965,13 +965,13 @@ func TestRepoScopeDiscoverRootUnitSubdirectory(t *testing.T) {
 func TestRepoScopeDiscoverSingleModuleSubdirectory(t *testing.T) {
 	newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
 	repo := chdirCheckoutRepo(t)
-	writeRepoFiles(t, repo, map[string]string{"internal/handlers/handlers.go": "package handlers\n"})
-	t.Chdir(filepath.Join(repo, "internal", "handlers"))
+	writeRepoFiles(t, repo, map[string]string{"internal/refunds/refunds.go": "package refunds\n"})
+	t.Chdir(filepath.Join(repo, "internal", "refunds"))
 
 	report, _ := discoverReport(t)
 	require.Equal(t, ".", report.Unit)
-	require.Equal(t, "internal/handlers", report.Dir)
-	require.Contains(t, report.Sent, "handlers", "the directory's name is looked for")
+	require.Equal(t, "internal/refunds", report.Dir)
+	require.Contains(t, report.Sent, "refunds", "the directory's name is looked for")
 	require.False(t, report.Candidates[0].MatchedDir)
 	require.Equal(t, flowSetCommand, report.Candidates[0].SetCommand)
 

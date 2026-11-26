@@ -166,11 +166,12 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 }
 
 // unitTokens collects the names of unit: nameDir's own name unless it is the
-// repository root, then the names of every source attributed to the unit.
+// repository root or one of layoutWords, then the names of every source
+// attributed to the unit.
 func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string) []token {
 	var tokens []token
 	if nameDir != "." {
-		if t, ok := newToken(kindDir, path.Base(nameDir), dirSource(nameDir), 0); ok {
+		if t, ok := newToken(kindDir, path.Base(nameDir), dirSource(nameDir), 0); ok && !layoutWords[t.value] {
 			tokens = append(tokens, t)
 		}
 	}
