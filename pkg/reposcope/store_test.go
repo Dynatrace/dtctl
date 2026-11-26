@@ -1,6 +1,7 @@
 package reposcope
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -226,6 +227,82 @@ func TestRepoFS(t *testing.T) {
 	s, err := extract(RepoFS(loc), loc.RelDir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"module orders go.mod:1"}, tokenLines(s.tokens))
+}
+
+// fileOfSize is a valid File whose encoding is exactly size bytes: entries
+// of many long service names up to near the size, then short entries whose
+// one name is lengthened to land on it.
+func fileOfSize(t *testing.T, size int) *File {
+	t.Helper()
+	const leave = 200 // room for one more short entry
+	f := &File{APIVersion: apiVersion, Environments: map[string][]Entry{}}
+	entries := func() []Entry { return f.Environments[prodHost] }
+	add := func(names ...string) {
+		i := len(entries())
+		f.Environments[prodHost] = append(entries(), Entry{Name: fmt.Sprintf("e%d", i), Path: fmt.Sprintf("d%d", i), ServiceNames: names})
+	}
+	for {
+		data, err := encode(f)
+		require.NoError(t, err)
+		short := size - len(data)
+		if short == 0 {
+			require.Nil(t, f.check())
+			return f
+		}
+		require.Positive(t, short)
+		if short > 10000 {
+			names := make([]string, 30)
+			for i := range names {
+				names[i] = fmt.Sprintf("big-%d-%d-%s", len(entries()), i, strings.Repeat("x", 200))
+			}
+			add(names...)
+			continue
+		}
+		if n := len(entries()); n > 0 && len(entries()[n-1].ServiceNames) == 1 {
+			name := &entries()[n-1].ServiceNames[0]
+			grow := min(short, maxServiceNameRunes-len(*name))
+			if rest := short - grow; rest > 0 && rest < leave {
+				grow = short - leave
+			}
+			if grow > 0 {
+				*name += strings.Repeat("x", grow)
+				continue
+			}
+		}
+		add("s")
+	}
+}
+
+// Load reads at most 1 MiB, so Save writes no more: a set that saved a
+// larger file would leave the repository with one every later command
+// refuses.
+func TestSave_NeverWritesWhatLoadRefuses(t *testing.T) {
+	root := newRepo(t)
+	loc, _, err := Locate(root)
+	require.NoError(t, err)
+
+	require.NoError(t, Save(loc, fileOfSize(t, maxFileBytes)))
+	atLimit, err := os.ReadFile(loc.Path)
+	require.NoError(t, err)
+	require.Len(t, atLimit, maxFileBytes)
+	_, err = Load(loc)
+	require.NoError(t, err, "a file of exactly the limit loads")
+
+	err = Save(loc, fileOfSize(t, maxFileBytes+1))
+	var invalidErr *InvalidError
+	require.ErrorAs(t, err, &invalidErr)
+	assert.Equal(t, loc.Path, invalidErr.Source)
+	assert.Equal(t, "would be larger than 1 MiB, which is the most that is read", invalidErr.Msg)
+	after, err := os.ReadFile(loc.Path)
+	require.NoError(t, err)
+	assert.Equal(t, atLimit, after, "a refused save leaves the old bytes")
+	assertOnlyEntries(t, root, ".git", FileName)
+
+	// The same byte more, in a file written by hand, is refused by Load.
+	require.NoError(t, os.WriteFile(loc.Path, append(atLimit, '\n'), 0o644))
+	_, err = Load(loc)
+	require.ErrorAs(t, err, &invalidErr)
+	assert.Equal(t, "is larger than 1 MiB", invalidErr.Msg)
 }
 
 // A Location is what Locate returns. One without a path names no file, and

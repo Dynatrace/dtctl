@@ -127,7 +127,7 @@ func Load(loc Location) (*File, error) {
 // interrupted write never leaves a half-written file and a refused one leaves
 // the old file byte-identical. It removes the file when f is empty, and
 // refuses while the loaded file holds keys this dtctl does not know, which
-// writing would drop. Comments and key order are not preserved; the header is
+// writing would drop. It writes no file larger than Load reads. Comments and key order are not preserved; the header is
 // rewritten.
 func Save(loc Location, f *File) error {
 	if loc.Path == "" {
@@ -150,6 +150,12 @@ func Save(loc Location, f *File) error {
 	data, err := encode(f)
 	if err != nil {
 		return err
+	}
+	// The encoding is longer than what a person writes, so a file that
+	// loaded can pass the limit when it is rewritten.
+	if len(data) > maxFileBytes {
+		return &InvalidError{Source: loc.Path, Msg: "would be larger than 1 MiB, which is the most that is read",
+			Suggestions: []string{"split the repository's entries, or remove the ones no directory needs"}}
 	}
 	return writeAtomic(loc.Path, data)
 }
