@@ -3,6 +3,7 @@
 package reposcope
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -61,4 +62,32 @@ func TestLoadUnreadableFile(t *testing.T) {
 	_, err := Load(loc)
 	require.ErrorIs(t, err, os.ErrPermission)
 	require.ErrorContains(t, err, loc.Path+": cannot be read: permission denied")
+}
+
+// Save replaces the file rather than writing into it: the new bytes arrive
+// as a new file under the old name, so a reader that has the old one open
+// keeps reading the old bytes to their end.
+func TestSave_ReplacesTheFile(t *testing.T) {
+	root := newRepo(t)
+	loc, _, err := Locate(root)
+	require.NoError(t, err)
+	require.NoError(t, Save(loc, exampleFile()))
+	before, err := os.Stat(loc.Path)
+	require.NoError(t, err)
+	old, err := os.ReadFile(loc.Path)
+	require.NoError(t, err)
+	reader, err := os.Open(loc.Path)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	f := exampleFile()
+	f.Upsert(prodHost, Entry{Name: "tools", Path: "tools", ServiceNames: []string{"tools"}})
+	require.NoError(t, Save(loc, f))
+
+	after, err := os.Stat(loc.Path)
+	require.NoError(t, err)
+	require.False(t, os.SameFile(before, after), "the file was written in place")
+	seen, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Equal(t, old, seen)
 }

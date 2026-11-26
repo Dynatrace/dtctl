@@ -227,3 +227,23 @@ func TestRepoFS(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"module orders go.mod:1"}, tokenLines(s.tokens))
 }
+
+// Deleting the last entry removes the file, but not one that holds a key
+// this dtctl does not know: a newer dtctl wrote something there.
+func TestSave_KeepsAFileWithUnknownKeysWhenTheLastEntryGoes(t *testing.T) {
+	root := newRepo(t)
+	newer := []byte("retention: 30d\nenvironments:\n  " + prodHost + ":\n    - name: checkout\n      service-names: [checkout]\n")
+	require.NoError(t, os.WriteFile(filepath.Join(root, FileName), newer, 0o644))
+	loc, _, err := Locate(root)
+	require.NoError(t, err)
+	f, err := Load(loc)
+	require.NoError(t, err)
+	require.True(t, f.Remove(prodHost, "checkout"))
+	require.True(t, f.Empty())
+
+	var invalidErr *InvalidError
+	require.ErrorAs(t, Save(loc, f), &invalidErr)
+	after, err := os.ReadFile(loc.Path)
+	require.NoError(t, err)
+	assert.Equal(t, newer, after)
+}
