@@ -396,6 +396,7 @@ func TestExecProfiling_WindowAtTheEpoch(t *testing.T) {
 		{"starts there", []string{"--default-timeframe-start", "0", "--default-timeframe-end", "60000"}, "from=0&to=60000"},
 		{"starts there, no end", []string{"--default-timeframe-start", "0"}, "from=0&to=7200000"},
 		{"ends there", []string{"--default-timeframe-start=-60000", "--default-timeframe-end", "0"}, "from=-60000&to=0"},
+		{"ends there, no start", []string{"--default-timeframe-end", "0"}, "from=-7200000&to=0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

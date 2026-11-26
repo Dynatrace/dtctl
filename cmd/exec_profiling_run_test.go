@@ -162,6 +162,14 @@ func TestExecProfiling_FocusNeedsOneFunction(t *testing.T) {
 	require.Empty(t, stdout)
 	require.Equal(t, "Error: \"Main\" matches 2 functions; pass one exactly:\n  app.Main.main\n  app.Main.handle\n", stderr)
 
+	// The agent envelope carries the same text, candidates included.
+	code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--focus", "Main", "--agent")
+	require.Equal(t, 1, code)
+	require.Empty(t, stderr)
+	require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{
+		Code: "error", Message: "\"Main\" matches 2 functions; pass one exactly:\n  app.Main.main\n  app.Main.handle",
+	}}, decodeProfilingError(t, stdout))
+
 	// At most eight are listed, and the count is of all of them.
 	var nodes, ids []string
 	for i := 0; i < 10; i++ {
