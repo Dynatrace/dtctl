@@ -15,15 +15,19 @@ type InvalidError struct {
 	Suggestions []string
 }
 
+// Error is the source and the message, as Shown prints them. The checks
+// quote the values they refuse, so a quoted value reads as it was written;
+// showing the whole text is what holds for a check that does not.
 func (e *InvalidError) Error() string {
-	return Shown(e.Source) + ": " + e.Msg
+	return Shown(e.Source + ": " + e.Msg)
 }
 
 // Shown is s as a message may print it. A source is often a path, and a
 // directory name is whatever a clone carries: git stores any byte but NUL
 // and "/", so a name can hold an escape sequence that acts on the terminal
-// the message is printed to. Each character a terminal does not show as
-// itself is replaced by U+FFFD.
+// the message is printed to. A value of the scope file is as much the
+// clone's. Each character a terminal does not show as itself is replaced by
+// U+FFFD.
 func Shown(s string) string {
 	return strings.Map(func(r rune) rune {
 		if !unicode.IsPrint(r) {
