@@ -271,3 +271,155 @@ func TestExecProfiling_AllocationsTable(t *testing.T) {
 	require.Equal(t, "# ALLOCATIONS (bytes, sorted by surv; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n"+
 		"Cache.put alloc=100 surv=500 alloc_count=1 surv_count=5\n", stdout)
 }
+
+// An empty --state counts the running samples, as leaving the flag out does.
+// It used to count no state at all, and reported a busy process as one
+// without samples.
+func TestExecProfiling_EmptyStateIsRunning(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	code, want, stderr := runProfilingStreams(t, "hotspots", testProcess, "--view", "functions")
+	require.Zero(t, code, stderr)
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--view", "functions", "--state", "")
+	require.Zero(t, code, stderr)
+	require.Empty(t, stderr)
+	require.Equal(t, want, stdout)
+	require.Contains(t, stdout, "# 4 of 4 functions, by self running samples (100 running samples in the window)\n")
+
+	env := runProfilingAgent(t, "hotspots", testProcess, "--view", "functions", "--state", "")
+	require.Len(t, env.Result, 4)
+	require.Equal(t, "running", env.Context.Profile.State)
+}
+
+// A completed analysis carries a JSON object. Any other JSON value is a result
+// the command cannot read, and it fails saying so, in every view and with
+// --raw. It used to print the note of a process without samples and exit 0,
+// which is a different finding.
+func TestExecProfiling_ResultThatIsNoObject(t *testing.T) {
+	check := func(t *testing.T, is string, args ...string) {
+		t.Helper()
+		want := "profiling: malformed analysis result: the result of a completed analysis is " + is + ", not an object"
+		code, stdout, stderr := runProfilingStreams(t, args...)
+		require.Equal(t, 1, code, args)
+		require.Empty(t, stdout, args)
+		require.Equal(t, "Error: "+want+"\n", stderr, args)
+
+		code, stdout, stderr = runProfilingStreams(t, append(args, "--agent")...)
+		require.Equal(t, 1, code, args)
+		require.Empty(t, stderr, args)
+		require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{Code: "error", Message: want}}, decodeProfilingError(t, stdout), args)
+	}
+
+	for _, tc := range []struct{ body, is string }{
+		{`[]`, "an array"},
+		{`null`, "null"},
+		{`"done"`, "a string"},
+		{`3`, "a number"},
+		{`true`, "a boolean"},
+	} {
+		t.Run("inline "+tc.body, func(t *testing.T) {
+			newProfilingAPI(t, http.StatusOK, tc.body)
+			check(t, tc.is, "hotspots", testProcess)
+			check(t, tc.is, "hotspots", testProcess, "--view", "functions")
+			check(t, tc.is, "hotspots", testProcess, "--focus", "wrap")
+			check(t, tc.is, "hotspots", testProcess, "--raw")
+			check(t, tc.is, "allocations", testProcess)
+			check(t, tc.is, "allocations", testProcess, "--raw")
+		})
+	}
+	// The result of a poll is read the same way.
+	t.Run("polled", func(t *testing.T) {
+		newProfilingPollAPI(t, http.StatusOK, `[]`)
+		check(t, "an array", "hotspots", testProcess)
+		check(t, "an array", "allocations", testProcess, "--raw")
+	})
+}
+
+// A 204 is the API's answer when there is nothing to analyse. It ends the
+// analysis as one without data whether it answers a poll or the submit itself:
+// the submit also carries a result when it answers 200. On the submit it used
+// to fail as "submit returned 202 without a progress token".
+func TestExecProfiling_NoContentIsNoData(t *testing.T) {
+	const note = "no stacks for " + testProcess + ": no profiling samples in the window (status=no-data) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result"
+	table := func(t *testing.T, args ...string) {
+		t.Helper()
+		code, stdout, stderr := runProfilingStreams(t, args...)
+		require.Zero(t, code, args)
+		require.Empty(t, stderr, args)
+		require.Equal(t, "# "+note+"\n", stdout, args)
+	}
+	rawAndAgent := func(t *testing.T, polls int) {
+		t.Helper()
+		code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--raw")
+		require.Zero(t, code)
+		require.Empty(t, stderr)
+		require.JSONEq(t, fmt.Sprintf(`{"status":"no-data","kind":"methodHotspots","entityId":%q,"pollCount":%d,"result":null}`, testProcess, polls), stdout)
+
+		env := runProfilingAgent(t, "hotspots", testProcess)
+		require.Empty(t, env.Result)
+		require.Equal(t, 0, *env.Context.Total)
+		require.Equal(t, []string{note}, env.Context.Warnings)
+		require.Equal(t, "no-data", env.Context.Profile.Status)
+		require.Nil(t, env.Context.Profile.Samples)
+	}
+
+	t.Run("submit", func(t *testing.T) {
+		api := newProfilingAPI(t, http.StatusNoContent, "")
+		table(t, "hotspots", testProcess)
+		table(t, "hotspots", testProcess, "--view", "functions")
+		table(t, "hotspots", testProcess, "--focus", "wrap")
+		table(t, "allocations", testProcess)
+		rawAndAgent(t, 0)
+		require.Len(t, api.paths, 6, "a submit without content is not polled")
+	})
+	t.Run("poll", func(t *testing.T) {
+		newProfilingPollAPI(t, http.StatusNoContent, "")
+		table(t, "hotspots", testProcess)
+		rawAndAgent(t, 1)
+	})
+}
+
+// The epoch is an instant like any other, so a window that starts or ends at
+// epoch millisecond 0 is analysed. It used to be refused before any request,
+// as bounds that were not given.
+func TestExecProfiling_WindowAtTheEpoch(t *testing.T) {
+	const stacks = "app.Main.main;lib.Loader.load running=30 lock=0 net_io=0 disk_io=0 wait=0\n" +
+		"app.Main.main;lib.Loader.load;lib.Util.wrap running=30 lock=0 net_io=0 disk_io=0 wait=0\n" +
+		"app.Main.main;app.Main.handle;lib.Util.wrap running=20 lock=5 net_io=0 disk_io=0 wait=0\n" +
+		"app.Main.main running=10 lock=0 net_io=0 disk_io=0 wait=0\n" +
+		"app.Main.main;app.Main.handle running=10 lock=0 net_io=0 disk_io=0 wait=0\n"
+	cases := []struct {
+		name  string
+		args  []string
+		query string
+	}{
+		{"starts there", []string{"--default-timeframe-start", "0", "--default-timeframe-end", "60000"}, "from=0&to=60000"},
+		{"starts there, no end", []string{"--default-timeframe-start", "0"}, "from=0&to=7200000"},
+		{"ends there", []string{"--default-timeframe-start=-60000", "--default-timeframe-end", "0"}, "from=-60000&to=0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := newProfilingAPI(t, http.StatusOK, profilingTree)
+			code, stdout, stderr := runProfilingStreams(t, append([]string{"hotspots", testProcess}, tc.args...)...)
+			require.Zero(t, code, stderr)
+			require.Empty(t, stderr)
+			require.Equal(t, stacks, stdout)
+			require.Equal(t, []string{tc.query}, api.queries)
+		})
+	}
+
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+	env := runProfilingAgent(t, "hotspots", testProcess, "--default-timeframe-start", "0", "--default-timeframe-end", "60000")
+	require.Len(t, env.Result, 5)
+	require.Equal(t, "1970-01-01T00:00:00Z", env.Context.Window.From)
+	require.Equal(t, "1970-01-01T00:01:00Z", env.Context.Window.To)
+	require.Equal(t, "1m", env.Context.Window.Span)
+
+	// Both bounds there is still no window.
+	api := newProfilingAPI(t, http.StatusOK, profilingTree)
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--default-timeframe-start", "0", "--default-timeframe-end", "0")
+	require.Equal(t, 1, code)
+	require.Empty(t, stdout)
+	require.Equal(t, "Error: invalid timeframe: the end must be after the start\n", stderr)
+	require.Empty(t, api.paths)
+}
