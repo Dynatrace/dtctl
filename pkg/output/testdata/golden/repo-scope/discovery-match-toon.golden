@@ -1,7 +1,7 @@
 candidates[1]:
   - clusterName: prod-eu
     clusterUid: 11111111-2222-3333-4444-555555555555
-    evidence[4]: "k8s.cluster.uid \"11111111-2222-3333-4444-555555555555\" (k8s.cluster.name \"prod-eu\")","k8s.workload.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1","service.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1","12400 spans, 88000 logs in 24h"
+    evidence[5]: "k8s.cluster.uid \"11111111-2222-3333-4444-555555555555\" (k8s.cluster.name \"prod-eu\")","k8s.namespace.name \"payments\" from deploy/k8s/deployment.yaml:5","k8s.workload.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1","service.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1","12400 spans, 88000 logs in 24h"
     logs: 88000
     name: checkout
     namespace: payments
@@ -11,7 +11,6 @@ candidates[1]:
     serviceCount: 1
     serviceName: checkout
     services[1]: SERVICE-0123456789ABCDEF
-    setCommand: dtctl repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout --service-name checkout
     spans: 12400
     tier: exact
     workload: checkout
@@ -73,6 +72,7 @@ queries[11]:
   - dataObject: logs
     dql: "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(<process groups the candidate's spans carried>))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200"
     purpose: logs by process group
+    skipped: true
 sent[1]: checkout
 unit: .
 verdict: match

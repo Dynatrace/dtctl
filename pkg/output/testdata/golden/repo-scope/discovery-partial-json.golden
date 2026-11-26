@@ -1,6 +1,6 @@
 {
   "environment": "abc12345.apps.dynatrace.com",
-  "dir": "services/checkout",
+  "dir": ".",
   "unit": ".",
   "verdict": "none",
   "verdicts": {
@@ -88,7 +88,8 @@
     {
       "purpose": "logs by process group",
       "dataObject": "logs",
-      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(\u003cprocess groups the candidate's spans carried\u003e))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200"
+      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(\u003cprocess groups the candidate's spans carried\u003e))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200",
+      "skipped": true
     }
   ],
   "sent": [

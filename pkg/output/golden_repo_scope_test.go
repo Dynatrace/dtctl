@@ -2,10 +2,15 @@ package output
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
 const (
@@ -57,146 +62,141 @@ func repoScopeStatus(dir string) reposcope.Status {
 	return *s
 }
 
-// repoScopeQueries is the discovery plan for a unit named checkout, with the
-// given outcome applied to each query in turn: two record queries, each
-// followed by its three sampled retries, then the two entity searches.
-func repoScopeQueries(outcomes ...func(*reposcope.Query)) []reposcope.Query {
-	p, err := reposcope.PlanDiscovery(fstest.MapFS{}, ".", []string{"checkout"})
+// repoScopeRunner answers discovery's queries from canned results, by the
+// data object a query fetches, each object's answers in the order given: a
+// record query's first, then its sampled retries'. A query with no answer
+// left gets an empty result.
+type repoScopeRunner map[string][]repoScopeAnswer
+
+// repoScopeAnswer is one query's result: rows as the JSON Grail returns,
+// and how the result was cut short, sampled, or failed.
+type repoScopeAnswer struct {
+	rows    string
+	capped  bool // the scan cap stopped the query
+	sampled bool
+	scanned int64
+	err     error
+}
+
+func (r repoScopeRunner) RunQuery(_ context.Context, dql string) (*inventory.RunResult, error) {
+	object := strings.TrimSuffix(strings.Fields(strings.TrimPrefix(dql, "fetch "))[0], ",")
+	var a repoScopeAnswer
+	if queue := r[object]; len(queue) > 0 {
+		a, r[object] = queue[0], queue[1:]
+	}
+	if a.err != nil {
+		return nil, a.err
+	}
+	res := &inventory.RunResult{Sampled: a.sampled, ScannedBytes: a.scanned}
+	if a.rows != "" {
+		if err := json.Unmarshal([]byte("["+a.rows+"]"), &res.Records); err != nil {
+			panic(err)
+		}
+	}
+	if a.capped {
+		res.Truncated, res.TruncationCause = true, inventory.TruncationScanLimit
+		res.Truncations = []inventory.Truncation{{Cause: inventory.TruncationScanLimit, Typed: true}}
+	}
+	return res, nil
+}
+
+// repoScopeCheckoutRepo is a repository whose manifest and module both name
+// the workload checkout, and which keeps a refunds service in a directory
+// without a build file of its own.
+var repoScopeCheckoutRepo = fstest.MapFS{
+	"go.mod":                     {Data: []byte("module example.invalid/checkout\n")},
+	"deploy/k8s/deployment.yaml": {Data: []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: checkout\n  namespace: payments\n")},
+	"services/refunds/main.go":   {Data: []byte("package main\n")},
+}
+
+// repoScopeDiscovery is the report discovery gives for dir of
+// repoScopeCheckoutRepo against an environment that answers as runner does.
+// It is built by Discover, so a golden holds only a report the command can
+// produce. SetCommand stays empty, as Discover leaves it: the command line
+// is the CLI's to spell, and cmd's own tests pin it.
+func repoScopeDiscovery(dir string, runner repoScopeRunner) reposcope.DiscoveryReport {
+	p, err := reposcope.PlanDiscovery(repoScopeCheckoutRepo, dir, nil)
 	if err != nil {
 		panic(err)
 	}
-	plan := p.Queries
-	for i, apply := range outcomes {
-		apply(&plan[i])
+	r, err := reposcope.Discover(context.Background(), runner, p, repoScopeHost)
+	if err != nil {
+		panic(err)
 	}
-	return plan
+	return *r
 }
 
-func repoScopeRows(n int) func(*reposcope.Query) { return func(q *reposcope.Query) { q.Rows = n } }
-func repoScopeSkipped(q *reposcope.Query)        { q.Skipped = true }
-func repoScopeCapped(q *reposcope.Query)         { q.Truncated, q.Cause = true, "truncated" }
-func repoScopeFailed(cause, msg string) func(*reposcope.Query) {
-	return func(q *reposcope.Query) { q.Cause, q.Error = cause, msg }
+// repoScopeRow is one row of a record query for the workload checkout.
+func repoScopeRow(fields string) string {
+	return `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout",` + fields + `}`
 }
 
-func repoScopeVerdicts(v reposcope.Verdict) map[string]reposcope.Verdict {
-	return map[string]reposcope.Verdict{"service": v, "processGroup": v, "workload": v, "serviceName": v}
-}
+const repoScopeInCluster = `"k8s.cluster.uid":"` + repoScopeCluster + `","clusterName":"prod-eu",`
 
+// repoScopeDiscoveryMatch is one workload, read whole in spans and logs.
 func repoScopeDiscoveryMatch() reposcope.DiscoveryReport {
-	return reposcope.DiscoveryReport{
-		Environment: repoScopeHost,
-		Dir:         ".",
-		Unit:        ".",
-		Verdict:     reposcope.VerdictMatch,
-		Verdicts:    repoScopeVerdicts(reposcope.VerdictMatch),
-		Candidates: []reposcope.Candidate{{
-			Rank:              1,
-			Name:              "checkout",
-			Services:          []string{repoScopeSvc},
-			ServiceCount:      1,
-			ProcessGroups:     []string{repoScopePG},
-			ProcessGroupCount: 1,
-			ServiceName:       "checkout",
-			ClusterUID:        repoScopeCluster,
-			ClusterName:       "prod-eu",
-			Namespace:         "payments",
-			Workload:          "checkout",
-			Tier:              "exact",
-			Spans:             12400,
-			Logs:              88000,
-			Evidence: []string{
-				`k8s.cluster.uid "` + repoScopeCluster + `" (k8s.cluster.name "prod-eu")`,
-				`k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
-				`service.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
-				"12400 spans, 88000 logs in 24h",
-			},
-			SetCommand: "dtctl repo-scope set checkout --cluster-uid " + repoScopeCluster + " --namespace payments --workload checkout --service-name checkout",
-		}},
-		Queries: repoScopeQueries(repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped,
-			repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped),
-		Sent: []string{"checkout"},
-	}
+	return repoScopeDiscovery(".", repoScopeRunner{
+		"spans": {{rows: repoScopeRow(repoScopeInCluster + `"records":"12400","serviceCount":"1","services":["` + repoScopeSvc + `"],` +
+			`"processGroupCount":"1","processGroups":["` + repoScopePG + `"]`)}},
+		"logs": {{rows: repoScopeRow(repoScopeInCluster + `"records":"88000","processGroupCount":"1","processGroups":[["` + repoScopePG + `"]]`)}},
+	})
 }
 
-// repoScopeDiscoverySampled is a match on an environment where a day of
-// spans scans past the cap: the first sampled retry answered, the rest were
-// not needed, and the logs were read whole.
+// repoScopeDiscoverySampled is an environment where a day of spans scans
+// past the cap. The first sampled retry answered with the workload; the
+// capped scan had also seen it in a second namespace, which the sample did
+// not return. The logs were read whole.
 func repoScopeDiscoverySampled() reposcope.DiscoveryReport {
-	return reposcope.DiscoveryReport{
-		Environment: repoScopeHost,
-		Dir:         ".",
-		Unit:        ".",
-		Verdict:     reposcope.VerdictMatch,
-		Verdicts:    repoScopeVerdicts(reposcope.VerdictMatch),
-		Candidates: []reposcope.Candidate{{
-			Rank:              1,
-			Name:              "checkout",
-			Services:          []string{repoScopeSvc, "SERVICE-0123456789ABCDF0"},
-			ServiceCount:      212,
-			ServicesCapped:    true,
-			ProcessGroups:     []string{repoScopePG},
-			ProcessGroupCount: 1,
-			ServiceName:       "checkout",
-			Namespace:         "payments",
-			Workload:          "checkout",
-			Tier:              "exact",
-			SpansSampled:      17,
-			LogsSampled:       4,
-			Sampled:           true,
-			Evidence: []string{
-				`k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
-				"17 sampled span hits in 1h (1 in 100000 requested), 4 sampled log hits in 1h (1 in 100000 requested)",
-			},
-			SetCommand: "dtctl repo-scope set checkout --namespace payments --workload checkout",
-		}},
-		Queries: repoScopeQueries(repoScopeCapped, repoScopeRows(1), repoScopeSkipped, repoScopeSkipped,
-			repoScopeCapped, repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped),
-		Sent: []string{"checkout"},
-		Notes: []string{
-			"spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing",
-			"logs scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 logs over 1h may be missing",
+	staging := strings.Replace(repoScopeRow(`"records":"40"`), "payments", "staging", 1)
+	return repoScopeDiscovery(".", repoScopeRunner{
+		"spans": {
+			{rows: repoScopeRow(`"records":"900"`) + "," + staging, capped: true},
+			{rows: repoScopeRow(`"records":"17","serviceCount":"1","services":["` + repoScopeSvc + `"]`), sampled: true, scanned: 180000000},
 		},
-	}
+		"logs": {{rows: repoScopeRow(`"records":"88000"`)}},
+	})
 }
 
+// repoScopeDiscoveryAmbiguous is discovery for services/refunds, a directory
+// of the root unit, with what makes candidates hard to tell apart: one
+// workload in two clusters, one of them under a uid a scope file cannot
+// hold; a workload whose logs carry no cluster; and one whose logs carry
+// only its process group, found by the lookup.
+func repoScopeDiscoveryAmbiguous() reposcope.DiscoveryReport {
+	refunds := func(namespace, fields string) string {
+		return `{"k8s.namespace.name":"` + namespace + `","k8s.workload.name":"refunds","service.name":"refunds",` + fields + `}`
+	}
+	const otherPG = "PROCESS_GROUP-0000000000000002"
+	return repoScopeDiscovery("services/refunds", repoScopeRunner{
+		"spans": {{rows: strings.Join([]string{
+			refunds("payments", repoScopeInCluster+`"records":"500","processGroupCount":"1","processGroups":["`+repoScopePG+`"]`),
+			refunds("payments", `"k8s.cluster.uid":"legacy-cluster","records":"300"`),
+			refunds("batch", `"k8s.cluster.uid":"66666666-7777-8888-9999-000000000000","clusterName":"prod-us","records":"200"`),
+			refunds("tools", `"records":"100","processGroupCount":"1","processGroups":["`+otherPG+`"]`),
+		}, ",")}},
+		"logs": {
+			{rows: refunds("payments", repoScopeInCluster+`"records":"7000"`) + "," +
+				refunds("payments", `"k8s.cluster.uid":"legacy-cluster","records":"10"`) + "," + refunds("batch", `"records":"60"`)},
+			{rows: `{"dt.entity.process_group":"` + otherPG + `","records":"5012"}`},
+		},
+	})
+}
+
+// repoScopeDiscoveryNone is an environment in which nothing carries a name
+// of the repository: every query ran and returned no row.
 func repoScopeDiscoveryNone() reposcope.DiscoveryReport {
-	return reposcope.DiscoveryReport{
-		Environment: repoScopeHost,
-		Dir:         "services/ledger",
-		Unit:        "services/ledger",
-		Verdict:     reposcope.VerdictNone,
-		Verdicts:    repoScopeVerdicts(reposcope.VerdictNone),
-		Candidates:  []reposcope.Candidate{},
-		Queries:     repoScopeQueries(),
-		Sent:        []string{"checkout"},
-	}
+	return repoScopeDiscovery(".", repoScopeRunner{})
 }
 
+// repoScopeDiscoveryPartial is a run in which the spans query ran out of
+// time, the token could not read the service entities, and the environment
+// has no process group table.
 func repoScopeDiscoveryPartial() reposcope.DiscoveryReport {
-	return reposcope.DiscoveryReport{
-		Environment: repoScopeHost,
-		Dir:         "services/checkout",
-		Unit:        ".",
-		Verdict:     reposcope.VerdictNone,
-		Verdicts:    repoScopeVerdicts(reposcope.VerdictNone),
-		Candidates:  []reposcope.Candidate{},
-		Queries: repoScopeQueries(
-			repoScopeFailed("timeout", "context deadline exceeded"),
-			repoScopeSkipped, repoScopeSkipped, repoScopeSkipped,
-			repoScopeRows(0),
-			repoScopeSkipped, repoScopeSkipped, repoScopeSkipped,
-			repoScopeFailed("auth", "query failed (NOT_AUTHORIZED_FOR_TABLE): not authorized"),
-			repoScopeFailed("unknown_object", "query failed (UNKNOWN_DATA_OBJECT): dt.entity.process_group"),
-		),
-		Sent: []string{"checkout"},
-		Notes: []string{
-			"discovery ran out of time; a narrower directory or an explicit name sends less",
-			"the token cannot read dt.entity.service",
-			"dt.entity.process_group is not available on this environment; the record queries are what applies here",
-		},
-		Partial: true,
-	}
+	return repoScopeDiscovery(".", repoScopeRunner{
+		"spans":                   {{err: context.DeadlineExceeded}},
+		"dt.entity.service":       {{err: &sdkquery.QueryError{ErrorType: "NOT_AUTHORIZED_FOR_TABLE", Message: "not authorized"}}},
+		"dt.entity.process_group": {{err: &sdkquery.QueryError{ErrorType: "UNKNOWN_DATA_OBJECT", Message: "dt.entity.process_group"}}},
+	})
 }
 
 // The repo-scope commands print their terminal output themselves (cmd's
@@ -209,13 +209,14 @@ func TestGolden_RepoScope(t *testing.T) {
 		obj     interface{}
 		formats []string
 	}{
-		"status-linked":     {repoScopeStatusLinked(), all},
-		"status-segments":   {repoScopeStatus("services/ledger"), all},
-		"status-unlinked":   {reposcope.Status{Reason: "not inside a git repository"}, all},
-		"discovery-match":   {repoScopeDiscoveryMatch(), all},
-		"discovery-none":    {repoScopeDiscoveryNone(), []string{"json"}},
-		"discovery-partial": {repoScopeDiscoveryPartial(), []string{"json"}},
-		"discovery-sampled": {repoScopeDiscoverySampled(), []string{"json"}},
+		"status-linked":       {repoScopeStatusLinked(), all},
+		"status-segments":     {repoScopeStatus("services/ledger"), all},
+		"status-unlinked":     {reposcope.Status{Reason: "not inside a git repository"}, all},
+		"discovery-match":     {repoScopeDiscoveryMatch(), all},
+		"discovery-none":      {repoScopeDiscoveryNone(), []string{"json"}},
+		"discovery-partial":   {repoScopeDiscoveryPartial(), []string{"json"}},
+		"discovery-sampled":   {repoScopeDiscoverySampled(), []string{"json"}},
+		"discovery-ambiguous": {repoScopeDiscoveryAmbiguous(), []string{"json"}},
 	}
 	for name, single := range singles {
 		obj := single.obj
