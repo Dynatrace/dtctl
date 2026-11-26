@@ -60,10 +60,17 @@ type Status struct {
 // Entry is nil and Reason names the paths the entries do cover, or the
 // entries that cover relDir as closely (see Ambiguous).
 //
+// relDir is Location.RelDir: a clean, slash-separated path relative to the
+// repository root, "." at the root. Anything else is an *InvalidError. repo
+// may be nil for a caller with no repository to read; no build is read then.
+//
 // Path comparison folds case on darwin and windows and is exact elsewhere.
 // The Status holds a copy of the entry, so it stays the answer it was when f
 // changes.
 func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
+	if !fs.ValidPath(relDir) {
+		return nil, &InvalidError{Source: fmt.Sprintf("directory %q", relDir), Msg: "is not a clean path relative to the repository root"}
+	}
 	s := &Status{File: FileName, Environment: host, Dir: relDir, Warning: f.Warning(), Hosts: f.Hosts()}
 	entries := f.Environments[host]
 	// Reading the build walks the repository, and Resolve runs on every
@@ -192,7 +199,7 @@ type gradleCoverage struct {
 
 func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverage {
 	var c gradleCoverage
-	if !slices.ContainsFunc(entries, func(e Entry) bool { return e.Path != "" }) {
+	if repo == nil || !slices.ContainsFunc(entries, func(e Entry) bool { return e.Path != "" }) {
 		return c
 	}
 	b := gradleBuildAt(repo, relDir)

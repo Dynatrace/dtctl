@@ -1,9 +1,11 @@
 package reposcope
 
 import (
+	"fmt"
 	"io/fs"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -299,4 +301,35 @@ func TestResolve_ReadsTheBuildOnlyWhenItMatters(t *testing.T) {
 			assert.Equal(t, tc.reads, repo.calls > 0, "%d calls", repo.calls)
 		})
 	}
+}
+
+// The directory is a path inside the repository, as Location.RelDir is. One
+// that is not is the caller's mistake, and is refused: left alone, a
+// directory through ".." is covered by the entry it has just left.
+func TestResolve_DirMustBeInsideTheRepository(t *testing.T) {
+	for _, dir := range []string{"/srv/repo/services/checkout", "services/checkout/..", "services//checkout", "../services/checkout", "./services/checkout", "services/checkout/", ""} {
+		done := make(chan error, 1)
+		go func() {
+			_, err := Resolve(fixture(t, "gradle-multi"), withRepositoryWide(monorepoFile()), prodHost, dir, "")
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			var invalidErr *InvalidError
+			require.ErrorAs(t, err, &invalidErr, "%q", dir)
+			assert.Equal(t, fmt.Sprintf("directory %q: is not a clean path relative to the repository root", dir), err.Error())
+		case <-time.After(10 * time.Second):
+			t.Fatalf("Resolve did not return for %q", dir)
+		}
+	}
+	_, err := Resolve(fstest.MapFS{}, monorepoFile(), prodHost, ".", "")
+	require.NoError(t, err, "the root itself")
+}
+
+// A caller with no repository to read has no build either.
+func TestResolve_WithoutARepository(t *testing.T) {
+	r, err := Resolve(nil, monorepoFile(), prodHost, "services/ledger/close", "")
+	require.NoError(t, err)
+	require.NotNil(t, r.Entry)
+	assert.Equal(t, "ledger-close", r.Entry.Name)
 }
