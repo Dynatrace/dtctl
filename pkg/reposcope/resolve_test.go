@@ -169,7 +169,7 @@ func TestResolve_PathCase(t *testing.T) {
 
 func TestResolve_Status(t *testing.T) {
 	f := exampleFile()
-	f.unknown = []string{`"discovered" on line 8`}
+	f.unknown = []string{`"kind" on line 3`}
 	r, err := Resolve(fstest.MapFS{}, f, prodHost, "services/checkout/internal", "")
 	require.NoError(t, err)
 	assert.Equal(t, &Status{
@@ -187,7 +187,7 @@ func TestResolve_Status(t *testing.T) {
 			{"service.name": {"checkout"}},
 			{"dt.entity.process_group": {pgID}},
 		},
-		Warning: `unknown key "discovered" on line 8 (a typo, or written by a newer dtctl)`,
+		Warning: `unknown key "kind" on line 3 (a typo, or written by a newer dtctl)`,
 		Others:  []string{"ledger"},
 		Hosts:   []string{prodHost, stgHost},
 	}, r)

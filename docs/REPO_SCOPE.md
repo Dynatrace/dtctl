@@ -341,7 +341,7 @@ The cluster narrows the workload it is written on, and nothing else. A service n
 
 The file spells its keys in kebab-case (`process-groups`, `service-names`); the JSON and YAML that `-o json`, `-o yaml` and agent mode print for a result use camelCase (`processGroups`, `serviceNames`), except an entry in YAML output, which keeps the file's spelling.
 
-Hand edits are fine; `set` and `delete` rewrite the file in a canonical layout without your comments. A key this dtctl does not know, a typo or one a newer dtctl wrote, is reported by `current`, `describe` and every scoped query, and the entries apply without it; `set` and `delete` refuse to rewrite the file rather than drop it.
+Hand edits are fine; `set` and `delete` rewrite the file in a canonical layout without your comments. A key this dtctl does not know is a typo, or one a newer dtctl wrote, and where it sits decides what happens. Beside `apiVersion` and `environments` it is reported by `current`, `describe` and every scoped query, and the entries apply without it; `set` and `delete` refuse to rewrite the file rather than drop it. Inside an entry, on the entry or on one of its workloads, the file is not applied at all, as with a value that fails its format: such a key may be a constraint (`cluster_uid` for `cluster-uid`), and an entry applied without its constraint would select more than the file says while reporting that it was applied. Queries then run unscoped with a warning naming the key, until it is corrected or dtctl is upgraded.
 
 ## Turning it off
 

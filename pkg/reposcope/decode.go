@@ -16,17 +16,32 @@ import (
 const fileHeader = "# dtctl repo scope: links this repository to the Dynatrace entities that run its code.\n" +
 	"# Written by 'dtctl repo-scope set'; see docs/REPO_SCOPE.md. Commit it to share it.\n"
 
-// unknownFieldRe reads the key out of the error yaml.v3 reports for a key the
-// target struct has no field for.
-var unknownFieldRe = regexp.MustCompile(`^line (\d+): field (.+) not found in type `)
+// unknownFieldRe reads the key, and the type it is not a field of, out of the
+// error yaml.v3 reports for a key the target struct has no field for.
+var unknownFieldRe = regexp.MustCompile(`^line (\d+): field (.+) not found in type reposcope\.(\w+)$`)
+
+// narrowingTypes are the parts of the document in which a key can narrow
+// what an entry selects, by the name of their type, with how an error names
+// the place.
+var narrowingTypes = map[string]string{"Entry": "an entry", "Workload": "a workload"}
 
 // decode parses and validates a scope file's bytes. Empty input is an empty,
 // valid File.
 //
-// Unknown keys do not fail the read: a typo and a newer dtctl's binding look
-// the same here, and failing would leave every query in the repository
-// unscoped over one stray line. A second, strict decode finds them instead,
-// for Warning and for Save to refuse on.
+// A second, strict decode finds the keys this dtctl does not know: a typo and
+// a newer dtctl's key look the same here. Where such a key sits decides what
+// it does to the read.
+//
+// A key of the document itself is read past, for Warning and for Save to
+// refuse on. It is beside the entries and changes nothing any of them
+// selects, and failing over it would leave every query in the repository
+// unscoped over one stray line.
+//
+// A key inside an entry fails the read. That is where a constraint lives:
+// read past, a misspelt cluster-uid leaves its workload bound in every
+// cluster, and the scope would be reported as applied while selecting more
+// than the file says. Nothing here can tell such a key from a harmless one,
+// so none is read past.
 //
 // A second YAML document with content is an error, not a warning: both
 // decodes read only the first, so Save would silently drop the rest. An empty
@@ -47,12 +62,28 @@ func decode(data []byte) (*File, *InvalidError) {
 	strict := yaml.NewDecoder(bytes.NewReader(data))
 	strict.KnownFields(true)
 	var typeErr *yaml.TypeError
+	var narrowing []string
 	if err := strict.Decode(&File{}); errors.As(err, &typeErr) {
 		for _, msg := range typeErr.Errors {
-			if m := unknownFieldRe.FindStringSubmatch(msg); m != nil {
-				f.unknown = append(f.unknown, fmt.Sprintf("%q on line %s", m[2], m[1]))
+			m := unknownFieldRe.FindStringSubmatch(msg)
+			if m == nil {
+				continue
+			}
+			key := fmt.Sprintf("%q on line %s", m[2], m[1])
+			if place, ok := narrowingTypes[m[3]]; ok {
+				narrowing = append(narrowing, key+", in "+place)
+			} else {
+				f.unknown = append(f.unknown, key)
 			}
 		}
+	}
+	if len(narrowing) > 0 {
+		them := "them"
+		if len(narrowing) == 1 {
+			them = "it"
+		}
+		return nil, invalid(unknownKeys(narrowing)+"; a key there can narrow the entry, so the file is not applied without "+them,
+			"correct the key, or upgrade dtctl if a newer one wrote it")
 	}
 	for {
 		var doc yaml.Node
@@ -82,17 +113,22 @@ func emptyDocument(doc *yaml.Node) bool {
 	return true
 }
 
-// Warning names the keys the file holds that this dtctl does not know, or
-// returns "". The entries apply without them.
+// Warning names the document keys the file holds that this dtctl does not
+// know, or returns "". The entries apply without them.
 func (f *File) Warning() string {
 	if len(f.unknown) == 0 {
 		return ""
 	}
+	return unknownKeys(f.unknown)
+}
+
+// unknownKeys names keys this dtctl does not know, each as decode found it.
+func unknownKeys(keys []string) string {
 	noun := "key"
-	if len(f.unknown) > 1 {
+	if len(keys) > 1 {
 		noun = "keys"
 	}
-	return fmt.Sprintf("unknown %s %s (a typo, or written by a newer dtctl)", noun, strings.Join(f.unknown, ", "))
+	return fmt.Sprintf("unknown %s %s (a typo, or written by a newer dtctl)", noun, strings.Join(keys, ", "))
 }
 
 // encode renders f the way Save writes it: the header, then the document

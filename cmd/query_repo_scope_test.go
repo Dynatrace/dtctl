@@ -215,12 +215,38 @@ func TestQueryRepoScope_InvalidFile(t *testing.T) {
 	require.Empty(t, srv.queries(), "a query naming an unusable scope is not sent")
 }
 
-// Keys this dtctl does not know leave the entry in force, and the run says so
-// on stderr and in context.repo_scope.reason.
+// A workload key this dtctl does not know may be a constraint: a misspelt
+// cluster-uid, read past, leaves the workload bound in every cluster. The
+// scope is not applied and says so; it is never reported as applied while
+// selecting more than the file says.
+func TestQueryRepoScope_UnknownEntryKeyIsNotApplied(t *testing.T) {
+	optInRepoScope(t)
+	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, strings.Replace(checkoutScope, "        - namespace: payments\n",
+		"        - cluster_uid: 11111111-2222-3333-4444-555555555555\n          namespace: payments\n", 1))
+	const reason = `.dtctl-repo-scope.yaml: unknown key "cluster_uid" on line 6, in a workload (a typo, or written by a newer dtctl); ` +
+		"a key there can narrow the entry, so the file is not applied without it"
+
+	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, repoScopeTypedQuery, srv.first(t))
+	require.Equal(t, "Warning: repo scope not applied: "+reason+"; the query runs unscoped (use --no-repo-scope to silence this)\n", stderr)
+	scope := repoScopeContext(t, stdout)
+	require.Equal(t, []any{false, "invalid_file", reason}, []any{scope.Applied, scope.Code, scope.Reason})
+
+	srv.reset()
+	code, stdout, _ = runRepoScoped([]string{"query", repoScopeTypedQuery, "--repo-scope", "checkout", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, "validation_error", agentError(t, stdout).Code)
+	require.Empty(t, srv.queries())
+}
+
+// A document key this dtctl does not know leaves the entry in force, and the
+// run says so on stderr and in context.repo_scope.reason.
 func TestQueryRepoScope_UnknownKeys(t *testing.T) {
 	optInRepoScope(t)
 	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
-	chdirTestRepo(t, checkoutScope+"      metrics: [dt.service.request.count]\n")
+	chdirTestRepo(t, "metrics: [dt.service.request.count]\n"+checkoutScope)
 
 	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
 	require.Zero(t, code, stderr)

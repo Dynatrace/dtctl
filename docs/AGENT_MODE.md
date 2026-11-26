@@ -356,8 +356,10 @@ sent: `applied` stays true, `filter` is absent, and `reason` starts with
 `filter not inserted (<code>):` and one of the codes above. `wait query` sends
 the segments too; `verify query` does not, and says so on stderr.
 
-When the scope file holds keys this dtctl does not know (a typo, or a newer
-dtctl's), the entry still applies and `reason` names the keys.
+When the scope file holds document keys this dtctl does not know (a typo, or a
+newer dtctl's), the entry still applies and `reason` names the keys. An unknown
+key inside an entry is `invalid_file`: it could be a constraint, so the entry
+is not applied without it.
 
 There is no `repo_scope` key at all outside a linked repository, in a
 repository whose file has no entry for the active context's environment, with

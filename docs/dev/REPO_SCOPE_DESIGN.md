@@ -27,7 +27,7 @@ None of the three is a reason not to *use* a segment that already exists, and an
 | Narrows by | bindings, rendered to a filter in the query text, and the existing filter segments an entry references, sent beside the query | existing filter segments, sent beside the query |
 | Varies by directory | yes, an entry's `path` | no |
 | Selects the environment | never | `environment`, in dtui |
-| Unknown keys | reported; `set` and `delete` refuse to rewrite | ignored |
+| Unknown keys | of the document: reported, and `set` and `delete` refuse to rewrite; inside an entry: the file is not applied | ignored |
 
 1. **dtctl does not read `.dtui.yaml`.** Its `environment` key picks the context, which is harmless in a read-only viewer and not in a CLI that writes: a cloned file would decide which environment `apply` and `delete` reach, and under which safety level. Its segments would change the rows of a stable command for everyone who already has the file, including a personal one in a home directory. The same segments are available explicitly through `--segment` and `--segments-file`, and a repository that wants them applied by default lists them in an entry of the scope file, where they are validated, vary by directory and are found only at the `.git` root.
 2. **dtui is to read the scope file through `pkg/reposcope`,** not through a parser of its own. The lookup rules (the `.git` stop, the regular-file and size check), the validation and the renderer are what make a cloned file safe to honour, and a second implementation would drift in exactly those places. The read path is `Locate`, `Load`, `Resolve`, `Filters` and `dql.InsertFilter`, shown in the package example; none of them writes. An entry's segments are `Status.Entry.Segments`, ids and variable values as validated data, so dtui sends them without parsing a string.
@@ -96,7 +96,7 @@ A namespace and a workload name identify a workload only within one cluster, so 
 - **One flag.** `set --cluster-uid` qualifies every `--workload` of the command, as `--namespace` does, and is refused without them. Workloads in different clusters under one entry are written by hand, the same limit `--namespace` has.
 - **A bound field only when bound.** `k8s.cluster.uid` joins the fields a user's own `filter` overrides (`user_filter`) only for an entry that binds a cluster, so a query that filters on the cluster under an entry without one is still scoped.
 
-`cluster-uid` is added under `apiVersion: v1` although it constrains a binding, which [Evolving the schema](#evolving-the-schema) reserves for v2. No released dtctl reads the file: repo scope ships first in 0.47.0, with the key. Once a release is out, the rule applies as written.
+`cluster-uid` is added under `apiVersion: v1` without the version bump [Evolving the schema](#evolving-the-schema) asks of a key an older dtctl has to cope with. No released dtctl reads the file: repo scope ships first in 0.47.0, with the key. Once a release is out, the rule applies as written.
 
 `set` always replaces the named entry. There is no merge, no `--replace`, and no `--environment`: the root `--context` decides the host.
 
@@ -104,12 +104,18 @@ The file's keys are kebab-case, like the config file. Results printed as JSON or
 
 ### Evolving the schema
 
-A key this dtctl does not know is read past, reported as a warning by `current`, `describe` and every scoped query, and refused by `set` and `delete`, which would drop it. A typo and a newer dtctl's key look the same at that point, so the warning names both.
+A typo and a newer dtctl's key look the same to the dtctl that reads them, so where an unknown key sits decides what happens, not what it might mean:
+
+- **A key of the document itself** (beside `apiVersion` and `environments`) is read past, reported as a warning by `current`, `describe` and every scoped query, and refused by `set` and `delete`, which would drop it. It is outside every entry and cannot change what one selects.
+- **A key inside an entry**, on the entry or on one of its workloads, fails the read (`invalid_file`): queries run as typed with the warning, `current` says why, and `--repo-scope <name>` is an error. That is where a constraint is written, and a constraint read past leaves a wider scope behind it: `cluster_uid` for `cluster-uid` binds the workload in every cluster. A warning beside `applied: true` is not enough for that, because the rows already look scoped. dtctl cannot tell a misspelt constraint from a harmless key, so it reads past none.
+
+A value that fails its format is the same case and gets the same treatment: a `cluster-uid` that is not a UUID, edited in by hand, fails the read rather than being dropped from its workload.
 
 That makes the rule for `apiVersion: v1`:
 
-- A new binding that is one more alternative in the OR may be added under v1. An older dtctl warns about it and applies the entry's other bindings, which is narrower than intended but never wider. An entry bound by the new key alone binds nothing to an older dtctl, so the file fails validation there and queries run unscoped with the `invalid_file` warning until it is upgraded.
-- Anything that constrains an entry (a binding that must hold together with the others), or changes the format of an existing value, needs `apiVersion: v2`. An older dtctl would apply such an entry wrongly rather than narrowly.
+- A new document key may be added under v1; an older dtctl warns and applies its entries unchanged. It must not change what an entry selects.
+- A new key inside an entry, binding or constraint, is not read by an older dtctl: the file fails to load there and its queries run unscoped, with the `invalid_file` warning naming the key, until dtctl is upgraded. That is the cost of never applying an entry more widely than it is written, and it is paid loudly. A key that an older dtctl must keep working without therefore needs `apiVersion: v2`, which every dtctl refuses by name with the advice to upgrade.
+- Changing the format of an existing value needs `apiVersion: v2` as well.
 
 Entity ids are the change already announced. The file pins classic ids in `dt.entity.service` and `dt.entity.process_group`, and the semantic dictionary deprecates both fields. The migration is `apiVersion: v2`: `services` moves to `dt.smartscape.service` and `process-groups` to `dt.process_group.id`, each with the id format its field carries, and v1 files keep rendering onto the classic fields for as long as the records carry them. The new bindings cannot be added under v1, because they change the format of an existing value. Workload and service-name bindings depend on neither field, which is why discovery proposes them first and offers ids only for a candidate they cannot select, and why the documentation prefers them.
 
@@ -160,7 +166,7 @@ An entry may list existing filter segments, each with the values of its variable
 
 - **By id, never by name.** `--segment` resolves a name with a list call and takes the first match; a committed file must not change meaning when someone renames a segment or creates a second one of that name. `variables` is a map from name to values, so a variable cannot be given twice, where `--segments-file` takes the API's list.
 - **Validated like every binding.** An id is letters, digits, `-` and `_`; a variable name is a DQL identifier that may hold dots; values are printable text of bounded length; an entry holds at most ten segments, the platform's limit per query, and names none twice. Ids and values travel in the request body as JSON, never in the query text, so there is nothing to quote, but nothing unchecked leaves the machine either.
-- **ANDed with the bindings.** The bindings stay alternatives among themselves; the filter they render and every segment must all hold. A segment is a constraint, which [Evolving the schema](#evolving-the-schema) reserves for `apiVersion: v2`; like `cluster-uid` it is in v1 because no released dtctl reads the file.
+- **ANDed with the bindings.** The bindings stay alternatives among themselves; the filter they render and every segment must all hold. Like `cluster-uid` it is added under v1 because no released dtctl reads the file (see [Evolving the schema](#evolving-the-schema)).
 - **An entry may hold only segments.** It then inserts no filter and applies wherever segments do, `timeseries` and events included, which no binding reaches today.
 - **Which commands.** `query` and `wait query` send them. `verify query` does not: verification takes the query text and nothing else, so it says the entry's segments are not part of what it checked. `exec dql` is never scoped. The Live Debugger commands ignore them, because a workspace is filtered by labels, not by segments: an entry that holds only segments renders no filter set, with that reason, and the user guide says it where breakpoints are described.
 - **With the user's own.** `--segment`, `--segments-file` and the entry's are sent together. A segment the user names that the entry also lists is sent once, with the user's variables, and a line says so: what is typed wins over what is committed, as the user's own `filter` on a bound field does. More than ten in total is an error before anything is sent, naming `--no-repo-scope`; dropping some silently would change the rows.

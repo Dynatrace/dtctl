@@ -62,19 +62,45 @@ func TestDecode_EmptyIsAnEmptyFile(t *testing.T) {
 	}
 }
 
-func TestDecode_UnknownKeysAreAWarning(t *testing.T) {
+// A key of the document itself that this dtctl does not know is read past
+// and reported: it sits beside the entries and cannot change what one
+// selects.
+func TestDecode_UnknownDocumentKeysAreAWarning(t *testing.T) {
 	f, err := decode(readFixture(t, "newer-dtctl.yaml"))
-	require.Nil(t, err, "unknown keys do not stop a read")
-	assert.Equal(t, `unknown keys "kind" on line 3, "discovered" on line 8, "container" on line 12 (a typo, or written by a newer dtctl)`, f.Warning())
+	require.Nil(t, err, "an unknown document key does not stop a read")
+	assert.Equal(t, `unknown key "kind" on line 3 (a typo, or written by a newer dtctl)`, f.Warning())
 	assert.Equal(t, []string{"checkout"}, f.Entries(prodHost)[0].ServiceNames)
-
-	f, err = decode([]byte("environments:\n  " + prodHost + ":\n    - name: checkout\n      service_names: [checkout]\n      services: [" + svcID + "]\n"))
-	require.Nil(t, err)
-	assert.Equal(t, `unknown key "service_names" on line 4 (a typo, or written by a newer dtctl)`, f.Warning())
 
 	f, err = decode(readFixture(t, "example.yaml"))
 	require.Nil(t, err)
 	assert.Empty(t, f.Warning())
+}
+
+// A key inside an entry is where a constraint lives. Read past, a misspelt
+// cluster-uid would leave the workload bound in every cluster, and the scope
+// would be reported as applied while selecting more than the file says. Such
+// a key fails the read.
+func TestDecode_UnknownKeysOfAnEntryFailTheRead(t *testing.T) {
+	head := "environments:\n  " + prodHost + ":\n    - name: checkout\n"
+	for name, tc := range map[string]struct{ body, msg string }{
+		"a misspelt cluster-uid": {
+			"      workloads:\n        - cluster_uid: " + clusterUID + "\n          namespace: payments\n          name: checkout\n",
+			`unknown key "cluster_uid" on line 5, in a workload (a typo, or written by a newer dtctl); a key there can narrow the entry, so the file is not applied without it`},
+		"a misspelt binding": {
+			"      service_names: [checkout]\n      services: [" + svcID + "]\n",
+			`unknown key "service_names" on line 4, in an entry (a typo, or written by a newer dtctl); a key there can narrow the entry, so the file is not applied without it`},
+		"several": {
+			"      service-names: [checkout]\n      discovered: 2026-09-30\n      workloads:\n        - namespace: payments\n          name: checkout\n          container: app\n",
+			`unknown keys "discovered" on line 5, in an entry, "container" on line 9, in a workload (a typo, or written by a newer dtctl); a key there can narrow the entry, so the file is not applied without them`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := decode([]byte(head + tc.body))
+			require.NotNil(t, err)
+			assert.Nil(t, f)
+			assert.Equal(t, tc.msg, err.Msg)
+			assert.Equal(t, []string{"correct the key, or upgrade dtctl if a newer one wrote it"}, err.Suggestions)
+		})
+	}
 }
 
 func TestCheck(t *testing.T) {

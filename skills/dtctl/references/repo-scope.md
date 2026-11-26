@@ -10,7 +10,7 @@ dtctl repo-scope current -A
 
 - `result.linked: true` — queries from here are already scoped to `result.entry`; `result.filters` shows the exact filter per data object. Query without naming the service.
 - `result.linked: false` — `result.reason` says why: not in a git repository, no scope file, no entry for this environment, or no entry covering this directory (`result.others` lists the entries; select one with `--repo-scope <name>`).
-- `result.warning` — the file holds keys this dtctl does not know (a typo, or a newer dtctl's). The entries apply without them; tell the user.
+- `result.warning` — the file holds document keys this dtctl does not know (a typo, or a newer dtctl's). The entries apply without them; tell the user. An unknown key inside an entry is different: the file is not applied (`reason` names the key), because it could be a constraint.
 
 ## Link a repository
 

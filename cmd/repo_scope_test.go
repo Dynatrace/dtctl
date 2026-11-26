@@ -405,9 +405,35 @@ func TestRepoScopeSetFlagsRejectEmptyValues(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
-// Keys this dtctl does not know are a typo or a newer dtctl's. Queries and
-// current say so; set refuses, because saving would drop them.
+// A document key this dtctl does not know is a typo or a newer dtctl's.
+// Queries and current say so; set refuses, because saving would drop it.
 func TestRepoScopeUnknownKeys(t *testing.T) {
+	localRepoScopeConfig(t)
+	withKey := "kind: RepoScope\n" + monorepoScope
+	repo := chdirTestRepo(t, withKey)
+	chdirSubdir(t, "services/checkout")
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "checkout  (services/checkout · abc12345.apps.dynatrace.com)\n", stdout)
+	require.Contains(t, stderr, `unknown key "kind" on line 1`)
+
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "current", "-o", "json"}, RunOptions{})
+	require.Zero(t, code)
+	var status reposcope.Status
+	require.NoError(t, json.Unmarshal([]byte(stdout), &status))
+	require.Contains(t, status.Warning, "kind")
+
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "set", "ledger", "--service-name", "ledger", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, "validation_error", agentError(t, stdout).Code)
+	require.Equal(t, withKey, string(readScopeFile(t, repo)))
+}
+
+// A key inside an entry that this dtctl does not know could be a constraint,
+// so the file is not applied without it: current says why no entry applies,
+// and nothing rewrites the file.
+func TestRepoScopeUnknownEntryKeys(t *testing.T) {
 	localRepoScopeConfig(t)
 	withKey := strings.Replace(monorepoScope, "      service-names: [checkout]\n", "      service-names: [checkout]\n      service_names: [checkout-v2]\n", 1)
 	repo := chdirTestRepo(t, withKey)
@@ -415,14 +441,8 @@ func TestRepoScopeUnknownKeys(t *testing.T) {
 
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, "checkout  (services/checkout · abc12345.apps.dynatrace.com)\n", stdout)
-	require.Contains(t, stderr, `unknown key "service_names" on line 6`)
-
-	code, stdout, _ = runRepoScoped([]string{"repo-scope", "current", "-o", "json"}, RunOptions{})
-	require.Zero(t, code)
-	var status reposcope.Status
-	require.NoError(t, json.Unmarshal([]byte(stdout), &status))
-	require.Contains(t, status.Warning, "service_names")
+	require.Equal(t, `none  (.dtctl-repo-scope.yaml: unknown key "service_names" on line 6, in an entry (a typo, or written by a newer dtctl); `+
+		"a key there can narrow the entry, so the file is not applied without it)\n", stdout)
 
 	code, stdout, _ = runRepoScoped([]string{"repo-scope", "set", "ledger", "--service-name", "ledger", "--agent"}, RunOptions{})
 	require.NotZero(t, code)
