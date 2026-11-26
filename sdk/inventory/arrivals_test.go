@@ -848,12 +848,25 @@ func cappedLogs() mockResponse {
 	}
 }
 
+// decades are the five ratios the walk asks for, most aggressive first. They
+// are written out here rather than read from samplingLadder, so that a rung
+// removed from the ladder fails the tests instead of shrinking them.
+var decades = []int64{100000, 10000, 1000, 100, 10}
+
+// rungMatch is the text that identifies the rung asking for one ratio. The
+// delimiter is part of it: without one, the match for 1-in-10 is a prefix of
+// every other rung's query and would answer for whichever of them a test left
+// out.
+func rungMatch(ratio int64) string {
+	return fmt.Sprintf("samplingRatio:%d |", ratio)
+}
+
 // sampledRung is a response for one rung of the ladder. population is what
 // sum(dt.system.sampling_ratio) returns, which is what the extrapolation must
 // be read from.
 func sampledRung(ratio int64, matched, population int64, lastSeen string) mockResponse {
 	return mockResponse{
-		match:   fmt.Sprintf("samplingRatio:%d", ratio),
+		match:   rungMatch(ratio),
 		sampled: true,
 		records: []map[string]interface{}{
 			rec("matched", matched, "population", population, "last_seen", lastSeen),
@@ -871,13 +884,106 @@ func sampledCalls(runner *mockRunner) []string {
 	return out
 }
 
+// unlistedRungs returns the sampled probes the runner answered without a
+// response written for them. Such a probe falls through to the exhaustive
+// fixture of its stream, which answers as an unflagged hit and so ends the
+// walk as a refusal: a test that leaves a rung out would pass for a reason it
+// does not state.
+func unlistedRungs(runner *mockRunner) []string {
+	var out []string
+calls:
+	for _, c := range sampledCalls(runner) {
+		for _, r := range runner.responses {
+			if strings.Contains(r.match, "samplingRatio:") && strings.Contains(c, r.match) {
+				continue calls
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func assertEveryRungListed(t *testing.T, runner *mockRunner) {
+	t.Helper()
+	for _, c := range unlistedRungs(runner) {
+		t.Errorf("the walk ran a sampled probe this test lists no response for: %s", c)
+	}
+}
+
+// discoverWith runs Discover over the windowed definitions and fails the test
+// when the walk asked for a rung the test did not list.
 func discoverWith(t *testing.T, runner *mockRunner, opts DiscoverOptions) *Inventory {
 	t.Helper()
 	inv, err := Discover(context.Background(), runner, windowDefs(), opts)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
+	assertEveryRungListed(t, runner)
 	return inv
+}
+
+// TestWalkAsksTheFiveDecadesInOrder pins the ladder itself. Grail rounds every
+// ratio down to a power of ten and caps it at 100000, so these five are all
+// the rungs there are, and a walk that skips one gives up a tenfold step in
+// precision without any test of a verdict noticing.
+func TestWalkAsksTheFiveDecadesInOrder(t *testing.T) {
+	runner := windowRunner()
+	runner.responses = append([]mockResponse{
+		cappedLogs(),
+		sampledRung(100000, 0, 0, ""), sampledRung(10000, 0, 0, ""), sampledRung(1000, 0, 0, ""),
+		sampledRung(100, 0, 0, ""), sampledRung(10, 0, 0, ""),
+	}, runner.responses...)
+
+	discoverWith(t, runner, windowOpts())
+	want := []string{
+		"fetch logs, from:now()-15m, samplingRatio:100000 | filter",
+		"fetch logs, from:now()-15m, samplingRatio:10000 | filter",
+		"fetch logs, from:now()-15m, samplingRatio:1000 | filter",
+		"fetch logs, from:now()-15m, samplingRatio:100 | filter",
+		"fetch logs, from:now()-15m, samplingRatio:10 | filter",
+	}
+	got := sampledCalls(runner)
+	if len(got) != len(want) {
+		t.Fatalf("ran %d sampled probes, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], want[i]) {
+			t.Errorf("sampled probe %d = %q, want it to start with %q", i+1, got[i], want[i])
+		}
+	}
+}
+
+// TestWalkEndsAtThirtyMatchesAndNotBefore pins the floor from both sides.
+// Thirty matches are enough to date the arrival, so the walk ends there; one
+// fewer is not, so it runs every remaining rung to thicken the sample and, as
+// none does, ends on the last hit it made.
+func TestWalkEndsAtThirtyMatchesAndNotBefore(t *testing.T) {
+	below := []mockResponse{
+		sampledRung(10000, 0, 0, ""), sampledRung(1000, 0, 0, ""),
+		sampledRung(100, 0, 0, ""), sampledRung(10, 0, 0, ""),
+	}
+	for _, tc := range []struct {
+		matched int64
+		calls   int
+	}{
+		{30, 1},
+		{29, 5},
+	} {
+		t.Run(fmt.Sprintf("%d matches", tc.matched), func(t *testing.T) {
+			runner := windowRunner()
+			rungs := append([]mockResponse{cappedLogs(), sampledRung(100000, tc.matched, tc.matched*100000, at(0, 30))}, below...)
+			runner.responses = append(rungs, runner.responses...)
+
+			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+			if got := len(sampledCalls(runner)); got != tc.calls {
+				t.Errorf("ran %d sampled probes, want %d", got, tc.calls)
+			}
+			if logs.State != SignalLive || logs.RecordsSampled != tc.matched || logs.SamplingRatio != 100000 {
+				t.Errorf("state/sampled/ratio = %q/%d/%d, want live/%d/100000 (evidence: %s)",
+					logs.State, logs.RecordsSampled, logs.SamplingRatio, tc.matched, logs.Evidence)
+			}
+		})
+	}
 }
 
 // TestSampledProbeRescuesCappedSignal is the whole point of the fallback: a
@@ -963,6 +1069,11 @@ func TestThinSampleSurvivesACappedNextRung(t *testing.T) {
 	if logs.State != SignalLive || logs.RecordsSampled != 2 {
 		t.Errorf("state/sampled = %q/%d, want live/2: the thin rung had already proven arrival (evidence: %s)", logs.State, logs.RecordsSampled, logs.Evidence)
 	}
+	// Every rung below a capped one reads ten times more, so the walk ends on
+	// it instead of asking them.
+	if got := len(sampledCalls(runner)); got != 2 {
+		t.Errorf("ran %d sampled probes, want 2: a sampled rung that hit the cap ends the walk", got)
+	}
 }
 
 // TestSampledZeroIsNeverEmpty is the guard on the failure this package exists
@@ -971,7 +1082,7 @@ func TestThinSampleSurvivesACappedNextRung(t *testing.T) {
 func TestSampledZeroIsNeverEmpty(t *testing.T) {
 	runner := windowRunner()
 	rungs := []mockResponse{cappedLogs()}
-	for _, r := range samplingLadder {
+	for _, r := range decades {
 		rungs = append(rungs, sampledRung(r, 0, 0, ""))
 	}
 	runner.responses = append(rungs, runner.responses...)
@@ -1020,7 +1131,7 @@ func TestSamplingRefusalIsNotRetried(t *testing.T) {
 // so on its own it says nothing about whether the environment samples the
 // object. The summarize row is there in one shape and missing in the other.
 func unflaggedEmptyRung(ratio int64, withRow bool) mockResponse {
-	r := mockResponse{match: fmt.Sprintf("samplingRatio:%d", ratio)}
+	r := mockResponse{match: rungMatch(ratio)}
 	if withRow {
 		r.records = []map[string]interface{}{rec("matched", int64(0))}
 	}
@@ -1074,15 +1185,15 @@ func TestUnflaggedEmptyRungDoesNotEndTheWalk(t *testing.T) {
 func TestUnflaggedEmptyRungsKeepTheCappedVerdict(t *testing.T) {
 	runner := windowRunner()
 	rungs := []mockResponse{cappedLogs()}
-	for _, r := range samplingLadder {
+	for _, r := range decades {
 		rungs = append(rungs, unflaggedEmptyRung(r, true))
 	}
 	runner.responses = append(rungs, runner.responses...)
 	opts := windowOpts()
 
 	logs := signalByName(t, discoverWith(t, runner, opts), "logs")
-	if got := len(sampledCalls(runner)); got != len(samplingLadder) {
-		t.Errorf("ran %d sampled probes, want %d: no rung gave a reason to stop", got, len(samplingLadder))
+	if got := len(sampledCalls(runner)); got != 5 {
+		t.Errorf("ran %d sampled probes, want 5: no rung gave a reason to stop", got)
 	}
 	if logs.State != SignalUnknown || logs.Truncation != TruncationScanLimit {
 		t.Errorf("state/truncation = %q/%q, want unknown/scan_limit", logs.State, logs.Truncation)
@@ -1102,7 +1213,7 @@ func TestUnflaggedEmptyRungsKeepTheCappedVerdict(t *testing.T) {
 func TestSampledBoundComesFromAFlaggedRung(t *testing.T) {
 	runner := windowRunner()
 	rungs := []mockResponse{cappedLogs(), sampledRung(100000, 0, 0, "")}
-	for _, r := range samplingLadder[1:] {
+	for _, r := range decades[1:] {
 		rungs = append(rungs, unflaggedEmptyRung(r, false))
 	}
 	runner.responses = append(rungs, runner.responses...)
@@ -1114,8 +1225,8 @@ func TestSampledBoundComesFromAFlaggedRung(t *testing.T) {
 	if !strings.Contains(logs.Evidence, "1-in-100k matched nothing") || !strings.Contains(logs.Evidence, "under ~300k records") {
 		t.Errorf("evidence %q should report the bound of the one rung that confirmed it sampled", logs.Evidence)
 	}
-	if got := len(sampledCalls(runner)); got != len(samplingLadder) {
-		t.Errorf("ran %d sampled probes, want %d", got, len(samplingLadder))
+	if got := len(sampledCalls(runner)); got != 5 {
+		t.Errorf("ran %d sampled probes, want 5", got)
 	}
 }
 
@@ -1155,7 +1266,7 @@ func TestTruncatedUnflaggedRungIsARefusal(t *testing.T) {
 // next to a response that cannot be reconciled with it.
 func TestRefusalIsClaimedOnlyWhenNothingContradictsIt(t *testing.T) {
 	timedOut := func(ratio int64) mockResponse {
-		return mockResponse{match: fmt.Sprintf("samplingRatio:%d |", ratio), truncated: true, cause: TruncationTimeout}
+		return mockResponse{match: rungMatch(ratio), truncated: true, cause: TruncationTimeout}
 	}
 	for _, tc := range []struct {
 		name  string
@@ -1188,15 +1299,19 @@ func TestRefusalIsClaimedOnlyWhenNothingContradictsIt(t *testing.T) {
 // precision must not lose an answer that was already conclusive, any more
 // than a capped rung may.
 func TestThinSampleSurvivesARefusedNextRung(t *testing.T) {
-	for name, between := range map[string][]mockResponse{
-		"refused on the next rung":   nil,
-		"refused after an empty one": {unflaggedEmptyRung(10000, true)},
+	// The unsampled retry of a capped stream usually hits the cap again, so
+	// the refusal arrives cut short as often as it arrives with matches.
+	cutShort := unflaggedEmptyRung(10000, true)
+	cutShort.truncated, cutShort.cause = true, TruncationScanLimit
+	for name, after := range map[string][]mockResponse{
+		"refused on the next rung":   {refusedRung(10000, 500)},
+		"refused after an empty one": {unflaggedEmptyRung(10000, true), refusedRung(1000, 500)},
+		"refused and cut short":      {cutShort},
 	} {
 		t.Run(name, func(t *testing.T) {
 			runner := windowRunner()
 			rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, fixedNow.Format(time.RFC3339))}
-			rungs = append(rungs, between...)
-			rungs = append(rungs, refusedRung(samplingLadder[len(rungs)-1], 500))
+			rungs = append(rungs, after...)
 			runner.responses = append(rungs, runner.responses...)
 
 			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
@@ -1207,7 +1322,7 @@ func TestThinSampleSurvivesARefusedNextRung(t *testing.T) {
 			if logs.Truncation != "" || strings.Contains(logs.Evidence, "does not support sampling") {
 				t.Errorf("truncation = %q, evidence = %q: a resolved signal must not read as capped or refused", logs.Truncation, logs.Evidence)
 			}
-			if got, want := len(sampledCalls(runner)), len(between)+2; got != want {
+			if got, want := len(sampledCalls(runner)), len(after)+1; got != want {
 				t.Errorf("ran %d sampled probes, want %d: the refusal ends the walk", got, want)
 			}
 		})
@@ -1402,6 +1517,7 @@ func TestEachRungIsDatedAgainstItsOwnClockReading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
+	assertEveryRungListed(t, mock)
 	logs := signalByName(t, inv, "logs")
 	if logs.State != SignalStale || logs.AgeSeconds != 360 {
 		t.Errorf("state/age = %q/%ds, want stale/360s against a 5m threshold: the record was 6m old when its rung was asked (evidence: %s)",
@@ -1434,6 +1550,7 @@ func TestNewestMatchKeepsTheReadingOfItsOwnRung(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
+	assertEveryRungListed(t, mock)
 	logs := signalByName(t, inv, "logs")
 	if logs.State != SignalLive || logs.LastSeen != at(0, 30) || logs.AgeSeconds != 90 {
 		t.Errorf("state/lastSeen/age = %q/%q/%ds, want live/%q/90s", logs.State, logs.LastSeen, logs.AgeSeconds, at(0, 30))
@@ -1493,7 +1610,7 @@ func TestSampledCountIgnoresRequestedRatio(t *testing.T) {
 // unknown, with the count it did establish, and a real outage on a thinly
 // sampled source costs the gate its exit 10.
 func TestThinSampleNeverSaysStale(t *testing.T) {
-	timedOut := mockResponse{match: "samplingRatio:10000 |", truncated: true, cause: TruncationTimeout}
+	timedOut := mockResponse{match: rungMatch(10000), truncated: true, cause: TruncationTimeout}
 	for _, tc := range []struct {
 		name    string
 		rungs   []mockResponse
@@ -1661,9 +1778,10 @@ func TestOnlyTheScanCapIsWorthSampling(t *testing.T) {
 func TestSampledProbeKeepsTheScopeAndTimeField(t *testing.T) {
 	runner := windowRunner()
 	// spans carries a non-default TimeField, which the sampled probe must use.
-	runner.responses = append([]mockResponse{{
-		match: "fetch spans, from:now()-15m | filter", truncated: true, cause: TruncationScanLimit,
-	}}, runner.responses...)
+	runner.responses = append([]mockResponse{
+		{match: "fetch spans, from:now()-15m | filter", truncated: true, cause: TruncationScanLimit},
+		sampledRung(100000, 96, 9600000, at(0, 30)),
+	}, runner.responses...)
 
 	discoverWith(t, runner, windowOpts())
 	calls := sampledCalls(runner)
