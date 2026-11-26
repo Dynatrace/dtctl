@@ -1667,3 +1667,74 @@ func TestAuthLogin_BrowserFlowRequestsTheKeptLevelsScopes(t *testing.T) {
 		})
 	}
 }
+
+// runClientCredentialsLogin runs `auth login` with the client credentials
+// grant stubbed to succeed and the tokens going to a file store in a temp
+// directory. It returns what the command printed, its error and whether a
+// token was requested.
+func runClientCredentialsLogin(t *testing.T, args ...string) (stderr string, runErr error, granted bool) {
+	t.Helper()
+	viper.Reset()
+	resetAuthLoginFlags(t)
+	t.Setenv(config.EnvTokenStorage, "file")
+	setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
+	t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
+	t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
+	t.Setenv(envLoginAccountURN, "")
+
+	origCheck := authCheckKeyringFunc
+	t.Cleanup(func() { authCheckKeyringFunc = origCheck })
+	authCheckKeyringFunc = func() error {
+		return fmt.Errorf("keyring disabled via %s environment variable", config.EnvDisableKeyring)
+	}
+	origGrant := authClientCredentialsFunc
+	t.Cleanup(func() { authClientCredentialsFunc = origGrant })
+	authClientCredentialsFunc = func(context.Context, *auth.OAuthFlow, string, string, string, []string) (*auth.TokenSet, error) {
+		granted = true
+		return &auth.TokenSet{AccessToken: "test-access-token", TokenType: "Bearer", ExpiresIn: 300, ExpiresAt: time.Now().Add(5 * time.Minute)}, nil
+	}
+
+	stderr = captureAuthStderr(t, func() {
+		rootCmd.SetArgs(append([]string{"auth", "login"}, args...))
+		runErr = rootCmd.Execute()
+	})
+	return stderr, runErr, granted
+}
+
+// TestAuthLogin_BothFlagsKeepTheContextsTokenName: --token-name "defaults to
+// existing token name", and that holds when --context and --environment are
+// both given for a context that already exists.
+func TestAuthLogin_BothFlagsKeepTheContextsTokenName(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	configPath := setupAuthTestConfig(t, "viewer", envURL, "team-oauth")
+	gFlags.cfgFile = configPath
+	t.Cleanup(func() { gFlags.cfgFile = "" })
+
+	stderr, err, granted := runClientCredentialsLogin(t, "--context", "viewer", "--environment", envURL)
+	if err != nil || !granted {
+		t.Fatalf("login: err %v, granted %v\n%s", err, granted, stderr)
+	}
+	if want := "as 'team-oauth'"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, stderr)
+	}
+	after, err := config.LoadFrom(configPath)
+	if err != nil {
+		t.Fatalf("load saved config: %v", err)
+	}
+	nc, err := after.GetContext("viewer")
+	if err != nil {
+		t.Fatalf("context missing: %v", err)
+	}
+	if nc.Context.TokenRef != "team-oauth" {
+		t.Errorf("token-ref = %q, want %q", nc.Context.TokenRef, "team-oauth")
+	}
+
+	// A context that does not exist yet still gets <context>-oauth.
+	stderr, err, _ = runClientCredentialsLogin(t, "--context", "fresh", "--environment", envURL)
+	if err != nil {
+		t.Fatalf("login to a new context: %v\n%s", err, stderr)
+	}
+	if want := "as 'fresh-oauth'"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, stderr)
+	}
+}

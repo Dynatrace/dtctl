@@ -722,8 +722,10 @@ Non-interactive login (CI/CD):
 			}
 
 			// Resolve contextName, environment and tokenName from the config when not
-			// supplied as explicit flags.
-			if contextName == "" || environment == "" {
+			// supplied as explicit flags. A missing --token-name is reason enough:
+			// an existing context keeps its token name even when --context and
+			// --environment are both given.
+			if contextName == "" || environment == "" || tokenName == "" {
 				contextHint := "Use 'dtctl ctx' to list available context names, then pass --context <name> --environment <url>"
 				cfg, err := loadConfig(cmdContext(cmd))
 				if err != nil {
