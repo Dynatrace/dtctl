@@ -84,7 +84,9 @@ type sampledProbe struct {
 type sighting struct {
 	lastSeen string
 	at       time.Time
-	asked    int64
+	// asked is the ratio of the rung that matched the record, 0 for the
+	// exhaustive probe that hit the cap.
+	asked int64
 }
 
 // newerSighting returns the later of seen and the newest record p matched. A
@@ -186,6 +188,8 @@ func sampledHitEvidence(object string, p sampledProbe, newest *sighting, bias ti
 		object, scanCapLabel(scanLimitGB), formatCount(p.ratio),
 		formatCount(p.matched), plural64(p.matched, "record"), formatCount(p.records))
 	switch {
+	case newest != nil && newest.asked == 0:
+		s += ", and last-seen was read from the unsampled probe that hit the cap, which matched a newer record than this sample did"
 	case newest != nil && newest.asked != p.asked:
 		s += fmt.Sprintf(", and last-seen was read from the 1-in-%s probe of the same walk, which matched a newer record than this sample did", formatCount(newest.asked))
 	case bias > 0:
@@ -252,16 +256,17 @@ func plural64(n int64, word string) string {
 	return word + "s"
 }
 
-// recoverBySampling is reached when the exhaustive stream probe was cut short.
-// It walks samplingLadder for a verdict the cap denied, and returns the capped
-// "unknown" unchanged if it cannot find one.
+// recoverBySampling is reached when the exhaustive stream probe was cut short,
+// and is handed that probe's result. It walks samplingLadder for a verdict the
+// cap denied, and returns the capped "unknown" unchanged if it cannot find one.
 //
 // The walk is deliberately biased toward admitting defeat. Every exit that is
 // not a genuine hit leaves the signal unknown, because the alternative — a
 // sampled miss presented as "empty" — would be this package's central error
 // (blaming a source for a question that was never fully asked) reintroduced one
 // level down, and at a scale where nobody could check it.
-func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, now time.Time, cause TruncationCause) (Signal, error) {
+func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, now time.Time, exhaustive *RunResult) (Signal, error) {
+	cause := exhaustive.TruncationCause
 	capped := func() Signal {
 		sig.State = SignalUnknown
 		sig.Truncation = cause
@@ -278,8 +283,10 @@ func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *C
 	var hit *sampledProbe
 	// newest is read from every response, before the rung is classified: a
 	// refused or cut-short rung supplies no count, but a record it matched is
-	// still the newest this scope is known to have.
-	var newest *sighting
+	// still the newest this scope is known to have. The capped probe is the
+	// first such response. What it counted is not a count of the window, and
+	// it is not a hit; its timestamp is a record's all the same.
+	newest := newerSighting(nil, readSampledProbe(exhaustive, 0))
 	// zeroAt remembers the least aggressive sampled rung that came back empty,
 	// since that is the rung whose bound is tightest and therefore worth
 	// reporting.

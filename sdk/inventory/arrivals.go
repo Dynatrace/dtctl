@@ -146,7 +146,7 @@ func (b *budgetRunner) probeStreamSignal(ctx context.Context, name string, def *
 		// A cut-short probe that found nothing proves nothing: the match may
 		// sit in the part that was never read. Before settling for that,
 		// try to buy the answer more cheaply by sampling.
-		return b.recoverBySampling(ctx, sig, def, opts, timeField, now, res.TruncationCause)
+		return b.recoverBySampling(ctx, sig, def, opts, timeField, now, res)
 	}
 
 	var matched int64

@@ -1229,6 +1229,32 @@ func TestNewestMatchOfTheWalkDatesTheHit(t *testing.T) {
 	}
 }
 
+// TestCappedProbesOwnMatchDatesTheHit: the exhaustive probe that hit the cap
+// is the first response of the walk. It could not count, but a record it
+// matched before it was stopped is a record of this scope like any other, and
+// no sampled rung may report the signal older than that.
+func TestCappedProbesOwnMatchDatesTheHit(t *testing.T) {
+	runner := windowRunner()
+	capped := cappedLogs()
+	capped.records = []map[string]interface{}{rec("matched", int64(700), "last_seen", at(0, 3))}
+	runner.responses = append([]mockResponse{
+		capped, sampledRung(100000, 40, 4000000, at(9, 0)),
+	}, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State != SignalLive || logs.LastSeen != at(0, 3) || logs.AgeSeconds != 3 {
+		t.Fatalf("state/lastSeen/age = %q/%q/%d, want live/%q/3: the capped probe matched a record 3s old (evidence: %s)",
+			logs.State, logs.LastSeen, logs.AgeSeconds, at(0, 3), logs.Evidence)
+	}
+	// What the capped probe counted is not a count of the window.
+	if logs.RecordsSampled != 40 || logs.SamplingRatio != 100000 || logs.Records != 4000000 {
+		t.Errorf("sampled/ratio/records = %d/%d/%d, want 40/100000/4000000", logs.RecordsSampled, logs.SamplingRatio, logs.Records)
+	}
+	if want := "last-seen was read from the unsampled probe that hit the cap"; !strings.Contains(logs.Evidence, want) {
+		t.Errorf("evidence %q should say %q", logs.Evidence, want)
+	}
+}
+
 // TestTiedTimestampStaysWithTheSample: the hit's own timestamp is the one
 // reported unless another rung saw a strictly newer record, so the evidence
 // keeps describing the sample's bias instead of crediting a rung that added
@@ -1287,7 +1313,7 @@ func TestCancellationEndsTheWalk(t *testing.T) {
 	b := &budgetRunner{runner: runner, report: &Report{}, queries: 100, seconds: 100}
 
 	sig, err := b.recoverBySampling(ctx, Signal{Name: "logs"}, &CapabilityDef{DataObject: "logs"},
-		windowOpts(), DefaultTimeField, fixedNow, TruncationScanLimit)
+		windowOpts(), DefaultTimeField, fixedNow, &RunResult{Truncated: true, TruncationCause: TruncationScanLimit})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("recoverBySampling = %+v, %v; want context.Canceled", sig, err)
 	}
