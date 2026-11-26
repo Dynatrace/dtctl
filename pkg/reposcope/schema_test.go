@@ -1,6 +1,7 @@
 package reposcope
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,6 +256,86 @@ func TestCheck(t *testing.T) {
 			assert.True(t, strings.HasPrefix(err.Error(), FileName+": "), err.Error())
 		})
 	}
+}
+
+// The limits are part of the format: a file within them is read, and one
+// beyond them is refused whole, not read in part.
+func TestCheck_Limits(t *testing.T) {
+	entries := func(n int) string {
+		var b strings.Builder
+		b.WriteString("environments:\n  " + prodHost + ":\n")
+		for i := range n {
+			fmt.Fprintf(&b, "    - name: e%d\n      path: p%d\n      service-names: [s%d]\n", i, i, i)
+		}
+		return b.String()
+	}
+	hosts := func(n int) string {
+		var b strings.Builder
+		b.WriteString("environments:\n")
+		for i := range n {
+			fmt.Fprintf(&b, "  h%d.example.invalid:\n    - name: checkout\n      service-names: [checkout]\n", i)
+		}
+		return b.String()
+	}
+	// join lists n distinct values made by item.
+	join := func(n int, item func(int) string) string {
+		values := make([]string, n)
+		for i := range values {
+			values[i] = item(i)
+		}
+		return strings.Join(values, ", ")
+	}
+	items := func(n int, item func(int) string) string { return "[" + join(n, item) + "]" }
+	entry := func(lines ...string) string {
+		return "environments:\n  " + prodHost + ":\n    - name: checkout\n      " + strings.Join(lines, "\n      ") + "\n"
+	}
+	name := func(i int) string { return fmt.Sprintf("s%d", i) }
+	id := func(prefix string) func(int) string {
+		return func(i int) string { return fmt.Sprintf("%s-%016X", prefix, i) }
+	}
+	workload := func(i int) string { return fmt.Sprintf("{namespace: payments, name: w%d}", i) }
+	variable := func(i int) string { return fmt.Sprintf("v%d: [a]", i) }
+	const over = maxListItems + 1
+	for _, tc := range []struct {
+		name string
+		doc  string
+		msg  string
+	}{
+		{"as many environments as a file takes", hosts(maxEnvironments), ""},
+		{"one environment more", hosts(maxEnvironments + 1), "holds 65 environments; a file takes at most 64"},
+		{"as many entries as an environment takes", entries(maxEntries), ""},
+		{"one entry more", entries(maxEntries + 1), `environment "` + prodHost + `" holds 1001 entries; an environment takes at most 1000`},
+		{"as many items as a list takes", entry("service-names: "+items(maxListItems, name), "services: "+items(maxListItems, id("SERVICE")),
+			"process-groups: "+items(maxListItems, id("PROCESS_GROUP")), "workloads: "+items(maxListItems, workload),
+			"segments: [{id: Ab3dEf9hIjk, variables: {"+join(maxListItems-1, variable)+", env: "+items(maxListItems, name)+"}}]"), ""},
+		{"one service name more", entry("service-names: " + items(over, name)), `entry "checkout": service-names holds 1001 items; a list takes at most 1000`},
+		{"one service more", entry("services: " + items(over, id("SERVICE"))), "services holds 1001 items; a list takes at most 1000"},
+		{"one process group more", entry("process-groups: " + items(over, id("PROCESS_GROUP"))), "process-groups holds 1001 items; a list takes at most 1000"},
+		{"one workload more", entry("workloads: " + items(over, workload)), "workloads holds 1001 items; a list takes at most 1000"},
+		{"one variable more", entry("segments: [{id: Ab3dEf9hIjk, variables: {" + join(over, variable) + "}}]"),
+			"segments[0] holds 1001 variables; a segment takes at most 1000"},
+		{"one variable value more", entry("segments: [{id: Ab3dEf9hIjk, variables: {env: " + items(over, name) + "}}]"),
+			`segments[0] variable "env" holds 1001 values; a variable takes at most 1000`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decode([]byte(tc.doc))
+			if tc.msg == "" {
+				require.Nil(t, err)
+				return
+			}
+			require.NotNil(t, err)
+			assert.Contains(t, err.Msg, tc.msg)
+		})
+	}
+}
+
+// An environment listed without entries would be a host the file both
+// defines and has nothing for.
+func TestCheck_EnvironmentWithoutEntries(t *testing.T) {
+	_, err := decode([]byte("environments:\n  " + prodHost + ": []\n"))
+	require.NotNil(t, err)
+	assert.Equal(t, `environment "`+prodHost+`" has no entries`, err.Msg)
+	assert.Equal(t, []string{"give it an entry, or delete the line"}, err.Suggestions)
 }
 
 func TestCheck_NoBindingSuggestsWhatToAdd(t *testing.T) {

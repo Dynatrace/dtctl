@@ -132,6 +132,14 @@ var (
 // limit, and so how many an entry may reference.
 const MaxSegments = 10
 
+// The sizes a file may have. They are part of the format: a reader may rely
+// on them, and a file beyond one is refused whole, never read in part.
+const (
+	maxEnvironments = 64
+	maxEntries      = 1000 // per environment
+	maxListItems    = 1000 // per list of an entry, a workload or a segment
+)
+
 // maxSegmentValueRunes bounds one value of a segment variable.
 const maxSegmentValueRunes = 255
 
@@ -149,7 +157,8 @@ const maxServiceNameRunes = 255
 // fails its pattern is an error naming the host, the entry and the field,
 // never something to escape and hope. Beyond the patterns above: host keys
 // must already be canonical, names and paths are unique per host (so at most
-// one entry omits Path), and every entry binds something.
+// one entry omits Path), every environment has an entry, every entry binds
+// something, and nothing is larger than the format allows.
 //
 // Paths are unique regardless of case, on every OS. Resolve folds case on
 // macOS and Windows, where two paths differing only in case are one
@@ -161,6 +170,9 @@ func (f *File) check() *InvalidError {
 	if f.APIVersion != "" && f.APIVersion != apiVersion {
 		return invalid(fmt.Sprintf("apiVersion %q is not supported (this dtctl reads %q)", f.APIVersion, apiVersion),
 			"upgrade dtctl, or set apiVersion: "+apiVersion)
+	}
+	if n := len(f.Environments); n > maxEnvironments {
+		return invalid(fmt.Sprintf("holds %d environments; a file takes at most %d", n, maxEnvironments))
 	}
 	for _, host := range f.Hosts() {
 		if err := f.validateHost(host); err != nil {
@@ -181,6 +193,12 @@ func (f *File) validateHost(host string) *InvalidError {
 	}
 	if !dnsSubdomainRe.MatchString(host) {
 		return invalid(fmt.Sprintf("environment %q is not a host name", host))
+	}
+	switch n := len(f.Environments[host]); {
+	case n == 0:
+		return invalid(fmt.Sprintf("environment %q has no entries", host), "give it an entry, or delete the line")
+	case n > maxEntries:
+		return invalid(fmt.Sprintf("environment %q holds %d entries; an environment takes at most %d", host, n, maxEntries))
 	}
 	names := map[string]bool{}
 	paths := map[string]Entry{} // by lowercase path
@@ -221,6 +239,17 @@ func (e *Entry) validate() *InvalidError {
 	}
 	if err := validatePath(e.Path); err != nil {
 		return err
+	}
+	for _, list := range []struct {
+		key string
+		n   int
+	}{
+		{"workloads", len(e.Workloads)}, {"service-names", len(e.ServiceNames)},
+		{"process-groups", len(e.ProcessGroups)}, {"services", len(e.Services)},
+	} {
+		if list.n > maxListItems {
+			return tooLong(list.key, list.n, "items", "a list")
+		}
 	}
 	for i, id := range e.Services {
 		if !serviceIDRe.MatchString(id) {
@@ -288,8 +317,14 @@ func (e *Entry) validateSegments() *InvalidError {
 			return invalid(fmt.Sprintf("segments[%d] id %q is listed twice", i, s.ID))
 		}
 		seen[s.ID] = true
+		if n := len(s.Variables); n > maxListItems {
+			return tooLong(fmt.Sprintf("segments[%d]", i), n, "variables", "a segment")
+		}
 		for _, name := range s.VariableNames() {
 			values := s.Variables[name]
+			if n := len(values); n > maxListItems {
+				return tooLong(fmt.Sprintf("segments[%d] variable %q", i, name), n, "values", "a variable")
+			}
 			if !segmentVariableRe.MatchString(name) {
 				return invalid(fmt.Sprintf("segments[%d] variable %q is not a variable name (letters, digits, _ and .)", i, name))
 			}
@@ -304,6 +339,11 @@ func (e *Entry) validateSegments() *InvalidError {
 		}
 	}
 	return nil
+}
+
+// tooLong refuses a list beyond maxListItems.
+func tooLong(what string, n int, things, holder string) *InvalidError {
+	return invalid(fmt.Sprintf("%s holds %d %s; %s takes at most %d", what, n, things, holder, maxListItems))
 }
 
 // segmentValueProblem explains why v cannot be a segment variable's value,
