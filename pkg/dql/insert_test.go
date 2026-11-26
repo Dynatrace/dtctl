@@ -270,3 +270,15 @@ func TestInsertFilter_ObjectWithoutCondition(t *testing.T) {
 	assert.Equal(t, "repo scope has no filter for spans (it filters logs)", InsertFilter("fetch spans", filters).Reason)
 	assert.Equal(t, UnsupportedObject, InsertFilter("fetch logs", nil).Outcome)
 }
+
+// A filter built by another caller may name no field, or an empty one. An
+// empty name is no field of the query: not a word of it, and not the empty
+// identifier.
+func TestInsertFilter_EmptyFieldName(t *testing.T) {
+	filters := map[string]Filter{"logs": {Expr: logsExpr, Fields: []string{"", "k8s.workload.name"}}}
+
+	assert.Equal(t, Applied, InsertFilter("fetch logs | filter x == 1", filters).Outcome)
+	assert.Equal(t, Applied, InsertFilter("fetch logs | filter `` == 1", filters).Outcome)
+	assert.Equal(t, UserFilter, InsertFilter(`fetch logs | filter k8s.workload.name == "x"`, filters).Outcome)
+	assert.NotPanics(t, func() { InsertFilter("fetch logs |filter", filters) })
+}

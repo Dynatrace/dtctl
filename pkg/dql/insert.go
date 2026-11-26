@@ -205,7 +205,7 @@ func asciiLower(s string) string {
 // A name inside square brackets is not the stage's: there it is a field of a
 // subquery's records or an index into another field, and neither is a
 // condition on the fetched record. Taking it for one would drop the scope
-// for a filter the user never wrote.
+// for a filter the user never wrote. An empty name in fields is no field.
 func userFilterField(q string, m Masked, fields []string) (field string, found bool) {
 	for _, seg := range m.Segments {
 		if !filteringCommands[asciiLower(seg.Command)] {
@@ -213,6 +213,9 @@ func userFilterField(q string, m Masked, fields []string) (field string, found b
 		}
 		code := outsideSquareBrackets(m.Code[seg.Start:seg.End])
 		for _, f := range fields {
+			if f == "" {
+				continue
+			}
 			if containsWholeWord(code, f) || hasBacktickName(q[seg.Start:seg.End], code, f) {
 				return f, true
 			}
