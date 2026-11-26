@@ -47,6 +47,8 @@ func TestClassifyError(t *testing.T) {
 			want: Failure{Reason: FailureServer, StatusCode: 500, Message: "the API's message"}},
 		{name: "503 on a poll", err: api(sdkcla.PhasePoll, 503), ok: true,
 			want: Failure{Reason: FailureServer, StatusCode: 503, Message: "the API's message"}},
+		{name: "the last 5xx", err: api(sdkcla.PhaseSubmit, 599), ok: true,
+			want: Failure{Reason: FailureServer, StatusCode: 599, Message: "the API's message"}},
 		{name: "never completed", err: notCompleted, ok: true,
 			want: Failure{Reason: FailureTimeout, Message: "codelevelanalysis: analysis did not complete within 60s (token t1)"}},
 		{name: "429 on a poll", err: api(sdkcla.PhasePoll, 429), ok: true,

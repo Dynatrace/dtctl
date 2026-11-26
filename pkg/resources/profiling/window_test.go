@@ -49,10 +49,16 @@ func TestParseTime_NowRelative(t *testing.T) {
 		{"now()-1h30m", now - 3*h/2, false},
 		{"now()-1.5h", now - 3*h/2, false},
 		{"now() - 2h", now - 2*h, false},
+		// Space around a bound is not part of it.
+		{" now()-1h ", now - h, false},
+		{" 1700000000000\t", now, false},
 		{"1700000000000", now, false},
 		{"2023-11-14T22:13:20Z", now, false},
 		{"2023-11-14T22:13:20.000+00:00", now, false},
-		{"2023-11-14T22:13:20", now, false}, // no zone: UTC
+		{"2023-11-14T22:13:20", now, false},         // no zone: UTC
+		{"2023-11-14T22:13", now - 20_000, false},   // to the minute
+		{"2023-11-14", now - 80_000_000, false},     // the day's first millisecond
+		{"2023-11-14T22:13:20.5", now + 500, false}, // a fraction, no zone
 		{"now()-", 0, true},
 		{"now()*5m", 0, true},
 		{"now()-1y", 0, true},
@@ -84,6 +90,8 @@ func TestResolveWindow(t *testing.T) {
 		{name: "end alone: the 2h before it", end: "now()-1d", from: now - 26*h, to: now - 24*h},
 		{name: "exactly 2h, far back", start: "now()-21h", end: "now()-19h", from: now - 21*h, to: now - 19*h},
 		{name: "before the epoch", start: "1960-01-01", from: -315619200000, to: -315619200000 + 2*h},
+		// The earliest end that still has a time 2h before it.
+		{name: "end alone, 2h after the first millisecond", end: "-9223372036847575808", from: math.MinInt64, to: math.MinInt64 + 2*h},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -161,6 +169,9 @@ func TestResolveWindow_UnreadableBound(t *testing.T) {
 			why: `time "-9223372036854775808" is out of range`},
 		{name: "duration out of range", start: "now()-99999999999999999999w", bound: BoundStart, value: "now()-99999999999999999999w",
 			why: `invalid duration in "now()-99999999999999999999w": duration "99999999999999999999w" is out of range`},
+		// Each part fits a duration and their sum does not.
+		{name: "parts that add up out of range", start: "now()-2000000h2000000h", bound: BoundStart, value: "now()-2000000h2000000h",
+			why: `invalid duration in "now()-2000000h2000000h": duration "2000000h2000000h" is out of range`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -176,6 +187,21 @@ func TestResolveWindow_UnreadableBound(t *testing.T) {
 				t.Errorf("err = %q, want %q", err, want)
 			}
 		})
+	}
+}
+
+// A start with no time 2h after it ends now, as any start less than 2h back
+// does: the end is held at the last millisecond, not wrapped around to one
+// before the start. Only a clock near that millisecond gets there.
+func TestResolveWindow_StartNearTheLastMillisecond(t *testing.T) {
+	const nowMs = int64(math.MaxInt64 - 1000)
+	now := time.UnixMilli(nowMs)
+	if now.UnixMilli() != nowMs {
+		t.Fatalf("the clock reads %d, want %d", now.UnixMilli(), nowMs)
+	}
+	w, err := ResolveWindow("9223372036851175807", "", now) // one hour before the last millisecond
+	if want := (Window{From: math.MaxInt64 - 3600_000, To: nowMs}); err != nil || w != want {
+		t.Errorf("got %+v, %v; want %+v", w, err, want)
 	}
 }
 
