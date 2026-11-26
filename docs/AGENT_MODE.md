@@ -341,6 +341,7 @@ stopped, points at the executor's scan-limit advice.
 | `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
 | `segment_unavailable` | a filter segment the entry references could not be read (deleted, not shared with you, or the token lacks `storage:filter-segments:read`); `reason` names it |
 | `user_segment` | the entry references only filter segments, and `--segment` gave every one of them: those were sent and the entry added nothing |
+| `segments_not_sent` | the entry references only filter segments, and the command sends none (`verify query` checks the query text only) |
 
 An entry may also reference existing filter segments, which the query then
 sends as if `--segment` had been typed. `segments` lists the ones sent, each

@@ -10,7 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Dynatrace/dtctl/pkg/dql"
 	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
 // segmentScope has an entry with bindings and segments, and one, for tools/,
@@ -390,8 +392,7 @@ func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 		require.NotContains(t, r, "filterSegments")
 	}
 	require.True(t, strings.HasPrefix(stderr, repoScopeApplying+"\n"+
-		"repo scope checkout: its segments "+entrySegmentRefs+" are neither read nor sent: verify query checks the query text only. "+
-		"query sends them, and runs unscoped when one cannot be read\n"), stderr)
+		"repo scope checkout: its segments "+entrySegmentRefs+" are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
 
 	// An entry that is only segments has nothing verify query applies.
 	repo := chdirTestRepo(t, segmentScope)
@@ -399,9 +400,32 @@ func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 	chdirSubdir(t, "tools")
 	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only. "+
-		"query sends them, and runs unscoped when one cannot be read\n"), stderr)
+	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
 	require.NotContains(t, stderr, "applying repo scope")
+
+	// Named, it is the same: verifying is not refused, and nothing says
+	// that a scope was applied.
+	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery, "--repo-scope", "tools"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
+	require.NotContains(t, stderr, "applying repo scope")
+}
+
+// A scope whose only content the command dropped is not an applied one, and
+// its code says why rather than "applied".
+func TestRepoScopedQuery_SegmentsOnlyEntryWithoutSegments(t *testing.T) {
+	q := &repoScopedQuery{
+		scope:    &output.RepoScope{Name: "tools", Code: string(dql.Applied)},
+		segments: []reposcope.Segment{{ID: "plain-1"}},
+	}
+	q.settle()
+	require.True(t, q.scope.Applied, "control: with its segments the scope is applied")
+
+	q.withoutSegments()
+	require.False(t, q.scope.Applied)
+	require.Equal(t, "segments_not_sent", q.scope.Code)
+	require.Equal(t, "the entry references only filter segments, and verify query checks the query text only", q.scope.Reason)
+	require.Empty(t, q.scope.Segments)
 }
 
 // Whether a segment's variables are all bound is the platform's to say. When

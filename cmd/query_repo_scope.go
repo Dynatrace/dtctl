@@ -46,6 +46,9 @@ const (
 	// repoScopeUserSegment is an entry that references only segments, each
 	// of which the command line gives too: the scope sent nothing of its own.
 	repoScopeUserSegment = "user_segment"
+	// repoScopeSegmentsNotSent is an entry that references only segments,
+	// under a command that sends none: nothing of the scope was applied.
+	repoScopeSegmentsNotSent = "segments_not_sent"
 )
 
 // repoScopeCodes is every context.repo_scope.code; docs/AGENT_MODE.md lists
@@ -53,7 +56,7 @@ const (
 var repoScopeCodes = []string{
 	string(dql.Applied), string(dql.NotFetch), string(dql.UnsupportedObject), repoScopeNoBinding,
 	string(dql.UserFilter), string(dql.Subquery), string(dql.Unscannable), repoScopeNoEntry, repoScopeAmbiguousEntry,
-	repoScopeInvalidFile, repoScopeSegmentUnavailable, repoScopeUserSegment,
+	repoScopeInvalidFile, repoScopeSegmentUnavailable, repoScopeUserSegment, repoScopeSegmentsNotSent,
 }
 
 // repoScopeRefusals are the codes for an entry that resolved but cannot narrow
@@ -343,6 +346,10 @@ func (q *repoScopedQuery) settle() {
 	case !q.bound && !s.Applied && q.overridden:
 		s.Code = repoScopeUserSegment
 		q.setReason("every segment it references is given on the command line, and those are sent")
+	case !q.bound && !s.Applied:
+		// Only a command that sends no segments gets here (withoutSegments).
+		s.Code = repoScopeSegmentsNotSent
+		q.setReason("the entry references only filter segments, and verify query checks the query text only")
 	case q.filtered || !q.bound:
 		s.Code = string(dql.Applied)
 		q.setReason("")
@@ -586,7 +593,7 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	warnRepoScopeFile(q.stderr, q.warning)
 	s := q.scope
 	if q.unsent != "" {
-		defer output.FprintInfo(q.stderr, "repo scope %s: its segments %s are neither read nor sent: verify query checks the query text only. query sends them, and runs unscoped when one cannot be read", s.Name, q.unsent)
+		defer output.FprintInfo(q.stderr, "repo scope %s: its segments %s are neither read nor sent: verify query checks the query text only; query sends them", s.Name, q.unsent)
 		if !q.bound {
 			return
 		}
