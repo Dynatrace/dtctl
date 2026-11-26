@@ -138,3 +138,15 @@ func TestRepoScopeDiscoverDryRunWithoutNames(t *testing.T) {
 	require.Contains(t, stdout, repoScopeNarrowHint)
 	require.NoFileExists(t, filepath.Join(repo, reposcope.FileName))
 }
+
+// The scope file comes with a clone, and its paths are printed in the
+// answers about it. An escape sequence in one must never reach the terminal.
+func TestRepoScopeNeverPrintsAnEscapeSequence(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, "environments:\n  "+repoScopeTestEnvHost+":\n    - name: checkout\n      path: \"svc\\e[31mRED\"\n      service-names: [checkout]\n")
+	for _, args := range [][]string{{"current"}, {"describe"}, {"list"}, {"describe", "checkout"}} {
+		_, stdout, stderr := runRepoScoped(append([]string{"repo-scope"}, args...), RunOptions{})
+		require.NotContains(t, stdout+stderr, "\x1b", args)
+		require.Contains(t, stdout+stderr, `path "svc\x1b[31mRED" must not contain control or non-printing characters`, args)
+	}
+}

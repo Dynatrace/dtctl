@@ -361,10 +361,8 @@ func segmentValueProblem(v string) string {
 		// String must read back as the reference it renders.
 		return "must not contain , & or =, which separate values where a segment is spelt as --segment takes it"
 	}
-	for _, r := range v {
-		if !unicode.IsPrint(r) {
-			return "must not contain control or non-printing characters"
-		}
+	if !printable(v) {
+		return "must not contain control or non-printing characters"
 	}
 	return ""
 }
@@ -383,24 +381,43 @@ func (e *Entry) BindsCluster() bool {
 }
 
 // validatePath holds Path to a clean, relative, slash-separated directory
-// inside the repository.
+// inside the repository, in text that shows what it is: the path is printed
+// in every answer about the entry, and a committed file is read in review.
 func validatePath(p string) *InvalidError {
 	if p == "" {
 		return nil
 	}
+	clean := path.Clean(p)
 	switch {
+	case !utf8.ValidString(p):
+		return invalid(fmt.Sprintf("path %q is not valid UTF-8", p))
+	case !printable(p):
+		return invalid(fmt.Sprintf("path %q must not contain control or non-printing characters", p))
+	case strings.TrimSpace(p) != p:
+		return invalid(fmt.Sprintf("path %q must not start or end with a space", p))
 	case strings.Contains(p, `\`):
 		return invalid(fmt.Sprintf("path %q must use forward slashes", p))
-	case path.IsAbs(p):
+	case path.IsAbs(p) || driveRe.MatchString(p):
 		return invalid(fmt.Sprintf("path %q must be relative to the repository root", p))
 	case p == ".":
 		return invalid(`path "." is the repository root`, "omit path for an entry that covers the whole repository")
-	case p == ".." || strings.HasPrefix(p, "../") || strings.Contains(p, "/../") || strings.HasSuffix(p, "/.."):
+	case clean == ".." || strings.HasPrefix(clean, "../"):
 		return invalid(fmt.Sprintf("path %q leaves the repository", p))
-	case path.Clean(p) != p:
-		return invalid(fmt.Sprintf("path %q is not clean (write it as %q)", p, path.Clean(p)))
+	case clean != p:
+		return invalid(fmt.Sprintf("path %q is not clean (write it as %q)", p, clean))
 	}
 	return nil
+}
+
+// driveRe is a Windows drive at the start of a path. path.IsAbs knows only
+// the POSIX form, and "C:/work" is no more inside the repository than
+// "/work".
+var driveRe = regexp.MustCompile(`^[A-Za-z]:`)
+
+// printable reports whether every character of s is one a terminal shows as
+// itself: no control character, escape, or invisible separator.
+func printable(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return !unicode.IsPrint(r) })
 }
 
 // serviceNameProblem explains why name cannot be a service-names binding, or
@@ -417,10 +434,8 @@ func serviceNameProblem(name string) string {
 	case strings.ContainsAny(name, `"\`):
 		return `must not contain " or \`
 	}
-	for _, r := range name {
-		if !unicode.IsPrint(r) {
-			return "must not contain control or non-printing characters"
-		}
+	if !printable(name) {
+		return "must not contain control or non-printing characters"
 	}
 	return ""
 }

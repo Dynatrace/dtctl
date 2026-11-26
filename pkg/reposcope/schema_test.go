@@ -125,6 +125,7 @@ func TestCheck(t *testing.T) {
 		{name: "workload name longer than a DNS label", doc: entry("name: checkout", "workloads: [{namespace: payments, name: "+strings.Repeat("a", 64)+"}]")},
 		{name: "workload name at its longest", doc: entry("name: checkout", "workloads: [{namespace: payments, name: "+strings.Repeat("a", 253)+"}]")},
 		{name: "workload in a cluster", doc: entry("name: checkout", "workloads: [{cluster-uid: "+clusterUID+", namespace: payments, name: checkout}]")},
+		{name: "path with a space and a colon inside", doc: entry("name: checkout", "path: 'my services/check:out'", "service-names: [checkout]")},
 		{name: "a leading document marker", doc: "---\n" + entry("name: checkout", "service-names: [checkout]")},
 		{name: "a trailing document marker", doc: entry("name: checkout", "service-names: [checkout]") + "---\n"},
 		{name: "a trailing document holding a comment", doc: entry("name: checkout", "service-names: [checkout]") + "---\n# end\n"},
@@ -176,6 +177,24 @@ func TestCheck(t *testing.T) {
 			msg: `path "." is the repository root`},
 		{name: "unclean path", doc: entry("name: checkout", "path: services/./checkout/", "service-names: [checkout]"),
 			msg: `path "services/./checkout/" is not clean (write it as "services/checkout")`},
+		{name: "path through a parent that stays inside", doc: entry("name: checkout", "path: a/b/../c", "service-names: [checkout]"),
+			msg: `path "a/b/../c" is not clean (write it as "a/c")`},
+		{name: "path with an escape sequence", doc: entry("name: checkout", `path: "services/\e[31mred"`, "service-names: [checkout]"),
+			msg: `path "services/\x1b[31mred" must not contain control or non-printing characters`},
+		{name: "path of two lines", doc: entry("name: checkout", `path: "a\nb"`, "service-names: [checkout]"),
+			msg: `path "a\nb" must not contain control or non-printing characters`},
+		{name: "path with a NUL", doc: entry("name: checkout", `path: "a\0b"`, "service-names: [checkout]"),
+			msg: `path "a\x00b" must not contain control or non-printing characters`},
+		{name: "path with a line separator", doc: entry("name: checkout", `path: "a\u2028b"`, "service-names: [checkout]"),
+			msg: `must not contain control or non-printing characters`},
+		{name: "path on a Windows drive", doc: entry("name: checkout", "path: C:/work/svc", "service-names: [checkout]"),
+			msg: `path "C:/work/svc" must be relative to the repository root`},
+		{name: "path with a drive and no slash", doc: entry("name: checkout", "path: 'c:svc'", "service-names: [checkout]"),
+			msg: `path "c:svc" must be relative to the repository root`},
+		{name: "path starting with a space", doc: entry("name: checkout", "path: ' svc'", "service-names: [checkout]"),
+			msg: `path " svc" must not start or end with a space`},
+		{name: "path ending with a space", doc: entry("name: checkout", "path: 'svc '", "service-names: [checkout]"),
+			msg: `path "svc " must not start or end with a space`},
 
 		{name: "short service id", doc: entry("name: checkout", "services: [SERVICE-123]"),
 			msg: `services[0] "SERVICE-123" is not a service id (SERVICE- and 16 hex digits)`},
@@ -432,6 +451,14 @@ func TestCheckInvalidUTF8ServiceName(t *testing.T) {
 	err := f.check()
 	require.NotNil(t, err)
 	assert.Contains(t, err.Msg, "is not valid UTF-8")
+}
+
+func TestCheckInvalidUTF8Path(t *testing.T) {
+	f := &File{}
+	f.Upsert(prodHost, Entry{Name: "checkout", Path: "svc\xff", ServiceNames: []string{"checkout"}})
+	err := f.check()
+	require.NotNil(t, err)
+	assert.Contains(t, err.Msg, `path "svc\xff" is not valid UTF-8`)
 }
 
 func TestCheckHostWithPathOrQuery(t *testing.T) {
