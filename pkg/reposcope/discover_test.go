@@ -1558,4 +1558,7 @@ func TestPlan_ShortNamesMatchOnlyWhole(t *testing.T) {
 		assert.Equal(t, inside, strings.Contains(p.Queries[0].DQL, "contains("), "%s:\n%s", term, p.Queries[0].DQL)
 	}
 	assert.Equal(t, []string{"billing-engine", "billingengine"}, segmentPatterns([]string{"BillingEngine", "billing-engine", "billing.engine", "billing_engine", "billingengine", "cart"}))
+	// A term spelled with a "-" at an end or two in a row is not a run of
+	// segments: no workload name folds to it.
+	assert.Equal(t, []string{"checkout"}, segmentPatterns([]string{"-checkout", "checkout", "ledger-", "ledger--writer"}))
 }

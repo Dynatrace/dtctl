@@ -425,11 +425,14 @@ func TestDiscover_MissingRecordTable(t *testing.T) {
 	assert.Equal(t, VerdictMatch, r.Verdict)
 	assert.Equal(t, []string{"spans is not available on this environment, so nothing was looked for there"}, r.Notes)
 
-	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
-		"dt.entity.service": {{err: &sdkquery.QueryError{ErrorType: "UNKNOWN_DATA_OBJECT"}}},
-	}}, singleGo(t), prodHost)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"dt.entity.service is not available on this environment; the record queries are what applies here"}, r.Notes)
+	// Grail names a missing table in two ways.
+	for _, errorType := range []string{"UNKNOWN_DATA_OBJECT", "DATA_OBJECT_NOT_SUPPORTED"} {
+		r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+			"dt.entity.service": {{err: &sdkquery.QueryError{ErrorType: errorType}}},
+		}}, singleGo(t), prodHost)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"dt.entity.service is not available on this environment; the record queries are what applies here"}, r.Notes, errorType)
+	}
 }
 
 // Grail may report a table the token cannot read in the message alone, with

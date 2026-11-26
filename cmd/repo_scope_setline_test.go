@@ -154,6 +154,24 @@ func TestRepoScopeSetLine(t *testing.T) {
 			notes: []string{`candidate 1's line leaves --namespace Payments --workload BillingEngine out, which a scope file cannot hold: workloads[0] namespace "Payments" is not a Kubernetes namespace name`},
 		},
 		{
+			// Without a workload the name is all a line could bind, and a
+			// name nothing looked for selects records nothing checked.
+			name: "a candidate without a workload is not bound by a name the repository did not name",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "gateway", ServiceName: "gateway", Tier: "exact", Spans: 10, Services: []string{svc}},
+			}},
+			want: "dtctl repo-scope set gateway --service " + svc,
+		},
+		{
+			// No name discovery sends is one a scope file refuses; the
+			// check holds should that ever change.
+			name: "a service name a scope file cannot hold gets no line",
+			report: reposcope.DiscoveryReport{Sent: []string{`pay"roll`}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "pay-roll", ServiceName: `pay"roll`, Tier: "exact", Spans: 10},
+			}},
+			notes: []string{`candidate 1 has no set line: a scope file cannot hold --service-name 'pay"roll': service-names[0] "pay\"roll" must not contain " or \`},
+		},
+		{
 			name: "an entity id a scope file cannot hold gets no line",
 			report: reposcope.DiscoveryReport{Sent: []string{"pay"}, Candidates: []reposcope.Candidate{
 				{Rank: 1, Name: "pay", Tier: "exact", Services: []string{"dt.smartscape.service-1234"}},
