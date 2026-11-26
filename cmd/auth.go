@@ -19,6 +19,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/prompt"
 	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/sdk/urls"
 )
 
 // authCheckKeyringFunc and authEnsureKeyringFunc are the functions used to
@@ -554,8 +555,12 @@ type loginLevels struct {
 // A level that is not a valid value is refused rather than kept or replaced,
 // in the context and in the global binding alike. Keeping it would save and
 // print a level dtctl does not enforce, and replacing it would pick a level
-// nobody chose.
-func loginSafetyLevels(cfg *config.Config, contextName, tokenName string, flagLevel config.SafetyLevel, flagGiven bool) (loginLevels, error) {
+// nobody chose. In a project config that covers every context of global, the
+// global config's contexts (globalContextsFor), that binds tokenName, whatever
+// level the clamp arrives at: dtctl ranks an unknown value with readwrite-all,
+// so the clamp alone would return it only to a project context above that
+// rank, and for a tie only when it is listed first.
+func loginSafetyLevels(cfg *config.Config, global []config.NamedContext, contextName, tokenName string, flagLevel config.SafetyLevel, flagGiven bool) (loginLevels, error) {
 	levels := loginLevels{saved: flagLevel, declared: flagLevel, source: loginLevelFromDefault}
 	if flagGiven {
 		levels.source = loginLevelFromFlag
@@ -579,22 +584,27 @@ func loginSafetyLevels(cfg *config.Config, contextName, tokenName string, flagLe
 		}
 	}
 
-	levels.requested = cfg.EffectiveSafetyLevelFor(&config.Context{TokenRef: tokenName, SafetyLevel: levels.declared})
-	if !levels.requested.IsValid() {
-		// Only a clamp can produce a level that is neither the flag's, nor
-		// the context's, nor the default: the global binding holds it.
-		e := &diagnostic.Error{
-			Operation: "auth login",
-			Message: fmt.Sprintf("the global config binds token %q to the safety level %q, which is not a valid value (valid values: %s)",
-				tokenName, levels.requested, validSafetyLevelList()),
+	var refusal *diagnostic.Error
+	for _, nc := range globalContextsBinding(global, tokenName) {
+		if nc.Context.SafetyLevel.IsValid() {
+			continue
 		}
-		for _, nc := range globalContextsFor(cfg) {
-			if nc.Context.TokenRef == tokenName && nc.Context.SafetyLevel == levels.requested {
-				e.Suggestions = append(e.Suggestions, fmt.Sprintf("Give the global context a valid level: dtctl ctx set %s --global --safety-level <level>", nc.Name))
+		if refusal == nil {
+			refusal = &diagnostic.Error{
+				Operation: "auth login",
+				Message: fmt.Sprintf("global context %q binds token %q to the safety level %q, which is not a valid value (valid values: %s)",
+					nc.Name, tokenName, nc.Context.SafetyLevel, validSafetyLevelList()),
 			}
 		}
-		return loginLevels{}, e
+		refusal.Suggestions = append(refusal.Suggestions, fmt.Sprintf("Give the global context a valid level: dtctl ctx set %s --global --safety-level <level>", nc.Name))
 	}
+	if refusal != nil {
+		return loginLevels{}, refusal
+	}
+
+	// The declared level is valid, and so is every level the clamp can
+	// return in its place.
+	levels.requested = cfg.EffectiveSafetyLevelFor(&config.Context{TokenRef: tokenName, SafetyLevel: levels.declared})
 	return levels, nil
 }
 
@@ -679,6 +689,21 @@ func tokenBoundIn(contexts []config.NamedContext, tokenName string) bool {
 	return slices.ContainsFunc(contexts, func(nc config.NamedContext) bool {
 		return nc.Context.TokenRef == tokenName && nc.Context.Environment != ""
 	})
+}
+
+// globalContextsBinding returns the contexts of global, the global config's
+// contexts, that bind tokenName: those the clamp of a project config's level
+// is built from. The rule is the one of buildGlobalBindings in sdk/session,
+// which keeps its bindings to itself: a context binds its token to the host
+// of its environment, so one whose environment has no host binds nothing.
+func globalContextsBinding(global []config.NamedContext, tokenName string) []config.NamedContext {
+	var binding []config.NamedContext
+	for _, nc := range global {
+		if nc.Context.TokenRef == tokenName && urls.Host(nc.Context.Environment) != "" {
+			binding = append(binding, nc)
+		}
+	}
+	return binding
 }
 
 // tokenPeer is another context that uses the stored token a login replaces.
@@ -988,7 +1013,8 @@ Non-interactive login (CI/CD):
 
 			// levels.saved is what the context stores from here on;
 			// levels.requested is what the login asks the identity provider for.
-			levels, err := loginSafetyLevels(cfg, contextName, tokenName, safetyLevel, cmd.Flags().Changed("safety-level"))
+			globalContexts := globalContextsFor(cfg)
+			levels, err := loginSafetyLevels(cfg, globalContexts, contextName, tokenName, safetyLevel, cmd.Flags().Changed("safety-level"))
 			if err != nil {
 				return err
 			}
@@ -1044,7 +1070,6 @@ Non-interactive login (CI/CD):
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Safety level: %s", oauthConfig.SafetyLevel)
 
 			// A login replaces the stored token, which other contexts may use.
-			globalContexts := globalContextsFor(cfg)
 			peers := contextsSharingToken(cfg, globalContexts, contextName, tokenName, environment)
 
 			// Create OAuth flow

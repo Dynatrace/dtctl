@@ -1320,7 +1320,7 @@ func TestLoginSafetyLevels(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := loginSafetyLevels(tt.cfg, "ctx", "ctx-oauth", tt.flagLevel, tt.flagGiven)
+			got, err := loginSafetyLevels(tt.cfg, nil, "ctx", "ctx-oauth", tt.flagLevel, tt.flagGiven)
 			if err != nil {
 				t.Fatalf("loginSafetyLevels: %v", err)
 			}
@@ -1336,7 +1336,7 @@ func TestLoginSafetyLevels(t *testing.T) {
 
 	t.Run("an invalid stored level is refused", func(t *testing.T) {
 		cfg := withContext("read-only")
-		_, err := loginSafetyLevels(cfg, "ctx", "ctx-oauth", config.DefaultSafetyLevel, false)
+		_, err := loginSafetyLevels(cfg, nil, "ctx", "ctx-oauth", config.DefaultSafetyLevel, false)
 		var diagErr *diagnostic.Error
 		if !errors.As(err, &diagErr) {
 			t.Fatalf("err = %T %v, want a diagnostic.Error", err, err)
@@ -1355,7 +1355,7 @@ func TestLoginSafetyLevels(t *testing.T) {
 			t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, wantSuggestions)
 		}
 		// The flag is the way out, so it must still work.
-		got, err := loginSafetyLevels(cfg, "ctx", "ctx-oauth", config.SafetyLevelReadOnly, true)
+		got, err := loginSafetyLevels(cfg, nil, "ctx", "ctx-oauth", config.SafetyLevelReadOnly, true)
 		if err != nil || got.saved != config.SafetyLevelReadOnly || got.requested != config.SafetyLevelReadOnly {
 			t.Errorf("with the flag: saved %q, requested %q, err %v", got.saved, got.requested, err)
 		}
@@ -1369,7 +1369,7 @@ func TestLoginSafetyLevels_RefusalHasOneAgentCode(t *testing.T) {
 	for _, name := range []string{"viewer", "timeout-env", "my-config", "no context here"} {
 		cfg := config.NewConfig()
 		cfg.SetContextWithOptions(name, "https://abc12345.apps.dynatrace.com", "t-oauth", &config.ContextOptions{SafetyLevel: "read-only"})
-		_, err := loginSafetyLevels(cfg, name, "t-oauth", config.DefaultSafetyLevel, false)
+		_, err := loginSafetyLevels(cfg, nil, name, "t-oauth", config.DefaultSafetyLevel, false)
 		if err == nil {
 			t.Fatalf("context %q: no error", name)
 		}
@@ -1418,7 +1418,7 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 		t.Fatal("the project config was not picked up")
 	}
 
-	levels, err := loginSafetyLevels(cfg, "project", "prod-oauth", config.DefaultSafetyLevel, false)
+	levels, err := loginSafetyLevels(cfg, globalContextsFor(cfg), "project", "prod-oauth", config.DefaultSafetyLevel, false)
 	if err != nil {
 		t.Fatalf("loginSafetyLevels: %v", err)
 	}
@@ -1925,7 +1925,9 @@ func TestAuthLogin_ProjectConfigRequestsNoMoreThanTheTokensBinding(t *testing.T)
 	global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", config.SafetyLevelReadOnly})
 
 	tests := []struct {
-		name      string
+		name string
+		// global replaces the global config of the other rows when set.
+		global    string
 		project   loginTestContext
 		args      []string
 		wantLevel config.SafetyLevel
@@ -1976,7 +1978,11 @@ func TestAuthLogin_ProjectConfigRequestsNoMoreThanTheTokensBinding(t *testing.T)
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setupLoginProject(t, global, loginConfigYAML("project", tt.project))
+			globalConfig := global
+			if tt.global != "" {
+				globalConfig = tt.global
+			}
+			setupLoginProject(t, globalConfig, loginConfigYAML("project", tt.project))
 
 			stderr, oauthConfig, runErr := runBrowserLogin(t, tt.args...)
 			if !errors.Is(runErr, errBrowserLoginStubbed) {
@@ -2042,37 +2048,99 @@ func TestAuthLogin_ContextWithoutALevelIsNotGivenOne(t *testing.T) {
 	}
 }
 
-// TestAuthLogin_InvalidLevelInTheGlobalBindingIsRefused: a project context
-// clamped to a global level that is not a level would be shown that value as
-// its safety level while the scopes fell back to the default's.
+// TestAuthLogin_InvalidLevelInTheGlobalBindingIsRefused: in a project
+// directory a global context that binds the login's token to a level that is
+// not a level stops the login before a token is requested. dtctl ranks such a
+// value with readwrite-all, so a clamp alone lets every project level at or
+// below that through and makes the outcome of a tie depend on the order of
+// the global contexts.
 func TestAuthLogin_InvalidLevelInTheGlobalBindingIsRefused(t *testing.T) {
 	const envURL = "https://abc12345.apps.dynatrace.com"
-	global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", "read-only"})
-	setupLoginProject(t, global, loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelDangerouslyUnrestricted}))
+	invalid := loginTestContext{"prod", envURL, "prod-oauth", "read-only"}
+	writer := loginTestContext{"writer", envURL, "prod-oauth", config.SafetyLevelReadWriteAll}
+	viewer := loginTestContext{"viewer", envURL, "prod-oauth", config.SafetyLevelReadOnly}
 
-	stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "project")
-	if granted {
-		t.Errorf("a token was requested\n%s", stderr)
+	tests := []struct {
+		name    string
+		global  []loginTestContext
+		project config.SafetyLevel
+	}{
+		{"project readonly", []loginTestContext{invalid}, config.SafetyLevelReadOnly},
+		{"project readwrite-mine", []loginTestContext{invalid}, config.SafetyLevelReadWriteMine},
+		{"project readwrite-all", []loginTestContext{invalid}, config.SafetyLevelReadWriteAll},
+		{"project without a level", []loginTestContext{invalid}, ""},
+		{"project dangerously-unrestricted", []loginTestContext{invalid}, config.SafetyLevelDangerouslyUnrestricted},
+		// The invalid value ranks with readwrite-all: neither order may win.
+		{"listed before a readwrite-all context", []loginTestContext{invalid, writer}, config.SafetyLevelDangerouslyUnrestricted},
+		{"listed after a readwrite-all context", []loginTestContext{writer, invalid}, config.SafetyLevelDangerouslyUnrestricted},
+		// A lower, valid level in another context is the ceiling and still
+		// does not make the typo acceptable.
+		{"next to a readonly context", []loginTestContext{viewer, invalid}, config.SafetyLevelReadOnly},
 	}
-	var diagErr *diagnostic.Error
-	if !errors.As(runErr, &diagErr) {
-		t.Fatalf("err = %T %v, want a diagnostic.Error", runErr, runErr)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupLoginProject(t, loginConfigYAML("prod", tt.global...),
+				loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", tt.project}))
+
+			stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "project")
+			if granted {
+				t.Errorf("a token was requested\n%s", stderr)
+			}
+			var diagErr *diagnostic.Error
+			if !errors.As(runErr, &diagErr) {
+				t.Fatalf("err = %T %v, want a diagnostic.Error", runErr, runErr)
+			}
+			if want := `global context "prod" binds token "prod-oauth" to the safety level "read-only", which is not a valid value (valid values: readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)`; diagErr.Message != want {
+				t.Errorf("message = %q\nwant      %q", diagErr.Message, want)
+			}
+			if diagErr.Operation != "auth login" {
+				t.Errorf("operation = %q, want %q", diagErr.Operation, "auth login")
+			}
+			wantSuggestions := []string{
+				"Give the global context a valid level: dtctl ctx set prod --global --safety-level <level>",
+			}
+			if !slices.Equal(diagErr.Suggestions, wantSuggestions) {
+				t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, wantSuggestions)
+			}
+			if strings.Contains(stderr, "Safety level:") {
+				t.Errorf("the login printed a level:\n%s", stderr)
+			}
+		})
 	}
-	if want := `the global config binds token "prod-oauth" to the safety level "read-only", which is not a valid value (valid values: readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)`; diagErr.Message != want {
-		t.Errorf("message = %q\nwant      %q", diagErr.Message, want)
-	}
-	if diagErr.Operation != "auth login" {
-		t.Errorf("operation = %q, want %q", diagErr.Operation, "auth login")
-	}
-	wantSuggestions := []string{
-		"Give the global context a valid level: dtctl ctx set prod --global --safety-level <level>",
-	}
-	if !slices.Equal(diagErr.Suggestions, wantSuggestions) {
-		t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, wantSuggestions)
-	}
-	if strings.Contains(stderr, "Safety level: read-only") {
-		t.Errorf("the invalid value was printed as the login's level:\n%s", stderr)
-	}
+
+	t.Run("every invalid context gets its repair command", func(t *testing.T) {
+		setupLoginProject(t,
+			loginConfigYAML("prod", invalid, writer, loginTestContext{"stage", envURL, "prod-oauth", "rw"}),
+			loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly}))
+
+		_, runErr, _ := runClientCredentialsLogin(t, "--context", "project")
+		var diagErr *diagnostic.Error
+		if !errors.As(runErr, &diagErr) {
+			t.Fatalf("err = %T %v, want a diagnostic.Error", runErr, runErr)
+		}
+		wantSuggestions := []string{
+			"Give the global context a valid level: dtctl ctx set prod --global --safety-level <level>",
+			"Give the global context a valid level: dtctl ctx set stage --global --safety-level <level>",
+		}
+		if !slices.Equal(diagErr.Suggestions, wantSuggestions) {
+			t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, wantSuggestions)
+		}
+	})
+
+	t.Run("a context that binds nothing is not read", func(t *testing.T) {
+		// Another token's context, and one whose environment has no host:
+		// neither is part of the binding dtctl enforces for prod-oauth.
+		setupLoginProject(t,
+			loginConfigYAML("prod", viewer,
+				loginTestContext{"elsewhere", envURL, "other-oauth", "read-only"},
+				loginTestContext{"broken", "not-a-url", "prod-oauth", "read-only"}),
+			loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly}))
+
+		stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "project")
+		if runErr != nil || !granted {
+			t.Fatalf("login: err %v, granted %v\n%s", runErr, granted, stderr)
+		}
+	})
 }
 
 // TestAuthLogin_BrowserFlowNamesTheContextsItNarrows: the browser login
