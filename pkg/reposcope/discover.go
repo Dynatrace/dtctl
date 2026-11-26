@@ -166,19 +166,25 @@ type Plan struct {
 // with spans and no logs; its ids come from the environment's own answer, so
 // the plan shows it with a placeholder.
 //
-// A term is held to what a name read from the repository is, and one that is
-// not is an InvalidError: it would otherwise be the one way a generic word, a
-// two-letter name or a character with a meaning in DQL reaches a query.
+// dir is relative to the repository root, as an fs.FS names it; one that is
+// not is an InvalidError. A term is held to what a name read from the
+// repository is, and one that is not is an InvalidError too: it would
+// otherwise be the one way a generic word, a two-letter name or a character
+// with a meaning in DQL reaches a query.
 func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 	terms, err := checkTerms(terms)
 	if err != nil {
 		return nil, err
 	}
+	if dir = path.Clean(dir); !fs.ValidPath(dir) {
+		return nil, &InvalidError{Source: dir, Msg: "is not a directory inside the repository",
+			Suggestions: []string{"name the directory relative to the repository root, e.g. services/checkout"}}
+	}
 	s, err := extract(repo, dir)
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Dir: path.Clean(dir), Unit: s.unit, SharedBy: s.sharedBy,
+	p := &Plan{Dir: dir, Unit: s.unit, SharedBy: s.sharedBy,
 		Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens}
 	p.Dropped = heldBack(s.dropped, p.Sent)
 	switch n := len(p.Sent); {

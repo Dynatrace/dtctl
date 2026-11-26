@@ -140,7 +140,7 @@ func (bs gradleBuilds) claimed(claims []string) (*gradleBuild, string) {
 // of is the build dir belongs to: the nearest settings file at or above it.
 func (bs gradleBuilds) of(dir string) *gradleBuild {
 	for d := dir; ; d = path.Dir(d) {
-		if b := bs[d]; b != nil || d == "." {
+		if b := bs[d]; b != nil || topDir(d) {
 			return b
 		}
 	}
@@ -174,7 +174,7 @@ func testModule(m string) bool {
 
 // module is the module holding dir, "" when none does.
 func (b *gradleBuild) module(dir string) string {
-	for d := dir; d != b.dir && d != "."; d = path.Dir(d) {
+	for d := dir; d != b.dir && !topDir(d); d = path.Dir(d) {
 		if _, ok := b.modules[d]; ok {
 			return d
 		}
@@ -281,7 +281,7 @@ func gradleBuildAt(fsys fs.FS, dir string) *gradleBuild {
 		_, err := fs.Stat(fsys, path.Join(d, f))
 		return err == nil
 	}); d = path.Dir(d) {
-		if d == "." {
+		if topDir(d) {
 			return nil
 		}
 	}

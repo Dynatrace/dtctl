@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -152,6 +153,55 @@ func TestExtractLayoutDirectoriesNameNothing(t *testing.T) {
 		p, err := PlanDiscovery(units, dir, nil)
 		require.NoError(t, err)
 		require.Equal(t, want, tokenLines(p.tokens), dir)
+	}
+}
+
+// A directory is named relative to the repository root. One that is not (an
+// absolute path, one that leaves the root) is refused: the walks up from it
+// used to never end, since the parent of "/" is "/".
+func TestPlanDiscoveryRefusesADirectoryOutsideTheRepository(t *testing.T) {
+	for _, dir := range []string{"/project", "/", "../elsewhere", "services/../../elsewhere"} {
+		done := make(chan error, 1)
+		go func() {
+			_, err := PlanDiscovery(fstest.MapFS{"settings.gradle": {Data: []byte("rootProject.name = 'ledger-writer'\n")}}, dir, nil)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			var invalid *InvalidError
+			require.ErrorAs(t, err, &invalid, dir)
+			require.Contains(t, err.Error(), "is not a directory inside the repository", dir)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("PlanDiscovery(%q) did not return", dir)
+		}
+	}
+	for _, dir := range []string{"", ".", "./", "services/..", "services/ledger/"} {
+		_, err := PlanDiscovery(fstest.MapFS{}, dir, nil)
+		require.NoError(t, err, dir)
+	}
+}
+
+// The Gradle readers walk up from a directory too, and resolving an entry
+// calls one of them with a directory of its own.
+func TestGradleWalksEndAtAnAbsoluteRoot(t *testing.T) {
+	type found struct {
+		at, of *gradleBuild
+		module string
+	}
+	done := make(chan found, 1)
+	go func() {
+		builds := gradleBuilds{"build": &gradleBuild{dir: "build", modules: map[string][]string{}}}
+		done <- found{
+			at:     gradleBuildAt(fstest.MapFS{}, "/project/module"),
+			of:     builds.of("/project/module"),
+			module: builds["build"].module("/project/module"),
+		}
+	}()
+	select {
+	case got := <-done:
+		require.Equal(t, found{}, got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a walk up from an absolute directory did not end")
 	}
 }
 

@@ -274,8 +274,15 @@ func testFile(name string) bool {
 	return false
 }
 
+// topDir reports whether d has no directory above it to walk up to: the
+// repository root, or "/" for a path that is not relative to it, whose parent
+// is itself.
+func topDir(d string) bool {
+	return d == "." || d == "/"
+}
+
 func nearestUnit(units map[string]bool, dir string) string {
-	for d := dir; d != "." && d != "/"; d = path.Dir(d) {
+	for d := dir; !topDir(d); d = path.Dir(d) {
 		if units[d] {
 			return d
 		}
