@@ -66,6 +66,17 @@ func TestClassifyError(t *testing.T) {
 		{name: "a transport error", err: &sdkcla.Error{Phase: sdkcla.PhaseSubmit, Err: errors.New("codelevelanalysis: submit: connection refused")}},
 		{name: "a cancelled context", err: &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: context.Canceled}},
 		{name: "not an analysis error", err: errors.New("boom")},
+		// A caller that collects errors: the status of another API's answer
+		// says nothing about the analysis beside it, in either order.
+		{name: "a cancelled poll joined after a 404 from elsewhere",
+			err: errors.Join(httpclient.NewAPIError(404, "no such dashboard", ""), &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: context.Canceled})},
+		{name: "a cancelled poll joined before a 404 from elsewhere",
+			err: errors.Join(&sdkcla.Error{Phase: sdkcla.PhasePoll, Err: context.Canceled}, httpclient.NewAPIError(404, "no such dashboard", ""))},
+		{name: "a failed submit joined with an analysis that did not complete elsewhere",
+			err: errors.Join(&sdkcla.Error{Phase: sdkcla.PhaseSubmit, Err: errors.New("codelevelanalysis: submit: connection refused")}, sdkcla.ErrNotCompleted)},
+		{name: "a 404 on a poll joined with a 500 from elsewhere", ok: true,
+			err:  errors.Join(httpclient.NewAPIError(500, "another API's message", ""), api(sdkcla.PhasePoll, 404)),
+			want: Failure{Reason: FailureTaskExpired, StatusCode: 404, Message: "the API's message"}},
 		{name: "nil", err: nil},
 	}
 	for _, tc := range cases {

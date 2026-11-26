@@ -58,7 +58,13 @@ type Failure struct {
 // reports false for every other error: a failed connection, a cancelled
 // context, a status with no meaning of its own here such as 401, and any
 // error that did not come from an analysis, whose status means something
-// else. Such an error is best shown as it is.
+// else. The status and the reason are read from the analysis error alone, so
+// an error of another request joined to it does not lend it a status.
+//
+// An error it reports false for has no message made for display: its text is
+// the SDK's and can hold the request URL, with the environment and the entity
+// in it, or the token of the analysis task. Show it where that is acceptable,
+// and log it otherwise.
 func ClassifyError(err error) (Failure, bool) {
 	var runErr *sdkcla.Error
 	if !errors.As(err, &runErr) {
@@ -68,12 +74,12 @@ func ClassifyError(err error) (Failure, bool) {
 	if phase == sdkcla.PhaseValidate {
 		return Failure{Reason: FailureInvalidInput, Message: runErr.Error()}, true
 	}
-	if errors.Is(err, sdkcla.ErrNotCompleted) {
+	if errors.Is(runErr.Err, sdkcla.ErrNotCompleted) {
 		return Failure{Reason: FailureTimeout, Message: err.Error()}, true
 	}
 
 	var apiErr *httpclient.APIError
-	if !errors.As(err, &apiErr) {
+	if !errors.As(runErr.Err, &apiErr) {
 		return Failure{}, false
 	}
 	f := Failure{StatusCode: apiErr.StatusCode, Message: apiErr.Message}
