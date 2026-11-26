@@ -14,7 +14,7 @@ Filter segments are how Dynatrace scopes a query, and `dtctl query` already take
 2. **A segment cannot express per-directory scope.** It is an environment object with one meaning wherever it is used. A monorepo needs a different filter depending on the directory a command runs from, which only the client knows.
 3. **The link belongs with the code.** It is reviewed, versioned and branched with the repository, and every clone has it. A segment lives in the environment, outside that review.
 
-Rendering an entry onto an existing segment, so that the platform applies it, is a follow-up; the file format does not stand in its way.
+None of the three is a reason not to *use* a segment that already exists, and an entry can name some: see [Segments an entry references](#segments-an-entry-references). Reading a segment needs no write scope, the entry still decides per directory, and the reference is reviewed with the code. dtctl never creates or changes one.
 
 ## dtui's workspace file
 
@@ -24,14 +24,14 @@ Rendering an entry onto an existing segment, so that the platform applies it, is
 |---|---|---|
 | Owner | dtctl (`pkg/reposcope`) | dtui |
 | Found | at the `.git` root only | walking up to `/` |
-| Narrows by | bindings, rendered to a filter in the query text | existing filter segments, sent beside the query |
+| Narrows by | bindings, rendered to a filter in the query text, and the existing filter segments an entry references, sent beside the query | existing filter segments, sent beside the query |
 | Varies by directory | yes, an entry's `path` | no |
 | Selects the environment | never | `environment`, in dtui |
 | Unknown keys | reported; `set` and `delete` refuse to rewrite | ignored |
 
-1. **dtctl does not read `.dtui.yaml`.** Its `environment` key picks the context, which is harmless in a read-only viewer and not in a CLI that writes: a cloned file would decide which environment `apply` and `delete` reach, and under which safety level. Its segments would change the rows of a stable command for everyone who already has the file, including a personal one in a home directory. The same segments are available explicitly through `--segment` and `--segments-file`.
-2. **dtui is to read the scope file through `pkg/reposcope`,** not through a parser of its own. The lookup rules (the `.git` stop, the regular-file and size check), the validation and the renderer are what make a cloned file safe to honour, and a second implementation would drift in exactly those places. The read path is `Locate`, `Load`, `Resolve`, `Filters` and `dql.InsertFilter`, shown in the package example; none of them writes.
-3. **The two narrowings are ANDed and independent.** Segments travel in the request and the scope filter sits in the query text, so a query that has both is narrowed by both (in dtctl today, a scoped query run with `--segment`), and neither replaces, merges with or takes precedence over the other. Each has its own switch. Bindings and segments that share no records give no rows, which is the correct answer to the question asked.
+1. **dtctl does not read `.dtui.yaml`.** Its `environment` key picks the context, which is harmless in a read-only viewer and not in a CLI that writes: a cloned file would decide which environment `apply` and `delete` reach, and under which safety level. Its segments would change the rows of a stable command for everyone who already has the file, including a personal one in a home directory. The same segments are available explicitly through `--segment` and `--segments-file`, and a repository that wants them applied by default lists them in an entry of the scope file, where they are validated, vary by directory and are found only at the `.git` root.
+2. **dtui is to read the scope file through `pkg/reposcope`,** not through a parser of its own. The lookup rules (the `.git` stop, the regular-file and size check), the validation and the renderer are what make a cloned file safe to honour, and a second implementation would drift in exactly those places. The read path is `Locate`, `Load`, `Resolve`, `Filters` and `dql.InsertFilter`, shown in the package example; none of them writes. An entry's segments are `Status.Entry.Segments`, ids and variable values as validated data, so dtui sends them without parsing a string.
+3. **The two narrowings are ANDed and independent.** Segments travel in the request and the scope filter sits in the query text, so a query that has both is narrowed by both (in dtctl today, a scoped query run with `--segment`), and neither replaces, merges with or takes precedence over the other. Each has its own switch. That holds for the segments an entry references as well: they are sent with the workspace file's own, a segment both name is sent once with the workspace file's variables (the nearer, personal file wins, as `--segment` does in dtctl), and the platform's limit of ten per query is dtui's to enforce over the union. Bindings and segments that share no records give no rows, which is the correct answer to the question asked.
 4. **The scope file never selects an environment.** `--context`, `DTCTL_CONTEXT` and, in dtui, the workspace file's `environment` decide that; the scope is then looked up under the resulting host, and a host without entries means no scope.
 5. **Neither file moves into the other.** A workspace file is hand-written, tolerant of keys it does not know and found from any parent directory; the scope file is written by `set`, refuses to drop what it does not know and belongs to one repository. One file could keep only one of those behaviours.
 
@@ -142,6 +142,34 @@ A scoped query that returns nothing is diagnosed on the text the user typed, not
 
 **Scope and scan cost.** The inserted filter narrows the rows and, as an equality filter right after `fetch`, helps the scan, but it cannot by itself keep a wide timeframe under the scan limit. `sdk/inventory/sampling.go` records the measurement: a scoped, unsampled 15-minute count of logs still scanned 341 GB on a large environment, against 500 GB for the capped unscoped read. Nothing honest can be inserted to change that: a timeframe changes the question, `samplingRatio` makes every scoped result approximate, and a scan cap is not scoping. So the rewrite sends what it always sent, and says so before sending: when neither the fetch stage (a `scanLimitGBytes` other than `-1`, `samplingRatio`; `Rewrite.ScanBounded`) nor the resolved scan limit or sampling ratio bounds the scan, the scope line ends with a clause that only the environment's default cap applies, and `decorate` repeats the same string as the one scan suggestion. A bounded scoped query the cap still stopped gets one line after the run instead, worded to agree with the executor's "filter early with ==" hint, which lists the other levers. `wait query` says either once; `verify query` sends no query and has no clause.
 
+## Segments an entry references
+
+An entry may list existing filter segments, each with the values of its variables. A query run under the entry sends them as if `--segment` had been typed:
+
+```yaml
+- name: checkout
+  workloads:
+    - namespace: payments
+      name: checkout
+  segments:
+    - id: Ab3dEf9hIjk
+      variables:
+        environment: [production]
+```
+
+- **By id, never by name.** `--segment` resolves a name with a list call and takes the first match; a committed file must not change meaning when someone renames a segment or creates a second one of that name. `variables` is a map from name to values, so a variable cannot be given twice, where `--segments-file` takes the API's list.
+- **Validated like every binding.** An id is letters, digits, `-` and `_`; a variable name is a DQL identifier that may hold dots; values are printable text of bounded length; an entry holds at most ten segments, the platform's limit per query, and names none twice. Ids and values travel in the request body as JSON, never in the query text, so there is nothing to quote, but nothing unchecked leaves the machine either.
+- **ANDed with the bindings.** The bindings stay alternatives among themselves; the filter they render and every segment must all hold. A segment is a constraint, which [Evolving the schema](#evolving-the-schema) reserves for `apiVersion: v2`; like `cluster-uid` it is in v1 because no released dtctl reads the file.
+- **An entry may hold only segments.** It then inserts no filter and applies wherever segments do, `timeseries` and events included, which no binding reaches today.
+- **Which commands.** `query` and `wait query` send them. `verify query` does not: verification takes the query text and nothing else, so it says the entry's segments are not part of what it checked. `exec dql` is never scoped. The Live Debugger commands ignore them, because a workspace is filtered by labels, not by segments: an entry that holds only segments renders no filter set, with that reason, and the user guide says it where breakpoints are described.
+- **With the user's own.** `--segment`, `--segments-file` and the entry's are sent together. A segment the user names that the entry also lists is sent once, with the user's variables, and a line says so: what is typed wins over what is committed, as the user's own `filter` on a bound field does. More than ten in total is an error before anything is sent, naming `--no-repo-scope`; dropping some silently would change the rows.
+- **Switches.** `--no-repo-scope`, `DTCTL_NO_REPO_SCOPE` and a stability floor that hides the flags turn the entry off whole, segments included. There is no switch for the segments alone.
+- **What is shown.** The scope line on stderr lists them (`segments Ab3dEf9hIjk?environment=production`), in the spelling `--segment` takes. `context.repo_scope.segments` carries them as data. `applied` is true when the query sent was narrowed, by the filter, by segments or both, and `filter` is empty when none was inserted. `describe` and `list` print them.
+- **The filter and the segments fail apart.** When the rewrite cannot insert the filter (`not_fetch`, `user_filter` and the rest) the entry's segments are still sent, and the line says which half applied. Under `--repo-scope <name>` a refused rewrite stays the error it was when the entry has bindings: the caller asked for that entry's rows.
+- **A segment that cannot be used fails the whole scope, loudly.** The platform fails a query that names a segment it cannot find (`FILTER_SEGMENT_NOT_FOUND`), so one deleted segment would break every query in the repository. Before sending, dtctl reads each of the entry's segments once (`GET` by id, at most ten, once per invocation however often `wait query` polls). If one is missing or unreadable (deleted, not shared with this user, or a token without `storage:filter-segments:read`), the query runs exactly as typed, without the filter either, with a warning naming the segment and code `segment_unavailable`. Half a scope would return rows that look scoped and are not. Under `--repo-scope <name>` it is an error.
+- **What the check cannot see.** Whether a segment's variables are all bound is the platform's to say: a missing one fails the query (`FILTER_SEGMENT_REQUIRES_VARIABLE`), and the failure names the scope, the segment and `--no-repo-scope`. A variable the segment does not declare is ignored by the platform, and a value it does not know selects nothing, which the zero-records line covers.
+- **Cost.** One small read per referenced segment per invocation, and nothing for an entry without segments. Probing with a query was rejected: a query over `data record()` does not validate its segments, and a real one would scan.
+
 ## Live Debugger
 
 A Live Debugger workspace is filtered by labels its processes carry, under the same names as the record fields an entry binds, so an entry can set workspace filters as well as narrow queries. `reposcope.LiveDebuggerFilters` renders it into the type `--filters` parses to and `livedebugger.BuildFilterSets` takes, `map[string][]string`. `Resolve` renders once into `Status.LiveDebuggerFilters`, the one rendering `repo-scope describe`, `-o json` and both breakpoint paths read (through `Status.LiveDebuggerFilterSets`, which carries the reason when there is none).
@@ -230,7 +258,7 @@ Candidates are keyed by cluster, namespace, workload and service name, so the re
 
 1. Metrics: `timeseries` scoping on `dt.service.*` and `dt.process.*` through the `filter:` parameter. Until then metric queries run unscoped with a warning.
 2. `fetch events` and `fetch bizevents`; `inventory arrivals --scope` defaulting to the repo scope.
-3. Rendering an entry onto a filter segment, so the platform applies it.
+3. Creating a segment from an entry's bindings, so the platform applies them. Referencing existing segments is done (see [Segments an entry references](#segments-an-entry-references)); creating one stays a write dtctl does not make on a user's behalf.
 4. Discovery narrowing by host or deploy time, and a configurable window; a breakpoint's reached-process count (asynchronous per rule).
 5. A per-user overlay, export/import, and mapping profiling frames back to source.
 6. Rebuilding `stripDQLLiterals` (`pkg/exec`) and `dqlCode` (`cmd/query_window.go`) on `dql.Scan`, so one scanner remains.
