@@ -541,9 +541,10 @@ func TestWaitQueryRepoScope_OutcomeNamesTheScope(t *testing.T) {
 	chdirTestRepo(t, checkoutScope)
 	const (
 		noRecords = `{"state":"SUCCEEDED","result":{"records":[]}}`
-		unmet     = "condition not met under repo scope checkout; compare with --no-repo-scope\n"
-		vacuous   = "0 records under repo scope checkout; compare with --no-repo-scope\n"
+		unmet     = "condition not met under repo scope checkout; compare without --repo-scope checkout\n"
+		vacuous   = "0 records under repo scope checkout; compare without --repo-scope checkout\n"
 	)
+	named := []string{"--repo-scope", "checkout"}
 	poll := []string{"--max-attempts", "2", "--min-interval", "1ms", "--max-interval", "1ms"}
 	for _, tc := range []struct {
 		name, body, condition string
@@ -551,12 +552,12 @@ func TestWaitQueryRepoScope_OutcomeNamesTheScope(t *testing.T) {
 		code                  int
 		line                  string
 	}{
-		{"none is satisfied by nothing", noRecords, "none", nil, 0, vacuous},
-		{"any never arrives", noRecords, "any", nil, 2, unmet},
-		{"a count is not reached", oneRecord, "count-gte=5", nil, 2, unmet},
-		{"any arrives", oneRecord, "any", nil, 0, ""},
-		{"unscoped and unmet", noRecords, "any", []string{"--no-repo-scope"}, 2, ""},
-		{"unscoped and satisfied by nothing", noRecords, "none", []string{"--no-repo-scope"}, 0, ""},
+		{"none is satisfied by nothing", noRecords, "none", named, 0, vacuous},
+		{"any never arrives", noRecords, "any", named, 2, unmet},
+		{"a count is not reached", oneRecord, "count-gte=5", named, 2, unmet},
+		{"any arrives", oneRecord, "any", named, 0, ""},
+		{"unscoped and unmet", noRecords, "any", nil, 2, ""},
+		{"unscoped and satisfied by nothing", noRecords, "none", nil, 0, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			newDQLRecorder(t, "readonly", answer(http.StatusOK, tc.body))
@@ -642,7 +643,7 @@ func TestQueryRepoScope_ScanCapNotice(t *testing.T) {
 	require.NotContains(t, stderr, "repo scope")
 	require.NotContains(t, stdout, "under repo scope")
 
-	wait := []string{"wait", "query", repoScopeTypedQuery, "--for=count-gte=5",
+	wait := []string{"wait", "query", repoScopeTypedQuery, "--for=count-gte=5", "--repo-scope", "checkout",
 		"--max-attempts", "2", "--min-interval", "1ms", "--max-interval", "1ms"}
 	srv.reset()
 	_, _, stderr = runRepoScoped(append(append([]string{}, wait...), bounded...), RunOptions{})
@@ -718,10 +719,10 @@ func TestExecDQLIsNeverRepoScoped(t *testing.T) {
 }
 
 // wait query and verify query take the same input path as query, so they
-// send (and verify checks) the same scoped text, and honour the opt-out.
-// Neither has an agent envelope, so in agent mode too the stderr line is all
-// that reports the scope. Verifying scans nothing, so its line has no scan
-// clause.
+// send (and verify checks) the same scoped text: verify query by default,
+// wait query when the entry is named. Neither has an agent envelope, so in
+// agent mode too the stderr line is all that reports the scope. Verifying
+// scans nothing, so its line has no scan clause.
 func TestWaitQueryAndVerifyQueryApplyRepoScope(t *testing.T) {
 	optInRepoScope(t)
 	for _, tc := range []struct {
@@ -729,9 +730,14 @@ func TestWaitQueryAndVerifyQueryApplyRepoScope(t *testing.T) {
 		argv   []string
 		body   string
 		notice string
+		// unscoped is what runs the query as typed.
+		unscoped []string
 	}{
-		{"wait query", []string{"wait", "query", repoScopeTypedQuery, "--for=any"}, oneRecord, repoScopeNotice},
-		{"verify query", []string{"verify", "query", repoScopeTypedQuery}, `{"valid":true}`, repoScopeApplying + "\n"},
+		{"wait query", []string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout"}, oneRecord,
+			strings.Replace(repoScopeNotice, " (use --no-repo-scope to ignore it)", "", 1),
+			[]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--quiet"}},
+		{"verify query", []string{"verify", "query", repoScopeTypedQuery}, `{"valid":true}`, repoScopeApplying + "\n",
+			[]string{"verify", "query", repoScopeTypedQuery, "--no-repo-scope"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, tc.body))
@@ -752,7 +758,7 @@ func TestWaitQueryAndVerifyQueryApplyRepoScope(t *testing.T) {
 			}
 
 			srv.reset()
-			code, _, stderr = runRepoScoped(append(tc.argv, "--no-repo-scope"), RunOptions{})
+			code, _, stderr = runRepoScoped(tc.unscoped, RunOptions{})
 			require.Zero(t, code, stderr)
 			require.Equal(t, repoScopeTypedQuery, srv.first(t))
 			require.NotContains(t, stderr, "repo scope")
@@ -794,10 +800,14 @@ func TestQueryRepoScope_StableFloor(t *testing.T) {
 	commands := []struct {
 		path string
 		argv []string
+		// byNameOnly is a command without a default scope: where the floor
+		// admits --repo-scope it names the covering entry in one line, and
+		// applies it only when it is named.
+		byNameOnly bool
 	}{
-		{"query", []string{"query", repoScopeTypedQuery, "--agent"}},
-		{"wait query", []string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"}},
-		{"verify query", []string{"verify", "query", repoScopeTypedQuery, "--agent"}},
+		{path: "query", argv: []string{"query", repoScopeTypedQuery, "--agent"}},
+		{path: "wait query", argv: []string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"}, byNameOnly: true},
+		{path: "verify query", argv: []string{"verify", "query", repoScopeTypedQuery, "--agent"}},
 	}
 	both := func(path string) []string { return []string{path + " --repo-scope", path + " --no-repo-scope"} }
 	for _, c := range commands {
@@ -807,15 +817,18 @@ func TestQueryRepoScope_StableFloor(t *testing.T) {
 			env        map[string]string
 			args       []string
 			scoped     bool
+			// hinted says the floor admits --repo-scope and nothing turned
+			// repo scopes off, so a byNameOnly command names the entry.
+			hinted bool
 		}{
 			{name: "floor in the context"},
 			{name: "floor in the environment", env: map[string]string{"DTCTL_MIN_STABILITY": "stable"}},
 			{name: "an exception for the command does not reach its flags", exceptions: []string{c.path}},
 			{name: "an exception for repo-scope does not admit the command's flags", exceptions: []string{"repo-scope"}},
-			{name: "--repo-scope alone leaves the default off", exceptions: []string{c.path + " --repo-scope"}},
+			{name: "--repo-scope alone leaves the default off", exceptions: []string{c.path + " --repo-scope"}, hinted: true},
 			{name: "--repo-scope alone admits naming an entry", exceptions: []string{c.path + " --repo-scope"},
 				args: []string{"--repo-scope", "checkout"}, scoped: true},
-			{name: "both flags admit the default", exceptions: both(c.path), scoped: true},
+			{name: "both flags admit the default", exceptions: both(c.path), scoped: true, hinted: true},
 			{name: "the environment opt-out still works", exceptions: both(c.path), env: map[string]string{noRepoScopeEnv: "1"}},
 		} {
 			t.Run(c.path+"/"+tc.name, func(t *testing.T) {
@@ -832,10 +845,14 @@ func TestQueryRepoScope_StableFloor(t *testing.T) {
 
 				code, stdout, stderr := runRepoScoped(append(append([]string{}, c.argv...), tc.args...), RunOptions{Env: tc.env})
 				require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-				if !tc.scoped {
+				if !tc.scoped || (c.byNameOnly && len(tc.args) == 0) {
 					require.Equal(t, repoScopeTypedQuery, srv.first(t))
-					require.NotContains(t, stderr, "repo scope")
 					require.NotContains(t, stdout, "repo_scope")
+					if c.byNameOnly && tc.hinted {
+						require.Contains(t, stderr, "repo scope checkout covers this directory and is not applied: wait query applies a scope only when it is named, with --repo-scope checkout\n")
+						return
+					}
+					require.NotContains(t, stderr, "repo scope")
 					return
 				}
 				require.Equal(t, repoScopeScopedQuery, srv.first(t))

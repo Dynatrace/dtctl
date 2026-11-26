@@ -203,6 +203,7 @@ func TestQueryRepoScope_SegmentReadFails(t *testing.T) {
 		{[]string{"--repo-scope", "checkout"}, "replace --repo-scope checkout with --no-repo-scope"},
 	} {
 		args, message := tc.args, failed+tc.asTyped+" to run it as typed"
+		named := []string{"--repo-scope", "checkout"}
 		srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
 		srv.segments = map[string]int{"Ab3dEf9hIjk": http.StatusBadRequest, "plain-1": http.StatusOK}
 		chdirTestRepo(t, segmentScope)
@@ -213,9 +214,10 @@ func TestQueryRepoScope_SegmentReadFails(t *testing.T) {
 		require.Empty(t, srv.queries(), "nothing is sent")
 		require.NotContains(t, stderr, "applying repo scope")
 
-		code, stdout, _ = runRepoScoped(append([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"}, args...), RunOptions{})
+		// wait query scopes under a name only, and has no opt-out to advise.
+		code, stdout, _ = runRepoScoped(append([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"}, named...), RunOptions{})
 		require.NotZero(t, code)
-		require.Equal(t, message, agentError(t, stdout).Message)
+		require.Equal(t, failed+"drop --repo-scope checkout to run it as typed", agentError(t, stdout).Message)
 		require.Empty(t, srv.queries())
 	}
 }
@@ -230,23 +232,26 @@ func TestQueryRepoScope_SegmentReadAsksForNoFields(t *testing.T) {
 	require.Equal(t, []string{segmentRequests + "Ab3dEf9hIjk ", segmentRequests + "plain-1 "}, srv.requests()[:2])
 }
 
-// wait query polls until its condition holds, so a wait whose scope was
-// dropped would poll the whole environment for minutes on one stderr line.
-// It fails before the first attempt instead.
+// A wait under a named entry one of whose segments is gone does not start:
+// the caller asked for that entry's rows.
 func TestWaitQuery_SegmentUnavailable(t *testing.T) {
 	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
 	srv.segments = map[string]int{"plain-1": http.StatusOK}
 	chdirTestRepo(t, segmentScope)
 
-	code, stdout, _ := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"}, RunOptions{})
+	code, stdout, _ := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent", "--repo-scope", "checkout"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Equal(t, "repo scope checkout cannot be applied: filter segment Ab3dEf9hIjk does not exist in this environment, or is not shared with you; "+
-		"wait query does not poll unscoped: correct the entry's segments in .dtctl-repo-scope.yaml, or pass --no-repo-scope", agentError(t, stdout).Message)
+	detail := agentError(t, stdout)
+	require.Equal(t, "validation_error", detail.Code)
+	require.Contains(t, detail.Message, `entry "checkout" cannot be applied: filter segment Ab3dEf9hIjk does not exist in this environment, or is not shared with you`)
+	require.Contains(t, detail.Suggestions, "drop --repo-scope checkout to run the query as typed")
 	require.Empty(t, srv.queries(), "no attempt is made")
 
-	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--plain", "--no-repo-scope"}, RunOptions{})
+	// Without the name the wait is not scoped, so the segment is not read.
+	before := len(srv.requestLog())
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, repoScopeTypedQuery, srv.first(t))
+	require.Equal(t, []string{"POST /platform/storage/query/v1/query:execute query=" + repoScopeTypedQuery}, srv.requestLog()[before:])
 }
 
 // Live mode refreshes for as long as it is open, and its one warning is on a
@@ -374,19 +379,19 @@ func TestQueryRepoScope_SegmentVarForASegmentGivenByName(t *testing.T) {
 	require.Contains(t, stderr, "repo scope tools: segment plain-1 is also given on the command line; its variables there are used")
 }
 
-// wait query sends the entry's segments on every attempt and reads them
-// once. verify query checks the text alone, and says the segments are not
+// wait query, under a named entry, sends its segments on every attempt and
+// reads them once. verify query checks the text alone, and says the segments are not
 // part of what it checked.
 func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
 	chdirTestRepo(t, segmentScope)
 
-	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any"}, RunOptions{})
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	body, reads := srv.executed(t)
 	require.Contains(t, body, segmentsSent)
 	require.Len(t, reads, 2)
-	require.Contains(t, stderr, " with segments "+entrySegmentRefs+" (use --no-repo-scope to ignore it)")
+	require.Contains(t, stderr, " with segments "+entrySegmentRefs+"; ")
 
 	srv = segmentRecorder(t, answer(http.StatusOK, `{"valid":true}`))
 	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery}, RunOptions{})
@@ -695,12 +700,13 @@ func TestQueryRepoScope_SegmentsOnlyEntryIsAScope(t *testing.T) {
 		agentEnvelope(t, stdout).Context.Suggestions[0])
 
 	poll := []string{"--max-attempts", "2", "--min-interval", "1ms", "--max-interval", "1ms"}
+	poll = append(poll, "--repo-scope", "tools")
 	code, _, stderr = runRepoScoped(append([]string{"wait", "query", timeseries, "--for=any"}, poll...), RunOptions{})
 	require.Equal(t, 2, code, stderr)
-	require.True(t, strings.HasSuffix(stderr, "condition not met under repo scope tools; compare with --no-repo-scope\n"), stderr)
+	require.True(t, strings.HasSuffix(stderr, "condition not met under repo scope tools; compare without --repo-scope tools\n"), stderr)
 	code, _, stderr = runRepoScoped(append([]string{"wait", "query", timeseries, "--for=none"}, poll...), RunOptions{})
 	require.Zero(t, code, stderr)
-	require.True(t, strings.HasSuffix(stderr, "0 records under repo scope tools; compare with --no-repo-scope\n"), stderr)
+	require.True(t, strings.HasSuffix(stderr, "0 records under repo scope tools; compare without --repo-scope tools\n"), stderr)
 
 	inTools(t, answer(http.StatusBadRequest, `{"error":{"code":400,"message":"no","details":{"errorType":"FILTER_SEGMENT_NOT_FOUND"}}}`))
 	code, stdout, _ = runRepoScoped([]string{"query", timeseries, "--agent"}, RunOptions{})

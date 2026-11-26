@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/util/template"
 	"github.com/Dynatrace/dtctl/pkg/wait"
@@ -146,9 +147,15 @@ Examples:
 				defer cancel()
 			}
 
+			// A scope is applied only when it is named. Without a name the
+			// wait is the one it always was, and says in one line when the
+			// directory's entry would have narrowed it.
 			scoped, err := applyRepoScope(cmd, cfg, query)
 			if err != nil {
 				return err
+			}
+			if hint := repoScopeHint(cmd, cfg, query); hint != "" && !quiet {
+				output.FprintInfo(currentStderr(ctx), "%s", hint)
 			}
 			// Read once here, however often the wait polls.
 			if err := scoped.checkSegments(ctx, c); err != nil {
@@ -158,9 +165,6 @@ Examples:
 					}
 					return &silentExitError{code: 1, reason: "wait: timeout"}
 				}
-				return err
-			}
-			if err := scoped.requireSegments("wait query does not poll unscoped"); err != nil {
 				return err
 			}
 			segments := scoped.withSegments(nil)
@@ -295,7 +299,7 @@ Examples:
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
-	addRepoScopeFlags(c, queryRepoScopeUsage, queryNoRepoScopeUsage)
+	addRepoScopeFlags(c, waitRepoScopeUsage, "")
 	rejectEmptyFlag(c, "file")
 	return c
 }

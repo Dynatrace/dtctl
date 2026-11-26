@@ -303,9 +303,13 @@ and `note` says so, because a count over 2h reads exactly like a count over
 
 Inside a git repository linked to the entities that run its code by a
 `.dtctl-repo-scope.yaml` at its root (see `dtctl repo-scope --help`),
-`dtctl query`, `wait query` and `verify query` narrow `fetch logs` and
+`dtctl query` and `verify query` narrow `fetch logs` and
 `fetch spans` to the entry covering the working directory, by inserting one
-`| filter (...)` after the `fetch` stage. `dtctl query`'s envelope says so;
+`| filter (...)` after the `fetch` stage. `wait query` does the same only
+under `--repo-scope <name>`: its answer is an exit code, so it applies no
+scope it was not asked for, and without the name it prints one line on stderr
+when an entry covers the directory (`repo scope <name> covers this directory
+and is not applied: ...`). `dtctl query`'s envelope says what was applied;
 `wait query` and `verify query` have no agent envelope, and report the scope
 only in the stderr line every scoped run prints:
 

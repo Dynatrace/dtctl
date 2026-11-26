@@ -73,6 +73,10 @@ const (
 	queryRepoScopeUsage = `narrow fetch logs/spans to this entry of the repository's .dtctl-repo-scope.yaml
 default: the entry covering the working directory`
 	queryNoRepoScopeUsage = "run the query exactly as typed, ignoring the repository's .dtctl-repo-scope.yaml (env: " + noRepoScopeEnv + "=1)"
+	// wait query has no default: its outcome is an exit code, read where
+	// nobody reads the line that says a scope was applied.
+	waitRepoScopeUsage = `narrow fetch logs/spans to this entry of the repository's .dtctl-repo-scope.yaml
+default: none, the query runs exactly as typed`
 )
 
 // addRepoScopeFlags registers the entry selector and, unless optOutUsage is
@@ -134,6 +138,7 @@ type repoScopeResolution struct {
 //
 //	--no-repo-scope, or DTCTL_NO_REPO_SCOPE without a name → off
 //	no name, and the stability floor hides either flag     → off
+//	no name, on a command without --no-repo-scope          → off (wait query)
 //	context has no environment URL                         → off (--repo-scope: the error)
 //	HostWorkingDirectory not granted, a session            → off (--repo-scope: CapabilityError)
 //	no .git at or above the working directory              → off (--repo-scope: InvalidError)
@@ -449,6 +454,35 @@ func (q *repoScopedQuery) changedRequest() bool {
 	return q.scope != nil && (q.filtered || len(q.segments) > 0)
 }
 
+// repoScopeHint is the one line of a command that applies a scope only when
+// one is named, run without a name where the covering entry would have
+// changed the request: the entry exists, and this is how to use it. It is
+// empty everywhere else, so the command says nothing a caller did not see
+// before repo scopes existed: where the user turned them off, where the
+// stability floor hides the flag the line names, outside a linked repository,
+// and for a file or an entry that offers this query nothing.
+func repoScopeHint(cmd *cobra.Command, cfg *config.Config, query string) string {
+	ctx := cmdContext(cmd)
+	if name, _ := cmd.Flags().GetString(repoScopeFlag); name != "" || truthyEnv(ctx, noRepoScopeEnv) || !repoScopeAdmitted(cmd, repoScopeFlag) {
+		return ""
+	}
+	scope, err := openRepoScope(ctx, cfg)
+	if err != nil || len(scope.file.Entries(scope.host)) == 0 {
+		return ""
+	}
+	status, err := scope.resolve("")
+	if err != nil || status.Entry == nil {
+		return ""
+	}
+	would := &repoScopedQuery{Query: query, typed: query}
+	would.rewrite(status)
+	if !would.changedRequest() {
+		return ""
+	}
+	return fmt.Sprintf("repo scope %s covers this directory and is not applied: %s applies a scope only when it is named, with --%s %s",
+		status.Entry.Name, commandPathRelative(cmd, cmd.Root()), repoScopeFlag, status.Entry.Name)
+}
+
 // asTyped is what to change on this command line to run the query as typed.
 // Under a name that is not "add --no-repo-scope", which the name excludes,
 // and not "drop the name", which applies whichever entry covers the
@@ -487,10 +521,11 @@ func (q *repoScopedQuery) ignoreHint(what string) string {
 }
 
 // requireSegments is for a command that must not run unscoped on its own
-// decision, because it keeps running after the one line that says so: wait
-// query polls until its condition holds, and live mode redraws the screen
-// the warning was on. refusal says what the command does not do, as in
-// "wait query does not poll unscoped".
+// decision, because it keeps running after the one line that says so: live
+// mode redraws the screen the warning was on. refusal says what the command
+// does not do, as in "query --live does not refresh unscoped". wait query,
+// which polls, needs no such check: it applies a scope only under a name,
+// and there a segment that cannot be read is already an error.
 func (q *repoScopedQuery) requireSegments(refusal string) error {
 	if q.scope == nil || q.unavailable == "" {
 		return nil

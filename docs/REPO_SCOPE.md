@@ -1,7 +1,7 @@
 # Repo Scope Guide
 
-> **Experimental:** the `repo-scope` commands, `--repo-scope`/`--no-repo-scope` on `query`, `wait query` and
-> `verify query`, and the breakpoint commands that read a scope may change in any release.
+> **Experimental:** the `repo-scope` commands, `--repo-scope`/`--no-repo-scope` on `query` and
+> `verify query`, `--repo-scope` on `wait query`, and the breakpoint commands that read a scope may change in any release.
 > A context with `min-stability: stable` withholds them and runs every query as typed; exceptions for both flags
 > (`'query --repo-scope'`, `'query --no-repo-scope'`) bring default scoping back. See [STABILITY.md](STABILITY.md#choosing-what-this-environment-accepts).
 
@@ -11,8 +11,9 @@ This guide explains how to link a git repository to the Dynatrace entities that 
 
 A **repo scope** is a data-only file at the repository root, `.dtctl-repo-scope.yaml`, committed like code. For each Dynatrace environment it names the Kubernetes workloads, service names, process groups and services that run the repository's code. Inside a linked repository:
 
-- `dtctl query`, `dtctl wait query` and `dtctl verify query` narrow `fetch logs` and `fetch spans` to those entities by default, and say so on stderr
+- `dtctl query` and `dtctl verify query` narrow `fetch logs` and `fetch spans` to those entities by default, and say so on stderr
 - `--no-repo-scope` runs one query exactly as typed; `DTCTL_NO_REPO_SCOPE=1` does it for a whole shell or CI job
+- `dtctl wait query` is scoped only when you name the entry (`--repo-scope <name>`): its answer is an exit code, read where nobody reads stderr. Without the name it runs as typed and says in one line that an entry covers the directory
 - `--repo-scope <name>` picks one entry where several exist, as in a monorepo
 
 The commands that manage the file:
@@ -201,7 +202,7 @@ fetch logs | filter (service.name == "checkout" or (k8s.namespace.name == "payme
 | filter loglevel == "ERROR" | limit 20
 ```
 
-When a scoped query returns no records, a second line says so, `0 records under repo scope checkout; compare with --no-repo-scope`, because a binding the records do not carry looks exactly like a quiet service. A query that ends in an ungrouped `summarize` returns one row even for nothing, so the line is also printed when that row's `count()` is 0; no other aggregate is read that way, since a zero `countIf` or `sum` says nothing about how many records the scope let through. `wait query` polls, so it does not say this per attempt. It says once, when the wait ends, `condition not met under repo scope checkout; compare with --no-repo-scope`, or the `0 records` line when a condition such as `--for none` was satisfied by nothing.
+When a scoped query returns no records, a second line says so, `0 records under repo scope checkout; compare with --no-repo-scope`, because a binding the records do not carry looks exactly like a quiet service. A query that ends in an ungrouped `summarize` returns one row even for nothing, so the line is also printed when that row's `count()` is 0; no other aggregate is read that way, since a zero `countIf` or `sum` says nothing about how many records the scope let through. `wait query --repo-scope checkout` polls, so it does not say this per attempt. It says once, when the wait ends, `condition not met under repo scope checkout; compare without --repo-scope checkout`, or the `0 records` line when a condition such as `--for none` was satisfied by nothing.
 
 ### What a scope costs
 
@@ -242,9 +243,9 @@ applying repo scope checkout to fetch logs: (k8s.namespace.name == "payments" an
 - **Segments alone.** An entry may hold only segments (`dtctl repo-scope set platform --segment Ab3dEf9hIjk`). It inserts no filter and applies to every query, `timeseries` and events included, which bindings do not reach.
 - **Where the filter cannot go.** When the filter cannot be inserted for one of the reasons above, the entry's segments are still sent, and a warning says which half applied. Such a query is narrower than the one you typed and wider than the entry, so in agent mode it is reported with `applied: false` and the reason the filter was refused, with the segments that were sent listed.
 - **With your own.** `--segment` and `--segments-file` are sent as well. A segment you name that the entry also lists is sent once, with your variables, and the scope line then lists only the segments the entry added. To give an entry's segment other variables for one query, name it: `--segment "Ab3dEf9hIjk?environment=staging"` (`--segment-var` works only on a segment you gave with `--segment`). A query takes ten segments; more than that, yours and the entry's together, is an error.
-- **A segment that is gone.** Before sending, dtctl reads each segment the entry references. If one was deleted, is not shared with you, or your token cannot read segments (`storage:filter-segments:read`), the query runs exactly as typed, without the filter either, and a warning names the segment. With `--repo-scope <name>` it is an error, and `wait query` and `query --live` fail as well rather than poll or refresh over the whole environment. A read that fails for any other reason (a server error, a rate limit, a timeout) is always an error and nothing is sent: it says nothing about the segment, so retry, or pass `--no-repo-scope`.
+- **A segment that is gone.** Before sending, dtctl reads each segment the entry references. If one was deleted, is not shared with you, or your token cannot read segments (`storage:filter-segments:read`), the query runs exactly as typed, without the filter either, and a warning names the segment. With `--repo-scope <name>` it is an error, which covers every scoped `wait query`, and `query --live` fails as well rather than refresh over the whole environment. A read that fails for any other reason (a server error, a rate limit, a timeout) is always an error and nothing is sent: it says nothing about the segment, so retry, or pass `--no-repo-scope`.
 - **Variables.** The entry has to give a value for every variable the segment requires. dtctl does not check that before sending: the platform fails the query, and the error names the segment, the variable and the entry, and says to give the variable a value in `.dtctl-repo-scope.yaml` or pass `--no-repo-scope`. A segment can also need a variable that only some data can supply. It then fails other queries run in the repository, an entity query for example, with an error that names the entry in the same way; remove that segment from the entry, or give it an entry of its own under a narrower `path`. `wait query` ends on either error at the first attempt, as on any query the platform refuses for good, and prints it with the text that was sent.
-- **Commands.** `query` and `wait query` send the segments. `verify query` checks the query text only: it neither reads nor sends them, and says so, so a segment that cannot be read shows on `query`, not there. `repo-scope describe` lists them and says that they are sent where no filter is inserted. Breakpoints are not affected: see [Live Debugger](#4-live-debugger).
+- **Commands.** `query` sends the segments, and so does `wait query` under `--repo-scope <name>`. `verify query` checks the query text only: it neither reads nor sends them, and says so, so a segment that cannot be read shows on `query`, not there. `repo-scope describe` lists them and says that they are sent where no filter is inserted. Breakpoints are not affected: see [Live Debugger](#4-live-debugger).
 
 ### Check your scope
 
