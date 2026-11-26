@@ -248,12 +248,6 @@ func addProfilingCommonFlags(c *cobra.Command, f *profilingFlags) {
 	fl.BoolVar(&f.raw, "raw", false, "print the API's whole (compacted) result instead of rows; large. Use with -o json or yaml")
 }
 
-// profilingAPIKinds maps a kind subcommand to the API kind it runs.
-var profilingAPIKinds = map[string]profiling.Kind{
-	"hotspots":    profiling.KindHotspots,
-	"allocations": profiling.KindAllocations,
-}
-
 // profilingRun is what one analysis was run on, for the agent envelope.
 type profilingRun struct {
 	kind          string // hotspots or allocations
@@ -332,40 +326,55 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return err
 	}
 
+	run := &profilingRun{
+		kind:          kind,
+		entity:        entityID,
+		leafType:      f.leafType,
+		from:          window.From,
+		to:            window.To,
+		defaultWindow: window.Default,
+	}
+	h := profiling.NewHandler(c)
 	progress := output.NewProgressReporterTo(true, agentMode(ctx), currentStderr(ctx))
 	progress.Update(output.ProgressState{Label: fmt.Sprintf("running %s analysis", kind)})
-	analysis, err := profiling.NewHandler(c).Analyze(cmd.Context(), profiling.Payload{
-		Kind:          profilingAPIKinds[kind],
-		EntityID:      entityID,
-		From:          window.From,
-		To:            window.To,
-		LeafType:      f.leafType,
-		ShowWaiting:   f.showWaiting,
-		SurvivorsOnly: f.survivorsOnly,
+
+	if kind == "allocations" {
+		a, err := h.Allocations(cmd.Context(), profiling.AllocationsRequest{
+			Entity:        entityID,
+			Window:        window,
+			SurvivorsOnly: f.survivorsOnly,
+		})
+		progress.Stop()
+		if err != nil {
+			return profilingAPIError(err)
+		}
+		run.status = a.Status
+		if f.raw {
+			return renderProfilingRaw(ctx, run, a.Raw())
+		}
+		return renderProfilingAllocations(ctx, run, a, f)
+	}
+
+	hs, err := h.Hotspots(cmd.Context(), profiling.HotspotsRequest{
+		Entity:      entityID,
+		Window:      window,
+		LeafType:    f.leafType,
+		ShowWaiting: f.showWaiting,
 	})
 	progress.Stop()
 	if err != nil {
 		return profilingAPIError(err)
 	}
-
-	run := &profilingRun{
-		kind:          kind,
-		entity:        entityID,
-		leafType:      f.leafType,
-		status:        analysis.Status,
-		from:          window.From,
-		to:            window.To,
-		defaultWindow: window.Default,
-	}
+	run.status = hs.Status
 	switch {
 	case f.raw:
-		return renderProfilingRaw(ctx, run, analysis)
+		return renderProfilingRaw(ctx, run, hs.Raw())
 	case f.focus != "":
-		return renderProfilingFocus(ctx, run, analysis, f)
+		return renderProfilingFocus(ctx, run, hs, f)
 	case f.view == "functions":
-		return renderProfilingFunctions(ctx, run, analysis, f)
+		return renderProfilingFunctions(ctx, run, hs, f)
 	}
-	return renderProfilingStacks(ctx, run, analysis, f)
+	return renderProfilingStacks(ctx, run, hs, f)
 }
 
 // validateProfilingView checks the hotspots view flags. A flag that only one
@@ -411,75 +420,91 @@ func profilingLimit(ctx context.Context, f *profilingFlags, def int) int {
 	return def
 }
 
-// renderProfilingStacks prints the stack view: one row per unique stack. A
-// table (the default outside agent mode) prints the rows as folded lines; every
-// structured format, --jq and the agent envelope get the same rows as fields.
-// --limit caps every one of them the same way.
-func renderProfilingStacks(ctx context.Context, run *profilingRun, a *profiling.Analysis, f *profilingFlags) error {
-	var rows interface{}
-	var n int
-	var folded func() string
-	unit := "stacks, by running samples"
-	var profile func(p *output.ProfileContext)
-	if run.kind == "allocations" {
-		view := a.Allocations(f.appOnly, f.survivorsOnly)
-		all := view.Rows
-		n = len(all)
-		key := "allocated"
-		if f.survivorsOnly {
-			key = "survived"
-		}
-		unit = "allocation stacks, by " + key + " bytes"
-		limited := capProfilingRows(all, profilingLimit(ctx, f, profilingStacksDefaultLimit))
-		rows = limited
-		folded = func() string { return profiling.FoldAllocations(limited, f.survivorsOnly) }
-		profile = func(p *output.ProfileContext) {
-			p.AllocatedBytes, p.SurvivedBytes = &view.AllocatedBytes, &view.SurvivedBytes
-		}
-	} else {
-		view := a.Stacks(f.appOnly)
-		all := view.Rows
-		n = len(all)
-		limited := capProfilingRows(all, profilingLimit(ctx, f, profilingStacksDefaultLimit))
-		rows = limited
-		folded = func() string { return profiling.FoldStacks(limited) }
-		profile = func(p *output.ProfileContext) {
+// renderProfilingStacks prints the hotspots stack view: one row per unique
+// stack.
+func renderProfilingStacks(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags) error {
+	view := h.Stacks(f.appOnly)
+	if len(view.Rows) == 0 {
+		_, note := h.WhyEmpty(f.appOnly, "")
+		return printProfilingEmpty(ctx, run, "stacks", "", []profiling.StackRow{}, note)
+	}
+	rows := capProfilingRows(view.Rows, profilingLimit(ctx, f, profilingStacksDefaultLimit))
+	return printProfilingStacks(ctx, run, profilingStackOutput{
+		rows:   rows,
+		shown:  len(rows),
+		total:  len(view.Rows),
+		unit:   "stacks, by running samples",
+		folded: func() string { return profiling.FoldStacks(rows) },
+		profile: func(p *output.ProfileContext) {
 			p.Samples = &view.Samples
 			p.State = "running"
-		}
-	}
-	shown := profilingRowCount(rows)
+		},
+		suggestion: "one row per call stack, ranked by running samples: to rank functions, summed over every stack they appear in, use --view functions (--state lock|wait|offcpu for blocked time); for one function's callers, --focus <function>",
+	})
+}
 
-	if n == 0 {
-		_, note := a.WhyEmpty(f.appOnly, "")
-		return printProfilingEmpty(ctx, run, "stacks", "", rows, note)
+// renderProfilingAllocations prints the allocations stack view: one row per
+// unique allocation path.
+func renderProfilingAllocations(ctx context.Context, run *profilingRun, a *profiling.Allocations, f *profilingFlags) error {
+	view := a.Stacks(f.appOnly, f.survivorsOnly)
+	if len(view.Rows) == 0 {
+		_, note := a.WhyEmpty(f.appOnly)
+		return printProfilingEmpty(ctx, run, "stacks", "", []profiling.AllocationRow{}, note)
 	}
+	key := "allocated"
+	if f.survivorsOnly {
+		key = "survived"
+	}
+	rows := capProfilingRows(view.Rows, profilingLimit(ctx, f, profilingStacksDefaultLimit))
+	return printProfilingStacks(ctx, run, profilingStackOutput{
+		rows:   rows,
+		shown:  len(rows),
+		total:  len(view.Rows),
+		unit:   "allocation stacks, by " + key + " bytes",
+		folded: func() string { return profiling.FoldAllocations(rows, f.survivorsOnly) },
+		profile: func(p *output.ProfileContext) {
+			p.AllocatedBytes, p.SurvivedBytes = &view.AllocatedBytes, &view.SurvivedBytes
+		},
+		suggestion: profiling.SurvivedNote,
+	})
+}
+
+// profilingStackOutput is a stack view ready to print, of either kind.
+type profilingStackOutput struct {
+	rows         interface{} // the rows after --limit
+	shown, total int         // row counts after and before --limit
+	unit         string      // what the rows are and how they are ranked
+	folded       func() string
+	profile      func(*output.ProfileContext) // sets the totals the rows are shares of
+	suggestion   string
+}
+
+// printProfilingStacks prints a stack view that has rows. A table (the default
+// outside agent mode) prints them as folded lines; every structured format,
+// --jq and the agent envelope get the same rows as fields. --limit caps every
+// one of them the same way.
+func printProfilingStacks(ctx context.Context, run *profilingRun, o profilingStackOutput) error {
 	truncated := ""
-	if shown < n {
-		truncated = fmt.Sprintf("showing %d of %d %s; --limit 0 lists them all", shown, n, unit)
+	if o.shown < o.total {
+		truncated = fmt.Sprintf("showing %d of %d %s; --limit 0 lists them all", o.shown, o.total, o.unit)
 	}
 
 	if agentMode(ctx) {
 		p := newPrinterCtx(ctx)
 		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
-			profile(run.annotate(ap, "stacks", ""))
-			ap.SetTotal(n)
+			o.profile(run.annotate(ap, "stacks", ""))
+			ap.SetTotal(o.total)
 			if truncated != "" {
 				ap.SetHasMore(true)
 				ap.SetWarnings([]string{truncated})
 			}
-			if run.kind == "allocations" {
-				ap.SetSuggestions([]string{profiling.SurvivedNote})
-			}
-			if run.kind == "hotspots" {
-				ap.SetSuggestions([]string{"one row per call stack, ranked by running samples: to rank functions, summed over every stack they appear in, use --view functions (--state lock|wait|offcpu for blocked time); for one function's callers, --focus <function>"})
-			}
+			ap.SetSuggestions([]string{o.suggestion})
 		}
-		return p.PrintList(rows)
+		return p.PrintList(o.rows)
 	}
 	if isProfilingTableFormat(ctx) && jqFilter(ctx) == "" {
 		w := currentStdout(ctx)
-		if _, err := fmt.Fprint(w, folded()); err != nil {
+		if _, err := fmt.Fprint(w, o.folded()); err != nil {
 			return err
 		}
 		if truncated != "" {
@@ -487,7 +512,7 @@ func renderProfilingStacks(ctx context.Context, run *profilingRun, a *profiling.
 		}
 		return nil
 	}
-	return newPrinterCtx(ctx).PrintList(rows)
+	return newPrinterCtx(ctx).PrintList(o.rows)
 }
 
 func capProfilingRows[T any](rows []T, limit int) []T {
@@ -498,16 +523,6 @@ func capProfilingRows[T any](rows []T, limit int) []T {
 		return []T{}
 	}
 	return rows
-}
-
-func profilingRowCount(rows interface{}) int {
-	switch r := rows.(type) {
-	case []profiling.StackRow:
-		return len(r)
-	case []profiling.AllocationRow:
-		return len(r)
-	}
-	return 0
 }
 
 // isProfilingTableFormat reports whether the output format is a table, which
@@ -522,22 +537,22 @@ func isProfilingTableFormat(ctx context.Context) bool {
 
 // renderProfilingRaw prints the API's whole (compacted) result: JSON unless
 // another structured format was asked for.
-func renderProfilingRaw(ctx context.Context, run *profilingRun, a *profiling.Analysis) error {
+func renderProfilingRaw(ctx context.Context, run *profilingRun, raw map[string]interface{}) error {
 	p := newPrinterCtx(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 		run.annotate(ap, "raw", "")
 	} else if isProfilingTableFormat(ctx) {
 		p = newPrinterOpts(ctx, output.PrinterOptions{Format: "json", PlainMode: plainMode(ctx), JQFilter: jqFilter(ctx)})
 	}
-	return p.Print(a.Raw())
+	return p.Print(raw)
 }
 
 // renderProfilingFunctions prints the functions view: rows through the standard
 // printer, so a table, -o json/csv/yaml, --jq and the agent envelope all work.
-func renderProfilingFunctions(ctx context.Context, run *profilingRun, a *profiling.Analysis, f *profilingFlags) error {
-	t := a.Functions(f.appOnly, f.state, f.sortBy)
+func renderProfilingFunctions(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags) error {
+	t := h.Functions(f.appOnly, f.state, f.sortBy)
 	if t == nil {
-		_, note := a.WhyEmpty(f.appOnly, f.state)
+		_, note := h.WhyEmpty(f.appOnly, f.state)
 		return printProfilingEmpty(ctx, run, "functions", f.state, []profiling.FunctionRow{}, note)
 	}
 	limit := profilingLimit(ctx, f, profilingFunctionsDefaultLimit)
@@ -560,12 +575,12 @@ func renderProfilingFunctions(ctx context.Context, run *profilingRun, a *profili
 }
 
 // renderProfilingFocus prints one function's callers and callees.
-func renderProfilingFocus(ctx context.Context, run *profilingRun, a *profiling.Analysis, f *profilingFlags) error {
+func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags) error {
 	limit := profilingLimit(ctx, f, profilingFocusDefaultLimit)
-	rows, fn, nCallers, nCallees, err := a.Focus(f.appOnly, f.state, f.focus, limit)
+	rows, fn, nCallers, nCallees, err := h.Focus(f.appOnly, f.state, f.focus, limit)
 	if err != nil {
-		if a.Functions(f.appOnly, f.state, "self") == nil {
-			_, note := a.WhyEmpty(f.appOnly, f.state)
+		if h.Functions(f.appOnly, f.state, "self") == nil {
+			_, note := h.WhyEmpty(f.appOnly, f.state)
 			return printProfilingEmpty(ctx, run, "focus", f.state, []profiling.FocusRow{}, note)
 		}
 		return err

@@ -3,31 +3,20 @@
 // that uses dtctl as a library.
 //
 // The sequence is: ResolveWindow turns a requested timeframe into a Window,
-// Handler.Analyze runs the analysis, and the methods of the returned Analysis
-// read it as rows (Stacks, Allocations, Functions, Focus) or whole (Raw).
-// ClassifyError says what to do about an API failure, and Analysis.WhyEmpty
-// why a view has no rows. The HTTP calls are the SDK's
+// Handler.Hotspots or Handler.Allocations runs the analysis, and the methods of
+// the returned Hotspots or Allocations read it as rows (Stacks, Functions,
+// Focus) or whole (Raw). Each kind of analysis has its own result type, so a
+// view is only there for the kind it reads. ClassifyError says what to do about
+// an API failure, and WhyEmpty why a view has no rows. The HTTP calls are the SDK's
 // (sdk/api/codelevelanalysis); this package adds the window rules, the folds
 // and the advice. Advice and notes are worded for a dtctl user and name dtctl
 // flags.
 package profiling
 
 import (
-	"context"
-
 	"github.com/Dynatrace/dtctl/pkg/client"
 	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
-)
-
-// Kind names an analysis by its API name.
-type Kind = sdkcla.Kind
-
-// The analyses `dtctl exec profiling` runs. The allocations analysis is the
-// API's memoryAllocation, which the command also takes as `memory`.
-const (
-	KindHotspots    = sdkcla.KindHotspots
-	KindAllocations = sdkcla.KindAllocations
 )
 
 // Leaf-type selections for hotspots, re-exported from the SDK.
@@ -48,12 +37,6 @@ func APIEntityID(entityID string) string { return sdkcla.NormalizeEntityID(entit
 // other id fails before a request is sent.
 func EligibleEntity(entityID string) bool { return sdkcla.EligibleEntity(entityID) }
 
-// Payload is the analysis request; re-exported from the SDK for CLI use.
-type Payload = sdkcla.Payload
-
-// Response is the analysis result; re-exported from the SDK for CLI use.
-type Response = sdkcla.Response
-
 // Handler runs analyses against one environment.
 type Handler struct {
 	sdk *sdkcla.Handler
@@ -62,10 +45,4 @@ type Handler struct {
 // NewHandler returns a Handler that sends its requests through c.
 func NewHandler(c *client.Client) *Handler {
 	return &Handler{sdk: sdkcla.NewHandler(httpclient.Wrap(c.HTTP()))}
-}
-
-// Run runs one analysis and returns the SDK's response as it is. Analyze does
-// the same and returns it ready to be read.
-func (h *Handler) Run(ctx context.Context, p Payload) (*Response, error) {
-	return h.sdk.Run(ctx, p)
 }

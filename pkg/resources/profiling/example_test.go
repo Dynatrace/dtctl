@@ -44,11 +44,9 @@ func Example() {
 		return
 	}
 
-	analysis, err := profiling.NewHandler(c).Analyze(context.Background(), profiling.Payload{
-		Kind:     profiling.KindHotspots,
-		EntityID: "PROCESS-0000000000000001",
-		From:     window.From,
-		To:       window.To,
+	analysis, err := profiling.NewHandler(c).Hotspots(context.Background(), profiling.HotspotsRequest{
+		Entity: "PROCESS-0000000000000001",
+		Window: window,
 	})
 	if err != nil {
 		if f, ok := profiling.ClassifyError(err); ok {
