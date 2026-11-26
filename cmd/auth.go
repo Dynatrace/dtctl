@@ -504,6 +504,16 @@ func finalizeLoginConfig(cfg *config.Config, contextName, environment, tokenName
 	cfg.PruneEmptyEnvironments(contextName, placeholderNames)
 }
 
+// existingSafetyLevel returns the safety level the named context already
+// has, or fallback when the context is new or records none.
+func existingSafetyLevel(cfg *config.Config, contextName string, fallback config.SafetyLevel) config.SafetyLevel {
+	nc, err := cfg.GetContext(contextName)
+	if err != nil || nc.Context.SafetyLevel == "" {
+		return fallback
+	}
+	return nc.Context.SafetyLevel
+}
+
 // Environment variables that supply client credentials grant parameters. They
 // are preferred over the equivalent flags because command line arguments are
 // visible to other processes.
@@ -705,6 +715,13 @@ Non-interactive login (CI/CD):
 				cfg = config.NewConfig()
 			}
 
+			// Re-authenticating a context keeps the level it already has:
+			// the flag's default is for a context that does not exist yet,
+			// and must not raise one that was set to readonly.
+			if !cmd.Flags().Changed("safety-level") {
+				safetyLevel = existingSafetyLevel(cfg, contextName, safetyLevel)
+			}
+
 			// Ensure a token storage backend is available before starting OAuth flow.
 			// Keyring is preferred; file-based storage is the fallback for headless/WSL/CI environments.
 			if keyringErr := authCheckKeyringFunc(); keyringErr != nil {
@@ -854,7 +871,7 @@ Non-interactive login (CI/CD):
 	c.Flags().String("environment", "", "Dynatrace environment URL (defaults to current context's environment)")
 	c.Flags().String("token-name", "", "name for storing the OAuth token (defaults to existing token name or <context>-oauth)")
 	c.Flags().String("timeout", "5m", "timeout for the authentication flow (bounds the browser flow and the client credentials token request)")
-	c.Flags().String("safety-level", string(config.DefaultSafetyLevel), "safety level for the context (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)")
+	c.Flags().String("safety-level", string(config.DefaultSafetyLevel), "safety level for the context (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted); an existing context keeps its level unless this is given")
 	c.Flags().String("client-id", "", "OAuth client ID for the non-interactive client credentials grant (env: "+envLoginClientID+")")
 	c.Flags().String("client-secret", "", "OAuth client secret for the client credentials grant; prefer the environment variable (env: "+envLoginClientSecret+")")
 	c.Flags().String("account-urn", "", "account URN sent as the resource indicator, e.g. urn:dtaccount:<uuid> (env: "+envLoginAccountURN+")")

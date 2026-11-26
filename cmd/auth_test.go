@@ -1172,3 +1172,91 @@ func TestAuthLogin_ClientCredentials_PartialInputDoesNotFallBackToBrowser(t *tes
 		})
 	}
 }
+
+// TestAuthLogin_KeepsTheContextsSafetyLevel: logging in again is how an
+// expired session is renewed, so it must not change what the context may do.
+// The flag's default applies to a context that does not exist yet; an
+// existing one keeps its level unless --safety-level is given.
+func TestAuthLogin_KeepsTheContextsSafetyLevel(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+
+	tests := []struct {
+		name     string
+		existing config.SafetyLevel // "" = the context does not exist yet
+		args     []string
+		want     config.SafetyLevel
+	}{
+		{"existing readonly context, no flag", config.SafetyLevelReadOnly, nil, config.SafetyLevelReadOnly},
+		{"existing readonly context, flag raises it", config.SafetyLevelReadOnly, []string{"--safety-level", "readwrite-mine"}, config.SafetyLevelReadWriteMine},
+		{"existing context, flag set to the default", config.SafetyLevelReadOnly, []string{"--safety-level", string(config.DefaultSafetyLevel)}, config.DefaultSafetyLevel},
+		{"new context, no flag", "", nil, config.DefaultSafetyLevel},
+		{"new context, flag", "", []string{"--safety-level", "readonly"}, config.SafetyLevelReadOnly},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			resetAuthLoginFlags(t)
+			t.Setenv("DTCTL_DISABLE_KEYRING", "1")
+			t.Setenv(config.EnvTokenStorage, "file")
+			t.Setenv("XDG_DATA_HOME", t.TempDir())
+			xdg.Reload()
+			t.Cleanup(xdg.Reload)
+			t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
+			t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
+			t.Setenv(envLoginAccountURN, "")
+
+			ctxName := fmt.Sprintf("keep-level-ctx-%d", i)
+			configPath := setupAuthTestConfig(t, "other", envURL, "other-oauth")
+			if tt.existing != "" {
+				cfg, err := config.LoadFrom(configPath)
+				if err != nil {
+					t.Fatalf("load config: %v", err)
+				}
+				cfg.SetContextWithOptions(ctxName, envURL, ctxName+"-oauth", &config.ContextOptions{SafetyLevel: tt.existing})
+				if err := cfg.SaveTo(configPath); err != nil {
+					t.Fatalf("save config: %v", err)
+				}
+			}
+			gFlags.cfgFile = configPath
+			defer func() { gFlags.cfgFile = "" }()
+
+			origCheck := authCheckKeyringFunc
+			defer func() { authCheckKeyringFunc = origCheck }()
+			authCheckKeyringFunc = func() error {
+				return fmt.Errorf("keyring disabled via %s environment variable", config.EnvDisableKeyring)
+			}
+
+			origGrant := authClientCredentialsFunc
+			defer func() { authClientCredentialsFunc = origGrant }()
+			authClientCredentialsFunc = func(context.Context, *auth.OAuthFlow, string, string, string, []string) (*auth.TokenSet, error) {
+				return &auth.TokenSet{
+					AccessToken: "test-access-token",
+					TokenType:   "Bearer",
+					ExpiresIn:   300,
+					ExpiresAt:   time.Now().Add(5 * time.Minute),
+				}, nil
+			}
+
+			args := append([]string{"auth", "login", "--context", ctxName, "--environment", envURL}, tt.args...)
+			captureAuthStderr(t, func() {
+				rootCmd.SetArgs(args)
+				if err := rootCmd.Execute(); err != nil {
+					t.Errorf("auth login: %v", err)
+				}
+			})
+
+			saved, err := config.LoadFrom(configPath)
+			if err != nil {
+				t.Fatalf("load saved config: %v", err)
+			}
+			nc, err := saved.GetContext(ctxName)
+			if err != nil {
+				t.Fatalf("context not saved: %v", err)
+			}
+			if nc.Context.SafetyLevel != tt.want {
+				t.Errorf("safety level = %q, want %q", nc.Context.SafetyLevel, tt.want)
+			}
+		})
+	}
+}
