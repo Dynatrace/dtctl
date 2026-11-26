@@ -448,3 +448,28 @@ func TestDiscover_DenialReportedInTheMessage(t *testing.T) {
 		assert.True(t, r.Partial, name)
 	}
 }
+
+// A rung that came back empty and one after it that the environment did not
+// sample: the capped answer stands, and the notes say so. They used to say
+// too that the data was sampled and matched nothing, which the next note
+// contradicts.
+func TestDiscover_RefusedRungAfterAnEmptyOne(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {
+			capped(rows(t, "spans-checkout")),
+			sampledAnswer(nil, 1_000_000),
+			{records: rows(t, "spans-checkout"), scannedBytes: 4_000_000_000},
+		},
+		"logs": {{records: rows(t, "logs-checkout")}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Len(t, runner.sent, 4)
+	assert.Equal(t, causeSamplingRefused, r.Queries[2].Cause)
+	assert.Equal(t, []string{
+		"this environment did not sample spans, so there is no cheaper query than the capped one",
+		"spans stopped at the 5 GB scan cap, so the verdict is capped at ambiguous",
+	}, r.Notes)
+	assert.True(t, r.Partial)
+	assert.False(t, r.SampledRecords(), "nothing was read by a sample")
+}

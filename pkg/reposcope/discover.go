@@ -857,12 +857,14 @@ func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCau
 // for: Grail only ever samples more finely than asked, so it is the
 // conservative bound, and it is defined when the sample matched nothing.
 // A sampled match is complete at that floor; a sampled miss is a bound, not
-// an absence, so the report stays partial.
+// an absence, so the report stays partial. An object the environment turned
+// out not to sample gets no such note: its capped answer stands, and an
+// earlier rung that came back empty bounds nothing.
 func (r *DiscoveryReport) samplingNotes() []string {
 	var answered []*Query
 	for i := range r.Queries {
 		q := &r.Queries[i]
-		if !q.SampledRetry() || q.Skipped || q.Error != "" || (q.Cause != "" && q.Cause != causeRowLimit) {
+		if !q.SampledRetry() || q.Skipped || q.Error != "" || (q.Cause != "" && q.Cause != causeRowLimit) || r.samplingRefused(q.DataObject) {
 			continue
 		}
 		// The last rung of an object that answered is the finest: it is
@@ -886,7 +888,16 @@ func (r *DiscoveryReport) samplingNotes() []string {
 // report shows to be unshared may still be shared.
 func (r *DiscoveryReport) SampledRecords() bool {
 	return slices.ContainsFunc(r.Queries, func(q Query) bool {
-		return q.SampledRetry() && !q.Skipped && q.Error == "" && q.Cause != causeSamplingRefused
+		return q.SampledRetry() && !q.Skipped && q.Error == "" && !r.samplingRefused(q.DataObject)
+	})
+}
+
+// samplingRefused reports whether a sampled retry over object came back
+// unsampled: the environment does not sample it, whatever an earlier, empty
+// retry seemed to say.
+func (r *DiscoveryReport) samplingRefused(object string) bool {
+	return slices.ContainsFunc(r.Queries, func(q Query) bool {
+		return q.DataObject == object && q.Cause == causeSamplingRefused
 	})
 }
 
