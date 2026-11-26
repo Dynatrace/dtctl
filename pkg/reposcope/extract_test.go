@@ -394,11 +394,48 @@ func TestExtract_Dockerfile(t *testing.T) {
 		{"the last ENTRYPOINT counts", "ENTRYPOINT [\"/bin/first-thing\"]\nENTRYPOINT [\"/bin/second-thing\"]", "second-thing"},
 		{"nothing but an interpreter", `CMD ["bash"]`, ""},
 		{"a generic name is no token", `ENTRYPOINT ["/app/server"]`, ""},
+		{"a shell line in exec form is not a name", `CMD ["sh", "-c", "java -Dapi.key=secret123 -jar app.jar"]`, ""},
+		{"nor is one that runs a binary with a secret", `CMD ["sh", "-c", "/bin/order-api --db-pass=hunter2"]`, ""},
+		{"an assignment is not a name", "CMD API_KEY=secret123 /bin/order-api", "order-api"},
+		{"a flag that holds a jar is not the artifact", `ENTRYPOINT ["java", "-javaagent:/otel/opentelemetry-javaagent.jar", "-jar", "/app/billing-core.jar"]`, "billing-core"},
+		{"only a flag holds a jar", `ENTRYPOINT ["java", "-javaagent:/otel/opentelemetry-javaagent.jar"]`, ""},
+		{"a web server names nothing", `CMD ["nginx", "-g", "daemon off;"]`, ""},
+		{"a package script names nothing", `CMD ["npm", "start"]`, ""},
+		{"an application server names nothing", "CMD python -m uvicorn main:app", ""},
+		{"nor does its module file", `CMD ["gunicorn", "wsgi"]`, ""},
+		{"an entry file names nothing", "CMD node dist/index.js", ""},
+		{"a launch script names nothing", `ENTRYPOINT ["./run.sh"]`, ""},
+		{"what a launcher runs is read", `CMD ["uvicorn", "ledger.main:app"]`, "ledger"},
+		{"an interpreter is known by its stem", `CMD ["python3.12", "scheduler.py"]`, "scheduler"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _ := dockerEntrypoint("FROM scratch\n"+tt.dockerfile+"\n", "Dockerfile")
 			assert.Equal(t, tt.want, got.value)
+		})
+	}
+}
+
+// Only the last stage of a Dockerfile is the image; what an earlier stage
+// runs is a build tool.
+func TestExtract_DockerfileReadsTheLastStage(t *testing.T) {
+	for name, tt := range map[string]struct {
+		dockerfile, want string
+		line             int
+	}{
+		"the build stage's entrypoint is not read": {
+			"FROM golang AS build\nENTRYPOINT [\"/bin/builder-tool\"]\nFROM scratch\nCOPY --from=build /out /\n", "", 0},
+		"the last stage's is": {
+			"FROM golang AS build\nENTRYPOINT [\"/bin/builder-tool\"]\nfrom scratch\nENTRYPOINT [\"/bin/order-api\"]\n", "order-api", 4},
+		"the same line in both stages is cited where it counts": {
+			"FROM golang AS build\nCMD [\"/bin/order-api\"]\nFROM scratch\nCMD [\"/bin/order-api\"]\n", "order-api", 4},
+		"no stage at all": {
+			"CMD [\"/bin/order-api\"]\n", "order-api", 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, _ := dockerEntrypoint(tt.dockerfile, "Dockerfile")
+			assert.Equal(t, tt.want, got.value)
+			assert.Equal(t, tt.line, got.line)
 		})
 	}
 }

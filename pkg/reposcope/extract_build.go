@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -108,37 +109,49 @@ func assemblyName(text, file string) (token, bool) {
 	return newToken(kindAssembly, strings.TrimSuffix(path.Base(file), ".csproj"), file, 0)
 }
 
-// interpreters are the programs a Dockerfile runs something else with; the
-// name worth reading is that something else.
-var interpreters = keySet("sh", "bash", "exec", "java", "node", "python", "python3",
-	"dotnet", "npm", "yarn", "pnpm", "ruby", "php", "tini", "dumb-init")
+// launchers are the programs and scripts a Dockerfile starts something else
+// with, compared without their extension: an interpreter or a process
+// supervisor, a server that is configured rather than built (nginx, uvicorn,
+// gunicorn), and the entry files every project calls the same (index.js,
+// run.sh, npm start, wsgi.py). None of them names the service; the name worth
+// reading is what comes after.
+var launchers = keySet("sh", "bash", "exec", "java", "node", "python", "python3",
+	"dotnet", "npm", "yarn", "pnpm", "ruby", "php", "tini", "dumb-init",
+	"nginx", "uvicorn", "gunicorn", "index", "run", "start", "wsgi", "asgi")
 
-// dockerEntrypoint reads what the image runs. Docker appends CMD to
-// ENTRYPOINT, so the last of each are read together; a jar, war or dll
-// argument wins, since it names the artifact, and otherwise the first
-// argument that is neither an interpreter nor a flag.
+var dockerFromRe = regexp.MustCompile(`(?im)^[ \t]*FROM[ \t]`)
+
+// dockerEntrypoint reads what the image runs. The image is the last stage of
+// the file, so only that stage is read: an earlier one runs a build tool.
+// Docker appends CMD to ENTRYPOINT, so the last of each are read together; a
+// jar, war or dll argument wins, since it names the artifact, and otherwise
+// the first argument that is neither a launcher nor a flag.
 func dockerEntrypoint(text, file string) (token, bool) {
-	var entrypoint, cmd []string
-	for _, m := range dockerRunRe.FindAllStringSubmatch(text, -1) {
-		if strings.EqualFold(m[1], "ENTRYPOINT") {
+	stage := 0
+	if from := dockerFromRe.FindAllStringIndex(text, -1); len(from) > 0 {
+		stage = from[len(from)-1][0]
+	}
+	var entrypoint, cmd []int
+	for _, m := range dockerRunRe.FindAllStringSubmatchIndex(text[stage:], -1) {
+		if strings.EqualFold(text[stage+m[2]:stage+m[3]], "ENTRYPOINT") {
 			entrypoint = m
 		} else {
 			cmd = m
 		}
 	}
 	var args []string
-	line := ""
-	for _, m := range [][]string{cmd, entrypoint} {
+	line := 0
+	for _, m := range [][]int{cmd, entrypoint} {
 		if m != nil {
-			args = append(splitDockerArgs(m[2]), args...)
-			line = m[0]
+			args = append(splitDockerArgs(text[stage+m[4]:stage+m[5]]), args...)
+			line = strings.Count(text[:stage+m[0]], "\n") + 1
 		}
 	}
 	name := runTarget(args)
 	if name == "" {
 		return token{}, false
 	}
-	return tokenAt(kindEntrypoint, name, file, text, line)
+	return newToken(kindEntrypoint, name, file, line)
 }
 
 // splitDockerArgs splits ENTRYPOINT/CMD arguments in exec form (a JSON
@@ -152,8 +165,14 @@ func splitDockerArgs(args string) []string {
 }
 
 // runTarget picks the name a command line runs, without directory or
-// extension.
+// extension. An argument is never a name when it is a flag, an assignment
+// (KEY=value, --key=value) or a line of its own (the script of sh -c): those
+// carry configuration, credentials among it, and a flag may hold a jar that
+// is an agent rather than the artifact.
 func runTarget(args []string) string {
+	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool {
+		return strings.HasPrefix(a, "-") || strings.ContainsAny(a, "= \t\r\n")
+	})
 	for _, a := range args {
 		switch path.Ext(a) {
 		case ".jar", ".war", ".dll":
@@ -161,11 +180,9 @@ func runTarget(args []string) string {
 		}
 	}
 	for _, a := range args {
-		base := path.Base(a)
-		if strings.HasPrefix(a, "-") || interpreters[base] {
-			continue
+		if stem := strings.TrimSuffix(path.Base(a), path.Ext(a)); !launchers[stem] {
+			return stem
 		}
-		return strings.TrimSuffix(base, path.Ext(base))
 	}
 	return ""
 }
