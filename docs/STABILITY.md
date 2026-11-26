@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 29 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 1009
+- entries below (commands + flags): 1010
 
 ## Surface
 
@@ -1010,6 +1010,7 @@ repo-scope set                       experimental
   --namespace                        experimental
   --path                             experimental
   --process-group                    experimental
+  --segment                          experimental
   --service                          experimental
   --service-name                     experimental
   --workload                         experimental

@@ -265,6 +265,53 @@ func TestRepoScopeSetClusterUID(t *testing.T) {
 	require.Equal(t, before, readScopeFile(t, repo))
 }
 
+// set --segment takes the spelling query --segment does, and saves the
+// reference as data. A segment is given by id: set sends nothing, so it
+// cannot look a name up, and a committed name could change its meaning.
+func TestRepoScopeSetSegments(t *testing.T) {
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, "")
+
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "checkout", "--service-name", "checkout",
+		"--segment", "Ab3dEf9hIjk?environment=production,staging&k8s.namespace.name=payments", "--segment", "plain-1"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	// A segment alone makes an entry.
+	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "tools", "--path", "tools", "--segment", "plain-1"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []reposcope.Entry{
+		{Name: "checkout", ServiceNames: []string{"checkout"}, Segments: []reposcope.Segment{
+			{ID: "Ab3dEf9hIjk", Variables: map[string][]string{"environment": {"production", "staging"}, "k8s.namespace.name": {"payments"}}},
+			{ID: "plain-1"},
+		}},
+		{Name: "tools", Path: "tools", Segments: []reposcope.Segment{{ID: "plain-1"}}},
+	}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost))
+	before := readScopeFile(t, repo)
+
+	for name, tc := range map[string]struct {
+		segment, message string
+	}{
+		"a name":           {"Payments prod", `entry "checkout": segments[0] id "Payments prod" is not a filter segment id (letters, digits, - and _; a name is not accepted)`},
+		"a variable twice": {"Ab3dEf9hIjk?env=a&env=b", `repo-scope set: invalid --segment "Ab3dEf9hIjk?env=a&env=b": variable "env" is given twice; list its values as env=a,b`},
+		"no value":         {"Ab3dEf9hIjk?env=", `repo-scope set: invalid --segment "Ab3dEf9hIjk?env=": variable "env" value must not be empty`},
+	} {
+		code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "checkout", "--agent", "--segment", tc.segment}, RunOptions{})
+		require.NotZero(t, code, name)
+		detail := agentError(t, stdout)
+		require.Equal(t, "validation_error", detail.Code, name)
+		require.True(t, strings.HasSuffix(detail.Message, tc.message), "%s: %s", name, detail.Message)
+		require.Equal(t, before, readScopeFile(t, repo), name)
+	}
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe", "checkout", "--plain", "--no-agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Regexp(t, `Segments:\s+Ab3dEf9hIjk\?environment=production,staging&k8s\.namespace\.name=payments, plain-1\n`, stdout)
+	var table bytes.Buffer
+	rows := repoScopeRows(loadScopeFile(t, repo).Entries(repoScopeTestEnvHost))
+	require.NoError(t, output.NewPrinterWithOpts(output.PrinterOptions{Format: "table", Writer: &table}).PrintList(rows))
+	require.Regexp(t, `NAME\s+PATH\s+WORKLOADS\s+SERVICE NAMES\s+PROCESS GROUPS\s+SERVICES\s+SEGMENTS\s*\n`, table.String())
+	require.Regexp(t, `tools\s+tools\s+plain-1\s*\n`, table.String())
+}
+
 // A refused set must leave a committed file exactly as it was.
 func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 	localRepoScopeConfig(t)

@@ -98,6 +98,11 @@ func TestLiveDebuggerFilters_NothingToCarry(t *testing.T) {
 	assert.Nil(t, sets)
 	assert.Equal(t, `entry "ids" binds only service ids, which Live Debugger does not honour as a workspace label; bind --namespace/--workload or --process-group`, reason)
 
+	sets, ok, reason = LiveDebuggerFilters(&Entry{Name: "segments", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}})
+	assert.False(t, ok)
+	assert.Nil(t, sets)
+	assert.Equal(t, `entry "segments" references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so bind --namespace/--workload or --process-group`, reason)
+
 	sets, ok, reason = LiveDebuggerFilters(&Entry{Name: "empty"})
 	assert.False(t, ok)
 	assert.Nil(t, sets)

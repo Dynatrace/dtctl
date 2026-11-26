@@ -78,6 +78,7 @@ func newRepoScopeSetCmd() *cobra.Command {
 		processGroups []string
 		serviceNames  []string
 		clusterUID    string
+		segments      []string
 		namespace     string
 		workloads     []string
 		entryPaths    []string
@@ -105,6 +106,10 @@ Examples:
   dtctl repo-scope set ledger --path services/ledger \
     --service SERVICE-0123456789ABCDEF --process-group PROCESS_GROUP-FEDCBA9876543210
 
+  # Also send an existing filter segment, by id, with its variable
+  dtctl repo-scope set checkout --service-name checkout \
+    --segment "Ab3dEf9hIjk?environment=production"
+
   # The same entry for the staging environment
   dtctl --context staging repo-scope set checkout --service-name checkout
 `,
@@ -130,6 +135,10 @@ Examples:
 			for _, w := range workloads {
 				entry.Workloads = append(entry.Workloads, reposcope.Workload{ClusterUID: clusterUID, Namespace: namespace, Name: w})
 			}
+			var err error
+			if entry.Segments, err = repoScopeSegments(segments); err != nil {
+				return &reposcope.InvalidError{Source: "repo-scope set", Msg: err.Error()}
+			}
 			return setRepoScope(cmd, entry)
 		},
 	}
@@ -140,7 +149,9 @@ Examples:
 	c.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
 	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
-	for _, name := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "path"} {
+	c.Flags().StringArrayVar(&segments, "segment", nil, `existing filter segment a query under the entry also sends, by id (repeatable, max 10)
+bind its variables inline: "ID?var=val&var2=val1,val2"`)
+	for _, name := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "segment", "path"} {
 		rejectEmptyFlag(c, name)
 	}
 	c.MarkFlagsRequiredTogether("namespace", "workload")
@@ -368,15 +379,41 @@ func repoScopeStatusSuggestions(s *reposcope.Status) []string {
 	return []string{repoScopeDiscoverHint}
 }
 
+// repoScopeSegments reads set's --segment values, in the spelling query's
+// --segment takes, into the references an entry holds. The id is kept as
+// typed: set sends nothing, so a name is not looked up, and Save refuses one
+// that is not an id.
+func repoScopeSegments(flags []string) ([]reposcope.Segment, error) {
+	refs, err := parseSegmentFlags(flags)
+	if err != nil {
+		return nil, err
+	}
+	var out []reposcope.Segment
+	for i, ref := range refs {
+		seg := reposcope.Segment{ID: ref.ID}
+		for _, v := range ref.Variables {
+			if _, twice := seg.Variables[v.Name]; twice {
+				return nil, fmt.Errorf("invalid --segment %q: variable %q is given twice; list its values as %s=a,b", strings.TrimSpace(flags[i]), v.Name, v.Name)
+			}
+			if seg.Variables == nil {
+				seg.Variables = map[string][]string{}
+			}
+			seg.Variables[v.Name] = v.Values
+		}
+		out = append(out, seg)
+	}
+	return out, nil
+}
+
 // setRepoScope writes entry for the current context's environment.
 func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 	ctx := cmdContext(cmd)
 	// Checked here rather than left to Save, so the error names the flags
 	// instead of the file.
-	if len(entry.Services)+len(entry.ProcessGroups)+len(entry.ServiceNames)+len(entry.Workloads) == 0 {
+	if !entry.HasBindings() && len(entry.Segments) == 0 {
 		return &reposcope.InvalidError{
 			Source:      "repo-scope set",
-			Msg:         "an entry needs at least one of --namespace with --workload, --service-name, --process-group or --service",
+			Msg:         "an entry needs at least one of --namespace with --workload, --service-name, --process-group, --service or --segment",
 			Suggestions: []string{repoScopeDiscoverHint},
 		}
 	}

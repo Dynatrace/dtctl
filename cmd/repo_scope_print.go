@@ -68,6 +68,7 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	kv("Service names:", e.ServiceNames...)
 	kv("Process groups:", e.ProcessGroups...)
 	kv("Services:", e.Services...)
+	kv("Segments:", segmentRefs(e.Segments)...)
 	output.FprintDescribeSection(w, "Filters:")
 	for _, object := range reposcope.DataObjects() {
 		if filter, ok, reason := reposcope.Render(e, object); ok {
@@ -101,6 +102,16 @@ func workloadNames(workloads []reposcope.Workload) []string {
 	return names
 }
 
+// segmentRefs spells each segment an entry references the way query's
+// --segment takes one.
+func segmentRefs(segments []reposcope.Segment) []string {
+	refs := make([]string, len(segments))
+	for i, s := range segments {
+		refs[i] = s.String()
+	}
+	return refs
+}
+
 // repoScopeRow is an entry as `repo-scope list` prints it in a table.
 type repoScopeRow struct {
 	Name          string `table:"NAME"`
@@ -109,6 +120,7 @@ type repoScopeRow struct {
 	ServiceNames  string `table:"SERVICE NAMES"`
 	ProcessGroups string `table:"PROCESS GROUPS"`
 	Services      string `table:"SERVICES"`
+	Segments      string `table:"SEGMENTS"`
 }
 
 func repoScopeRows(entries []reposcope.Entry) []repoScopeRow {
@@ -121,6 +133,7 @@ func repoScopeRows(entries []reposcope.Entry) []repoScopeRow {
 			ServiceNames:  strings.Join(e.ServiceNames, ", "),
 			ProcessGroups: strings.Join(e.ProcessGroups, ", "),
 			Services:      strings.Join(e.Services, ", "),
+			Segments:      strings.Join(segmentRefs(e.Segments), ", "),
 		})
 	}
 	return rows

@@ -181,7 +181,7 @@ func TestRepoScopeListsBindingsWorkloadFirst(t *testing.T) {
 	rows := repoScopeRows([]reposcope.Entry{{Name: "checkout", Services: []string{svc}}})
 	var table bytes.Buffer
 	require.NoError(t, output.NewPrinterWithOpts(output.PrinterOptions{Format: "table", Writer: &table}).PrintList(rows))
-	require.Regexp(t, `^NAME\s+PATH\s+WORKLOADS\s+SERVICE NAMES\s+PROCESS GROUPS\s+SERVICES\s*\n`, table.String())
+	require.Regexp(t, `^NAME\s+PATH\s+WORKLOADS\s+SERVICE NAMES\s+PROCESS GROUPS\s+SERVICES\s+SEGMENTS\s*\n`, table.String())
 }
 
 // A set line saves exactly the candidate shown, so it binds the cluster the

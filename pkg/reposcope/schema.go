@@ -48,6 +48,42 @@ type Entry struct {
 	ServiceNames  []string   `yaml:"service-names,omitempty" json:"serviceNames,omitempty" table:"SERVICE-NAMES"`
 	ProcessGroups []string   `yaml:"process-groups,omitempty" json:"processGroups,omitempty" table:"PROCESS-GROUPS"`
 	Services      []string   `yaml:"services,omitempty" json:"services,omitempty" table:"SERVICES"`
+	// Segments are existing filter segments a query under the entry sends
+	// beside its text. Unlike the bindings they are not alternatives: every
+	// one must hold, together with the filter the bindings render. An entry
+	// may hold nothing else.
+	Segments []Segment `yaml:"segments,omitempty" json:"segments,omitempty" table:"SEGMENTS"`
+}
+
+// Segment references one filter segment of the environment by its id, with
+// the values of the variables it declares. A name is never accepted: it can
+// be changed, or given to a second segment, under a committed file.
+type Segment struct {
+	ID        string              `yaml:"id" json:"id"`
+	Variables map[string][]string `yaml:"variables,omitempty" json:"variables,omitempty"`
+}
+
+// VariableNames is the names of the segment's variables, sorted.
+func (s Segment) VariableNames() []string {
+	names := make([]string, 0, len(s.Variables))
+	for name := range s.Variables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// String renders the reference in the spelling query --segment takes:
+// "id", or "id?name=value,value&name=value" with the variables by name.
+func (s Segment) String() string {
+	var vars []string
+	for _, name := range s.VariableNames() {
+		vars = append(vars, name+"="+strings.Join(s.Variables[name], ","))
+	}
+	if len(vars) == 0 {
+		return s.ID
+	}
+	return s.ID + "?" + strings.Join(vars, "&")
 }
 
 // Workload binds one Kubernetes workload. Namespace is required: a workload
@@ -82,7 +118,19 @@ var (
 	// clusterUIDRe is a Kubernetes object UID as the API server writes one:
 	// k8s.cluster.uid is the UID of the cluster's kube-system namespace.
 	clusterUIDRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	// A segment id and a segment variable's name travel in the request
+	// body, not in the query text. They are held to a pattern all the same:
+	// a committed file names existing objects, it does not carry free text.
+	segmentIDRe       = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	segmentVariableRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]{0,127}$`)
 )
+
+// MaxSegments is how many filter segments one query takes, the platform's
+// limit, and so how many an entry may reference.
+const MaxSegments = 10
+
+// maxSegmentValueRunes bounds one value of a segment variable.
+const maxSegmentValueRunes = 255
 
 // maxDNSSubdomain bounds a Kubernetes DNS subdomain name. A namespace is a
 // DNS label; a workload (a Deployment, StatefulSet, …) is a DNS subdomain, so
@@ -197,14 +245,73 @@ func (e *Entry) validate() *InvalidError {
 			return invalid(fmt.Sprintf("workloads[%d] name %q is not a Kubernetes workload name", i, w.Name))
 		}
 	}
-	if !e.hasBinding() {
+	if err := e.validateSegments(); err != nil {
+		return err
+	}
+	if !e.HasBindings() && len(e.Segments) == 0 {
 		return invalid("binds nothing",
-			"add at least one of workloads, service-names, process-groups or services")
+			"add at least one of workloads, service-names, process-groups, services or segments")
 	}
 	return nil
 }
 
-func (e *Entry) hasBinding() bool {
+// validateSegments checks the segments the entry references.
+func (e *Entry) validateSegments() *InvalidError {
+	if len(e.Segments) > MaxSegments {
+		return invalid(fmt.Sprintf("lists %d segments; a query takes at most %d", len(e.Segments), MaxSegments))
+	}
+	seen := map[string]bool{}
+	for i, s := range e.Segments {
+		if !segmentIDRe.MatchString(s.ID) {
+			return invalid(fmt.Sprintf("segments[%d] id %q is not a filter segment id (letters, digits, - and _; a name is not accepted)", i, s.ID),
+				"find the id with: dtctl get segments")
+		}
+		if seen[s.ID] {
+			return invalid(fmt.Sprintf("segments[%d] id %q is listed twice", i, s.ID))
+		}
+		seen[s.ID] = true
+		for _, name := range s.VariableNames() {
+			values := s.Variables[name]
+			if !segmentVariableRe.MatchString(name) {
+				return invalid(fmt.Sprintf("segments[%d] variable %q is not a variable name (letters, digits, _ and .)", i, name))
+			}
+			if len(values) == 0 {
+				return invalid(fmt.Sprintf("segments[%d] variable %q has no values", i, name))
+			}
+			for _, v := range values {
+				if problem := segmentValueProblem(v); problem != "" {
+					return invalid(fmt.Sprintf("segments[%d] variable %q value %q %s", i, name, v, problem))
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// segmentValueProblem explains why v cannot be a segment variable's value,
+// or returns "".
+func segmentValueProblem(v string) string {
+	n := utf8.RuneCountInString(v)
+	switch {
+	case !utf8.ValidString(v):
+		return "is not valid UTF-8"
+	case n == 0:
+		return "is empty"
+	case n > maxSegmentValueRunes:
+		return fmt.Sprintf("is longer than %d characters", maxSegmentValueRunes)
+	}
+	for _, r := range v {
+		if !unicode.IsPrint(r) {
+			return "must not contain control or non-printing characters"
+		}
+	}
+	return ""
+}
+
+// HasBindings reports whether the entry binds anything a filter is rendered
+// from. An entry without bindings references segments only: it inserts no
+// filter, and its segments are all it applies.
+func (e *Entry) HasBindings() bool {
 	return len(e.Services)+len(e.ProcessGroups)+len(e.ServiceNames)+len(e.Workloads) > 0
 }
 

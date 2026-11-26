@@ -33,6 +33,9 @@ import (
 // the entry leaves out. If a workspace turns out not to carry the label, a
 // set with it selects nothing, which shows.
 //
+// The filter segments an entry references are not rendered: a segment
+// narrows a query, and a workspace has no place to take one.
+//
 // Values are sorted copies, never quoted: a filter set is a GraphQL variable,
 // not DQL. ok is false, with a reason, when e binds nothing a label can
 // carry: only service ids, or a binding kind added later.
@@ -72,6 +75,8 @@ func LiveDebuggerFilters(e *Entry) (sets []map[string][]string, ok bool, reason 
 		}
 	}
 	switch {
+	case len(sets) == 0 && !e.HasBindings() && len(e.Segments) > 0:
+		return nil, false, fmt.Sprintf("entry %q references only filter segments, which narrow queries; a Live Debugger workspace is filtered by labels, so bind --namespace/--workload or --process-group", e.Name)
 	case len(sets) == 0 && len(e.Services) > 0:
 		return nil, false, fmt.Sprintf("entry %q binds only service ids, which Live Debugger does not honour as a workspace label; bind --namespace/--workload or --process-group", e.Name)
 	case len(sets) == 0:

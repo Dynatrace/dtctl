@@ -190,6 +190,20 @@ func TestCheck(t *testing.T) {
 			msg: `workloads[0] cluster-uid "ABCDEF01-2222-3333-4444-555555555555" is not a Kubernetes cluster uid (a lowercase UUID, the value of k8s.cluster.uid)`},
 		{name: "cluster name for a uid", doc: entry("name: checkout", "workloads: [{cluster-uid: prod-eu, namespace: payments, name: checkout}]"),
 			msg: `workloads[0] cluster-uid "prod-eu" is not a Kubernetes cluster uid`},
+		{name: "segment named, not identified", doc: entry("name: checkout", "segments: [{id: Payments prod}]"),
+			msg: `segments[0] id "Payments prod" is not a filter segment id (letters, digits, - and _; a name is not accepted)`},
+		{name: "segment without an id", doc: entry("name: checkout", "segments: [{variables: {env: [prod]}}]"),
+			msg: `segments[0] id "" is not a filter segment id`},
+		{name: "segment listed twice", doc: entry("name: checkout", "segments: [{id: Ab3dEf9hIjk}, {id: Ab3dEf9hIjk}]"),
+			msg: `segments[1] id "Ab3dEf9hIjk" is listed twice`},
+		{name: "segment variable name", doc: entry("name: checkout", `segments: [{id: Ab3dEf9hIjk, variables: {"env name": [prod]}}]`),
+			msg: `segments[0] variable "env name" is not a variable name`},
+		{name: "segment variable without values", doc: entry("name: checkout", "segments: [{id: Ab3dEf9hIjk, variables: {env: []}}]"),
+			msg: `segments[0] variable "env" has no values`},
+		{name: "segment variable control character", doc: entry("name: checkout", `segments: [{id: Ab3dEf9hIjk, variables: {env: ["a\tb"]}}]`),
+			msg: `segments[0] variable "env" value "a\tb" must not contain control or non-printing characters`},
+		{name: "more segments than a query takes", doc: entry("name: checkout", "segments: [{id: s1}, {id: s2}, {id: s3}, {id: s4}, {id: s5}, {id: s6}, {id: s7}, {id: s8}, {id: s9}, {id: s10}, {id: s11}]"),
+			msg: "lists 11 segments; a query takes at most 10"},
 		{name: "wrong shape", doc: entry("name: checkout", "services: SERVICE-0123456789ABCDEF"), msg: "does not match the repo scope schema"},
 	}
 	for _, tt := range tests {
@@ -212,7 +226,7 @@ func TestCheck_NoBindingSuggestsWhatToAdd(t *testing.T) {
 	f := &File{Environments: map[string][]Entry{prodHost: {{Name: "checkout"}}}}
 	invalidErr := f.check()
 	require.NotNil(t, invalidErr)
-	assert.Equal(t, []string{"add at least one of workloads, service-names, process-groups or services"}, invalidErr.Suggestions)
+	assert.Equal(t, []string{"add at least one of workloads, service-names, process-groups, services or segments"}, invalidErr.Suggestions)
 }
 
 // A cluster is part of a workload binding, so one entry can bind the same
@@ -235,6 +249,32 @@ func TestWorkloadClusterUID(t *testing.T) {
 	}, workloads)
 	assert.Equal(t, "payments/checkout in cluster "+clusterUID, workloads[0].String())
 	assert.Equal(t, "batch/checkout", workloads[2].String())
+
+	out, err := encode(f)
+	require.NoError(t, err)
+	assert.Equal(t, fileHeader+doc, string(out))
+}
+
+// An entry may reference existing filter segments, beside its bindings or
+// alone, and they survive a rewrite of the file as written.
+func TestEntrySegments(t *testing.T) {
+	doc := "environments:\n  " + prodHost + ":\n    - name: checkout\n      service-names:\n        - checkout\n" +
+		"      segments:\n        - id: Ab3dEf9hIjk\n          variables:\n            environment:\n              - production\n" +
+		"            k8s.namespace.name:\n              - payments\n              - billing\n" +
+		"        - id: plain-segment_1\n" +
+		"    - name: everything\n      path: tools\n      segments:\n        - id: Ab3dEf9hIjk\n"
+	f, invalidErr := decode([]byte(doc))
+	require.Nil(t, invalidErr)
+	assert.Empty(t, f.Warning())
+	entries := f.Entries(prodHost)
+	assert.Equal(t, []Segment{
+		{ID: "Ab3dEf9hIjk", Variables: map[string][]string{"environment": {"production"}, "k8s.namespace.name": {"payments", "billing"}}},
+		{ID: "plain-segment_1"},
+	}, entries[0].Segments)
+	assert.Equal(t, "Ab3dEf9hIjk?environment=production&k8s.namespace.name=payments,billing", entries[0].Segments[0].String(),
+		"the spelling --segment takes, variables by name")
+	assert.Equal(t, "plain-segment_1", entries[0].Segments[1].String())
+	assert.Empty(t, entries[1].ServiceNames, "segments alone make an entry")
 
 	out, err := encode(f)
 	require.NoError(t, err)
