@@ -972,6 +972,37 @@ func TestDiscover_SamplingRefusedByGrail(t *testing.T) {
 	assert.Empty(t, r.samplingNotes())
 }
 
+// Grail leaves "sampled" out of the metadata of a sampled query that scanned
+// nothing, which is what the coarsest rung of a quiet hour looks like. That
+// rung is empty, not refused: the finer rung still runs and answers.
+func TestDiscover_RungThatScannedNothingIsNotARefusal(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), {}, sampledAnswer(rows(t, "spans-checkout-sampled"), 100_000_000)},
+		"logs":  {{records: rows(t, "logs-checkout")}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Empty(t, r.Queries[1].Cause, "nothing scanned is nothing to sample")
+	assert.False(t, r.Queries[2].Skipped, "the next rung ran")
+	require.Len(t, r.Candidates, 1)
+	assert.True(t, r.Candidates[0].Sampled)
+	assert.NotContains(t, strings.Join(r.Notes, "\n"), "did not sample")
+}
+
+// A rung that returns nothing unsampled but did scan data was refused: Grail
+// read what the capped query read and matched none of it.
+func TestDiscover_EmptyUnsampledRungThatScannedIsARefusal(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), {scannedBytes: 5_000_000_000}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	assert.Equal(t, causeSamplingRefused, r.Queries[1].Cause)
+	assert.True(t, r.Queries[2].Skipped)
+}
+
 // Sampled candidates rank by the hits the sample matched.
 func TestDiscover_RanksSampledCandidatesByHits(t *testing.T) {
 	p, err := PlanDiscovery(fstest.MapFS{}, ".", []string{"checkout", "ledger"})

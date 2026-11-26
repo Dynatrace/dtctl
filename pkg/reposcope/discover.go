@@ -391,7 +391,8 @@ func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.R
 // may find a quieter service; but before each rung runs, the scan of the
 // last one that ran is scaled by the steps in between, and a rung predicted
 // to hit the cap again is skipped rather than sent. A rung Grail would not
-// sample, or one cut short, ends it: the next one reads more.
+// sample, or one cut short, ends it: the next one reads more. Not sampled
+// means a result without the sampled flag that read something.
 func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, rungs []*Query, d *discovery) (answered bool) {
 	var predicted int64 // what the next rung will scan; 0 when unknown
 	done, capped := false, false
@@ -421,9 +422,11 @@ func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, r
 		}
 		q.Rows = len(res.Records)
 		switch {
-		case !res.Sampled:
+		case !res.Sampled && (q.Rows > 0 || res.ScannedBytes > 0):
 			// As in inventory: every further rung would be the capped query
-			// over again.
+			// over again. A rung that read nothing is not one: Grail leaves
+			// the sampled flag out of a result that scanned no record, so
+			// there the flag says nothing and the rung is simply empty.
 			q.Cause, done = causeSamplingRefused, true
 			r.note(failureNote(q))
 		case res.Truncated && !collectedArrayCut(q, res):
