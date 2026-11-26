@@ -69,6 +69,8 @@ func TestResolve(t *testing.T) {
 			entry: "ledger", others: []string{"checkout", "checkout-v2", "ledger-close", "shop"}},
 		{name: "no entries for this host", file: monorepoFile(), host: stgHost, dir: "services/checkout",
 			reason: "no entry for stg98765.apps.dynatrace.com; the file defines: abc12345.apps.dynatrace.com"},
+		{name: "a file with no entries at all", file: &File{}, host: prodHost, dir: ".",
+			reason: "no entry for abc12345.apps.dynatrace.com; the file defines no entries"},
 		{name: "selected by name from anywhere", file: monorepoFile(), host: prodHost, dir: ".", pick: "ledger",
 			entry: "ledger", reason: `selected by name; its path "services/ledger" does not cover "."`,
 			others: []string{"checkout", "checkout-v2", "ledger-close"}},

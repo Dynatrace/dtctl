@@ -158,7 +158,7 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 		fmt.Fprintf(w, "%s Save it with:\n  %s\n", took, r.Candidates[0].SetCommand)
 	default:
 		writeRepoScopeCandidates(w, r)
-		fmt.Fprintf(w, "Verdict: %s (candidates: %d)\n", r.Verdict, len(r.Candidates))
+		fmt.Fprintf(w, "Verdict: %s%s\n", r.Verdict, repoScopeDoubt(r))
 		switch {
 		case len(p.selectAll) > 0:
 			fmt.Fprintln(w, took)
@@ -168,6 +168,8 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 		case len(p.handLinks) > 0:
 			fmt.Fprintf(w, "%s No binding selects any candidate alone.\n", took)
 			writeRepoScopeHandLinks(w, p)
+		case len(r.Candidates) == 1:
+			fmt.Fprintf(w, "%s If it is what runs this code, save it with:\n  %s\n", took, r.Candidates[0].SetCommand)
 		default:
 			fmt.Fprintf(w, "%s Save the one that runs this code with its line:\n", took)
 			for i, c := range r.Candidates {
@@ -188,6 +190,20 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 	for _, n := range r.Notes {
 		fmt.Fprintf(w, "Note: %s\n", n)
 	}
+}
+
+// repoScopeDoubt says, after a verdict that is not a match, what stands in
+// the way of one. With several candidates it is their number. With one it is
+// not: that candidate's name matched only in part, or the result is partial
+// and a query that did not answer could have found another.
+func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
+	switch {
+	case len(r.Candidates) != 1:
+		return fmt.Sprintf(" (candidates: %d)", len(r.Candidates))
+	case r.Partial:
+		return ": one candidate, but the result is partial (see the notes)"
+	}
+	return fmt.Sprintf(": one candidate, matched by a %s of its name rather than the whole of it", r.Candidates[0].Tier)
 }
 
 // writeRepoScopeCandidates writes the unit and the candidate table, each row

@@ -130,3 +130,28 @@ func TestRepoScopeIDsColumn(t *testing.T) {
 		require.Equal(t, tc.want, idsColumn(tc.ids, tc.count, tc.sampled), "%v %d %v", tc.ids, tc.count, tc.sampled)
 	}
 }
+
+// One candidate can still be ambiguous: its name matched only in part, or a
+// query that could have found a second one did not answer. The verdict says
+// which, instead of counting a single candidate as if that were the doubt.
+func TestRepoScopeDiscoveryOneAmbiguousCandidate(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tier    string
+		partial bool
+		verdict string
+	}{
+		{"a partial name match", "segment", false, "Verdict: ambiguous: one candidate, matched by a segment of its name rather than the whole of it\n"},
+		{"a partial result", "exact", true, "Verdict: ambiguous: one candidate, but the result is partial (see the notes)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Verdict: reposcope.VerdictAmbiguous, Partial: tc.partial,
+				Candidates: []reposcope.Candidate{{Rank: 1, Name: "checkout", Services: []string{flowService}, ServiceCount: 1, Tier: tc.tier}}}
+			report.Candidates[0].SetCommand = repoScopeSetCommand(report, report.Candidates[0], nil)
+			var out bytes.Buffer
+			printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil), 0)
+			require.Contains(t, out.String(), tc.verdict)
+			require.Contains(t, out.String(), "If it is what runs this code, save it with:\n  dtctl repo-scope set checkout --service "+flowService+"\n")
+		})
+	}
+}

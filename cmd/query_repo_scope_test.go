@@ -228,6 +228,43 @@ func TestQueryRepoScope_UnknownKeys(t *testing.T) {
 	s := repoScopeContext(t, stdout)
 	require.True(t, s.Applied)
 	require.Contains(t, s.Reason, `unknown key "metrics"`)
+
+	// A query the scope does not apply to says each thing once: the keys in
+	// their own warning, why it was not applied in the other. The envelope
+	// has one reason field, which carries both.
+	code, stdout, stderr = runRepoScoped([]string{"query", "timeseries avg(dt.host.cpu.usage)", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, 1, strings.Count(stderr, `unknown key "metrics"`), stderr)
+	require.Contains(t, stderr, "repo scope checkout not applied: the query does not start with 'fetch <data object>'; the query runs unscoped")
+	s = repoScopeContext(t, stdout)
+	require.Contains(t, s.Reason, "does not start with")
+	require.Contains(t, s.Reason, `unknown key "metrics"`)
+}
+
+// The scan clause and the scan-cap line name the comparison the scope
+// inserted, which for entity ids is in(), not ==.
+func TestQueryRepoScope_ScanLinesNameTheFilter(t *testing.T) {
+	optInRepoScope(t)
+	newDQLRecorder(t, "readonly", answer(http.StatusOK, scanCappedRecord))
+	const ids = "environments:\n  127.0.0.1:\n    - name: checkout\n      process-groups: [PROCESS_GROUP-FEDCBA9876543210]\n"
+	for _, tc := range []struct {
+		name, file, with string
+	}{
+		{"ids only", ids, "in()"},
+		{"ids and a workload", ids + "      workloads:\n        - namespace: payments\n          name: checkout\n", "== and in()"},
+		{"names only", checkoutScope, "=="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chdirTestRepo(t, tc.file)
+			_, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
+			clause := "the repo scope filters early with " + tc.with + ", but no scan limit is set for this query"
+			require.Contains(t, stderr, clause)
+			require.Contains(t, strings.Join(agentEnvelope(t, stdout).Context.Suggestions, "\n"), clause)
+
+			_, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--default-scan-limit-gbytes", "5"}, RunOptions{})
+			require.Contains(t, stderr, "repo scope checkout already filters early with "+tc.with+", and the scan still hit its cap")
+		})
+	}
 }
 
 // An explicit --repo-scope that does not resolve is an error with the reason,

@@ -68,7 +68,10 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 			return nil, &NotFoundError{Name: name, Host: host, Known: f.Names(host)}
 		}
 	case len(entries) == 0:
-		s.Reason = fmt.Sprintf("no entry for %s; the file defines: %s", host, strings.Join(f.Hosts(), ", "))
+		s.Reason = fmt.Sprintf("no entry for %s; the file defines no entries", host)
+		if hosts := f.Hosts(); len(hosts) > 0 {
+			s.Reason = fmt.Sprintf("no entry for %s; the file defines: %s", host, strings.Join(hosts, ", "))
+		}
 		return s, nil
 	default:
 		var tied []*Entry

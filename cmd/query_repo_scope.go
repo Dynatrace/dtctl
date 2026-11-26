@@ -190,9 +190,13 @@ type repoScopedQuery struct {
 	// scope is nil when no scope resolved, and then nothing is printed and
 	// the envelope gains no key.
 	scope *output.RepoScope
-	// warning names keys the file holds that this dtctl does not know.
-	warning string
-	stderr  io.Writer
+	// warning names keys the file holds that this dtctl does not know. The
+	// envelope has one reason field, so scope.Reason carries it too;
+	// notApplied is the reason without it, for stderr, where the warning has
+	// a line of its own.
+	warning    string
+	notApplied string
+	stderr     io.Writer
 	// zeroRows is set by onResult and read by decorate; the executor calls
 	// OnResult first.
 	zeroRows bool
@@ -233,6 +237,7 @@ func applyRepoScope(cmd *cobra.Command, cfg *config.Config, query string) (*repo
 			}
 		}
 	}
+	q.notApplied = q.scope.Reason
 	if res.Warning != "" {
 		q.warning = res.Warning
 		q.scope.Reason = strings.TrimPrefix(q.scope.Reason+"; "+res.Warning, "; ")
@@ -285,7 +290,7 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 		clause := ""
 		if !q.scanBounded && limits != nil && limits.ScanLimitGbytes <= 0 && limits.SamplingRatio <= 1 {
 			q.unboundedScan, q.scanCapNoticed = true, true
-			clause = "; " + scanClause
+			clause = "; " + q.scanClause()
 		}
 		output.FprintInfo(q.stderr, "applying repo scope %s to fetch %s: %s (use --%s to ignore it)%s",
 			s.Name, s.DataObject, s.Filter, noRepoScopeFlag, clause)
@@ -296,7 +301,7 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 		label += " " + s.Name
 	}
 	output.FprintWarning(q.stderr, "%s not applied: %s; the query runs unscoped (use --%s to silence this)",
-		label, s.Reason, noRepoScopeFlag)
+		label, q.notApplied, noRepoScopeFlag)
 }
 
 // onResult is the executor's OnResult hook. A scoped query that returns
@@ -380,10 +385,30 @@ func (q *repoScopedQuery) noticeScanCap(_ int, result *exec.DQLQueryResponse) {
 
 // scanClause ends the scope line of a run nothing bounds the scan of, and is
 // the envelope's suggestion for it.
-const scanClause = "the repo scope filters early with ==, but no scan limit is set for this query, so the environment's default cap applies: add scanLimitGBytes: or --default-scan-limit-gbytes to scan less"
+func (q *repoScopedQuery) scanClause() string {
+	return fmt.Sprintf("the repo scope filters early with %s, but no scan limit is set for this query, so the environment's default cap applies: add scanLimitGBytes: or --default-scan-limit-gbytes to scan less",
+		q.comparisons())
+}
 
 func (q *repoScopedQuery) scanCapNotice() string {
-	return fmt.Sprintf("repo scope %s already filters early with ==, and the scan still hit its cap; scan less another way the scan-limit hint lists", q.scope.Name)
+	return fmt.Sprintf("repo scope %s already filters early with %s, and the scan still hit its cap; scan less another way the scan-limit hint lists",
+		q.scope.Name, q.comparisons())
+}
+
+// comparisons names what the inserted filter compares with: ==, in(), or
+// both. Names and workloads render as ==, entity ids and lists as in(); the
+// lines that say the scope already filters early say how, so they agree with
+// the filter printed beside them.
+func (q *repoScopedQuery) comparisons() string {
+	m, _ := dql.Scan(q.scope.Filter) // literals masked: a name may hold either
+	var with []string
+	if strings.Contains(m.Code, "==") {
+		with = append(with, "==")
+	}
+	if strings.Contains(m.Code, "in(") {
+		with = append(with, "in()")
+	}
+	return strings.Join(with, " and ")
 }
 
 // scanCapped reports whether the scan limit cut result short. result is nil
@@ -419,7 +444,7 @@ func (q *repoScopedQuery) decorate(c *output.ResponseContext, result *exec.DQLQu
 	}
 	switch {
 	case q.unboundedScan:
-		c.Suggestions = append(c.Suggestions, scanClause)
+		c.Suggestions = append(c.Suggestions, q.scanClause())
 	case q.scope.Applied && scanCapped(result):
 		c.Suggestions = append(c.Suggestions, q.scanCapNotice())
 	}

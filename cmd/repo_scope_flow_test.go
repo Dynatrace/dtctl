@@ -232,6 +232,8 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		{"discover-many-ids", rowsByObject(manyIDRows())},
 		{"discover-ambiguous", rowsByObject(map[string]string{"spans": checkoutRows["spans"] + "," + ledger})},
 		{"discover-none", rowsByObject(nil)},
+		{"discover-entity-name", rowsByObject(map[string]string{
+			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"eu-checkout-frontend"}`})},
 		{"discover-partial", func(r *http.Request, query string) (int, string) {
 			if strings.HasPrefix(query, "fetch spans") {
 				return http.StatusBadRequest, `{"error":{"code":400,"message":"Scan limit exceeded.","details":{"errorType":"SCAN_LIMIT"}}}`
