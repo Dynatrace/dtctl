@@ -143,19 +143,57 @@ repo scope checkout binds a cluster, which a Live Debugger workspace is not narr
   `--filters`. `update breakpoint` applies a scope only when one is named, so
   it has no `--no-repo-scope`.
 
-In a checkout with a scope file the workspace is named after the origin
-remote's repository name (the checkout directory's when `.git/config` cannot
-be read, so each such worktree gets its own): `<repo>/<entry>` where an entry
-covers the working directory, and `<repo>` in every other directory of the
-checkout, including one two entries tie on. Without a scope file, and outside
-a checkout, it is named after the working directory's base name.
+#### Which workspace a command works in
+
+In a checkout whose scope file has entries for the context's environment, the
+workspace is named after the repository: `<repo>/<entry>` where an entry covers
+the working directory, and `<repo>` in every other directory of the checkout,
+including one two entries tie on. `<repo>` is the last segment of the origin
+remote. The checkout directory's base name is used instead when
+`.git/config` has no origin to read (a worktree, which therefore gets a
+workspace of its own) or when that segment is not a plain name of letters,
+digits, `.`, `_` and `-`.
+
+Everywhere else the workspace is named after the working directory's base
+name, as it was before repo scopes existed: outside a checkout, in a checkout
+without a scope file, and in one whose scope file has no entry for this
+environment.
+
 `--repo-scope <name>` uses `<repo>/<name>` wherever it runs, on every
 breakpoint command: `get breakpoints`, `describe breakpoint`,
 `delete breakpoint`, `get snapshots` and `update breakpoint <id>` take it only
-to name the workspace.
-Neither `--no-repo-scope` nor `DTCTL_NO_REPO_SCOPE` changes the name. Saving an
-entry moves the directories it covers from `<repo>` to `<repo>/<entry>`: to
-clean up the old workspace, run `dtctl delete breakpoint --all` there before
+to name the workspace. `DTCTL_NO_REPO_SCOPE` does not change the name.
+
+A scope file that is there and does not load (invalid YAML, an unknown key
+inside an entry, a newer `apiVersion`) names no workspace, and `dtctl` does not
+guess one:
+
+- `create`, `update` and `delete breakpoint`, and their dry runs, fail with
+  what is wrong with the file and send nothing. Working in the directory's
+  workspace instead would delete or re-scope breakpoints other than the ones
+  the file points at.
+- `get breakpoints`, `describe breakpoint` and `get snapshots` read the
+  workspace named after the working directory and warn that it is not the one
+  the file would name (on stderr, and in `context.warnings` in agent mode).
+  With `--repo-scope <name>` they fail too, since the name asks for the file.
+
+`dtctl repo-scope current` says what is wrong with the file.
+
+**Breakpoints from before the scope file.** Until a checkout has entries for
+an environment, its breakpoints live in workspaces named after the directories
+the commands ran in. Once it has entries, the commands run inside it use
+`<repo>` and `<repo>/<entry>` and no longer look in those workspaces; nothing
+is moved or deleted. A directory-named workspace stays reachable from any
+directory of the same base name that is outside a linked checkout:
+
+```bash
+mkdir -p /tmp/old-workspace/src && cd /tmp/old-workspace/src
+dtctl get breakpoints          # the workspace "src"
+dtctl delete breakpoint --all  # clean it up
+```
+
+Saving a further entry likewise moves the directories it covers from `<repo>`
+to `<repo>/<entry>`: clean up with `dtctl delete breakpoint --all` before
 saving, or afterwards from a directory of the checkout no entry covers.
 
 ```bash

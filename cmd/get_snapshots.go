@@ -74,10 +74,11 @@ Use -o json / -o yaml for structured output.`,
 				return err
 			}
 
-			workspace, err := workspaceName(cmd, cfg)
+			ws, err := resolveBreakpointWorkspace(cmd, cfg)
 			if err != nil {
 				return err
 			}
+			workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
 			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if isDebugVerbose(cmdContext(cmd)) {
@@ -173,6 +174,7 @@ Use -o json / -o yaml for structured output.`,
 					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
 				},
 				Decorate: func(c *output.ResponseContext, _ *exec.DQLQueryResponse, _ []map[string]interface{}) {
+					c.Warnings = append(c.Warnings, warnings...)
 					if hint != "" {
 						c.Suggestions = append([]string{hint}, c.Suggestions...)
 					}

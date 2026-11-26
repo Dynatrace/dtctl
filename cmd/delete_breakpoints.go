@@ -72,10 +72,14 @@ Examples:
 				return err
 			}
 
-			workspace, err := workspaceName(cmd, cfg)
+			ws, err := resolveBreakpointWorkspace(cmd, cfg)
 			if err != nil {
 				return err
 			}
+			if err := ws.requireScopeFile(); err != nil {
+				return err
+			}
+			workspace := ws.name
 			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if verbose {

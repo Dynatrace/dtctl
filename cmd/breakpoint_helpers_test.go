@@ -532,19 +532,24 @@ func TestPrintGraphQLResponse_NilPayload(t *testing.T) {
 	}
 }
 
-func TestWorkspaceName(t *testing.T) {
+func TestResolveBreakpointWorkspace(t *testing.T) {
 	writeIsolatedConfig(t, safetyLevelConfig("http://127.0.0.1:1", "readonly"))
 	optInRepoScope(t)
 	cfg, err := loadConfig(context.Background())
 	require.NoError(t, err)
-	name := func(t *testing.T) (string, string) {
+	resolve := func(t *testing.T) breakpointWorkspace {
 		t.Helper()
-		var stderr bytes.Buffer
 		c := &cobra.Command{}
-		c.SetContext(withInvocation(context.Background(), &invocation{caps: Capabilities{HostWorkingDirectory: true}, stderr: &stderr}))
-		got, err := workspaceName(c, cfg)
+		c.SetContext(withInvocation(context.Background(), &invocation{caps: Capabilities{HostWorkingDirectory: true}}))
+		got, err := resolveBreakpointWorkspace(c, cfg)
 		require.NoError(t, err)
-		return got, stderr.String()
+		return got
+	}
+	name := func(t *testing.T) string {
+		t.Helper()
+		got := resolve(t)
+		require.Empty(t, got.unusable)
+		return got.name
 	}
 	const origin = "[remote \"origin\"]\n\turl = https://example.invalid/shop/storefront.git\n"
 
@@ -552,28 +557,28 @@ func TestWorkspaceName(t *testing.T) {
 		t.Chdir(t.TempDir())
 		cwd, err := os.Getwd()
 		require.NoError(t, err)
-		got, _ := name(t)
+		got := name(t)
 		require.Equal(t, filepath.Base(cwd), got)
 	})
 	t.Run("no scope file", func(t *testing.T) {
 		chdirTestRepo(t, "")
 		chdirSubdir(t, "src")
-		got, _ := name(t)
+		got := name(t)
 		require.Equal(t, "src", got, "an unlinked checkout keeps the base name")
 	})
 	t.Run("a covering entry", func(t *testing.T) {
 		root := chdirTestRepo(t, breakpointScope)
 		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
 		chdirSubdir(t, filepath.Join("services", "ledger", "src"))
-		got, stderr := name(t)
-		require.Equal(t, "storefront/ledger", got)
-		require.Empty(t, stderr)
+		got := resolve(t)
+		require.Equal(t, "storefront/ledger", got.name)
+		require.Equal(t, "ledger", got.scope.Entry.Name)
 	})
 	t.Run("a directory no entry covers", func(t *testing.T) {
 		root := chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: ledger\n      path: services/ledger\n      service-names: [ledger]\n")
 		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
 		chdirSubdir(t, filepath.Join("docs", "src"))
-		got, _ := name(t)
+		got := name(t)
 		require.Equal(t, "storefront", got)
 	})
 	t.Run("a directory two entries tie on", func(t *testing.T) {
@@ -590,7 +595,7 @@ func TestWorkspaceName(t *testing.T) {
 		require.NoError(t, os.CopyFS(root, os.DirFS(gradle)))
 		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
 		chdirSubdir(t, filepath.Join("webproxy-core", "src"))
-		got, _ := name(t)
+		got := name(t)
 		require.Equal(t, "storefront", got, "a tie names no entry, and no directory's base name either")
 	})
 	t.Run("a worktree", func(t *testing.T) {
@@ -598,15 +603,26 @@ func TestWorkspaceName(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: ../storefront/.git/worktrees/wt\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(root, reposcope.FileName), []byte(breakpointScope), 0o644))
 		t.Chdir(root)
-		got, _ := name(t)
+		got := name(t)
 		require.Equal(t, filepath.Base(root)+"/checkout", got, "without a readable .git/config the checkout directory names the repository")
 	})
-	t.Run("an invalid scope file", func(t *testing.T) {
-		root := chdirTestRepo(t, "environments: [\n")
+	t.Run("a scope file with no entry for this environment", func(t *testing.T) {
+		root := chdirTestRepo(t, "environments:\n  other.example.invalid:\n    - name: ledger\n      service-names: [ledger]\n")
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
 		chdirSubdir(t, "src")
-		got, stderr := name(t)
-		require.Equal(t, filepath.Base(root), got)
-		require.Contains(t, stderr, "the Live Debugger workspace is named after the repository")
+		got := resolve(t)
+		require.Equal(t, "src", got.name, "a file written for another environment moves nobody's breakpoints")
+		require.Nil(t, got.scope)
+	})
+	t.Run("a scope file that does not load", func(t *testing.T) {
+		root := chdirTestRepo(t, "environments: [\n")
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, "src")
+		got := resolve(t)
+		require.Equal(t, "src", got.name)
+		require.True(t, strings.HasPrefix(got.unusable, reposcope.FileName+": not valid YAML"), got.unusable)
+		require.NotContains(t, got.unusable, root)
+		require.Error(t, got.requireScopeFile())
 	})
 
 	// An embedded invocation has no working directory of its own, so it never
@@ -617,9 +633,9 @@ func TestWorkspaceName(t *testing.T) {
 	} {
 		c := &cobra.Command{}
 		c.SetContext(withInvocation(context.Background(), inv))
-		got, err := workspaceName(c, cfg)
+		got, err := resolveBreakpointWorkspace(c, cfg)
 		require.NoError(t, err)
-		require.Equal(t, "no-project", got, name)
+		require.Equal(t, breakpointWorkspace{name: "no-project"}, got, name)
 	}
 }
 

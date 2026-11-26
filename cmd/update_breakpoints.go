@@ -116,6 +116,15 @@ Examples:
 					return err
 				}
 
+				ws, err := resolveBreakpointWorkspace(cmd, cfg)
+				if err != nil {
+					return err
+				}
+				if err := ws.requireScopeFile(); err != nil {
+					return err
+				}
+				workspace := ws.name
+
 				var sets []map[string][]string
 				var origin string // " from repo scope <name>", or empty
 				if scopeName != "" {
@@ -131,10 +140,6 @@ Examples:
 					sets = []map[string][]string{parsed}
 				}
 
-				workspace, err := workspaceName(cmd, cfg)
-				if err != nil {
-					return err
-				}
 				if dryRun(cmdContext(cmd)) {
 					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update workspace %s's filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", workspace, origin, filterSetsSummary(sets)))
 				}
@@ -194,10 +199,14 @@ Examples:
 				return err
 			}
 
-			workspace, err := workspaceName(cmd, cfg)
+			ws, err := resolveBreakpointWorkspace(cmd, cfg)
 			if err != nil {
 				return err
 			}
+			if err := ws.requireScopeFile(); err != nil {
+				return err
+			}
+			workspace := ws.name
 			if dryRun(cmdContext(cmd)) {
 				changes := describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)
 				return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace(fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes), workspace))

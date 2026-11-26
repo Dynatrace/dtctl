@@ -87,7 +87,7 @@ type coveringFilters struct {
 
 // defaultBreakpointFilters is the entry covering the working directory,
 // under resolveRepoScope's off rules. A file that does not load is not
-// reported: workspaceName, which every create calls first, has warned.
+// reported: the create was refused when its workspace was resolved.
 func defaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config) (coveringFilters, error) {
 	res, err := resolveRepoScope(cmd, cfg, "")
 	switch {
@@ -106,13 +106,6 @@ func defaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config) (coveringF
 	cov := coveringFilters{name: res.Status.Entry.Name, sets: sets, entry: res.Status.Entry}
 	cov.set, _ = reposcope.WorkloadFilterSet(sets)
 	return cov, nil
-}
-
-// breakpointWorkspace is the workspace a create puts its breakpoint in.
-type breakpointWorkspace struct {
-	handler *livedebugger.Handler
-	id      string
-	resp    map[string]interface{} // as getOrCreateWorkspaceV2 returned it
 }
 
 // appliedDefault is what the repo scope default did to the workspace: scope
@@ -134,14 +127,17 @@ type appliedDefault struct {
 // typed, though, so the active breakpoints are counted even in a
 // non-interactive run, and if there are any the change is confirmed or,
 // where nobody can be asked, refused.
-func applyDefaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config, ws breakpointWorkspace, location string, skipConfirm bool) (appliedDefault, error) {
+//
+// workspaceID is the workspace and workspaceResp what getOrCreateWorkspaceV2
+// returned for it.
+func applyDefaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config, handler *livedebugger.Handler, workspaceID string, workspaceResp map[string]interface{}, location string, skipConfirm bool) (appliedDefault, error) {
 	ctx := cmdContext(cmd)
 	stderr := currentStderr(ctx)
-	hasFilters, err := livedebugger.WorkspaceHasFilters(ws.resp)
+	hasFilters, err := livedebugger.WorkspaceHasFilters(workspaceResp)
 	if err != nil {
 		return appliedDefault{}, err
 	}
-	current, err := livedebugger.WorkspaceFilterSets(ws.resp)
+	current, err := livedebugger.WorkspaceFilterSets(workspaceResp)
 	if err != nil {
 		return appliedDefault{}, err
 	}
@@ -165,7 +161,7 @@ func applyDefaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config, ws br
 	if err := checkSafety(ctx, cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
 		return appliedDefault{}, err
 	}
-	cancelled, err := applyWorkspaceFilters(ctx, ws.handler, ws.id, []map[string][]string{cov.set},
+	cancelled, err := applyWorkspaceFilters(ctx, handler, workspaceID, []map[string][]string{cov.set},
 		workspaceFilterChange{creating: true, skipConfirm: skipConfirm, unasked: true})
 	switch {
 	case errors.Is(err, errFiltersDeclined):

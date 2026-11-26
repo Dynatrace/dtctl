@@ -107,6 +107,18 @@ Examples:
 				}
 			}
 
+			// The workspace is resolved before anything else reads the scope
+			// file, so a file that does not load refuses the run here.
+			var workspace breakpointWorkspace
+			if cfg != nil {
+				if workspace, err = resolveBreakpointWorkspace(cmd, cfg); err != nil {
+					return err
+				}
+				if err := workspace.requireScopeFile(); err != nil {
+					return err
+				}
+			}
+
 			// A named entry is a filter source like --filters, resolved before
 			// any network call.
 			if scopeName != "" {
@@ -117,7 +129,7 @@ Examples:
 			}
 
 			if dryRun(cmdContext(cmd)) {
-				msg, err := previewCreateBreakpoint(cmd, cfg, location, scopeName, filtersChanged, filterSummary)
+				msg, err := previewCreateBreakpoint(cmd, cfg, workspace, location, scopeName, filtersChanged, filterSummary)
 				if err != nil {
 					return err
 				}
@@ -131,11 +143,7 @@ Examples:
 
 			verbose := isDebugVerbose(cmdContext(cmd))
 
-			workspace, err := workspaceName(cmd, cfg)
-			if err != nil {
-				return err
-			}
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace.name)
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -161,7 +169,7 @@ Examples:
 					return printBreakpointMessage(cmdContext(cmd), "create", "Cancelled")
 				}
 			} else {
-				applied, err := applyDefaultBreakpointFilters(cmd, cfg, breakpointWorkspace{handler: handler, id: workspaceID, resp: workspaceResp}, location, skipConfirm)
+				applied, err := applyDefaultBreakpointFilters(cmd, cfg, handler, workspaceID, workspaceResp, location, skipConfirm)
 				if err != nil {
 					return err
 				}
@@ -196,7 +204,7 @@ Examples:
 			if appliedScope != "" {
 				msg += fmt.Sprintf("; workspace filters set from repo scope %s: %s", appliedScope, filterSummary)
 			}
-			return printBreakpointMessageWith(cmdContext(cmd), "create", inWorkspace(msg, workspace), suggestions)
+			return printBreakpointMessageWith(cmdContext(cmd), "create", inWorkspace(msg, workspace.name), suggestions)
 		},
 	}
 	c.Flags().String("filters", "", "workspace filters to set before creating the breakpoint (comma-separated key:value pairs)")
@@ -215,7 +223,7 @@ Examples:
 // that does not build fails the preview like a read that fails. A preview
 // with a filter source sends nothing, and never newly requires config: when
 // none loads, the workspace goes unnamed.
-func previewCreateBreakpoint(cmd *cobra.Command, cfg *config.Config, location, scopeName string, filtersChanged bool, filterSummary string) (string, error) {
+func previewCreateBreakpoint(cmd *cobra.Command, cfg *config.Config, workspace breakpointWorkspace, location, scopeName string, filtersChanged bool, filterSummary string) (string, error) {
 	ctx := cmdContext(cmd)
 	preview := createBreakpointPreview{location: location, scopeName: scopeName, filtersChanged: filtersChanged, filterSummary: filterSummary}
 	if cfg == nil {
@@ -224,11 +232,15 @@ func previewCreateBreakpoint(cmd *cobra.Command, cfg *config.Config, location, s
 			return preview.message(), nil
 		}
 		cfg = loaded
+		if workspace, err = resolveBreakpointWorkspace(cmd, cfg); err != nil {
+			return "", err
+		}
+		if err := workspace.requireScopeFile(); err != nil {
+			return "", err
+		}
 	}
+	preview.workspace = workspace.name
 	var err error
-	if preview.workspace, err = workspaceName(cmd, cfg); err != nil {
-		return "", err
-	}
 	if filtersChanged || scopeName != "" {
 		return preview.message(), nil
 	}

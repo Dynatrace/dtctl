@@ -105,10 +105,11 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
-	workspace, err := workspaceName(cmd, cfg)
+	ws, err := resolveBreakpointWorkspace(cmd, cfg)
 	if err != nil {
 		return err
 	}
+	workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
 	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
 	if err != nil {
 		if verbose {
@@ -174,7 +175,9 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 
 	if !useBreakpointDescribeTextView(cmdContext(cmd)) {
 		printer := newPrinterCtx(cmdContext(cmd))
-		_ = enrichAgent(printer, "describe", "breakpoint")
+		if ap := enrichAgent(printer, "describe", "breakpoint"); ap != nil {
+			ap.Context().Warnings = append(ap.Context().Warnings, warnings...)
+		}
 		if len(results) == 1 {
 			return printer.Print(results[0])
 		}

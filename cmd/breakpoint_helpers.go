@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +15,6 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/prompt"
-	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 )
@@ -110,10 +107,11 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
-	workspace, err := workspaceName(cmd, cfg)
+	ws, err := resolveBreakpointWorkspace(cmd, cfg)
 	if err != nil {
 		return err
 	}
+	workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
 	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
 	if err != nil {
 		if verbose {
@@ -149,7 +147,7 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 	// NewPrinter, so it opts into the get-wide --limit/--fields itself.
 	var printer output.Printer
 	if agentMode(cmdContext(cmd)) {
-		printer = shapeListOutput(cmdContext(cmd), output.NewAgentPrinter(currentStdoutOr(cmdContext(cmd), rootCmd.OutOrStdout()), &output.ResponseContext{}), "json", false)
+		printer = shapeListOutput(cmdContext(cmd), output.NewAgentPrinter(currentStdoutOr(cmdContext(cmd), rootCmd.OutOrStdout()), &output.ResponseContext{Warnings: warnings}), "json", false)
 	} else {
 		printer = shapeListOutput(cmdContext(cmd), newPrinterOpts(cmdContext(cmd), output.PrinterOptions{Format: outputFormat(cmdContext(cmd)), Writer: currentStdoutOr(cmdContext(cmd), rootCmd.OutOrStdout()), PlainMode: plainMode(cmdContext(cmd))}),
 			outputFormat(cmdContext(cmd)), output.IsTabularFormat(outputFormat(cmdContext(cmd)), plainMode(cmdContext(cmd))))
@@ -223,86 +221,6 @@ func breakpointRowFromRule(rule livedebugger.BreakpointRule) (breakpointRow, boo
 	isDisabled := rule.IsDisabled
 	logMessage := unqualifyBreakpointOutputMessage(extractBreakpointOutputMessage(rule))
 	return breakpointRow{ID: id, Filename: filename, Line: line, Active: !isDisabled, LogMessage: logMessage}, true
-}
-
-// workspaceName names the Live Debugger workspace of this invocation. In a
-// checkout with a scope file it is named after the repository: the origin
-// remote's repository name, or the checkout directory's base name when
-// .git/config cannot be read (a worktree). With --repo-scope <name> it is
-// <repo>/<name> wherever the command runs. Otherwise, where an entry covers
-// the working directory it is <repo>/<entry>, so every directory an entry
-// covers shares one workspace, under the same name on every machine, and two
-// entries never share one; any other directory of that checkout, including
-// one two entries tie on, is <repo>. Without a scope file, and outside a
-// checkout, it is the base name of the working directory, the name breakpoint
-// commands have always used, or "no-project" when there is none (an embedded
-// invocation, see currentWorkDir) or that directory is the root.
-//
-// Naming is not scoping: --no-repo-scope, DTCTL_NO_REPO_SCOPE and the
-// stability floor leave the name alone, so every breakpoint command finds the
-// same workspace, and the read commands take --repo-scope only to name it. A
-// name that does not resolve is an error, as on create. A scope file that
-// does not load otherwise names no entry, and is warned about here.
-func workspaceName(cmd *cobra.Command, cfg *config.Config) (string, error) {
-	ctx := cmdContext(cmd)
-	name, _ := cmd.Flags().GetString(repoScopeFlag)
-	scope, err := openRepoScope(ctx, cfg)
-	var status *reposcope.Status
-	if name != "" {
-		if err != nil {
-			return "", err
-		}
-		if status, err = scope.resolve(name); err != nil {
-			return "", err
-		}
-	}
-	cwd, cwdErr := currentWorkDir(ctx)
-	if cwdErr != nil {
-		return "no-project", nil
-	}
-	if scope != nil && (err != nil || scope.loc.Exists) {
-		repo := repositoryWorkspace(scope.loc)
-		if err != nil {
-			output.FprintWarning(currentStderr(ctx), "%v; the Live Debugger workspace is named after the repository", err)
-			return repo, nil
-		}
-		if status == nil {
-			status, err = scope.resolve("")
-		}
-		if err == nil && status.Entry != nil {
-			return repo + "/" + status.Entry.Name, nil
-		}
-		return repo, nil
-	}
-	return directoryWorkspace(cwd), nil
-}
-
-// plainRepositoryName is what a repository name may be to name a workspace:
-// letters, digits, ".", "_" and "-".
-var plainRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-
-// repositoryWorkspace is the name the workspaces of a linked checkout start
-// with: the origin remote's repository name, so every clone uses the same
-// one, or the checkout directory's when there is no origin to read (a
-// worktree) or its last segment is not a plain name. The remote is text from
-// a file, and the name is sent to the environment and printed: a query
-// string, a quote or a parent directory in it names no repository.
-func repositoryWorkspace(loc reposcope.Location) string {
-	repo := reposcope.RepositoryName(reposcope.RepoFS(loc))
-	if !plainRepositoryName.MatchString(repo) || repo == "." || repo == ".." {
-		return directoryWorkspace(loc.Root)
-	}
-	return repo
-}
-
-// directoryWorkspace names a workspace after a directory: its base name, or
-// "no-project" for a directory that has none, the root.
-func directoryWorkspace(dir string) string {
-	base := filepath.Base(dir)
-	if base == "" || base == "." || base == string(filepath.Separator) {
-		return "no-project"
-	}
-	return base
 }
 
 func parseFilters(input string) (map[string][]string, error) {
