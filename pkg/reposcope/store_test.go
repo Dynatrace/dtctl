@@ -1,7 +1,9 @@
 package reposcope
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -100,6 +102,27 @@ func TestLocate(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, ok)
 	})
+}
+
+// A scope file that is there but cannot be inspected (an I/O error, a stale
+// network handle) is not "no scope file": Locate says where it is and why
+// it could not be looked at, so a caller can report an unusable file
+// instead of carrying on as if the repository had none.
+func TestLocate_FileThatCannotBeInspected(t *testing.T) {
+	root := newRepo(t)
+	broken := errors.New("input/output error")
+	lstat := func(name string) (fs.FileInfo, error) {
+		if filepath.Base(name) == FileName {
+			return nil, &fs.PathError{Op: "lstat", Path: name, Err: broken}
+		}
+		return os.Lstat(name)
+	}
+	loc, ok, err := locate(root, lstat)
+	require.ErrorIs(t, err, broken)
+	require.True(t, ok, "the directory is in a repository")
+	require.Equal(t, filepath.Join(loc.Root, FileName), loc.Path)
+	require.NotEmpty(t, loc.Root)
+	require.Contains(t, err.Error(), loc.Path)
 }
 
 func TestLoad_MissingFileIsEmpty(t *testing.T) {

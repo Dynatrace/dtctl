@@ -40,8 +40,15 @@ type Location struct {
 // "not in a repository" case, when no .git is found and also when a stat
 // fails for another reason: an unreadable parent must not fail the query,
 // the same choice the local .dtctl.yaml lookup makes. err is reserved for a
-// scope file that is there but cannot be inspected.
+// scope file that is there but cannot be inspected; loc is then where it is,
+// so the caller can report the file as unusable rather than as absent.
 func Locate(startDir string) (loc Location, ok bool, err error) {
+	return locate(startDir, os.Lstat)
+}
+
+// locate is Locate with the stat of the scope file passed in: no filesystem
+// a test can build fails that stat without failing the .git one beside it.
+func locate(startDir string, lstat func(string) (fs.FileInfo, error)) (loc Location, ok bool, err error) {
 	start, err := filepath.Abs(startDir)
 	if err != nil {
 		return Location{}, false, nil
@@ -58,11 +65,16 @@ func Locate(startDir string) (loc Location, ok bool, err error) {
 		return Location{}, false, nil
 	}
 	loc = Location{Root: root, Path: filepath.Join(root, FileName), RelDir: filepath.ToSlash(rel)}
-	switch _, err := os.Lstat(loc.Path); {
+	switch _, err := lstat(loc.Path); {
 	case err == nil:
 		loc.Exists = true
 	case !errors.Is(err, fs.ErrNotExist):
-		return Location{}, false, fmt.Errorf("inspect %s: %w", loc.Path, err)
+		// The cause without the file name the filesystem repeats in it.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			err = pathErr.Err
+		}
+		return loc, true, fmt.Errorf("%s: cannot be inspected: %w", loc.Path, err)
 	}
 	return loc, true, nil
 }

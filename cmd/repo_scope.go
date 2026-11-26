@@ -297,7 +297,8 @@ func repoScopeLocation(ctx context.Context) (reposcope.Location, error) {
 	}
 	loc, ok, err := reposcope.Locate(dir)
 	if err != nil {
-		return reposcope.Location{}, err
+		// The file is there and cannot be inspected: loc says where.
+		return loc, err
 	}
 	if !ok {
 		return reposcope.Location{}, &reposcope.InvalidError{
@@ -318,19 +319,33 @@ type repoScopeFile struct {
 }
 
 // openRepoScope reads the scope file. A missing file reads as an empty one,
-// so set can start from it. When the file is there but does not load, the
-// scope comes back together with the error, so a caller that reports rather
-// than fails can still say where; every earlier failure returns no scope.
+// so set can start from it. When the file is there but cannot be inspected or
+// does not load, the scope comes back together with the error, so a caller
+// that reports rather than fails can still say where; every earlier failure
+// returns no scope.
 func openRepoScope(ctx context.Context, cfg *config.Config) (*repoScopeFile, error) {
 	host, err := repoScopeHost(cfg)
 	if err != nil {
 		return nil, err
 	}
 	loc, err := repoScopeLocation(ctx)
-	if err != nil {
-		return nil, err
+	return loadRepoScope(host, loc, err)
+}
+
+// loadRepoScope reads the file at loc for host. located is why loc could not
+// be established. With a path in it the file is there and could not be
+// inspected, which is an unusable file like one that does not load: the
+// scope is returned beside the error, so a caller that warns about those and
+// carries on does so here too. Without one there is no file to speak of.
+func loadRepoScope(host string, loc reposcope.Location, located error) (*repoScopeFile, error) {
+	if located != nil && loc.Path == "" {
+		return nil, located
 	}
 	s := &repoScopeFile{loc: loc, host: host}
+	if located != nil {
+		return s, located
+	}
+	var err error
 	s.file, err = reposcope.Load(loc)
 	return s, err
 }

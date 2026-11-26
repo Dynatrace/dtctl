@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -192,4 +193,24 @@ func TestRepoScopeNeverPrintsAnEscapeSequence(t *testing.T) {
 		require.NotContains(t, stdout+stderr, "\x1b", args)
 		require.Contains(t, stdout+stderr, `path "svc\x1b[31mRED" must not contain control or non-printing characters`, args)
 	}
+}
+
+// A scope file that is located but could not be inspected is an unusable
+// file, like one that does not load: the commands that warn about those and
+// carry on need the scope it would have been, to say which file and which
+// environment. Only a location that is not known at all (no repository, no
+// working directory) leaves them without one, and silent.
+func TestLoadRepoScope_LocatedButNotInspected(t *testing.T) {
+	failed := errors.New("/repo/" + reposcope.FileName + ": cannot be inspected: input/output error")
+	loc := reposcope.Location{Root: "/repo", Path: "/repo/" + reposcope.FileName, RelDir: "svc"}
+
+	scope, err := loadRepoScope("env.example.invalid", loc, failed)
+	require.ErrorIs(t, err, failed)
+	require.NotNil(t, scope)
+	require.Equal(t, "env.example.invalid", scope.host)
+	require.Equal(t, reposcope.FileName+": cannot be inspected: input/output error", scope.unusable(err))
+
+	scope, err = loadRepoScope("env.example.invalid", reposcope.Location{}, failed)
+	require.ErrorIs(t, err, failed)
+	require.Nil(t, scope)
 }
