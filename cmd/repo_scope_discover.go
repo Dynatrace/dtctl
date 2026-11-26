@@ -80,6 +80,9 @@ Examples:
 `,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if outputFormat(cmdContext(cmd)) == "csv" {
+				return fmt.Errorf("a discovery report is not rows; use -o json, -o yaml or -o toon")
+			}
 			plans, err := discoveryPlans(cmdContext(cmd), dir, terms)
 			if err != nil {
 				return err
@@ -213,7 +216,9 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 			}
 		}
 	}
-	table := outputFormat(ctx) == "table" && !agentMode(ctx)
+	// wide is the table too: it asks for more columns where a table has
+	// them, not for another view.
+	table := (outputFormat(ctx) == "table" || outputFormat(ctx) == "wide") && !agentMode(ctx)
 
 	runCtx, cancel := inventoryCancelContext(cmd)
 	defer cancel()

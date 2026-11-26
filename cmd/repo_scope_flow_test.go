@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -540,6 +541,30 @@ func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) 
 	require.Empty(t, report.Candidates[0].SetCommand, "neither a service name nor an id from a sample")
 	require.True(t, strings.HasPrefix(suggestions[1], "link by hand: "), suggestions[1])
 	require.Contains(t, suggestions, "candidate 1 has no set line: it was found by sampling, which can miss another candidate sharing its service name or ids, so only --namespace with --workload is proposed, and its records name no workload")
+}
+
+// -o wide is the table, as everywhere else in dtctl, and -o csv is refused
+// before anything is sent: a report is a nested document, and csv printed its
+// Go value.
+func TestRepoScopeDiscoverWideAndCSV(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	chdirCheckoutRepo(t)
+	elapsed := regexp.MustCompile(`ran in [0-9.]+s`)
+	run := func(args ...string) string {
+		code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "discover", "--plain"}, args...), RunOptions{})
+		require.Zero(t, code, stderr)
+		return elapsed.ReplaceAllString(stdout, "ran")
+	}
+	table := run()
+	require.Contains(t, table, "#  CLUSTER")
+	require.Equal(t, table, run("-o", "wide"))
+
+	before := len(srv.queries())
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain", "-o", "csv"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, stdout+stderr, "a discovery report is not rows; use -o json, -o yaml or -o toon")
+	require.Len(t, srv.queries(), before, "refused before the first query")
+	require.NotContains(t, stderr, "Sending to")
 }
 
 // A repository nothing in the environment matches: every query is tried, and
