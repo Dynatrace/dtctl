@@ -136,17 +136,6 @@ Examples:
 			quiet, _ := cmd.Flags().GetBool("quiet")
 			verbose, _ := cmd.Flags().GetBool("verbose")
 
-			// --timeout bounds the whole wait. The deadline starts here so
-			// that it covers the reads of a scope's segments too; the waiter
-			// applies the same duration to this context, and the earlier
-			// deadline is the one that holds.
-			ctx := cmdContext(cmd)
-			if timeout > 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, timeout)
-				defer cancel()
-			}
-
 			// A scope is applied only when it is named. Without a name the
 			// wait is the one it always was, and says in one line when the
 			// directory's entry would have narrowed it.
@@ -154,8 +143,19 @@ Examples:
 			if err != nil {
 				return err
 			}
+			ctx := cmdContext(cmd)
 			if hint := repoScopeHint(cmd, cfg, query); hint != "" && !quiet {
 				output.FprintInfo(currentStderr(ctx), "%s", hint)
+			}
+			// --timeout bounds the whole wait, so for a scope that has
+			// segments to read the deadline starts before the reads. The
+			// waiter applies the same duration to this context, and the
+			// earlier deadline is the one that holds. A wait without such a
+			// scope keeps the waiter's deadline alone.
+			if timeout > 0 && scoped.readsSegments() {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
 			}
 			// Read once here, however often the wait polls.
 			if err := scoped.checkSegments(ctx, c); err != nil {

@@ -398,7 +398,7 @@ func (q *repoScopedQuery) segmentList() string {
 // wait the one that carries its deadline. Up to ten reads, each with the
 // client's own timeout and retries, would otherwise outlast both.
 func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) error {
-	if q.scope == nil || len(q.segments) == 0 {
+	if !q.readsSegments() {
 		return nil
 	}
 	handler := segment.NewHandler(c)
@@ -518,6 +518,11 @@ func (q *repoScopedQuery) ignoreHint(what string) string {
 		return ""
 	}
 	return fmt.Sprintf(" (use --%s to %s)", noRepoScopeFlag, what)
+}
+
+// readsSegments reports that checkSegments has segments to read.
+func (q *repoScopedQuery) readsSegments() bool {
+	return q.scope != nil && len(q.segments) > 0
 }
 
 // requireSegments is for a command that must not run unscoped on its own
