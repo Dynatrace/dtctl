@@ -295,6 +295,7 @@ type profilingEnvelope struct {
 			Status         string `json:"status"`
 			Samples        *int   `json:"samples"`
 			AllocatedBytes *int64 `json:"allocated_bytes"`
+			SurvivedBytes  *int64 `json:"survived_bytes"`
 		} `json:"profile"`
 	} `json:"context"`
 }
@@ -794,4 +795,165 @@ func TestExecProfiling_RawNeedsANestedFormat(t *testing.T) {
 		}
 	}
 	require.Empty(t, api.paths)
+}
+
+// --jq filters the rows, and stdout holds the filter's output alone: a table
+// is not printed beside it, and the note of an empty view goes to stderr.
+func TestExecProfiling_JQPrintsOnlyTheFilteredRows(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"stacks", []string{"hotspots", testProcess}, "5\n"},
+		{"functions", []string{"hotspots", testProcess, "--view", "functions"}, "4\n"},
+		{"focus", []string{"hotspots", testProcess, "--focus", "wrap"}, "4\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runProfilingStreams(t, append(tc.args, "--jq", "length")...)
+			require.Zero(t, code, stderr)
+			require.Empty(t, stderr)
+			require.Equal(t, tc.want, stdout)
+		})
+	}
+
+	newProfilingAPI(t, http.StatusOK, `{"dataRootNodeId":"0","dataNodes":[]}`)
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--jq", "length")
+	require.Zero(t, code, stderr)
+	require.Equal(t, "0\n", stdout)
+	require.Equal(t, "# no stacks for "+testProcess+": no profiling samples in the window (status=completed) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result\n", stderr)
+}
+
+// --view functions --sort total ranks by the samples with the function
+// anywhere on the stack.
+func TestExecProfiling_FunctionsViewSortedByTotal(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	first := func(args ...string) string {
+		t.Helper()
+		code, stdout, stderr := runProfilingStreams(t, append([]string{"hotspots", testProcess, "--view", "functions", "-o", "json"}, args...)...)
+		require.Zero(t, code, stderr)
+		var rows []struct {
+			Function string `json:"function"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(stdout), &rows), stdout)
+		require.Len(t, rows, 4)
+		return rows[0].Function
+	}
+	require.Equal(t, "lib.Util.wrap", first(), "the most self samples")
+	require.Equal(t, "app.Main.main", first("--sort", "total"), "on every stack")
+}
+
+// The flags that shape the analysis reach the request.
+func TestExecProfiling_RequestParameters(t *testing.T) {
+	query := func(args ...string) string {
+		t.Helper()
+		api := newProfilingAPI(t, http.StatusOK, `{"dataRootNodeId":"0","dataNodes":[]}`)
+		code, _, stderr := runProfilingStreams(t, append(args, "--default-timeframe-start", "1700000000000", "--default-timeframe-end", "1700003600000")...)
+		require.Zero(t, code, stderr)
+		require.Len(t, api.queries, 1)
+		return api.queries[0]
+	}
+	require.Equal(t, "from=1700000000000&to=1700003600000", query("hotspots", testProcess))
+	require.Equal(t, "from=1700000000000&showWaiting=true&to=1700003600000", query("hotspots", testProcess, "--show-waiting"))
+	require.Equal(t, "from=1700000000000&servicefilter=42%111&to=1700003600000", query("hotspots", testProcess, "--leaf-type", "service"))
+	require.Equal(t, "from=1700000000000&servicefilter=42%110&to=1700003600000", query("hotspots", testProcess, "--leaf-type", "background"))
+	require.Equal(t, "from=1700000000000&to=1700003600000", query("allocations", testProcess))
+	require.Equal(t, "from=1700000000000&survivorsOnly=true&to=1700003600000", query("allocations", testProcess, "--survivors-only"))
+}
+
+// profilingTwoAllocations has a library path that allocates the most and an
+// application path whose allocations survive the most.
+const profilingTwoAllocations = `{"analysisResult":{"stacktreeRootIds":[1,2],"stacktreeNodes":[` +
+	`{"id":1,"name":"Cache.put","childIds":[],"apiInfo":{"systemApi":true},` +
+	`"allocationInfo":{"allocationSize":100,"allocationCount":1,"survivorSize":500,"survivorCount":5}},` +
+	`{"id":2,"name":"lib.Buf.grow","childIds":[],"apiInfo":{"systemApi":false},` +
+	`"allocationInfo":{"allocationSize":300,"allocationCount":3,"survivorSize":50,"survivorCount":1}}]}}`
+
+// allocations ranks by allocated bytes, and by survived bytes with
+// --survivors-only; the cut-off line names the ranking, --app-only keeps the
+// application frames, and the envelope carries both totals.
+func TestExecProfiling_AllocationsRankingAndTotals(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTwoAllocations)
+	const (
+		byAlloc = "# ALLOCATIONS (bytes, sorted by alloc; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n"
+		bySurv  = "# ALLOCATIONS (bytes, sorted by surv; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n"
+		cache   = "Cache.put alloc=100 surv=500 alloc_count=1 surv_count=5\n"
+		buf     = "lib.Buf.grow alloc=300 surv=50 alloc_count=3 surv_count=1\n"
+	)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"by allocated bytes", nil, byAlloc + buf + cache},
+		{"by survived bytes", []string{"--survivors-only"}, bySurv + cache + buf},
+		{"cut off", []string{"--limit", "1"}, byAlloc + buf + "# showing 1 of 2 allocation stacks, by allocated bytes; --limit 0 lists them all\n"},
+		{"cut off, by survived bytes", []string{"--survivors-only", "--limit", "1"}, bySurv + cache + "# showing 1 of 2 allocation stacks, by survived bytes; --limit 0 lists them all\n"},
+		{"application frames only", []string{"--app-only"}, byAlloc + cache},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runProfilingStreams(t, append([]string{"allocations", testProcess}, tc.args...)...)
+			require.Zero(t, code, stderr)
+			require.Empty(t, stderr)
+			require.Equal(t, tc.want, stdout)
+		})
+	}
+
+	env := runProfilingAgent(t, "allocations", testProcess)
+	require.EqualValues(t, 400, *env.Context.Profile.AllocatedBytes)
+	require.EqualValues(t, 550, *env.Context.Profile.SurvivedBytes)
+}
+
+// allocations --raw prints the API's whole result under the envelope keys.
+func TestExecProfiling_AllocationsRaw(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTwoAllocations)
+
+	code, stdout, stderr := runProfilingStreams(t, "allocations", testProcess, "--raw")
+	require.Zero(t, code, stderr)
+	require.Empty(t, stderr)
+	require.JSONEq(t, `{"status":"completed","kind":"memoryAllocation","entityId":"`+testProcess+`","pollCount":0,"result":`+profilingTwoAllocations+`}`, stdout)
+}
+
+// -o folded names the stack view's own layout: the folded lines a table
+// prints, also with --plain, which turns only a table into JSON.
+func TestExecProfiling_FoldedFormat(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	code, want, stderr := runProfilingStreams(t, "hotspots", testProcess)
+	require.Zero(t, code, stderr)
+	require.Contains(t, want, "app.Main.main;lib.Loader.load running=30 lock=0 net_io=0 disk_io=0 wait=0\n")
+
+	for _, args := range [][]string{{"-o", "folded"}, {"-o", "folded", "--plain"}} {
+		code, stdout, stderr := runProfilingStreams(t, append([]string{"hotspots", testProcess}, args...)...)
+		require.Zero(t, code, stderr)
+		require.Empty(t, stderr, args)
+		require.Equal(t, want, stdout, args)
+	}
+}
+
+// hotspots --app-only folds every stack onto its application frames.
+func TestExecProfiling_HotspotsAppOnly(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--app-only")
+	require.Zero(t, code, stderr)
+	require.Empty(t, stderr)
+	require.Equal(t, "app.Main.main running=70 lock=0 net_io=0 disk_io=0 wait=0\n"+
+		"app.Main.main;app.Main.handle running=30 lock=5 net_io=0 disk_io=0 wait=0\n", stdout)
+}
+
+// A functions view that was cut off says so in the envelope.
+func TestExecProfiling_FunctionsViewCutOffWarns(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	env := runProfilingAgent(t, "hotspots", testProcess, "--view", "functions", "--limit", "1")
+	require.Len(t, env.Result, 1)
+	require.True(t, env.Context.HasMore)
+	require.Equal(t, []string{"showing 1 of 4 functions, by self running samples; --limit 0 lists every function"}, env.Context.Warnings)
+
+	env = runProfilingAgent(t, "hotspots", testProcess, "--view", "functions")
+	require.Len(t, env.Result, 4)
+	require.Empty(t, env.Context.Warnings)
 }
