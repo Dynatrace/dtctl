@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -652,36 +652,90 @@ func tokenBoundIn(contexts []config.NamedContext, tokenName string) bool {
 	})
 }
 
-// contextsNarrowedByLogin names the other contexts that use tokenName and are
-// allowed more than requested. A login replaces the stored token, so those
-// contexts lose the scopes their level relies on until one of them logs in
-// again.
-func contextsNarrowedByLogin(cfg *config.Config, contextName, tokenName string, requested config.SafetyLevel) []string {
-	var names []string
+// tokenPeer is another context that uses the stored token a login replaces.
+type tokenPeer struct {
+	label string             // the context's name as a message shows it
+	level config.SafetyLevel // the level dtctl enforces for it
+}
+
+// contextsSharingToken returns the contexts other than contextName whose
+// stored token is the one a login to environment replaces when it stores its
+// token as tokenName. Tokens are stored per OAuth tier and name, so a context
+// of another tier keeps its own token under the same name, and two
+// environments of one tier share one. global holds the contexts of the global
+// config when cfg is a project config (globalContextsFor); they are peers
+// too, and the login is never one of them.
+func contextsSharingToken(cfg *config.Config, global []config.NamedContext, contextName, tokenName, environment string) []tokenPeer {
+	tier := auth.DetectEnvironment(environment)
+	shares := func(c *config.Context) bool {
+		return c.TokenRef == tokenName && auth.DetectEnvironment(c.Environment) == tier
+	}
+	var peers []tokenPeer
 	for i := range cfg.Contexts {
 		nc := &cfg.Contexts[i]
-		if nc.Name == contextName || nc.Context.TokenRef != tokenName {
-			continue
-		}
-		if safetyLevelPermitsMore(cfg.EffectiveSafetyLevelFor(&nc.Context), requested) {
-			names = append(names, nc.Name)
+		if nc.Name != contextName && shares(&nc.Context) {
+			peers = append(peers, tokenPeer{fmt.Sprintf("%q", nc.Name), cfg.EffectiveSafetyLevelFor(&nc.Context)})
 		}
 	}
-	sort.Strings(names)
+	for i := range global {
+		nc := &global[i]
+		if shares(&nc.Context) {
+			peers = append(peers, tokenPeer{fmt.Sprintf("%q (global config)", nc.Name), nc.Context.GetEffectiveSafetyLevel()})
+		}
+	}
+	slices.SortFunc(peers, func(a, b tokenPeer) int { return strings.Compare(a.label, b.label) })
+	return peers
+}
+
+// peerLabels returns the peers' names as a message shows them.
+func peerLabels(peers []tokenPeer) []string {
+	labels := make([]string, len(peers))
+	for i, p := range peers {
+		labels[i] = p.label
+	}
+	return labels
+}
+
+// contextsNarrowedByLogin names the peers whose level requests a scope that
+// is not in scopes, the set the login requests. Those contexts lose that
+// scope until one of them logs in again. The comparison is by scope set and
+// not by rank: readonly requests read scopes that readwrite-mine does not.
+func contextsNarrowedByLogin(peers []tokenPeer, scopes []string) []string {
+	var names []string
+	for _, p := range peers {
+		if slices.ContainsFunc(auth.GetScopesForSafetyLevel(p.level), func(s string) bool { return !slices.Contains(scopes, s) }) {
+			names = append(names, p.label)
+		}
+	}
 	return names
 }
 
-// safetyLevelPermitsMore reports whether level a allows more than level b.
-// config.ValidSafetyLevels lists the levels from most to least restrictive;
-// a value outside it is enforced as the default (see sdk/session's checker).
-func safetyLevelPermitsMore(a, b config.SafetyLevel) bool {
-	rank := func(l config.SafetyLevel) int {
-		if i := slices.Index(config.ValidSafetyLevels(), l); i >= 0 {
-			return i
-		}
-		return slices.Index(config.ValidSafetyLevels(), config.DefaultSafetyLevel)
+// warnContextsNarrowedByLogin tells the user which contexts lose scopes when
+// the login replaces the token they share, and what to do about it. In a
+// project directory (local) a token name of its own is no way out by itself:
+// dtctl refuses a token there that the global config does not bind.
+func warnContextsNarrowedByLogin(w io.Writer, tokenName string, narrowed []string, local bool) {
+	if len(narrowed) == 0 {
+		return
 	}
-	return rank(a) > rank(b)
+	whose, lose, target := "whose safety level requests", "that context loses", "it"
+	if len(narrowed) > 1 {
+		whose, lose, target = "whose safety levels request", "those contexts lose", "one of them"
+	}
+	output.FprintWarning(w, "Token '%s' is also used by %s, %s scopes this login does not. The login replaces the token, so %s them.", tokenName, joinNames(narrowed), whose, lose)
+	if local {
+		output.FprintHint(w, "Log in to %s afterwards to restore its scopes. A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment.", target)
+		return
+	}
+	output.FprintHint(w, "Log in to %s afterwards to restore its scopes, or give this context its own token with --token-name.", target)
+}
+
+// joinNames joins names the way a sentence lists them: a, b and c.
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // Environment variables that supply client credentials grant parameters. They
@@ -938,13 +992,10 @@ Non-interactive login (CI/CD):
 			// Log which environment we detected
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Detected environment: %s", oauthConfig.Environment)
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Safety level: %s", oauthConfig.SafetyLevel)
-			if scopeLevel != levels.declared {
-				output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", levels.ceilingNotice(tokenName, tokenBoundIn(globalContextsFor(cfg), tokenName)))
-			}
-			if narrowed := contextsNarrowedByLogin(cfg, contextName, tokenName, scopeLevel); len(narrowed) > 0 {
-				output.FprintWarning(currentStderr(cmdContext(cmd)), "Token '%s' is also used by %s, which allow more than %s. This login replaces it with a %s token.", tokenName, strings.Join(narrowed, ", "), scopeLevel, scopeLevel)
-				output.FprintHint(currentStderr(cmdContext(cmd)), "Log in to one of them afterwards to restore its scopes, or give this context its own token with --token-name.")
-			}
+
+			// A login replaces the stored token, which other contexts may use.
+			globalContexts := globalContextsFor(cfg)
+			peers := contextsSharingToken(cfg, globalContexts, contextName, tokenName, environment)
 
 			// Create OAuth flow
 			flow, err := authNewOAuthFlowFunc(oauthConfig)
@@ -967,10 +1018,15 @@ Non-interactive login (CI/CD):
 					// The browser flow requests the safety level's scope set at the
 					// IdP, so there the two move together. Here they do not, and a
 					// narrowing safety level would otherwise read as if it had.
-					if levels.declared != config.SafetyLevelDangerouslyUnrestricted {
-						output.FprintWarning(currentStderr(cmdContext(cmd)), "--safety-level %s gates dtctl itself; it does not narrow the token.", levels.declared)
+					if scopeLevel != config.SafetyLevelDangerouslyUnrestricted {
+						output.FprintWarning(currentStderr(cmdContext(cmd)), "--safety-level %s gates dtctl itself; it does not narrow the token.", scopeLevel)
 						output.FprintHint(currentStderr(cmdContext(cmd)), "Pass --scopes, or provision the OAuth client with only the scopes this pipeline needs.")
 					}
+				}
+				// The grant's scopes do not follow the safety level, so all there
+				// is to say about a shared token is that it is replaced.
+				if len(peers) > 0 {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "Token '%s' is also used by %s. This login replaces it with the OAuth client's token.", tokenName, joinNames(peerLabels(peers)))
 				}
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Authenticating with the client credentials grant (no browser)...")
 				tokens, err = authClientCredentialsFunc(ctx, flow, clientID, clientSecret, accountURN, grantScopes)
@@ -985,6 +1041,11 @@ Non-interactive login (CI/CD):
 				}
 			} else {
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Requesting OAuth scopes for safety level %s...", oauthConfig.SafetyLevel)
+				if scopeLevel != levels.declared {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", levels.ceilingNotice(tokenName, tokenBoundIn(globalContexts, tokenName)))
+				}
+				// Said before the browser opens, while the login can still be abandoned.
+				warnContextsNarrowedByLogin(currentStderr(cmdContext(cmd)), tokenName, contextsNarrowedByLogin(peers, oauthConfig.Scopes), cfg.IsLocal())
 
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Starting OAuth authentication flow...")
 				tokens, err = authBrowserFlowFunc(ctx, flow)

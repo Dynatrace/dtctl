@@ -1460,11 +1460,17 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Safety level: readonly",
-		`The context declares dangerously-unrestricted; the global config allows token "prod-oauth" readonly, so the login requests readonly scopes.`,
+		// The enforced level is the one that does not narrow the token.
+		"--safety-level readonly gates dtctl itself; it does not narrow the token.",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)
 		}
+	}
+	// This is the client credentials grant: the token carries the OAuth
+	// client's scopes, so nothing may say the login requests a level's.
+	if strings.Contains(stderr, "so the login requests") {
+		t.Errorf("stderr says which scopes the login requests:\n%s", stderr)
 	}
 	after, err := config.Load()
 	if err != nil {
@@ -1479,39 +1485,75 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 	}
 }
 
-// TestContextsNarrowedByLogin: a login replaces the stored token, so contexts
-// that share it and are allowed more are named before it happens.
+// TestContextsNarrowedByLogin: a login replaces the stored token, so the
+// contexts that share it and whose level requests a scope the login does not
+// are named before it happens.
 func TestContextsNarrowedByLogin(t *testing.T) {
-	const envURL = "https://abc12345.apps.dynatrace.com"
+	const (
+		envURL     = "https://abc12345.apps.dynatrace.com"
+		otherURL   = "https://xyz67890.apps.dynatrace.com"
+		devTierURL = "https://abc12345.dev.apps.dynatracelabs.com"
+	)
 	cfg := config.NewConfig()
-	add := func(name, token string, level config.SafetyLevel) {
-		cfg.SetContextWithOptions(name, envURL, token, &config.ContextOptions{SafetyLevel: level})
+	add := func(name, url, token string, level config.SafetyLevel) {
+		cfg.SetContextWithOptions(name, url, token, &config.ContextOptions{SafetyLevel: level})
 	}
-	add("ro", "shared", config.SafetyLevelReadOnly)
-	add("writer", "shared", config.SafetyLevelReadWriteAll)
-	add("admin", "shared", config.SafetyLevelDangerouslyUnrestricted)
-	add("mine", "shared", config.SafetyLevelReadWriteMine)
-	add("unset", "shared", "")
-	add("elsewhere", "other", config.SafetyLevelDangerouslyUnrestricted)
+	add("ro", envURL, "shared", config.SafetyLevelReadOnly)
+	add("writer", envURL, "shared", config.SafetyLevelReadWriteAll)
+	add("admin", envURL, "shared", config.SafetyLevelDangerouslyUnrestricted)
+	add("mine", envURL, "shared", config.SafetyLevelReadWriteMine)
+	add("unset", envURL, "shared", "")
+	// Not a level: dtctl enforces the default for it, so it counts as one.
+	add("typo", envURL, "shared", "read-only")
+	// Another environment of the same tier shares the stored token.
+	add("neighbour", otherURL, "shared", config.SafetyLevelReadWriteAll)
+	// Tokens are stored per tier, so this one is not replaced.
+	add("dev", devTierURL, "shared", config.SafetyLevelDangerouslyUnrestricted)
+	add("elsewhere", envURL, "other", config.SafetyLevelDangerouslyUnrestricted)
 
 	tests := []struct {
 		context   string
 		requested config.SafetyLevel
 		want      []string
 	}{
-		{"ro", config.SafetyLevelReadOnly, []string{"admin", "mine", "unset", "writer"}},
-		{"mine", config.SafetyLevelReadWriteMine, []string{"admin", "unset", "writer"}},
-		{"writer", config.SafetyLevelReadWriteAll, []string{"admin"}},
+		{"ro", config.SafetyLevelReadOnly, []string{`"admin"`, `"mine"`, `"neighbour"`, `"typo"`, `"unset"`, `"writer"`}},
+		// readonly requests six read scopes that readwrite-mine does not.
+		{"mine", config.SafetyLevelReadWriteMine, []string{`"admin"`, `"neighbour"`, `"ro"`, `"typo"`, `"unset"`, `"writer"`}},
+		{"writer", config.SafetyLevelReadWriteAll, []string{`"admin"`}},
 		{"admin", config.SafetyLevelDangerouslyUnrestricted, nil},
+		// The context that logs in is never its own peer, also when the login
+		// requests less than its stored level.
+		{"admin", config.SafetyLevelReadOnly, []string{`"mine"`, `"neighbour"`, `"typo"`, `"unset"`, `"writer"`}},
 	}
 	for _, tt := range tests {
-		got := contextsNarrowedByLogin(cfg, tt.context, "shared", tt.requested)
+		peers := contextsSharingToken(cfg, nil, tt.context, "shared", envURL)
+		got := contextsNarrowedByLogin(peers, auth.GetScopesForSafetyLevel(tt.requested))
 		if !slices.Equal(got, tt.want) {
 			t.Errorf("login to %s at %s: got %v, want %v", tt.context, tt.requested, got, tt.want)
 		}
 	}
-	if got := contextsNarrowedByLogin(cfg, "ro", "ro-oauth", config.SafetyLevelReadOnly); got != nil {
+	if got := contextsSharingToken(cfg, nil, "ro", "ro-oauth", envURL); got != nil {
 		t.Errorf("a token nobody else uses: got %v", got)
+	}
+	if got := contextsSharingToken(cfg, nil, "fresh", "shared", devTierURL); len(got) != 1 || got[0].label != `"dev"` {
+		t.Errorf("a login in the dev tier: got %v, want only \"dev\"", got)
+	}
+}
+
+// TestJoinQuotedNames pins how a list of contexts reads in a sentence.
+func TestJoinQuotedNames(t *testing.T) {
+	tests := []struct {
+		names []string
+		want  string
+	}{
+		{[]string{`"a"`}, `"a"`},
+		{[]string{`"a"`, `"b"`}, `"a" and "b"`},
+		{[]string{`"a"`, `"b"`, `"c"`}, `"a", "b" and "c"`},
+	}
+	for _, tt := range tests {
+		if got := joinNames(tt.names); got != tt.want {
+			t.Errorf("joinNames(%v) = %q, want %q", tt.names, got, tt.want)
+		}
 	}
 }
 
@@ -1582,9 +1624,19 @@ func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 		if saved != config.SafetyLevelReadOnly {
 			t.Errorf("saved level %q, want readonly", saved)
 		}
-		for _, want := range []string{"Safety level: readonly", "Token 'shared-oauth' is also used by writer", "--token-name"} {
+		for _, want := range []string{
+			"Safety level: readonly",
+			`Token 'shared-oauth' is also used by "writer". This login replaces it with the OAuth client's token.`,
+		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		}
+		// The client credentials grant does not request the level's scopes,
+		// so the login cannot be said to narrow the token to them.
+		for _, unwanted := range []string{"readonly token", "requests readonly scopes", "loses", "--token-name"} {
+			if strings.Contains(stderr, unwanted) {
+				t.Errorf("stderr contains %q:\n%s", unwanted, stderr)
 			}
 		}
 	})
@@ -1795,8 +1847,8 @@ func TestAuthLogin_EmptySafetyLevelIsRejected(t *testing.T) {
 	if !errors.Is(runErr, errEmptyFlagValue) {
 		t.Fatalf("err = %v, want the empty flag value error\n%s", runErr, stderr)
 	}
-	if want := `invalid argument "" for "--safety-level" flag: must not be empty`; runErr.Error() != want {
-		t.Errorf("err = %q, want %q", runErr, want)
+	if !strings.Contains(runErr.Error(), "safety-level") {
+		t.Errorf("err = %q, want it to name --safety-level", runErr)
 	}
 	if granted {
 		t.Error("a token was requested")
@@ -2017,4 +2069,125 @@ func TestAuthLogin_InvalidLevelInTheGlobalBindingIsRefused(t *testing.T) {
 	if strings.Contains(stderr, "Safety level: read-only") {
 		t.Errorf("the invalid value was printed as the login's level:\n%s", stderr)
 	}
+}
+
+// TestAuthLogin_BrowserFlowNamesTheContextsItNarrows: the browser login
+// requests the scopes of one level and replaces the stored token, so a context
+// that shares the token and needs a scope outside that set is named before
+// the browser opens.
+func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
+	const (
+		envURL     = "https://abc12345.apps.dynatrace.com"
+		devTierURL = "https://abc12345.dev.apps.dynatracelabs.com"
+	)
+
+	t.Run("one context, by scope set and not by rank", func(t *testing.T) {
+		// readonly ranks below readwrite-mine and still requests six read
+		// scopes readwrite-mine does not, so it is the one that loses.
+		configPath := setupAuthTestConfig(t, "other", envURL, "other-oauth")
+		cfg, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		cfg.SetContextWithOptions("mine", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadWriteMine})
+		cfg.SetContextWithOptions("ro", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadOnly})
+		cfg.SetContextWithOptions("dev", devTierURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelDangerouslyUnrestricted})
+		if err := cfg.SaveTo(configPath); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+		gFlags.cfgFile = configPath
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+
+		stderr, _, runErr := runBrowserLogin(t, "--context", "mine")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		for _, want := range []string{
+			`Token 'shared-oauth' is also used by "ro", whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
+			"Log in to it afterwards to restore its scopes, or give this context its own token with --token-name.",
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		}
+		// The dev tier keeps its own token under the same name.
+		if strings.Contains(stderr, `"dev"`) {
+			t.Errorf("stderr names a context of another tier:\n%s", stderr)
+		}
+	})
+
+	t.Run("several contexts", func(t *testing.T) {
+		configPath := setupAuthTestConfig(t, "viewer", envURL, "shared-oauth")
+		cfg, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		cfg.SetContextWithOptions("viewer", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadOnly})
+		cfg.SetContextWithOptions("writer", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadWriteAll})
+		cfg.SetContextWithOptions("admin", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelDangerouslyUnrestricted})
+		if err := cfg.SaveTo(configPath); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+		gFlags.cfgFile = configPath
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+
+		stderr, _, runErr := runBrowserLogin(t, "--context", "viewer")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		for _, want := range []string{
+			`Token 'shared-oauth' is also used by "admin" and "writer", whose safety levels request scopes this login does not. The login replaces the token, so those contexts lose them.`,
+			"Log in to one of them afterwards to restore its scopes, or give this context its own token with --token-name.",
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		}
+	})
+
+	t.Run("a global context that shares the token with a project context", func(t *testing.T) {
+		// Two global contexts bind the token; the more restrictive one sets
+		// the ceiling, so the login requests readonly scopes whatever the
+		// project file declares, and the global readwrite-all context loses.
+		global := loginConfigYAML("prod",
+			loginTestContext{"prod", envURL, "prod-oauth", config.SafetyLevelReadOnly},
+			loginTestContext{"writer", envURL, "prod-oauth", config.SafetyLevelReadWriteAll})
+		setupLoginProject(t, global, loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelDangerouslyUnrestricted}))
+
+		stderr, _, runErr := runBrowserLogin(t, "--context", "project")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		for _, want := range []string{
+			`Token 'prod-oauth' is also used by "writer" (global config), whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
+			"Log in to it afterwards to restore its scopes. A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment.",
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		}
+	})
+
+	t.Run("nothing to say when no context loses a scope", func(t *testing.T) {
+		configPath := setupAuthTestConfig(t, "viewer", envURL, "shared-oauth")
+		cfg, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		cfg.SetContextWithOptions("viewer", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadOnly})
+		cfg.SetContextWithOptions("writer", envURL, "shared-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadWriteAll})
+		if err := cfg.SaveTo(configPath); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+		gFlags.cfgFile = configPath
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+
+		stderr, _, runErr := runBrowserLogin(t, "--context", "writer")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		if strings.Contains(stderr, "is also used by") {
+			t.Errorf("stderr warns about a shared token nobody loses a scope of:\n%s", stderr)
+		}
+	})
 }
