@@ -386,6 +386,21 @@ func TestBuildFilterSets(t *testing.T) {
 		}
 	})
 
+	t.Run("the request carries each label's values as given", func(t *testing.T) {
+		raw, err := json.Marshal(BuildFilterSets(
+			map[string][]string{"k8s.workload.name": {"checkout", "cart"}, "k8s.namespace.name": {"payments"}},
+			map[string][]string{"service.name": {"checkout"}},
+		))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		const want = `[{"filters":[],"labels":[{"field":"k8s.namespace.name","values":["payments"]},{"field":"k8s.workload.name","values":["checkout","cart"]}]},` +
+			`{"filters":[],"labels":[{"field":"service.name","values":["checkout"]}]}]`
+		if string(raw) != want {
+			t.Fatalf("filter sets:\n got %s\nwant %s", raw, want)
+		}
+	})
+
 	t.Run("no labels gives an empty slice", func(t *testing.T) {
 		for name, sets := range map[string][]map[string]interface{}{
 			"empty map": BuildFilterSets(map[string][]string{}),

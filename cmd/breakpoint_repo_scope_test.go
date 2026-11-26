@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -49,34 +50,42 @@ const breakpointScope = `environments:
           name: regions
 `
 
-var (
-	checkoutFilterSet = map[string][]string{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout"}}
-	ledgerFilterSet   = map[string][]string{"service.name": {"ledger"}}
-	splitFilterSets   = []map[string][]string{
-		{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"split"}},
-		{"service.name": {"split"}},
-	}
+// The filter sets the entries of breakpointScope render, as the request and
+// the response spell them.
+const (
+	checkoutSetJSON  = `{"filters":[],"labels":[{"field":"k8s.namespace.name","values":["payments"]},{"field":"k8s.workload.name","values":["checkout"]}]}`
+	ledgerSetJSON    = `{"filters":[],"labels":[{"field":"service.name","values":["ledger"]}]}`
+	splitWorkloadSet = `{"filters":[],"labels":[{"field":"k8s.namespace.name","values":["payments"]},{"field":"k8s.workload.name","values":["split"]}]}`
+	splitServiceSet  = `{"filters":[],"labels":[{"field":"service.name","values":["split"]}]}`
+	webSetJSON       = `{"filters":[],"labels":[{"field":"k8s.namespace.name","values":["web"]}]}`
 )
 
 // graphQLCall is one request the Live Debugger stub answered.
 type graphQLCall struct {
 	op        string
+	mutation  bool
 	variables map[string]interface{}
 }
 
-// liveDebuggerStub is a Live Debugger GraphQL endpoint holding one workspace.
+// liveDebuggerStub is a Live Debugger GraphQL endpoint. It keeps one
+// workspace per project path, whose id it derives from the path, refuses a
+// workspace id it did not issue, and keeps the filter sets an update sends.
 // The client sends a query text and variables but no operation name, so each
 // request is matched by the operation its text declares.
 type liveDebuggerStub struct {
 	*httptest.Server
 	mu    sync.Mutex
 	calls []graphQLCall
-	// filterSets are the workspace's filters, in the response's shape.
-	filterSets []interface{}
-	// rules are breakpoints the workspace holds, in the response's shape.
+	// seed is the filter sets a workspace holds when it is first asked for.
+	seed []interface{}
+	// filterSets are the filter sets of each workspace, by project path.
+	filterSets map[string][]interface{}
+	// rules are breakpoints every workspace holds, in the response's shape.
 	rules []interface{}
-	// activeRules is how many more enabled breakpoints it holds.
+	// activeRules is how many more enabled breakpoints every workspace holds.
 	activeRules int
+	// fail makes an operation answer with this GraphQL error.
+	fail map[string]string
 }
 
 // liveDebuggerOperations are the operations the stub answers, by the
@@ -86,14 +95,28 @@ var liveDebuggerOperations = []string{
 	"mutation UpdateWorkspaceV2(",
 	"mutation CreateRule(",
 	"query GetWorkspaceRules(",
+	"query GetRuleStatusBreakdown(",
+	"mutation EditRuleV2(",
 	"mutation EnableOrDisableRules(",
+	"mutation DeleteRule(",
+	"mutation DeleteAllRulesFromWorkspace(",
 }
 
+// stubWorkspaceID is the id the stub issues for the workspace of a project
+// path.
+func stubWorkspaceID(projectPath string) string { return "ws:" + projectPath }
+
 // newLiveDebuggerStub starts the stub and points an isolated config's only
-// context at it, at the given safety level, with repo scoping opted in.
-func newLiveDebuggerStub(t *testing.T, safetyLevel string, filterSets ...map[string][]string) *liveDebuggerStub {
+// context at it, at the given safety level, with repo scoping opted in. Each
+// of seed is one filter set, as JSON, that every workspace starts with.
+func newLiveDebuggerStub(t *testing.T, safetyLevel string, seed ...string) *liveDebuggerStub {
 	t.Helper()
-	s := &liveDebuggerStub{filterSets: workspaceFilterSetsJSON(filterSets...)}
+	s := &liveDebuggerStub{seed: []interface{}{}, filterSets: map[string][]interface{}{}, fail: map[string]string{}}
+	for _, set := range seed {
+		var decoded interface{}
+		require.NoError(t, json.Unmarshal([]byte(set), &decoded))
+		s.seed = append(s.seed, decoded)
+	}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/platform/storage/query/v1/query:execute" {
 			_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":{"records":[]}}`))
@@ -109,42 +132,77 @@ func newLiveDebuggerStub(t *testing.T, safetyLevel string, filterSets ...map[str
 		}
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &req)
-		op := ""
+		op, mutation := "", false
 		for _, decl := range liveDebuggerOperations {
 			if strings.HasPrefix(strings.TrimSpace(req.Query), decl) {
-				op = strings.Fields(decl)[1]
-				op = strings.TrimSuffix(op, "(")
+				kind, name, _ := strings.Cut(strings.TrimSuffix(decl, "("), " ")
+				op, mutation = name, kind == "mutation"
 			}
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		s.calls = append(s.calls, graphQLCall{op: op, variables: req.Variables})
+		s.calls = append(s.calls, graphQLCall{op: op, mutation: mutation, variables: req.Variables})
+		w.Header().Set("Content-Type", "application/json")
+		if msg := s.fail[op]; msg != "" {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"errors": []interface{}{map[string]interface{}{"message": msg}}})
+			return
+		}
+		// Every operation but the one that issues a workspace id names the
+		// workspace it works in by that id.
+		path := ""
+		if op != "GetOrCreateWorkspaceV2" && op != "GetRuleStatusBreakdown" {
+			id, _ := req.Variables["workspaceId"].(string)
+			path = strings.TrimPrefix(id, "ws:")
+			if _, issued := s.filterSets[path]; !issued || id != stubWorkspaceID(path) {
+				t.Errorf("%s names workspace id %q, which the stub did not issue", op, id)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"errors": []interface{}{map[string]interface{}{"message": "unknown workspace"}}})
+				return
+			}
+		}
+		workspace := func(body map[string]interface{}) map[string]interface{} {
+			return map[string]interface{}{"org": map[string]interface{}{"workspace": body}}
+		}
 		var body interface{}
 		switch op {
 		case "GetOrCreateWorkspaceV2":
+			input, _ := req.Variables["workspaceInput"].(map[string]interface{})
+			path, _ = input["projectPath"].(string)
+			if _, ok := s.filterSets[path]; !ok {
+				s.filterSets[path] = s.seed
+			}
 			body = map[string]interface{}{"org": map[string]interface{}{"getOrCreateUserWorkspaceV2": map[string]interface{}{
-				"id": "ws-1", "filterSets": s.filterSets,
+				"id": stubWorkspaceID(path), "filterSets": s.filterSets[path],
 			}}}
 		case "UpdateWorkspaceV2":
-			body = map[string]interface{}{"org": map[string]interface{}{"updateWorkspaceV2": map[string]interface{}{"id": "ws-1"}}}
-		case "CreateRule":
-			body = map[string]interface{}{"org": map[string]interface{}{"workspace": map[string]interface{}{
-				"createRuleV2": map[string]interface{}{"id": "dtctl-rule-0001"},
+			data, _ := req.Variables["data"].(map[string]interface{})
+			sets, _ := data["filterSets"].([]interface{})
+			s.filterSets[path] = sets
+			body = map[string]interface{}{"org": map[string]interface{}{"updateWorkspaceV2": map[string]interface{}{
+				"id": stubWorkspaceID(path), "filterSets": sets,
 			}}}
+		case "CreateRule":
+			body = workspace(map[string]interface{}{"createRuleV2": map[string]interface{}{"id": "dtctl-rule-0001"}})
 		case "GetWorkspaceRules":
 			rules := append([]interface{}{}, s.rules...)
 			for i := 0; i < s.activeRules; i++ {
 				rules = append(rules, map[string]interface{}{"id": fmt.Sprintf("bp-%d", i), "is_disabled": false})
 			}
-			body = map[string]interface{}{"org": map[string]interface{}{"workspace": map[string]interface{}{"rules": rules}}}
+			body = workspace(map[string]interface{}{"rules": rules})
+		case "GetRuleStatusBreakdown":
+			body = map[string]interface{}{"org": map[string]interface{}{"ruleStatuses": []interface{}{}}}
+		case "EditRuleV2":
+			body = workspace(map[string]interface{}{"editRuleV2": map[string]interface{}{"id": "dtctl-rule-0001"}})
 		case "EnableOrDisableRules":
-			body = map[string]interface{}{"org": map[string]interface{}{"workspace": map[string]interface{}{"enableOrDisableRules": []interface{}{}}}}
+			body = workspace(map[string]interface{}{"enableOrDisableRules": []interface{}{}})
+		case "DeleteRule":
+			body = workspace(map[string]interface{}{"deleteRuleV2": true})
+		case "DeleteAllRulesFromWorkspace":
+			body = workspace(map[string]interface{}{"deleteAllRulesFromWorkspaceV2": []interface{}{"dtctl-rule-0001"}})
 		default:
 			t.Errorf("unexpected GraphQL request: %.80s", req.Query)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": body})
 	}))
 	t.Cleanup(s.Close)
@@ -163,15 +221,6 @@ func ruleAt(filename string, line int, disableReason string) map[string]interfac
 	}
 }
 
-// workspaceFilterSetsJSON is sets as getOrCreateUserWorkspaceV2 returns them.
-func workspaceFilterSetsJSON(sets ...map[string][]string) []interface{} {
-	out := []interface{}{}
-	for _, set := range livedebugger.BuildFilterSets(sets...) {
-		out = append(out, set)
-	}
-	return out
-}
-
 // ops lists the operations the stub was sent, in order.
 func (s *liveDebuggerStub) ops() []string {
 	s.mu.Lock()
@@ -179,6 +228,19 @@ func (s *liveDebuggerStub) ops() []string {
 	ops := make([]string, len(s.calls))
 	for i, c := range s.calls {
 		ops[i] = c.op
+	}
+	return ops
+}
+
+// mutations lists the operations the stub was sent that change something.
+func (s *liveDebuggerStub) mutations() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ops := []string{}
+	for _, c := range s.calls {
+		if c.mutation {
+			ops = append(ops, c.op)
+		}
 	}
 	return ops
 }
@@ -214,18 +276,32 @@ func (s *liveDebuggerStub) projectPaths() []string {
 	return paths
 }
 
+// workedIn lists, without repeats, the workspaces the requests that name one
+// by id worked in, by project path.
+func (s *liveDebuggerStub) workedIn() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	paths := []string{}
+	for _, c := range s.calls {
+		if id, ok := c.variables["workspaceId"].(string); ok {
+			if path := strings.TrimPrefix(id, "ws:"); !slices.Contains(paths, path) {
+				paths = append(paths, path)
+			}
+		}
+	}
+	return paths
+}
+
+// reset forgets the requests seen so far. The workspaces stay as they are.
 func (s *liveDebuggerStub) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = nil
 }
 
-// filterSetsPayload is what BuildFilterSets sends for sets, as JSON.
-func filterSetsPayload(t *testing.T, sets ...map[string][]string) string {
-	t.Helper()
-	raw, err := json.Marshal(livedebugger.BuildFilterSets(sets...))
-	require.NoError(t, err)
-	return string(raw)
+// filterSetsJSON is the JSON list of the given filter sets.
+func filterSetsJSON(sets ...string) string {
+	return "[" + strings.Join(sets, ",") + "]"
 }
 
 const (
@@ -245,10 +321,12 @@ func TestCreateBreakpoint_RepoScopeDefault(t *testing.T) {
 	require.Equal(t, checkoutApplying, stderr)
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "GetWorkspaceRules", "UpdateWorkspaceV2", "CreateRule"}, srv.ops(),
 		"the default counts the active breakpoints even in a non-interactive run")
-	require.JSONEq(t, filterSetsPayload(t, checkoutFilterSet), srv.sentFilterSets(t))
+	require.JSONEq(t, filterSetsJSON(checkoutSetJSON), srv.sentFilterSets(t))
 	require.Contains(t, stdout, "Created breakpoint at A.java:1 (id: dtctl-rule-0001); workspace filters set from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout")
 
-	srv.reset()
+	// A second create finds the filters the first one set, so the envelope
+	// of the default is read from a workspace that has none yet.
+	newLiveDebuggerStub(t, "readwrite-all")
 	code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	resp := agentEnvelope(t, stdout)
@@ -292,7 +370,7 @@ func TestBreakpoint_RepoScopeClusterIsNotSent(t *testing.T) {
 			require.Equal(t, tc.stderr, stderr)
 			require.NotContains(t, stdout, "k8s.cluster.uid")
 			if tc.sends {
-				require.JSONEq(t, filterSetsPayload(t, checkoutFilterSet), srv.sentFilterSets(t))
+				require.JSONEq(t, filterSetsJSON(checkoutSetJSON), srv.sentFilterSets(t))
 			} else {
 				require.NotContains(t, srv.ops(), "UpdateWorkspaceV2")
 			}
@@ -318,7 +396,7 @@ func TestCreateBreakpoint_RepoScopeDefaultAsksOnlyWhenItRescopes(t *testing.T) {
 	require.NotContains(t, stdout, "Continue?")
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "GetWorkspaceRules", "UpdateWorkspaceV2", "CreateRule"}, srv.ops())
 
-	srv.reset()
+	srv = newLiveDebuggerStub(t, "readwrite-all")
 	srv.activeRules = 1
 	code, stdout, _ = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--no-agent"}, RunOptions{Stdin: strings.NewReader("y\n")})
 	require.Zero(t, code)
@@ -387,14 +465,14 @@ func TestCreateBreakpoint_RepoScopeOff(t *testing.T) {
 	chdirTestRepo(t, breakpointScope)
 	code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--no-repo-scope", "--filters", "k8s.namespace.name:web"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.JSONEq(t, filterSetsPayload(t, map[string][]string{"k8s.namespace.name": {"web"}}), srv.sentFilterSets(t))
+	require.JSONEq(t, filterSetsJSON(webSetJSON), srv.sentFilterSets(t))
 }
 
 // A workspace that already has filters keeps them. When the covering entry
 // would set different ones, one warning says how to apply it.
 func TestCreateBreakpoint_RepoScopeLeavesExistingFilters(t *testing.T) {
 	t.Run("different", func(t *testing.T) {
-		srv := newLiveDebuggerStub(t, "readwrite-all", map[string][]string{"k8s.namespace.name": {"web"}})
+		srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
 		chdirTestRepo(t, breakpointScope)
 
 		code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
@@ -403,7 +481,7 @@ func TestCreateBreakpoint_RepoScopeLeavesExistingFilters(t *testing.T) {
 		require.Contains(t, stderr, "the workspace already has filters (k8s.namespace.name:web); repo scope checkout would set k8s.namespace.name:payments,k8s.workload.name:checkout; pass --repo-scope checkout to apply it")
 	})
 	t.Run("the same", func(t *testing.T) {
-		srv := newLiveDebuggerStub(t, "readwrite-all", checkoutFilterSet)
+		srv := newLiveDebuggerStub(t, "readwrite-all", checkoutSetJSON)
 		chdirTestRepo(t, breakpointScope)
 
 		code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
@@ -423,21 +501,21 @@ func TestCreateBreakpoint_RepoScopeDefaultSendsTheWorkloadSet(t *testing.T) {
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
 	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-	require.JSONEq(t, filterSetsPayload(t, splitFilterSets[0]), srv.sentFilterSets(t))
+	require.JSONEq(t, filterSetsJSON(splitWorkloadSet), srv.sentFilterSets(t))
 	require.Contains(t, stderr, "repo scope split's other filter sets (service.name:split) are set only with --repo-scope split")
 	require.Contains(t, stdout, "workspace filters set from repo scope split: k8s.namespace.name:payments,k8s.workload.name:split")
 
 	srv.reset()
 	code, _, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--repo-scope", "split"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.JSONEq(t, filterSetsPayload(t, splitFilterSets...), srv.sentFilterSets(t))
+	require.JSONEq(t, filterSetsJSON(splitWorkloadSet, splitServiceSet), srv.sentFilterSets(t))
 	require.Equal(t, "repo scope split's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label\n", stderr)
 }
 
 // A workspace that holds every set of the covering entry, from an earlier
 // --repo-scope, is not warned about.
 func TestCreateBreakpoint_RepoScopeKnowsTheWholeEntry(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all", splitFilterSets[1], splitFilterSets[0])
+	srv := newLiveDebuggerStub(t, "readwrite-all", splitServiceSet, splitWorkloadSet)
 	chdirTestRepo(t, breakpointScope)
 	chdirSubdir(t, filepath.Join("services", "split"))
 
@@ -461,20 +539,20 @@ func TestCreateBreakpoint_RepoScopeSeveralWorkloadSets(t *testing.T) {
 }
 
 func TestBreakpoint_NamedRepoScope(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all", map[string][]string{"k8s.namespace.name": {"web"}})
+	srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
 	chdirTestRepo(t, breakpointScope)
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--repo-scope", "ledger", "--yes"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Empty(t, stderr)
-	require.JSONEq(t, filterSetsPayload(t, ledgerFilterSet), srv.sentFilterSets(t), "a named entry replaces filters the workspace has")
+	require.JSONEq(t, filterSetsJSON(ledgerSetJSON), srv.sentFilterSets(t), "a named entry replaces filters the workspace has")
 	require.Contains(t, stdout, "workspace filters set from repo scope ledger: service.name:ledger")
 
 	srv.reset()
 	code, stdout, stderr = runRepoScoped([]string{"update", "breakpoint", "--plain", "--repo-scope", "ledger", "--yes"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "UpdateWorkspaceV2"}, srv.ops())
-	require.JSONEq(t, filterSetsPayload(t, ledgerFilterSet), srv.sentFilterSets(t))
+	require.JSONEq(t, filterSetsJSON(ledgerSetJSON), srv.sentFilterSets(t))
 	require.Contains(t, stdout, "Updated Live Debugger workspace filters from repo scope ledger (service.name:ledger)")
 
 	for _, tc := range []struct {
@@ -546,14 +624,14 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 		name    string
 		dir     string
 		args    []string
-		filters []map[string][]string
+		filters []string
 		want    string // formatted with the workspace name
 	}{
 		{"a workspace without filters", "", nil, nil,
 			"Dry run: would create breakpoint at A.java:1; would set workspace %s's filters from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout"},
-		{"the entry's set", "", nil, []map[string][]string{checkoutFilterSet},
+		{"the entry's set", "", nil, []string{checkoutSetJSON},
 			"Dry run: would create breakpoint at A.java:1; workspace %s keeps its filters (k8s.namespace.name:payments,k8s.workload.name:checkout)"},
-		{"other filters", "", nil, []map[string][]string{{"k8s.namespace.name": {"web"}}},
+		{"other filters", "", nil, []string{webSetJSON},
 			"Dry run: would create breakpoint at A.java:1; would warn: workspace %s holds k8s.namespace.name:web, repo scope checkout would set k8s.namespace.name:payments,k8s.workload.name:checkout"},
 		{"no single set", filepath.Join("services", "regions"), nil, nil,
 			"Dry run: creating breakpoint at A.java:1 in workspace %s would fail: no workspace filters configured; repo scope regions has no single workload filter set (it renders k8s.namespace.name:payments,k8s.workload.name:regions; k8s.namespace.name:web,k8s.workload.name:regions): pass --repo-scope regions for all of them, or --filters key:value"},
@@ -622,7 +700,7 @@ func breakpointMessage(t *testing.T, stdout string) string {
 // command uses the workspace named after the repository and the entry
 // covering the working directory, and says which.
 func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all", ledgerFilterSet)
+	srv := newLiveDebuggerStub(t, "readwrite-all", ledgerSetJSON)
 	root := chdirTestRepo(t, breakpointScope)
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"),
 		[]byte("[remote \"origin\"]\n\turl = git@example.invalid:shop/storefront.git\n"), 0o644))
