@@ -3,6 +3,7 @@ package reposcope
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"runtime"
 	"slices"
 	"sort"
@@ -210,7 +211,10 @@ func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverag
 	if b == nil {
 		return c
 	}
-	for m := range b.modules {
+	// Sorted: two module directories that differ only in case cover relDir
+	// equally where case is folded, and the answer must not depend on the
+	// order a map is walked in.
+	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
 		// b.module(relDir), folding case as covers does.
 		if covers(m, relDir) && len(m) > len(c.module) {
 			c.module = m

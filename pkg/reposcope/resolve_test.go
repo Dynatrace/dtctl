@@ -373,3 +373,22 @@ func TestResolve_SharedModuleInsideADeployable(t *testing.T) {
 	require.NotNil(t, r.Entry)
 	assert.Equal(t, "lib", r.Entry.Name)
 }
+
+// Two modules whose directories differ only in case hold one directory on a
+// filesystem that folds case. Which of them the build is asked about must
+// not depend on the order a map is walked in.
+func TestResolve_ModuleChoiceIsStable(t *testing.T) {
+	prev := foldPathCase
+	t.Cleanup(func() { foldPathCase = prev })
+	foldPathCase = true
+	repo := fstest.MapFS{
+		"settings.gradle.kts":  {Data: []byte(`include(":app", ":Lib", ":lib")`)},
+		"app/build.gradle.kts": {Data: []byte(`dependencies { implementation(project(":lib")) }`)},
+	}
+	f := &File{Environments: map[string][]Entry{prodHost: {{Name: "app", Path: "app", ServiceNames: []string{"app"}}}}}
+	for range 200 {
+		r, err := Resolve(repo, f, prodHost, "lib/src", "")
+		require.NoError(t, err)
+		require.Equal(t, "covered through the Gradle build: app depends on Lib", r.Reason)
+	}
+}
