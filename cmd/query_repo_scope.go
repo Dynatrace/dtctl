@@ -412,14 +412,16 @@ func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) e
 }
 
 // requireSegments is for a command that must not run unscoped on its own
-// decision: wait query polls until its condition holds, and a wait whose
-// scope was dropped would poll the whole environment behind one stderr line.
-func (q *repoScopedQuery) requireSegments(command string) error {
+// decision, because it keeps running after the one line that says so: wait
+// query polls until its condition holds, and live mode redraws the screen
+// the warning was on. refusal says what the command does not do, as in
+// "wait query does not poll unscoped".
+func (q *repoScopedQuery) requireSegments(refusal string) error {
 	if q.scope == nil || q.unavailable == "" {
 		return nil
 	}
-	return fmt.Errorf("repo scope %s cannot be applied: %s; %s does not poll unscoped: correct the entry's segments in %s, or pass --%s",
-		q.scope.Name, q.unavailable, command, reposcope.FileName, noRepoScopeFlag)
+	return fmt.Errorf("repo scope %s cannot be applied: %s; %s: correct the entry's segments in %s, or pass --%s",
+		q.scope.Name, q.unavailable, refusal, reposcope.FileName, noRepoScopeFlag)
 }
 
 // refuseSegmentVars fails a --segment-var aimed at a segment the entry

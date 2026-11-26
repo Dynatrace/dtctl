@@ -160,7 +160,7 @@ Examples:
 				}
 				return err
 			}
-			if err := scoped.requireSegments("wait query"); err != nil {
+			if err := scoped.requireSegments("wait query does not poll unscoped"); err != nil {
 				return err
 			}
 			segments := scoped.withSegments(nil)

@@ -235,6 +235,22 @@ func TestWaitQuery_SegmentUnavailable(t *testing.T) {
 	require.Equal(t, repoScopeTypedQuery, srv.first(t))
 }
 
+// Live mode refreshes for as long as it is open, and its one warning is on a
+// screen the first redraw clears. Like a wait, it does not start when the
+// scope was dropped over a segment that cannot be read.
+func TestQueryLive_SegmentUnavailable(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+	srv.segments = map[string]int{"plain-1": http.StatusOK}
+	chdirTestRepo(t, segmentScope)
+
+	code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--live"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, stderr, "repo scope checkout cannot be applied: filter segment Ab3dEf9hIjk does not exist in this environment, or is not shared with you; "+
+		"query --live does not refresh unscoped: correct the entry's segments in .dtctl-repo-scope.yaml, or pass --no-repo-scope")
+	require.Empty(t, srv.queries(), "live mode does not start")
+	require.NotContains(t, stderr, "the query runs unscoped")
+}
+
 // What is typed wins over what is committed: a segment the user also names
 // is sent once, with the user's variables. Together they cannot exceed what a
 // query takes, and that is an error rather than a silent choice.

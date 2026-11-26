@@ -431,6 +431,11 @@ Examples:
 			if err := scoped.checkSegments(ctx, c); err != nil {
 				return err
 			}
+			if live {
+				if err := scoped.requireSegments("query --live does not refresh unscoped"); err != nil {
+					return err
+				}
+			}
 			segments = scoped.withSegments(segments)
 			query = scoped.Query
 			scoped.announce(&queryLimits)
