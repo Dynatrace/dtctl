@@ -2,8 +2,11 @@ package profiling
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 
 	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
 )
@@ -177,11 +180,18 @@ func jsonKind(v interface{}) string {
 }
 
 // HotspotsFromRaw rebuilds a hotspots analysis from the document its Raw
-// returned, so that an analysis kept as JSON (`dtctl exec profiling hotspots
-// --raw -o json` prints that document) can be read again without running it.
-// raw is typically that JSON, decoded. The result keeps a copy: raw stays the
-// caller's. A document of another kind of analysis, or one that Raw did not
-// write, is an error that wraps ErrMalformedResult.
+// returned, so that an analysis kept as JSON can be read again without running
+// it. Outside agent mode `dtctl exec profiling hotspots --raw -o json` prints
+// that document; in agent mode it is the result of the envelope printed. raw is
+// typically that JSON, decoded, with its numbers as float64 or, from a Decoder
+// with UseNumber, as json.Number. The result keeps a copy: raw stays the
+// caller's.
+//
+// A document of another kind of analysis, or one that Raw did not write, is an
+// error that wraps ErrMalformedResult. That includes a document built in Go
+// that holds a type no JSON decoder produces, such as an int or a []string of
+// child ids: read as it is, it would count for nothing and pass for a process
+// without samples.
 func HotspotsFromRaw(raw map[string]interface{}) (*Hotspots, error) {
 	e, err := openEnvelope(sdkcla.KindHotspots, raw)
 	if err != nil {
@@ -208,7 +218,8 @@ type envelope struct {
 }
 
 // openEnvelope reads a document rawEnvelope built for an analysis of kind. The
-// result it returns is a copy.
+// result it returns is a copy that shares nothing with raw, in the types
+// json.Unmarshal gives a document.
 func openEnvelope(kind sdkcla.Kind, raw map[string]interface{}) (envelope, error) {
 	if got, _ := raw["kind"].(string); got != string(kind) {
 		return envelope{}, fmt.Errorf("%w: kind %q, want %s", ErrMalformedResult, got, kind)
@@ -219,10 +230,59 @@ func openEnvelope(kind sdkcla.Kind, raw map[string]interface{}) (envelope, error
 		return envelope{}, err
 	}
 	e.entity, _ = raw["entityId"].(string)
-	polls, _ := raw["pollCount"].(float64)
-	e.pollCount = count(polls)
-	e.result = compactResult(raw["result"])
+	polls, err := decodedLeaf(raw["pollCount"])
+	if err != nil {
+		return envelope{}, fmt.Errorf("%w: pollCount%w", ErrMalformedResult, err)
+	}
+	if n, ok := polls.(float64); ok {
+		e.pollCount = count(n)
+	}
+	if e.result, err = compact(raw["result"], decodedLeaf); err != nil {
+		return envelope{}, fmt.Errorf("%w: result%w", ErrMalformedResult, err)
+	}
 	return e, nil
+}
+
+// notDecoded is a value in a document that no JSON decoder produces. Its text
+// continues the path that leads to the value, which compact fills in on the
+// way back up, so that a document without such a value costs no path.
+type notDecoded struct {
+	path string // from the walk's root, as ".dataNodes[0].childIds"
+	what string
+}
+
+func (e *notDecoded) Error() string { return e.path + " " + e.what }
+
+// under puts the step that led to a refused value in front of its path.
+func under(step string, err error) error {
+	var nd *notDecoded
+	if errors.As(err, &nd) {
+		nd.path = step + nd.path
+	}
+	return err
+}
+
+// decodedLeaf is a value of a document as json.Unmarshal gives it. A
+// json.Number, which a Decoder with UseNumber gives, becomes the float64 the
+// views read; one too large for a float64 becomes the largest, which every
+// count holds at its own limit. Any other type is not a document Raw wrote:
+// the views read none of them, and a slice or map among them could not be
+// copied, so it would stay shared with the caller.
+func decodedLeaf(v interface{}) (interface{}, error) {
+	switch val := v.(type) {
+	case nil, string, bool, float64:
+		return v, nil
+	case json.Number:
+		f, err := val.Float64()
+		switch {
+		case err == nil:
+			return f, nil
+		case errors.Is(err, strconv.ErrRange) && math.IsInf(f, 0):
+			return math.Copysign(math.MaxFloat64, f), nil
+		}
+		return nil, &notDecoded{what: fmt.Sprintf("is the json.Number %q, which is no number", string(val))}
+	}
+	return nil, &notDecoded{what: fmt.Sprintf("has the type %T, which no JSON decoder produces", v)}
 }
 
 // Raw is the API's whole result under the envelope keys status, kind (the
@@ -419,7 +479,17 @@ var emptyOnlyKeys = map[string]bool{
 
 // compactResult copies an analysis result without its timeseries dataPoints
 // and visual-only fields, so Raw carries signal without chart/render noise.
+// The result is the API's document as json.Unmarshal decoded it, so every
+// value that is no object or array is kept as it is.
 func compactResult(v interface{}) interface{} {
+	out, _ := compact(v, func(leaf interface{}) (interface{}, error) { return leaf, nil })
+	return out
+}
+
+// compact is the walk of compactResult. It copies every object and array, and
+// hands every other value to leaf, for the caller that cannot trust where the
+// document came from.
+func compact(v interface{}, leaf func(interface{}) (interface{}, error)) (interface{}, error) {
 	switch val := v.(type) {
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(val))
@@ -442,15 +512,23 @@ func compactResult(v interface{}) interface{} {
 					continue // the points are there to be counted
 				}
 			}
-			out[k] = compactResult(child)
+			copied, err := compact(child, leaf)
+			if err != nil {
+				return nil, under("."+k, err)
+			}
+			out[k] = copied
 		}
-		return out
+		return out, nil
 	case []interface{}:
 		out := make([]interface{}, len(val))
 		for i, item := range val {
-			out[i] = compactResult(item)
+			copied, err := compact(item, leaf)
+			if err != nil {
+				return nil, under(fmt.Sprintf("[%d]", i), err)
+			}
+			out[i] = copied
 		}
-		return out
+		return out, nil
 	}
-	return v
+	return leaf(v)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -188,5 +189,146 @@ func TestFromRaw_Malformed(t *testing.T) {
 	}
 	if hs, err := profiling.HotspotsFromRaw(nil); hs != nil || !errors.Is(err, profiling.ErrMalformedResult) {
 		t.Errorf("HotspotsFromRaw(nil) = %v, %v; want ErrMalformedResult", hs, err)
+	}
+}
+
+// decodeNumbers reads doc the way a program that wants exact integers does:
+// every number a json.Number.
+func decodeNumbers(t *testing.T, doc string) map[string]interface{} {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(doc))
+	dec.UseNumber()
+	var out map[string]interface{}
+	if err := dec.Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// A kept document reads the same whichever way its JSON was decoded. Read as
+// they are, the json.Number values of Decoder.UseNumber would count for
+// nothing: the document of a busy process would pass for one of an idle one.
+func TestFromRaw_NumbersDecodedAsJSONNumber(t *testing.T) {
+	hs, a := analyses(t)
+	hdoc, err := json.Marshal(hs.Raw())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdoc = []byte(strings.Replace(string(hdoc), `"pollCount":0`, `"pollCount":2`, 1))
+	plain, err := profiling.HotspotsFromRaw(decode(t, string(hdoc)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	numbered, err := profiling.HotspotsFromRaw(decodeNumbers(t, string(hdoc)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.PollCount != 2 || numbered.PollCount != 2 {
+		t.Errorf("poll counts %d and %d, want 2 and 2", plain.PollCount, numbered.PollCount)
+	}
+	if want, got := plain.Stacks(false), numbered.Stacks(false); got.Samples != 10 || !reflect.DeepEqual(got, want) {
+		t.Errorf("Stacks of the json.Number document = %+v\nwant %+v", got, want)
+	}
+	// Every number of the document handed out is a float64 again.
+	if !reflect.DeepEqual(numbered.Raw(), plain.Raw()) {
+		t.Errorf("Raw() of the json.Number document = %#v\nwant %#v", numbered.Raw(), plain.Raw())
+	}
+
+	adoc, err := json.Marshal(a.Raw())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aPlain, err := profiling.AllocationsFromRaw(decode(t, string(adoc)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	aNumbered, err := profiling.AllocationsFromRaw(decodeNumbers(t, string(adoc)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, got := aPlain.Stacks(false, false), aNumbered.Stacks(false, false); got.AllocatedBytes != 100 || !reflect.DeepEqual(got, want) {
+		t.Errorf("allocation Stacks of the json.Number document = %+v\nwant %+v", got, want)
+	}
+
+	// A number no float64 holds is the largest count, not an error and not
+	// zero; one that is no number is not a document Raw wrote.
+	huge := decodeNumbers(t, `{"status":"completed","kind":"methodHotspots","entityId":"PROCESS-1","pollCount":0,"result":{"dataRootNodeId":"1","dataNodes":[
+		{"id":"1","className":"C","methodName":"m","samples":{"RUNNING":1e999},"childIds":[]}]}}`)
+	over, err := profiling.HotspotsFromRaw(huge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := over.Stacks(false); len(got.Rows) != 1 || got.Rows[0].Running != math.MaxInt {
+		t.Errorf("Stacks of a count beyond float64 = %+v, want one row with the largest count", got)
+	}
+	if _, err := json.Marshal(over.Raw()); err != nil {
+		t.Errorf("Raw() of a count beyond float64 cannot be kept as JSON: %v", err)
+	}
+	huge["pollCount"] = json.Number("many")
+	if hs, err := profiling.HotspotsFromRaw(huge); hs != nil || !errors.Is(err, profiling.ErrMalformedResult) {
+		t.Errorf("HotspotsFromRaw with a json.Number that is no number = %v, %v; want ErrMalformedResult", hs, err)
+	}
+}
+
+// A document built in Go with types no JSON decoder produces is refused. Its
+// typed slices and maps could be neither read (a []string of child ids names
+// no children) nor copied, so the result would share them with the caller.
+func TestFromRaw_RefusesTypesNoDecoderProduces(t *testing.T) {
+	build := func(result map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{"status": "completed", "kind": "methodHotspots", "entityId": "PROCESS-1", "pollCount": float64(0), "result": result}
+	}
+	cases := []struct {
+		name string
+		doc  map[string]interface{}
+		want string
+	}{
+		{"a typed slice", build(map[string]interface{}{"dataRootNodeId": "1", "extra": []int{1, 2, 3}}),
+			"profiling: malformed analysis result: result.extra has the type []int, which no JSON decoder produces"},
+		{"typed child ids", build(map[string]interface{}{"dataRootNodeId": "1", "dataNodes": []interface{}{
+			map[string]interface{}{"id": "1", "childIds": []string{"2"}}}}),
+			"profiling: malformed analysis result: result.dataNodes[0].childIds has the type []string, which no JSON decoder produces"},
+		{"a typed map", build(map[string]interface{}{"dataNodes": []interface{}{
+			map[string]interface{}{"id": "1", "samples": map[string]int{"RUNNING": 7}}}}),
+			"profiling: malformed analysis result: result.dataNodes[0].samples has the type map[string]int, which no JSON decoder produces"},
+		{"an int", build(map[string]interface{}{"dataRootNodeId": 1}),
+			"profiling: malformed analysis result: result.dataRootNodeId has the type int, which no JSON decoder produces"},
+		{"an int poll count", map[string]interface{}{"status": "completed", "kind": "methodHotspots", "pollCount": 3, "result": map[string]interface{}{}},
+			"profiling: malformed analysis result: pollCount has the type int, which no JSON decoder produces"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs, err := profiling.HotspotsFromRaw(tc.doc)
+			if hs != nil || !errors.Is(err, profiling.ErrMalformedResult) || err.Error() != tc.want {
+				t.Errorf("HotspotsFromRaw = %v, %v\nwant the error %q", hs, err, tc.want)
+			}
+		})
+	}
+}
+
+// The result shares nothing with the document it was built from, and Raw
+// shares nothing with the result: neither the caller's document nor one
+// returned earlier can change what the next Raw returns.
+func TestFromRaw_SharesNothing(t *testing.T) {
+	doc := decode(t, `{"status":"completed","kind":"methodHotspots","entityId":"PROCESS-1","pollCount":0,"result":{"dataRootNodeId":"1","dataNodes":[
+		{"id":"1","className":"C","methodName":"m","samples":{"RUNNING":3},"childIds":["2"],"tags":["a","b"]}]}}`)
+	hs, err := profiling.HotspotsFromRaw(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := throughJSON(t, hs.Raw())
+
+	node := func(d map[string]interface{}) map[string]interface{} {
+		return d["result"].(map[string]interface{})["dataNodes"].([]interface{})[0].(map[string]interface{})
+	}
+	node(doc)["tags"].([]interface{})[0] = "changed"
+	node(doc)["samples"].(map[string]interface{})["RUNNING"] = float64(99)
+	first := hs.Raw()
+	if !reflect.DeepEqual(first, want) {
+		t.Errorf("after the caller changed its document, Raw() = %#v\nwant %#v", first, want)
+	}
+	node(first)["tags"].([]interface{})[1] = "changed"
+	node(first)["childIds"].([]interface{})[0] = "9"
+	if got := hs.Raw(); !reflect.DeepEqual(got, want) {
+		t.Errorf("after the caller changed an earlier Raw(), Raw() = %#v\nwant %#v", got, want)
 	}
 }
