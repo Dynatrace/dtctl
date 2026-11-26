@@ -700,8 +700,10 @@ func globalContextsBinding(global []config.NamedContext, tokenName string) []con
 
 // tokenPeer is another context that uses the stored token a login replaces.
 type tokenPeer struct {
-	label string             // the context's name as a message shows it
-	level config.SafetyLevel // the level dtctl enforces for it
+	label string // the context's name as a message shows it
+	// scopes are those a browser login to the context would request: the
+	// most the context can get back by logging in after this login.
+	scopes []string
 }
 
 // contextsSharingToken returns the contexts other than contextName whose
@@ -711,6 +713,11 @@ type tokenPeer struct {
 // environments of one tier share one. global holds the contexts of the global
 // config when cfg is a project config (globalContextsFor); they are peers
 // too, and the login is never one of them.
+//
+// A peer's scopes are worked out the way its own login would: for a context
+// of cfg from the level dtctl enforces for it, narrowed in a project config
+// to what the binding of tokenName requests (projectLoginScopes); for a
+// global context from its own level, which nothing clamps.
 func contextsSharingToken(cfg *config.Config, global []config.NamedContext, contextName, tokenName, environment string) []tokenPeer {
 	tier := auth.DetectEnvironment(environment)
 	shares := func(c *config.Context) bool {
@@ -720,13 +727,14 @@ func contextsSharingToken(cfg *config.Config, global []config.NamedContext, cont
 	for i := range cfg.Contexts {
 		nc := &cfg.Contexts[i]
 		if nc.Name != contextName && shares(&nc.Context) {
-			peers = append(peers, tokenPeer{fmt.Sprintf("%q", nc.Name), cfg.EffectiveSafetyLevelFor(&nc.Context)})
+			scopes, _, _ := projectLoginScopes(cfg, tokenName, auth.GetScopesForSafetyLevel(cfg.EffectiveSafetyLevelFor(&nc.Context)))
+			peers = append(peers, tokenPeer{fmt.Sprintf("%q", nc.Name), scopes})
 		}
 	}
 	for i := range global {
 		nc := &global[i]
 		if shares(&nc.Context) {
-			peers = append(peers, tokenPeer{fmt.Sprintf("%q (global config)", nc.Name), nc.Context.GetEffectiveSafetyLevel()})
+			peers = append(peers, tokenPeer{fmt.Sprintf("%q (global config)", nc.Name), auth.GetScopesForSafetyLevel(nc.Context.GetEffectiveSafetyLevel())})
 		}
 	}
 	slices.SortFunc(peers, func(a, b tokenPeer) int { return strings.Compare(a.label, b.label) })
@@ -742,14 +750,15 @@ func peerLabels(peers []tokenPeer) []string {
 	return labels
 }
 
-// contextsNarrowedByLogin names the peers whose level requests a scope that
-// is not in scopes, the set the login requests. Those contexts lose that
-// scope until one of them logs in again. The comparison is by scope set and
-// not by rank: readonly requests read scopes that readwrite-mine does not.
+// contextsNarrowedByLogin names the peers whose own login would request a
+// scope that is not in scopes, the set this login requests. Those contexts
+// lose that scope until one of them logs in again. The comparison is by scope
+// set and not by rank: readonly requests read scopes that readwrite-mine does
+// not.
 func contextsNarrowedByLogin(peers []tokenPeer, scopes []string) []string {
 	var names []string
 	for _, p := range peers {
-		if slices.ContainsFunc(auth.GetScopesForSafetyLevel(p.level), func(s string) bool { return !slices.Contains(scopes, s) }) {
+		if slices.ContainsFunc(p.scopes, func(s string) bool { return !slices.Contains(scopes, s) }) {
 			names = append(names, p.label)
 		}
 	}

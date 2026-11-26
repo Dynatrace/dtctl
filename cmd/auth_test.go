@@ -1486,8 +1486,8 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 }
 
 // TestContextsNarrowedByLogin: a login replaces the stored token, so the
-// contexts that share it and whose level requests a scope the login does not
-// are named before it happens.
+// contexts that share it and whose own login would request a scope this one
+// does not are named before it happens.
 func TestContextsNarrowedByLogin(t *testing.T) {
 	const (
 		envURL     = "https://abc12345.apps.dynatrace.com"
@@ -2246,6 +2246,35 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
 			}
+		}
+	})
+
+	t.Run("a context whose own login would request no more is not named", func(t *testing.T) {
+		// Both project contexts are readonly under a readwrite-mine binding,
+		// so a login to either requests the same 38 scopes: "b" loses
+		// nothing and could restore nothing. The global context can.
+		global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", config.SafetyLevelReadWriteMine})
+		setupLoginProject(t, global, loginConfigYAML("a",
+			loginTestContext{"a", envURL, "prod-oauth", config.SafetyLevelReadOnly},
+			loginTestContext{"b", envURL, "prod-oauth", config.SafetyLevelReadOnly}))
+
+		stderr, oauthConfig, runErr := runBrowserLogin(t, "--context", "a")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		if got := len(oauthConfig.Scopes); got != 38 {
+			t.Fatalf("%d scopes requested, want 38", got)
+		}
+		for _, want := range []string{
+			`Token 'prod-oauth' is also used by "prod" (global config), whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
+			"Log in to it afterwards to restore its scopes.",
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		}
+		if strings.Contains(stderr, `"b"`) {
+			t.Errorf("stderr names a context that loses nothing:\n%s", stderr)
 		}
 	})
 
