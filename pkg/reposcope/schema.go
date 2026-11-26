@@ -10,6 +10,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // FileName is the scope file's name, found in the repository root.
@@ -160,10 +162,10 @@ const maxServiceNameRunes = 255
 // one entry omits Path), every environment has an entry, every entry binds
 // something, and nothing is larger than the format allows.
 //
-// Paths are unique regardless of case, on every OS. Resolve folds case on
-// macOS and Windows, where two paths differing only in case are one
-// directory; a committed file has to mean the same thing on all of them, so
-// it is valid everywhere or nowhere.
+// Paths are unique regardless of case, on every OS, and written in one
+// Unicode form. Resolve folds case on macOS and Windows, where two paths
+// differing only in case are one directory; a committed file has to mean the
+// same thing on all of them, so it is valid everywhere or nowhere.
 //
 // The error's Source is FileName; Load and Save replace it with the path.
 func (f *File) check() *InvalidError {
@@ -201,7 +203,7 @@ func (f *File) validateHost(host string) *InvalidError {
 		return invalid(fmt.Sprintf("environment %q holds %d entries; an environment takes at most %d", host, n, maxEntries))
 	}
 	names := map[string]bool{}
-	paths := map[string]Entry{} // by lowercase path
+	paths := map[string]Entry{} // by folded path
 	for i, e := range f.Environments[host] {
 		where := fmt.Sprintf("environments[%s][%d]", host, i)
 		if e.Name != "" {
@@ -216,7 +218,7 @@ func (f *File) validateHost(host string) *InvalidError {
 				"give every entry under one environment its own name")
 		}
 		names[e.Name] = true
-		if other, taken := paths[strings.ToLower(e.Path)]; taken {
+		if other, taken := paths[foldPath(e.Path, true)]; taken {
 			covered := fmt.Sprintf("%q", other.Path)
 			switch {
 			case e.Path == "":
@@ -227,7 +229,7 @@ func (f *File) validateHost(host string) *InvalidError {
 			return invalid(fmt.Sprintf("%s: entry %q already covers %s", where, other.Name, covered),
 				"give each entry its own path; at most one entry may omit it")
 		}
-		paths[strings.ToLower(e.Path)] = e
+		paths[foldPath(e.Path, true)] = e
 	}
 	return nil
 }
@@ -405,6 +407,10 @@ func validatePath(p string) *InvalidError {
 		return invalid(fmt.Sprintf("path %q leaves the repository", p))
 	case clean != p:
 		return invalid(fmt.Sprintf("path %q is not clean (write it as %q)", p, clean))
+	case !norm.NFC.IsNormalString(p):
+		// Two spellings that look the same in every editor: say which is
+		// which in a form that shows it.
+		return invalid(fmt.Sprintf("path %+q is not in Unicode NFC, the form a path is compared in (write it as %+q)", p, norm.NFC.String(p)))
 	}
 	return nil
 }

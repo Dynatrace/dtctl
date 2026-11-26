@@ -7,6 +7,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // foldPathCase reports whether entry paths compare case-insensitively: on
@@ -209,18 +212,36 @@ func (c gradleCoverage) owns(e *Entry) bool {
 	return slices.ContainsFunc(c.owners, func(o string) bool { return samePath(e.Path, o) })
 }
 
-// samePath reports whether two paths name one directory, folding case as
-// covers does.
+// foldPath is the form paths are compared in, by check, covers and
+// samePath alike. Unicode composition is folded on every OS: a file holds
+// the composed spelling (see validatePath), while macOS hands a program
+// whichever one the directory was created or typed with. Case is folded
+// when foldCase is set, letter by letter the way strings.EqualFold does, so
+// no letter is taken for two as a full case folding would take "ß".
+func foldPath(p string, foldCase bool) string {
+	p = norm.NFC.String(p)
+	if !foldCase {
+		return p
+	}
+	return strings.Map(func(r rune) rune {
+		folded := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			folded = min(folded, f)
+		}
+		return folded
+	}, p)
+}
+
+// samePath reports whether two paths name one directory, folding as covers
+// does.
 func samePath(a, b string) bool {
-	return a == b || foldPathCase && strings.EqualFold(a, b)
+	return foldPath(a, foldPathCase) == foldPath(b, foldPathCase)
 }
 
 // covers reports whether the entry path p is relDir or one of its ancestors,
 // comparing whole path segments.
 func covers(p, relDir string) bool {
-	if foldPathCase {
-		p, relDir = strings.ToLower(p), strings.ToLower(relDir)
-	}
+	p, relDir = foldPath(p, foldPathCase), foldPath(relDir, foldPathCase)
 	return relDir == p || strings.HasPrefix(relDir, p+"/")
 }
 

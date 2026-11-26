@@ -286,6 +286,16 @@ func TestRepoScopeSet(t *testing.T) {
 	}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost), "set replaces the named entry whole and keeps the others")
 }
 
+// A shell on macOS completes a directory name in the decomposed spelling the
+// filesystem may hold; the file takes the composed one, so set writes that.
+func TestRepoScopeSetComposesThePath(t *testing.T) {
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, "")
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "cafe", "--service-name", "cafe", "--path", "services/cafe\u0301"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "services/caf\u00e9", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[0].Path)
+}
+
 // --cluster-uid qualifies the --workload names, as --namespace does.
 func TestRepoScopeSetClusterUID(t *testing.T) {
 	const uid = "11111111-2222-3333-4444-555555555555"

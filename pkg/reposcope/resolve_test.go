@@ -167,6 +167,40 @@ func TestResolve_PathCase(t *testing.T) {
 	assert.Nil(t, r.Entry, "a case-sensitive one does not")
 }
 
+// A directory is found under its path however the name was typed: macOS
+// hands a program the decomposed spelling of a name its user sees as one
+// with the composed one, and the file holds the composed one.
+func TestResolve_PathUnicode(t *testing.T) {
+	prev := foldPathCase
+	t.Cleanup(func() { foldPathCase = prev })
+	f := &File{Environments: map[string][]Entry{prodHost: {
+		{Name: "cafe", Path: "services/caf\u00e9", ServiceNames: []string{"cafe"}},
+		{Name: "long", Path: "\u017fvc", ServiceNames: []string{"long"}},
+	}}}
+	require.Nil(t, f.check())
+	for _, fold := range []bool{true, false} {
+		foldPathCase = fold
+		r, err := Resolve(fstest.MapFS{}, f, prodHost, "services/cafe\u0301/api", "")
+		require.NoError(t, err)
+		require.NotNil(t, r.Entry, "fold case: %v", fold)
+		assert.Equal(t, "cafe", r.Entry.Name)
+		assert.Empty(t, r.Reason)
+	}
+
+	// One folding for every comparison: two paths that are the same
+	// directory are also each other's cover.
+	foldPathCase = true
+	for _, pair := range [][2]string{{"\u017fvc", "svc"}, {"SVC", "svc"}, {"Stra\u00dfe", "STRASSE"}, {"caf\u00e9", "cafe\u0301"}, {"a", "b"}} {
+		assert.Equal(t, samePath(pair[0], pair[1]), covers(pair[0], pair[1]), "%q", pair)
+	}
+	assert.True(t, samePath("\u017fvc", "svc"))
+	assert.False(t, samePath("Stra\u00dfe", "STRASSE"), "a filesystem does not take one letter for two")
+	r, err := Resolve(fstest.MapFS{}, f, prodHost, "svc/cmd", "")
+	require.NoError(t, err)
+	require.NotNil(t, r.Entry)
+	assert.Equal(t, "long", r.Entry.Name)
+}
+
 func TestResolve_Status(t *testing.T) {
 	f := exampleFile()
 	f.unknown = []string{`"kind" on line 3`}

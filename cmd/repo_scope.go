@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/output"
@@ -124,7 +125,9 @@ Examples:
 				}
 			}
 			if len(entryPaths) == 1 {
-				entry.Path = path.Clean(filepath.ToSlash(entryPaths[0]))
+				// The spelling the file takes: slashes, clean, and composed
+				// Unicode, whatever the shell handed over.
+				entry.Path = norm.NFC.String(path.Clean(filepath.ToSlash(entryPaths[0])))
 			}
 			if clusterUID != "" && len(workloads) == 0 {
 				return &reposcope.InvalidError{
