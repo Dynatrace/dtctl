@@ -9,5 +9,5 @@ Unit: .
 
 Verdict: match: workload, service name, process group
 3 of 11 queries ran in 0.6s. Nothing was written. Save it with:
-  dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout
+  dtctl repo-scope set checkout --namespace payments --workload checkout
 Note: candidate 1 has spans, but no logs in 24h carry its k8s.workload.name, service.name or process group, so a scoped fetch logs returns nothing

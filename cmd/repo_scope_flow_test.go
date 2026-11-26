@@ -32,7 +32,7 @@ import (
 const (
 	flowService      = "SERVICE-0123456789ABCDEF"
 	flowProcessGroup = "PROCESS_GROUP-FEDCBA9876543210"
-	flowSetCommand   = "dtctl repo-scope set checkout --cluster-uid " + flowClusterUID + " --namespace payments --workload checkout --service-name checkout"
+	flowSetCommand   = "dtctl repo-scope set checkout --cluster-uid " + flowClusterUID + " --namespace payments --workload checkout"
 )
 
 // checkoutRows are the aggregates an environment running the checkout
@@ -228,7 +228,7 @@ func TestRepoScopeFlow(t *testing.T) {
 	runSetCommand(t, flowSetCommand)
 	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, "checkout  (whole repository · 127.0.0.1; the cluster narrows the workloads only: service names select records of every cluster)\n", stdout)
+	require.Equal(t, "checkout  (whole repository · 127.0.0.1)\n", stdout)
 	require.Len(t, srv.queries(), 4, "only discover talks to the environment")
 }
 
@@ -385,7 +385,7 @@ func TestRepoScopeDiscoverClusterOnSpansOnly(t *testing.T) {
 	report, suggestions := discoverReport(t)
 	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
 	require.Len(t, report.Candidates, 1)
-	const line = "dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout"
+	const line = "dtctl repo-scope set checkout --namespace payments --workload checkout"
 	require.Equal(t, line, report.Candidates[0].SetCommand)
 	require.Empty(t, report.Notes)
 	require.Contains(t, suggestions, "candidate 1's line leaves --cluster-uid out: its logs carry no k8s.cluster.uid, so a binding with it would return none of them; "+
@@ -394,7 +394,7 @@ func TestRepoScopeDiscoverClusterOnSpansOnly(t *testing.T) {
 	runSetCommand(t, line)
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, `fetch logs   | filter (service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))`)
+	require.Contains(t, stdout, `fetch logs   | filter ((k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))`)
 }
 
 // One workload in two clusters is two candidates, each line binding one. The
@@ -759,7 +759,7 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 
 	t.Chdir(filepath.Join(repo, "webproxy-api"))
 	report, _ := discoverReport(t)
-	const line = "dtctl repo-scope set webproxy --namespace edge --workload webproxy --service-name webproxy --path webproxy"
+	const line = "dtctl repo-scope set webproxy --namespace edge --workload webproxy --path webproxy"
 	require.Equal(t, line, report.Candidates[0].SetCommand)
 	runSetCommand(t, line)
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
@@ -776,7 +776,7 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 		resp := agentResult(t, stdout, &reports)
 		require.Equal(t, 2, *resp.Context.Total)
 		require.Len(t, reports, 2)
-		require.Equal(t, "dtctl repo-scope set admin --namespace edge --workload admin --service-name admin --path admin", reports[0].Candidates[0].SetCommand)
+		require.Equal(t, "dtctl repo-scope set admin --namespace edge --workload admin --path admin", reports[0].Candidates[0].SetCommand)
 		require.Equal(t, line, reports[1].Candidates[0].SetCommand)
 		require.Equal(t, "admin: confirm with the user, then: "+reports[0].Candidates[0].SetCommand, resp.Context.Suggestions[0])
 		require.Contains(t, resp.Context.Suggestions, "webproxy: confirm with the user, then: "+line)
@@ -1198,7 +1198,7 @@ func TestRepoScopeDiscoverSingleModuleSubdirectory(t *testing.T) {
 	t.Chdir(repo)
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, "checkout  (whole repository · 127.0.0.1; the cluster narrows the workloads only: service names select records of every cluster)\n", stdout)
+	require.Equal(t, "checkout  (whole repository · 127.0.0.1)\n", stdout)
 }
 
 // A match no binding selects alone, a workload whose records carry no

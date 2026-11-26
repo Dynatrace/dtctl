@@ -92,20 +92,19 @@ func TestRepoScopeSetCommandBindsOnlyWholeIDLists(t *testing.T) {
 // object was sampled: a candidate sharing its service name could sit below
 // that sample's floor.
 func TestRepoScopeSetCommandHoldsBackTheServiceNameWhenAnyObjectWasSampled(t *testing.T) {
-	c := reposcope.Candidate{Name: "checkout", Namespace: "payments", Workload: "checkout", ServiceName: "checkout", Logs: 88000}
+	c := reposcope.Candidate{Name: "checkout", ServiceName: "checkout", Logs: 88000}
 	whole := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"checkout"}, Queries: []reposcope.Query{
 		{DataObject: "spans", Rows: 0},
 		{DataObject: "logs", Rows: 1},
 	}}
-	require.Equal(t, "dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout",
-		repoScopeSetCommand(whole, c, nil))
+	require.Equal(t, "dtctl repo-scope set checkout --service-name checkout", repoScopeSetCommand(whole, c, nil))
 
 	sampled := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"checkout"}, Queries: []reposcope.Query{
 		{DataObject: "spans", Truncated: true, Cause: "truncated"},
 		{DataObject: "spans", Window: "1h", SamplingRatio: 100000},
 		{DataObject: "logs", Rows: 1},
 	}}
-	require.Equal(t, "dtctl repo-scope set checkout --namespace payments --workload checkout", repoScopeSetCommand(sampled, c, nil),
+	require.Empty(t, repoScopeSetCommand(sampled, c, nil),
 		"the spans sample matched nothing, and a spans-only checkout below its floor would share the name")
 
 	refused := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"checkout"}, Queries: []reposcope.Query{

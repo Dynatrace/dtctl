@@ -378,8 +378,10 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // asked about.
 //
 // The workload and the service name lead because they are what the records
-// carry by design; the entity ids are deprecated fields, listed process group
-// first, and are proposed only for a candidate the other two cannot select,
+// carry by design, the workload first and the service name only for a
+// candidate no workload binding describes; the entity ids are deprecated
+// fields, listed process group first, and are proposed only for a candidate
+// the other two cannot select,
 // or whose logs they cannot reach: discovery found those logs by the
 // candidate's process groups
 // (LogsByProcessGroup), and without that binding the entry would return its
@@ -440,7 +442,12 @@ func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e r
 			e.Workloads = []reposcope.Workload{w}
 		}
 	}
-	if c.ServiceName != "" && slices.Contains(r.Sent, c.ServiceName) && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() && !r.Partial &&
+	// The service name is for a candidate no workload binding describes.
+	// Beside one it would widen the entry: the bindings are alternatives, so
+	// the name selects its records in every cluster and namespace, whatever
+	// the workload binding says.
+	if len(e.Workloads) == 0 && c.ServiceName != "" && slices.Contains(r.Sent, c.ServiceName) &&
+		!c.ServiceNameShared && !c.Sampled && !r.SampledRecords() && !r.Partial &&
 		holds(reposcope.Entry{ServiceNames: []string{c.ServiceName}}) {
 		e.ServiceNames = []string{c.ServiceName}
 	}
@@ -699,6 +706,10 @@ func (s repoScopeSelectAll) sentence() string {
 func repoScopeSharedNameNotes(r *reposcope.DiscoveryReport) []string {
 	var names, notes []string
 	for _, c := range r.Candidates {
+		// A line that binds the workload carries no service name anyway.
+		if e, _ := repoScopeBindings(r, c); len(e.Workloads) > 0 {
+			continue
+		}
 		if c.ServiceNameShared && !slices.Contains(names, c.ServiceName) {
 			names = append(names, c.ServiceName)
 			notes = append(notes, fmt.Sprintf("--service-name %s is left out of the set lines: more than one candidate reports it, so it would select each of them",

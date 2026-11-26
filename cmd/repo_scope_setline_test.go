@@ -35,6 +35,16 @@ func TestRepoScopeSetLine(t *testing.T) {
 			want: "dtctl repo-scope set checkout --cluster-uid " + uid + " --namespace payments --workload checkout",
 		},
 		{
+			// The bindings of an entry are alternatives, so a service name
+			// beside a workload would also select that name in every other
+			// cluster and namespace, now or later.
+			name: "a workload binding stands alone",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ClusterUID: uid, Namespace: "payments", Workload: "checkout", ServiceName: "checkout", Tier: "exact", Spans: 10},
+			}},
+			want: "dtctl repo-scope set checkout --cluster-uid " + uid + " --namespace payments --workload checkout",
+		},
+		{
 			name: "a service name the repository named is",
 			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
 				{Rank: 1, Name: "checkout", ServiceName: "checkout", Tier: "exact", Spans: 10},
