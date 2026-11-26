@@ -2291,20 +2291,35 @@ func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.
 	}
 	const leftOut = `The login requests only scopes that the global binding of token "prod-oauth" (readwrite-mine) requests too. Left out: storage:application.snapshots:read, storage:user.events:read, storage:user.sessions:read, storage:user.replays:read, storage:fieldsets:read, storage:fieldset-definitions:read.`
 
+	prod := func(level config.SafetyLevel) loginTestContext {
+		return loginTestContext{"prod", envURL, "prod-oauth", level}
+	}
+	mine := loginTestContext{"mine", envURL, "prod-oauth", config.SafetyLevelReadWriteMine}
+
 	tests := []struct {
-		name            string
-		bound, declared config.SafetyLevel
-		wantScopes      int
-		wantSix         bool // whether the six read scopes are requested
+		name string
+		// global are the global contexts, all bound to the login's token.
+		global     []loginTestContext
+		declared   config.SafetyLevel
+		wantScopes int
+		wantSix    bool // whether the six read scopes are requested
+		// wantNarrowed is the global context named as losing scopes.
+		wantNarrowed string
 	}{
 		// Enforced readonly, bound readwrite-mine: the binding lacks the six.
-		{"readonly under a readwrite-mine binding", config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly, 38, false},
+		{"readonly under a readwrite-mine binding", []loginTestContext{prod(config.SafetyLevelReadWriteMine)}, config.SafetyLevelReadOnly, 38, false, `"prod" (global config)`},
 		// Enforced readonly, bound readonly: the binding requests all of it.
-		{"readwrite-mine under a readonly binding", config.SafetyLevelReadOnly, config.SafetyLevelReadWriteMine, 44, true},
+		{"readwrite-mine under a readonly binding", []loginTestContext{prod(config.SafetyLevelReadOnly)}, config.SafetyLevelReadWriteMine, 44, true, ""},
+		// Two global contexts bind the token: the most restrictive level by
+		// rank is the binding, in either order. A second, readonly context
+		// therefore raises a readonly project login from 38 scopes to 44,
+		// the 44 that global context requests for the same stored token.
+		{"readonly and readwrite-mine bind the token", []loginTestContext{prod(config.SafetyLevelReadOnly), mine}, config.SafetyLevelReadOnly, 44, true, `"mine" (global config)`},
+		{"readwrite-mine and readonly bind the token", []loginTestContext{mine, prod(config.SafetyLevelReadOnly)}, config.SafetyLevelReadOnly, 44, true, `"mine" (global config)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", tt.bound})
+			global := loginConfigYAML("prod", tt.global...)
 			setupLoginProject(t, global, loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", tt.declared}))
 
 			stderr, oauthConfig, runErr := runBrowserLogin(t, "--context", "project")
@@ -2334,11 +2349,14 @@ func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.
 			if tt.wantSix && strings.Contains(stderr, "Left out") {
 				t.Errorf("stderr reports scopes left out:\n%s", stderr)
 			}
-			// The global readwrite-mine context needs write scopes a readonly
-			// login does not request; the global readonly one loses nothing.
-			warned := strings.Contains(stderr, `Token 'prod-oauth' is also used by "prod" (global config), whose safety level requests scopes this login does not.`)
-			if warned == tt.wantSix {
-				t.Errorf("shared-token warning printed = %v, want %v:\n%s", warned, !tt.wantSix, stderr)
+			// A global readwrite-mine context needs write scopes a readonly
+			// login does not request; a global readonly one loses nothing.
+			if tt.wantNarrowed == "" {
+				if strings.Contains(stderr, "is also used by") {
+					t.Errorf("stderr warns about a shared token nobody loses a scope of:\n%s", stderr)
+				}
+			} else if want := "Token 'prod-oauth' is also used by " + tt.wantNarrowed + ", whose safety level requests scopes this login does not."; !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
 			}
 		})
 	}
