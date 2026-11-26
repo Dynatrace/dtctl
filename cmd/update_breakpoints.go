@@ -199,6 +199,12 @@ Examples:
 			condition, _ := cmd.Flags().GetString("condition")
 			logMessage, _ := cmd.Flags().GetString("log-message")
 			identifier := strings.TrimSpace(args[0])
+			// "--enabled false" leaves the flag bare and "false" as the only
+			// argument: the value, read as the identifier. No breakpoint is
+			// named then, and enabling a rule called "false" helps nobody.
+			if value, err := strconv.ParseBool(identifier); enabledChanged && len(args) == 1 && err == nil {
+				return &invalidInputError{fmt.Errorf(`%q was read as the breakpoint identifier, so no breakpoint is named: name it first, as in dtctl update breakpoint <id|filename:line> --enabled=%t`, args[0], value)}
+			}
 
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {

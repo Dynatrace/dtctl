@@ -213,3 +213,41 @@ func TestUpdateBreakpoint_DryRunNeedsItsContext(t *testing.T) {
 		require.Empty(t, srv.ops())
 	}
 }
+
+// "--enabled false" with no identifier before it leaves the flag bare and
+// "false" as the only argument, where the breakpoint identifier goes. A lone
+// argument that reads as a boolean is that mistake and names no breakpoint,
+// so nothing is sent.
+func TestUpdateBreakpoint_EnabledValueIsNotAnIdentifier(t *testing.T) {
+	for _, argv := range [][]string{
+		{"update", "breakpoint", "--enabled", "false"},
+		{"update", "breakpoint", "--repo-scope", "checkout", "--enabled", "false"},
+		{"update", "breakpoint", "--enabled", "TRUE"},
+	} {
+		t.Run(strings.Join(argv[2:], " "), func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readwrite-all")
+			chdirTestRepo(t, breakpointScope)
+
+			code, stdout, _ := runRepoScoped(append(argv, "--agent"), RunOptions{})
+			require.Equal(t, 2, code, stdout)
+			detail := agentError(t, stdout)
+			require.Equal(t, "validation_error", detail.Code)
+			require.Equal(t, fmt.Sprintf(`%q was read as the breakpoint identifier, so no breakpoint is named: name it first, as in dtctl update breakpoint <id|filename:line> --enabled=%s`, argv[len(argv)-1], strings.ToLower(argv[len(argv)-1])), detail.Message)
+			require.Empty(t, srv.ops())
+		})
+	}
+
+	// The spellings that name a breakpoint still do.
+	for _, argv := range [][]string{
+		{"update", "breakpoint", "dtctl-rule-0001", "--enabled", "false"},
+		{"update", "breakpoint", "dtctl-rule-0001", "--enabled=false"},
+		{"update", "breakpoint", "dtctl-rule-0001", "--enabled"},
+	} {
+		srv := newLiveDebuggerStub(t, "readwrite-all")
+		srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+		chdirTestRepo(t, breakpointScope)
+		code, stdout, stderr := runRepoScoped(append(argv, "--plain"), RunOptions{})
+		require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+		require.Len(t, srv.mutations(), 1)
+	}
+}
