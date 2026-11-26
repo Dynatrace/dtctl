@@ -140,9 +140,9 @@ func startsWord(runes []rune, i int) bool {
 
 // newToken builds a token from a raw name read at file:line (line 0 when
 // unknown), or reports false when the name is generic, too short, or a
-// template placeholder.
+// placeholder a template, a shell or MSBuild fills in ({{ }}, ${ }, $( )).
 func newToken(kind, raw, file string, line int) (token, bool) {
-	if strings.Contains(raw, "{{") || strings.Contains(raw, "${") {
+	if strings.Contains(raw, "{{") || strings.Contains(raw, "${") || strings.Contains(raw, "$(") {
 		return token{}, false
 	}
 	v := variants(raw)

@@ -17,6 +17,7 @@ import (
 var (
 	goModuleRe     = regexp.MustCompile(`(?m)^module[ \t]+"?([^\s"]+)"?`)
 	majorVersionRe = regexp.MustCompile(`/v[0-9]+$`)
+	xmlCommentRe   = regexp.MustCompile(`(?s)<!--.*?-->`)
 	pomParentRe    = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
 	pomArtifactRe  = regexp.MustCompile(`<artifactId>\s*([^<]+?)\s*</artifactId>`)
 	assemblyNameRe = regexp.MustCompile(`<AssemblyName>\s*([^<]+?)\s*</AssemblyName>`)
@@ -54,18 +55,22 @@ func packageName(text, file string) (token, bool) {
 }
 
 // pomArtifact reads the project's own artifactId: the first one outside the
-// <parent> block, which names the parent POM instead.
+// <parent> block, which names the parent POM instead, and outside a comment.
 func pomArtifact(text, file string) (token, bool) {
-	// Blank the parent out with as many newlines as it spans, so the line
-	// numbers after it stay true.
-	own := pomParentRe.ReplaceAllStringFunc(text, func(s string) string {
-		return strings.Repeat("\n", strings.Count(s, "\n"))
-	})
+	own := blankOut(pomParentRe, blankOut(xmlCommentRe, text))
 	m := pomArtifactRe.FindStringSubmatch(own)
 	if m == nil {
 		return token{}, false
 	}
 	return tokenAt(kindArtifact, m[1], file, own, m[0])
+}
+
+// blankOut removes what re matches from text, leaving as many newlines as each
+// match spans, so the line numbers after it stay true.
+func blankOut(re *regexp.Regexp, text string) string {
+	return re.ReplaceAllStringFunc(text, func(s string) string {
+		return strings.Repeat("\n", strings.Count(s, "\n"))
+	})
 }
 
 // gradleRootProject reads the build's name from a Gradle settings file.
@@ -113,9 +118,10 @@ func pyprojectName(text, file string) (token, bool) {
 	return newToken(kindProject, name, file, line)
 }
 
-// assemblyName reads a .csproj's AssemblyName, which defaults to the project
-// file's stem.
+// assemblyName reads a .csproj's AssemblyName outside a comment, which
+// defaults to the project file's stem.
 func assemblyName(text, file string) (token, bool) {
+	text = blankOut(xmlCommentRe, text)
 	if m := assemblyNameRe.FindStringSubmatch(text); m != nil {
 		return tokenAt(kindAssembly, m[1], file, text, m[0])
 	}

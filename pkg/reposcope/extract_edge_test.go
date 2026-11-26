@@ -64,6 +64,38 @@ func TestExtractPyprojectReadsOnlyTheProjectName(t *testing.T) {
 	}
 }
 
+// A name a file only refers to is read as what it refers to, or not at all:
+// a YAML alias is its anchor's value, not the anchor's label; an MSBuild
+// property is a placeholder like a template's; a commented-out element is
+// not the project's.
+func TestExtractNamesAreReadNotTheirPlaceholders(t *testing.T) {
+	for name, tt := range map[string]struct {
+		file, data string
+		want       []string
+	}{
+		"a YAML alias": {"deployment.yaml",
+			"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  labels:\n    app: &appname ledger-writer\n  name: *appname\n",
+			[]string{"workload ledger-writer deployment.yaml:5"}},
+		"an aliased mapping": {"deployment.yaml",
+			"apiVersion: apps/v1\nkind: Deployment\nx-meta: &meta\n  name: ledger-writer\nmetadata: *meta\n",
+			[]string{"workload ledger-writer deployment.yaml:4"}},
+		"an MSBuild property": {"Fallback.csproj",
+			"<Project>\n<AssemblyName>$(MSBuildProjectName)</AssemblyName>\n</Project>", []string{}},
+		"a commented-out artifactId": {"pom.xml",
+			"<project>\n<!-- <artifactId>old-name</artifactId> -->\n<!--\n<artifactId>older-name</artifactId>\n-->\n<artifactId>ledger-writer</artifactId>\n</project>",
+			[]string{"artifact ledger-writer pom.xml:6"}},
+		"a commented-out AssemblyName": {"Fallback.csproj",
+			"<Project>\n<!-- <AssemblyName>OldName</AssemblyName> -->\n<AssemblyName>LedgerWriter</AssemblyName>\n</Project>",
+			[]string{"assembly ledger-writer Fallback.csproj:3"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := PlanDiscovery(fstest.MapFS{tt.file: {Data: []byte(tt.data)}}, ".", nil)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, tokenLines(p.tokens))
+		})
+	}
+}
+
 func TestExtractExplicitAssemblyName(t *testing.T) {
 	p, err := PlanDiscovery(fstest.MapFS{"Fallback.csproj": {Data: []byte("<Project>\n<AssemblyName>InvoiceWorker</AssemblyName>\n</Project>")}}, ".", nil)
 	require.NoError(t, err)

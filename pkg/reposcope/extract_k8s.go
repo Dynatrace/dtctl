@@ -148,12 +148,17 @@ func (f *sourceNames) add(kind, raw, file string, line int) {
 	}
 }
 
+// mapValue is the value of key in the mapping n. An alias is read as the node
+// it refers to: its own Value is the anchor's label, which names nothing.
 func mapValue(n *yaml.Node, key string) *yaml.Node {
 	if n == nil || n.Kind != yaml.MappingNode {
 		return nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == key {
+			if v := n.Content[i+1]; v.Kind == yaml.AliasNode {
+				return v.Alias
+			}
 			return n.Content[i+1]
 		}
 	}
