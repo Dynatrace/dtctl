@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -36,6 +37,9 @@ func printRepoScopeCurrent(w io.Writer, s *reposcope.Status) {
 	if s.Reason != "" {
 		how += "; " + s.Reason
 	}
+	if note := repoScopeClusterNote(s.Entry); note != "" {
+		how += "; the cluster " + note
+	}
 	fmt.Fprintf(w, "%s  (%s)\n", s.Entry.Name, how)
 }
 
@@ -65,6 +69,7 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	kv("Note:", s.Reason)
 	kv("Warning:", s.Warning)
 	kv("Workloads:", workloadNames(e.Workloads)...)
+	kv("Cluster:", repoScopeClusterNote(e))
 	kv("Service names:", e.ServiceNames...)
 	kv("Process groups:", e.ProcessGroups...)
 	kv("Services:", e.Services...)
@@ -92,6 +97,38 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 // repoScopeCoverage names the directory an entry covers.
 func repoScopeCoverage(e *reposcope.Entry) string {
 	return cmp.Or(e.Path, "whole repository")
+}
+
+// repoScopeClusterNote says what a bound cluster does not narrow, for an
+// entry that binds one beside another kind of binding, and is "" otherwise.
+// The bindings are alternatives and the cluster is part of a workload, so a
+// service name or an id of the same entry selects its records in every
+// cluster. Read as "the cluster narrows the entry", such an entry looks
+// narrower than the filter it renders.
+func repoScopeClusterNote(e *reposcope.Entry) string {
+	if !slices.ContainsFunc(e.Workloads, func(w reposcope.Workload) bool { return w.ClusterUID != "" }) {
+		return ""
+	}
+	var others []string
+	for _, kind := range []struct {
+		name   string
+		values []string
+	}{
+		{"service names", e.ServiceNames}, {"process groups", e.ProcessGroups}, {"services", e.Services},
+	} {
+		if len(kind.values) > 0 {
+			others = append(others, kind.name)
+		}
+	}
+	if len(others) == 0 {
+		return ""
+	}
+	last := len(others) - 1
+	list := others[last]
+	if last > 0 {
+		list = strings.Join(others[:last], ", ") + " and " + list
+	}
+	return "narrows the workloads only: " + list + " select records of every cluster"
 }
 
 func workloadNames(workloads []reposcope.Workload) []string {

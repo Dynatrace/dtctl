@@ -174,7 +174,7 @@ The entry is filed under the current context's environment host. `set` always re
 | `--segment` | an existing filter segment a query under the entry also sends | the segment's id, with variables inline: `"ID?var=val&var2=val1,val2"` (repeatable, at most 10) |
 | `--path` | the directory the entry covers | relative to the repository root; default the whole repository |
 
-A cluster is bound by its uid, never its name: the uid is what identifies a cluster, while a name is chosen at deployment and can be changed or given to another cluster. `discover` shows the name beside the uid so you can tell which cluster a line is for. `--cluster-uid` applies to every `--workload` of the command; an entry whose workloads run in different clusters is written by hand in [the file](#the-file).
+A cluster is bound by its uid, never its name: the uid is what identifies a cluster, while a name is chosen at deployment and can be changed or given to another cluster. `discover` shows the name beside the uid so you can tell which cluster a line is for. `--cluster-uid` applies to every `--workload` of the command and to no other flag: a `--service-name`, `--process-group` or `--service` beside it still selects records of every cluster (see [the file](#the-file)). An entry whose workloads run in different clusters is written by hand in [the file](#the-file).
 
 Workload and service-name bindings are the ones to prefer: they are names you already know and they need no entity ids. They select only records that carry those fields, though, and logs do not always: an environment may record a workload's spans with `k8s.workload.name` and its logs with `dt.entity.process_group` alone, and a workload binding then returns no logs. `discover` checks this and proposes `--process-group` beside the workload when the logs need it; for an entry written by hand, [check your scope](#check-your-scope). They are also stable fields in the Dynatrace semantic dictionary, while both id fields are deprecated there (`dt.entity.service` in favour of `dt.smartscape.service`, `dt.entity.process_group` in favour of `dt.process_group.id`). Spans and logs carry the classic ids today, so `--service` and `--process-group` bind them; a later version of the file will move id bindings to their successors, and workload and service-name bindings are unaffected.
 
@@ -332,6 +332,8 @@ Within an entry the bindings are alternatives, OR-ed together; each data object 
 | `logs` | `k8s.namespace.name` and `k8s.workload.name`, with `k8s.cluster.uid` when bound | `service.name` | `dt.entity.process_group` | — |
 
 A workload with a `cluster-uid` renders `(k8s.cluster.uid == "…" and k8s.namespace.name == "…" and k8s.workload.name == "…")`, so it selects only records that carry all three fields. `k8s.cluster.uid` then counts as a field the scope filters on: a `filter` of your own on it wins, as one on the namespace or the workload does.
+
+The cluster narrows the workload it is written on, and nothing else. A service name, a process group or a service in the same entry is an alternative to that workload, so it selects its records in every cluster: an entry with `cluster-uid` on its workload and `service-names: [checkout]` returns the `checkout` service's records from all clusters. For an entry that keeps to one cluster, bind the workload alone. `repo-scope current` and `describe` say so for an entry that mixes the two (`Cluster: narrows the workloads only: service names select records of every cluster`).
 
 `dtctl repo-scope describe <name>` prints the exact filter for each.
 

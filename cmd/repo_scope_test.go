@@ -480,6 +480,18 @@ func TestRepoScopeHumanOutput(t *testing.T) {
       path: webproxy
       service-names: [webproxy]
 `
+	// A cluster narrows the workload it is written on and nothing else: the
+	// service name beside it is an alternative, in every cluster.
+	oneCluster := `environments:
+  abc12345.apps.dynatrace.com:
+    - name: checkout
+      workloads:
+        - cluster-uid: 11111111-2222-3333-4444-555555555555
+          namespace: payments
+          name: checkout
+      service-names: [checkout]
+      process-groups: [PROCESS_GROUP-FEDCBA9876543210]
+`
 	for _, tc := range []struct {
 		golden    string
 		repo      bool
@@ -499,6 +511,8 @@ func TestRepoScopeHumanOutput(t *testing.T) {
 		{golden: "describe-one-object", repo: true, scopeFile: billing, dir: "services/billing", args: []string{"describe"}},
 		{golden: "describe-uncovered", repo: true, scopeFile: monorepoScope, dir: "docs", args: []string{"describe"}},
 		{golden: "describe-gradle-library", repo: true, fixture: gradle, scopeFile: webproxy, dir: "webproxy-api", args: []string{"describe"}},
+		{golden: "current-cluster", repo: true, scopeFile: oneCluster, args: []string{"current"}},
+		{golden: "describe-cluster", repo: true, scopeFile: oneCluster, args: []string{"describe"}},
 		{golden: "list", repo: true, scopeFile: billing, args: []string{"list"}},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {
