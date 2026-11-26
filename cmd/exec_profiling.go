@@ -462,7 +462,7 @@ func renderProfilingStacks(ctx context.Context, run *profilingRun, h *profiling.
 		shown:  len(rows),
 		total:  len(view.Rows),
 		unit:   "stacks, by running samples",
-		folded: func() string { return profiling.FoldStacks(rows) },
+		folded: func() string { return foldProfilingStacks(rows) },
 		profile: func(p *output.ProfileContext) {
 			p.Samples = &view.Samples
 			p.State = "running"
@@ -488,12 +488,51 @@ func renderProfilingAllocations(ctx context.Context, run *profilingRun, a *profi
 		shown:  len(rows),
 		total:  len(view.Rows),
 		unit:   "allocation stacks, by " + key + " bytes",
-		folded: func() string { return profiling.FoldAllocations(rows, f.survivorsOnly) },
+		folded: func() string { return foldProfilingAllocations(rows, f.survivorsOnly) },
 		profile: func(p *output.ProfileContext) {
 			p.AllocatedBytes, p.SurvivedBytes = &view.AllocatedBytes, &view.SurvivedBytes
 		},
-		suggestion: profiling.SurvivedNote,
+		suggestion: profilingSurvivedNote,
 	})
+}
+
+// profilingSurvivedNote says what the survived figures are, for every output
+// that prints them: the API sums them over each GC an object lives through, so
+// they read as a size (and as heap held) when they are not one.
+const profilingSurvivedNote = "survived_bytes/survived_count are summed over every GC an object lived through within about a minute (10 bytes surviving 3 GCs = 30): not a size, can exceed alloc_bytes, not heap used or retained; survived/allocated ~1 = dies young, higher tracks GC frequency, not a leak signal alone"
+
+// foldProfilingStacks renders stack rows as collapsed (folded) stacks, one
+// line per row:
+// `frame1;frame2;...;frameN running=.. lock=.. net_io=.. disk_io=.. wait=..`.
+// Unlike single-metric folded output a line keeps all five thread-state
+// counts, so one read shows whether a stack is CPU-bound or blocked without a
+// separate flamegraph per state.
+func foldProfilingStacks(rows []profiling.StackRow) string {
+	var sb strings.Builder
+	for _, r := range rows {
+		fmt.Fprintf(&sb, "%s running=%d lock=%d net_io=%d disk_io=%d wait=%d\n",
+			r.Stack, r.Running, r.Lock, r.NetIO, r.DiskIO, r.Wait)
+	}
+	return sb.String()
+}
+
+// foldProfilingAllocations renders allocation rows as folded lines weighted by
+// bytes, under a header that names the sort key.
+func foldProfilingAllocations(rows []profiling.AllocationRow, bySurvivors bool) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	key := "alloc"
+	if bySurvivors {
+		key = "surv"
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "# ALLOCATIONS (bytes, sorted by %s; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n", key)
+	for _, l := range rows {
+		fmt.Fprintf(&sb, "%s alloc=%d surv=%d alloc_count=%d surv_count=%d\n",
+			l.Stack, l.AllocBytes, l.SurvivedBytes, l.AllocCount, l.SurvivedCount)
+	}
+	return sb.String()
 }
 
 // profilingStackOutput is a stack view ready to print, of either kind.

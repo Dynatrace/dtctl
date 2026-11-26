@@ -283,7 +283,8 @@ type AllocationView struct {
 	// allocated bytes (by survived bytes when asked for), descending.
 	Rows []AllocationRow
 	// AllocatedBytes and SurvivedBytes are the totals over all rows.
-	// SurvivedBytes is summed per GC survived and is not a size (SurvivedNote).
+	// SurvivedBytes is summed per GC survived and is not a size (see
+	// AllocationRow).
 	AllocatedBytes int64
 	SurvivedBytes  int64
 	// Empty says why there are no rows, and is empty when there are some.

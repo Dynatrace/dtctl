@@ -12,8 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
-
-	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 )
 
 // profilingTree is a methodHotspots result with cumulative counts, the way the
@@ -427,7 +425,7 @@ func TestExecProfiling_AllocationsSurvivedNote(t *testing.T) {
 		`"allocationInfo":{"allocationSize":100,"allocationCount":1,"survivorSize":500,"survivorCount":5}}]}}`)
 
 	env := runProfilingAgent(t, "allocations", testProcess)
-	require.Contains(t, env.Context.Suggestions, profiling.SurvivedNote)
+	require.Contains(t, env.Context.Suggestions, profilingSurvivedNote)
 	require.EqualValues(t, 500, env.Result[0]["survived_bytes"])
 
 	help := findProfilingCmd(t, "allocations").Long

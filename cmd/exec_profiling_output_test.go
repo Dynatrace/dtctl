@@ -242,3 +242,32 @@ func TestExecProfiling_AllocationsAPIError(t *testing.T) {
 		"  • Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy\n"+
 		"  • OAuth (dtctl auth login): log in again so the session requests storage:profiles:read\n", stderr)
 }
+
+// A table prints the stack views as folded lines: every thread-state count on
+// the line of its stack, and for allocations a header that names the sort key
+// and says the survived figure is not a size.
+func TestFoldProfilingRows(t *testing.T) {
+	require.Equal(t, "a.A.run;b.B.wait running=3 lock=4 net_io=5 disk_io=6 wait=7\na.A.run running=1 lock=0 net_io=0 disk_io=0 wait=0\n",
+		foldProfilingStacks([]profiling.StackRow{
+			{Running: 3, Lock: 4, NetIO: 5, DiskIO: 6, Wait: 7, Stack: "a.A.run;b.B.wait"},
+			{Running: 1, Stack: "a.A.run"},
+		}))
+	require.Empty(t, foldProfilingStacks(nil))
+
+	rows := []profiling.AllocationRow{{AllocBytes: 100, SurvivedBytes: 500, AllocCount: 2, SurvivedCount: 9, Stack: "Cache.put;Svc.get"}}
+	const line = "Cache.put;Svc.get alloc=100 surv=500 alloc_count=2 surv_count=9\n"
+	require.Equal(t, "# ALLOCATIONS (bytes, sorted by alloc; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n"+line,
+		foldProfilingAllocations(rows, false))
+	require.Equal(t, "# ALLOCATIONS (bytes, sorted by surv; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n"+line,
+		foldProfilingAllocations(rows, true))
+	require.Empty(t, foldProfilingAllocations(nil, false))
+}
+
+// The table of the allocations command is those lines.
+func TestExecProfiling_AllocationsTable(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingAllocTree)
+	code, stdout, stderr := runProfilingStreams(t, "allocations", testProcess, "--survivors-only")
+	require.Zero(t, code, stderr)
+	require.Equal(t, "# ALLOCATIONS (bytes, sorted by surv; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n"+
+		"Cache.put alloc=100 surv=500 alloc_count=1 surv_count=5\n", stdout)
+}

@@ -1,7 +1,6 @@
 package profiling
 
 import (
-	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -18,14 +17,12 @@ type StackRow struct {
 	Stack   string `json:"stack" yaml:"stack" table:"STACK"`
 }
 
-// SurvivedNote says what the survived figures are, for every output that
-// prints them: the API sums them over each GC an object lives through, so
-// they read as a size (and as heap held) when they are not one.
-const SurvivedNote = "survived_bytes/survived_count are summed over every GC an object lived through within about a minute (10 bytes surviving 3 GCs = 30): not a size, can exceed alloc_bytes, not heap used or retained; survived/allocated ~1 = dies young, higher tracks GC frequency, not a leak signal alone"
-
 // AllocationRow is one row of the allocations stack view: an allocation path,
 // allocation site first, with its own share of the window's allocations.
-// SurvivedBytes and SurvivedCount are summed per GC survived (SurvivedNote).
+// SurvivedBytes and SurvivedCount are summed over every GC an object lived
+// through until the agent's next report, about a minute (10 bytes surviving 3
+// GCs are 30): they are not sizes, can exceed the allocated figures, and say
+// nothing about the heap in use.
 // The figures are int64, as the view's totals are: a byte count outgrows an
 // int on a 32-bit platform.
 type AllocationRow struct {
@@ -34,39 +31,6 @@ type AllocationRow struct {
 	AllocCount    int64  `json:"alloc_count" yaml:"alloc_count" table:"ALLOC_COUNT"`
 	SurvivedCount int64  `json:"survived_count" yaml:"survived_count" table:"SURVIVED_COUNT"`
 	Stack         string `json:"stack" yaml:"stack" table:"STACK"`
-}
-
-// FoldStacks renders stack rows as collapsed (folded) stacks, one line per row:
-// `frame1;frame2;...;frameN running=.. lock=.. net_io=.. disk_io=.. wait=..`.
-// Unlike single-metric folded output a line keeps all five thread-state
-// counts, so one read shows whether a stack is CPU-bound or blocked without a
-// separate flamegraph per state.
-func FoldStacks(rows []StackRow) string {
-	var sb strings.Builder
-	for _, r := range rows {
-		fmt.Fprintf(&sb, "%s running=%d lock=%d net_io=%d disk_io=%d wait=%d\n",
-			r.Stack, r.Running, r.Lock, r.NetIO, r.DiskIO, r.Wait)
-	}
-	return sb.String()
-}
-
-// FoldAllocations renders allocation rows as folded lines weighted by bytes,
-// under a header that names the sort key.
-func FoldAllocations(rows []AllocationRow, bySurvivors bool) string {
-	if len(rows) == 0 {
-		return ""
-	}
-	key := "alloc"
-	if bySurvivors {
-		key = "surv"
-	}
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "# ALLOCATIONS (bytes, sorted by %s; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n", key)
-	for _, l := range rows {
-		fmt.Fprintf(&sb, "%s alloc=%d surv=%d alloc_count=%d surv_count=%d\n",
-			l.Stack, l.AllocBytes, l.SurvivedBytes, l.AllocCount, l.SurvivedCount)
-	}
-	return sb.String()
 }
 
 // hotspotStacks folds a hotspots result into one row per unique stack, sorted

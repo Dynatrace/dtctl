@@ -34,16 +34,26 @@ func hotspotsResult(rootID string, nodes ...map[string]interface{}) map[string]i
 	}
 }
 
-// toCollapsed is the stack view of a result as folded lines, capped at top
-// rows (0 = all): what `dtctl exec profiling` prints as a table.
+// toCollapsed is the stack view of a result with one line per row, capped at
+// top rows (0 = all), in the form `dtctl exec profiling` prints a table: the
+// fold tests read rows more easily as lines than as structs.
 func toCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
+	var sb strings.Builder
 	switch kind {
 	case "memoryAllocation":
-		return FoldAllocations(capRows(allocationStacks(raw, appOnly, false), top), false)
+		rows := capRows(allocationStacks(raw, appOnly, false), top)
+		if len(rows) > 0 {
+			sb.WriteString("# ALLOCATIONS\n")
+		}
+		for _, r := range rows {
+			fmt.Fprintf(&sb, "%s alloc=%d surv=%d alloc_count=%d surv_count=%d\n", r.Stack, r.AllocBytes, r.SurvivedBytes, r.AllocCount, r.SurvivedCount)
+		}
 	case "methodHotspots":
-		return FoldStacks(capRows(hotspotStacks(raw, appOnly), top))
+		for _, r := range capRows(hotspotStacks(raw, appOnly), top) {
+			fmt.Fprintf(&sb, "%s running=%d lock=%d net_io=%d disk_io=%d wait=%d\n", r.Stack, r.Running, r.Lock, r.NetIO, r.DiskIO, r.Wait)
+		}
 	}
-	return ""
+	return sb.String()
 }
 
 func capRows[T any](rows []T, top int) []T {
@@ -387,14 +397,10 @@ func TestAllocationStacks_BySurvivors(t *testing.T) {
 	if rows[0].Stack != "Keep.alloc" || rows[0].SurvivedBytes != 90 {
 		t.Errorf("by survived bytes, Keep.alloc first: %+v", rows)
 	}
-	if out := FoldAllocations(rows, true); !strings.Contains(out, "sorted by surv;") {
-		t.Errorf("header should name the survivors sort:\n%s", out)
-	}
 }
 
 // Survived bytes are summed per GC survived, so a long-lived frame's survivors
-// can exceed its allocations. The rows pass that through, and the folded header
-// says the figure is not a size, so nobody reads it as heap held.
+// can exceed its allocations. The rows pass that through.
 func TestAllocationStacks_SurvivedExceedsAllocated(t *testing.T) {
 	cache := memnode(1, "Cache.put", true, 100, 1)
 	cache["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(500)
@@ -403,11 +409,5 @@ func TestAllocationStacks_SurvivedExceedsAllocated(t *testing.T) {
 	rows := allocationStacks(raw, false, true)
 	if len(rows) != 1 || rows[0].AllocBytes != 100 || rows[0].SurvivedBytes != 500 {
 		t.Fatalf("want alloc 100, survived 500 as the API gives them: %+v", rows)
-	}
-	out := FoldAllocations(rows, true)
-	for _, want := range []string{"bytes x GCs survived", "not a size", "can exceed alloc"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("header should say %q:\n%s", want, out)
-		}
 	}
 }
