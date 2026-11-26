@@ -204,6 +204,10 @@ type repoScopedQuery struct {
 	scope *output.RepoScope
 	// named is the entry --repo-scope asked for, "" for the covering one.
 	named string
+	// optOut says the command has a --no-repo-scope this run may pass: one
+	// a stability floor hides is not advice. asTyped and without word
+	// the way back to the typed query by it and by named.
+	optOut bool
 	// filtered says the entry's filter was inserted. scope.Applied is wider:
 	// it also holds for a query narrowed by the entry's segments alone.
 	filtered bool
@@ -257,6 +261,7 @@ func applyRepoScope(cmd *cobra.Command, cfg *config.Config, query string) (*repo
 		return q, err
 	}
 	q.named, q.warning = name, res.Warning
+	q.optOut = repoScopeAdmitted(cmd, noRepoScopeFlag)
 	q.scope = res.Scope
 	if q.scope == nil {
 		refused := q.rewrite(res.Status)
@@ -264,7 +269,7 @@ func applyRepoScope(cmd *cobra.Command, cfg *config.Config, query string) (*repo
 			return nil, &reposcope.InvalidError{
 				Source:      "--" + repoScopeFlag,
 				Msg:         fmt.Sprintf("entry %q cannot narrow this query (%s): %s", name, refused, q.refusedReason),
-				Suggestions: []string{"drop --" + repoScopeFlag + " to run the query as typed"},
+				Suggestions: []string{q.asTyped() + " to run the query as typed"},
 			}
 		}
 		return q, nil
@@ -390,8 +395,8 @@ func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) e
 		case errors.Is(err, httpclient.ErrForbidden):
 			reason = fmt.Sprintf("filter segment %s could not be read (%v)", seg.ID, err)
 		default:
-			return fmt.Errorf("repo scope %s: filter segment %s could not be read (%w); the query was not sent: retry, or pass --%s to run it as typed",
-				q.scope.Name, seg.ID, err, noRepoScopeFlag)
+			return fmt.Errorf("repo scope %s: filter segment %s could not be read (%w); the query was not sent: retry, or %s to run it as typed",
+				q.scope.Name, seg.ID, err, q.asTyped())
 		}
 		if q.named != "" {
 			return &reposcope.InvalidError{
@@ -399,7 +404,7 @@ func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) e
 				Msg:    fmt.Sprintf("entry %q cannot be applied: %s", q.named, reason),
 				Suggestions: []string{
 					fmt.Sprintf("correct the entry's segments in %s; list the environment's with: dtctl get segments", reposcope.FileName),
-					"drop --" + repoScopeFlag + " to run the query as typed",
+					q.asTyped() + " to run the query as typed",
 				},
 			}
 		}
@@ -411,6 +416,43 @@ func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) e
 	return nil
 }
 
+// asTyped is what to change on this command line to run the query as typed.
+// Under a name that is not "add --no-repo-scope", which the name excludes,
+// and not "drop the name", which applies whichever entry covers the
+// directory: the opt-out goes in the name's place. A command without the
+// opt-out applies a scope only when one is named, so there the name is
+// dropped.
+func (q *repoScopedQuery) asTyped() string {
+	switch {
+	case q.named == "":
+		return "pass --" + noRepoScopeFlag
+	case q.optOut:
+		return fmt.Sprintf("replace --%s %s with --%s", repoScopeFlag, q.named, noRepoScopeFlag)
+	}
+	return fmt.Sprintf("drop --%s %s", repoScopeFlag, q.named)
+}
+
+// without is asTyped for the end of a sentence: "compare with
+// --no-repo-scope", "retry without --repo-scope checkout".
+func (q *repoScopedQuery) without() string {
+	switch {
+	case q.named == "":
+		return "with --" + noRepoScopeFlag
+	case q.optOut:
+		return fmt.Sprintf("with --%s in place of --%s %s", noRepoScopeFlag, repoScopeFlag, q.named)
+	}
+	return fmt.Sprintf("without --%s %s", repoScopeFlag, q.named)
+}
+
+// ignoreHint ends a line about a scope nobody named with how to turn it
+// off. Someone who named the entry does not need telling.
+func (q *repoScopedQuery) ignoreHint(what string) string {
+	if q.named != "" {
+		return ""
+	}
+	return fmt.Sprintf(" (use --%s to %s)", noRepoScopeFlag, what)
+}
+
 // requireSegments is for a command that must not run unscoped on its own
 // decision, because it keeps running after the one line that says so: wait
 // query polls until its condition holds, and live mode redraws the screen
@@ -420,8 +462,8 @@ func (q *repoScopedQuery) requireSegments(refusal string) error {
 	if q.scope == nil || q.unavailable == "" {
 		return nil
 	}
-	return fmt.Errorf("repo scope %s cannot be applied: %s; %s: correct the entry's segments in %s, or pass --%s",
-		q.scope.Name, q.unavailable, refusal, reposcope.FileName, noRepoScopeFlag)
+	return fmt.Errorf("repo scope %s cannot be applied: %s; %s: correct the entry's segments in %s, or %s",
+		q.scope.Name, q.unavailable, refusal, reposcope.FileName, q.asTyped())
 }
 
 // refuseSegmentVars fails a --segment-var aimed at a segment the entry
@@ -469,8 +511,8 @@ func (q *repoScopedQuery) yieldTo(user []exec.FilterSegmentRef) error {
 		kept = append(kept, seg)
 	}
 	if len(user)+len(kept) > maxSegmentsPerQuery {
-		return fmt.Errorf("too many segments: %d given and %d from repo scope %s, maximum is %d per query; give fewer, or pass --%s",
-			len(user), len(kept), q.scope.Name, maxSegmentsPerQuery, noRepoScopeFlag)
+		return fmt.Errorf("too many segments: %d given and %d from repo scope %s, maximum is %d per query; give fewer, or %s",
+			len(user), len(kept), q.scope.Name, maxSegmentsPerQuery, q.asTyped())
 	}
 	q.segments = kept
 	q.settle()
@@ -538,27 +580,27 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 			q.unboundedScan, q.scanCapNoticed = true, true
 			clause = "; " + q.scanClause()
 		}
-		output.FprintInfo(q.stderr, "applying repo scope %s to fetch %s: %s%s (use --%s to ignore it)%s",
-			s.Name, s.DataObject, s.Filter, with, noRepoScopeFlag, clause)
+		output.FprintInfo(q.stderr, "applying repo scope %s to fetch %s: %s%s%s%s",
+			s.Name, s.DataObject, s.Filter, with, q.ignoreHint("ignore it"), clause)
 		return
 	case with != "" && !q.bound:
-		output.FprintInfo(q.stderr, "applying repo scope %s: segments %s (use --%s to ignore it)", s.Name, q.segmentList(), noRepoScopeFlag)
+		output.FprintInfo(q.stderr, "applying repo scope %s: segments %s%s", s.Name, q.segmentList(), q.ignoreHint("ignore it"))
 		return
 	case with != "":
-		output.FprintWarning(q.stderr, "repo scope %s: its filter was not inserted: %s; its segments %s still apply (use --%s to ignore them)",
-			s.Name, q.refusedReason, q.segmentList(), noRepoScopeFlag)
+		output.FprintWarning(q.stderr, "repo scope %s: its filter was not inserted: %s; its segments %s still apply%s",
+			s.Name, q.refusedReason, q.segmentList(), q.ignoreHint("ignore them"))
 		return
 	}
 	if s.Code == repoScopeUserSegment {
-		output.FprintInfo(q.stderr, "repo scope %s not applied: %s (use --%s to silence this)", s.Name, q.notApplied, noRepoScopeFlag)
+		output.FprintInfo(q.stderr, "repo scope %s not applied: %s%s", s.Name, q.notApplied, q.ignoreHint("silence this"))
 		return
 	}
 	label := "repo scope"
 	if s.Name != "" {
 		label += " " + s.Name
 	}
-	output.FprintWarning(q.stderr, "%s not applied: %s; the query runs unscoped (use --%s to silence this)",
-		label, q.notApplied, noRepoScopeFlag)
+	output.FprintWarning(q.stderr, "%s not applied: %s; the query runs unscoped%s",
+		label, q.notApplied, q.ignoreHint("silence this"))
 }
 
 // onResult is the executor's OnResult hook. A scoped query that returns
@@ -577,7 +619,7 @@ func (q *repoScopedQuery) onResult(n int, result *exec.DQLQueryResponse) {
 }
 
 func (q *repoScopedQuery) noticeZeroRecords() {
-	output.FprintInfo(q.stderr, "0 records under repo scope %s; compare with --%s", q.scope.Name, noRepoScopeFlag)
+	output.FprintInfo(q.stderr, "0 records under repo scope %s; compare %s", q.scope.Name, q.without())
 }
 
 // countedNothing reports the empty result that is not zero rows: a query
@@ -616,7 +658,7 @@ func (q *repoScopedQuery) noticeWaitOutcome(met bool, records int64) {
 	switch {
 	case q.scope == nil || !q.scope.Applied:
 	case !met:
-		output.FprintInfo(q.stderr, "condition not met under repo scope %s; compare with --%s", q.scope.Name, noRepoScopeFlag)
+		output.FprintInfo(q.stderr, "condition not met under repo scope %s; compare %s", q.scope.Name, q.without())
 	case records == 0:
 		q.noticeZeroRecords()
 	}
@@ -694,10 +736,10 @@ func (q *repoScopedQuery) decorate(c *output.ResponseContext, result *exec.DQLQu
 	switch {
 	case q.zeroRows:
 		c.Suggestions = append([]string{fmt.Sprintf(
-			"0 records under repo scope %s: run the same query with --%s to tell whether the scope or the query filtered everything out",
-			q.scope.Name, noRepoScopeFlag)}, c.Suggestions...)
+			"0 records under repo scope %s: run the same query %s to tell whether the scope or the query filtered everything out",
+			q.scope.Name, q.without())}, c.Suggestions...)
 	case q.scope.Applied:
-		c.Suggestions = append(c.Suggestions, "run unscoped: add --"+noRepoScopeFlag)
+		c.Suggestions = append(c.Suggestions, "run unscoped: "+q.asTyped())
 	}
 	switch {
 	case q.unboundedScan:
@@ -713,7 +755,7 @@ func (q *repoScopedQuery) wrapError(err error) error {
 	if err == nil || q.scope == nil || !q.scope.Applied {
 		return err
 	}
-	return &ScopedQueryError{Err: err, Scope: q.scope, Sent: q.Query}
+	return &ScopedQueryError{Err: err, Scope: q.scope, Sent: q.Query, asTyped: q.asTyped(), without: q.without()}
 }
 
 // ScopedQueryError is a query that failed after repo scoping rewrote it. Grail
@@ -725,6 +767,9 @@ type ScopedQueryError struct {
 	Err   error
 	Scope *output.RepoScope
 	Sent  string
+	// asTyped and without say how the command line that failed runs the
+	// query as typed (repoScopedQuery.asTyped, without).
+	asTyped, without string
 }
 
 // repoScopeSegmentVariableCode is the agent error code of a query that
@@ -758,11 +803,11 @@ func (e *ScopedQueryError) segmentVariable() (msg string, ok bool) {
 		if !slices.ContainsFunc(e.Scope.Segments, func(s output.RepoScopeSegment) bool { return s.ID == required.Segment }) {
 			break
 		}
-		return fmt.Sprintf("segment %s requires variable %q, and repo scope %s sends it without one: give the variable a value under the entry's segments in %s, or pass --%s to run the query as typed",
-			required.Segment, required.Variable, e.Scope.Name, reposcope.FileName, noRepoScopeFlag), true
+		return fmt.Sprintf("segment %s requires variable %q, and repo scope %s sends it without one: give the variable a value under the entry's segments in %s, or %s to run the query as typed",
+			required.Segment, required.Variable, e.Scope.Name, reposcope.FileName, e.asTyped), true
 	case errors.As(e.Err, &queryErr) && queryErr.ErrorType == "MISSING_FILTER_SEGMENT_VARIABLE":
-		return fmt.Sprintf("repo scope %s sends the filter segments %s, and one of them needs a variable this query cannot supply (%s): remove the segment from the entry in %s, or pass --%s to run the query as typed",
-			e.Scope.Name, e.segmentList(), firstLineOf(queryErr.Error()), reposcope.FileName, noRepoScopeFlag), true
+		return fmt.Sprintf("repo scope %s sends the filter segments %s, and one of them needs a variable this query cannot supply (%s): remove the segment from the entry in %s, or %s to run the query as typed",
+			e.Scope.Name, e.segmentList(), firstLineOf(queryErr.Error()), reposcope.FileName, e.asTyped), true
 	}
 	return "", false
 }
@@ -791,5 +836,5 @@ func (e *ScopedQueryError) Suggestions() []string {
 		out = append(out, fmt.Sprintf("repo scope %s also sent the filter segments %s; if the failure names a segment or one of its variables, correct the entry's segments in %s",
 			e.Scope.Name, e.segmentList(), reposcope.FileName))
 	}
-	return append(out, fmt.Sprintf("retry with --%s to run the query exactly as typed", noRepoScopeFlag))
+	return append(out, fmt.Sprintf("retry %s to run the query exactly as typed", e.without))
 }

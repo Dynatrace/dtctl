@@ -794,7 +794,13 @@ func TestQueryRepoScope_StableFloor(t *testing.T) {
 					return
 				}
 				require.Equal(t, repoScopeScopedQuery, srv.first(t))
-				require.True(t, strings.HasPrefix(stderr, repoScopeApplying), stderr)
+				// A named entry needs no hint that it can be ignored.
+				applying := repoScopeApplying
+				if len(tc.args) > 0 {
+					applying = strings.TrimSuffix(applying, " (use --no-repo-scope to ignore it)")
+				}
+				require.True(t, strings.HasPrefix(stderr, applying), stderr)
+				require.Equal(t, len(tc.args) == 0, strings.Contains(stderr, "--no-repo-scope"), "the opt-out is named only where the floor admits it: %s", stderr)
 			})
 		}
 	}

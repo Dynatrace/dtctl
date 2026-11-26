@@ -316,8 +316,10 @@ only in the stderr line every scoped run prints:
                "code": "applied"}
 ```
 
-and `context.suggestions` names the opt-out (`run unscoped: add
---no-repo-scope`). When an applied scope returns no records, the first
+and `context.suggestions` names the opt-out (`run unscoped: pass
+--no-repo-scope`). Under `--repo-scope <name>` every such suggestion says
+to put `--no-repo-scope` in the name's place, since the two flags exclude
+each other and dropping the name applies the covering entry. When an applied scope returns no records, the first
 suggestion is to run the same query with `--no-repo-scope`: a binding the
 records do not carry looks exactly like a quiet service. One suggestion says
 when nothing bounds an applied scope's scan, or, for a bounded scan the limit

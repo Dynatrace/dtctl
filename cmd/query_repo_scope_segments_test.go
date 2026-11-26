@@ -111,7 +111,7 @@ func TestQueryRepoScope_SegmentsWithoutAFilter(t *testing.T) {
 	body, _ := srv.executed(t)
 	require.Equal(t, timeseries, srv.first(t), "an entry without bindings inserts nothing")
 	require.Contains(t, body, `"filterSegments":[{"id":"plain-1"}]`)
-	require.Equal(t, "applying repo scope tools: segments plain-1 (use --no-repo-scope to ignore it)\n", stderr)
+	require.Equal(t, "applying repo scope tools: segments plain-1\n", stderr)
 	scope := repoScopeContext(t, stdout)
 	require.Equal(t, []any{true, "applied", "", ""}, []any{scope.Applied, scope.Code, scope.Filter, scope.Reason})
 
@@ -187,8 +187,15 @@ func TestQueryRepoScope_SegmentUnavailable(t *testing.T) {
 // The status here is one the client does not retry; a 500, a 429 and a
 // timeout take the same branch after its retries.
 func TestQueryRepoScope_SegmentReadFails(t *testing.T) {
-	const message = `repo scope checkout: filter segment Ab3dEf9hIjk could not be read (get segment: API error (400): 400 Bad Request); the query was not sent: retry, or pass --no-repo-scope to run it as typed`
-	for _, args := range [][]string{nil, {"--repo-scope", "checkout"}} {
+	const failed = `repo scope checkout: filter segment Ab3dEf9hIjk could not be read (get segment: API error (400): 400 Bad Request); the query was not sent: retry, or `
+	for _, tc := range []struct {
+		args    []string
+		asTyped string
+	}{
+		{nil, "pass --no-repo-scope"},
+		{[]string{"--repo-scope", "checkout"}, "replace --repo-scope checkout with --no-repo-scope"},
+	} {
+		args, message := tc.args, failed+tc.asTyped+" to run it as typed"
 		srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
 		srv.segments = map[string]int{"Ab3dEf9hIjk": http.StatusBadRequest, "plain-1": http.StatusOK}
 		chdirTestRepo(t, segmentScope)
