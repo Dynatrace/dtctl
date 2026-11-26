@@ -222,10 +222,12 @@ func randomScopeDoc(rng *rand.Rand) string {
 			b.WriteString("# " + pick(rng, "checkout", "key: value", "- item", "---") + "\n")
 		}
 	}
+	// strs spells n of values, each at most once.
 	strs := func(n int, values ...string) []string {
+		rng.Shuffle(len(values), func(i, j int) { values[i], values[j] = values[j], values[i] })
 		out := make([]string, 0, n)
-		for range n {
-			out = append(out, scalar(rng, pick(rng, values...)))
+		for _, v := range values[:min(n, len(values))] {
+			out = append(out, scalar(rng, v))
 		}
 		return out
 	}
@@ -293,7 +295,7 @@ func randomScopeDoc(rng *rand.Rand) string {
 						case "service-names":
 							b.WriteString("service-names:" + list(rng, "      ", strs(1+rng.IntN(3), "checkout", "Kasse EU", "123", "true", "1.5", "2026-09-30", "0x1F", "null-ish", mostly(rng, "", "~x"))))
 						case "process-groups":
-							b.WriteString("process-groups:" + list(rng, "      ", strs(1+rng.IntN(2), pgID, "PROCESS_GROUP-0000000000000001", mostly(rng, "PG-1", pgID))))
+							b.WriteString("process-groups:" + list(rng, "      ", strs(1+rng.IntN(2), pgID, mostly(rng, "PG-1", "PROCESS_GROUP-0000000000000001"))))
 						case "services":
 							b.WriteString("services:" + list(rng, "      ", strs(1+rng.IntN(2), svcID, "SERVICE-0000000000000001")))
 						case "workloads":

@@ -268,12 +268,33 @@ func (e *Entry) validate() *InvalidError {
 			return invalid(fmt.Sprintf("service-names[%d] %q %s", i, name, problem))
 		}
 	}
+	// A value given twice selects nothing more, so it is a slip of the hand
+	// or of a merge, and the file is where to say so.
+	for _, list := range []struct {
+		key    string
+		values []string
+	}{{"services", e.Services}, {"process-groups", e.ProcessGroups}, {"service-names", e.ServiceNames}} {
+		if i := repeated(list.values); i >= 0 {
+			return invalid(fmt.Sprintf("%s[%d] %q is listed twice", list.key, i, list.values[i]))
+		}
+	}
 	workloads := map[Workload]bool{}
+	// bound is, by namespace and name, whether a workload is listed with a
+	// cluster (true) or without one.
+	bound := map[Workload]bool{}
 	for i, w := range e.Workloads {
 		if workloads[w] {
 			return invalid(fmt.Sprintf("workloads[%d] %s is listed twice", i, w))
 		}
 		workloads[w] = true
+		// The binding without a cluster already selects the workload in every
+		// cluster: one with a cluster beside it narrows nothing, while the
+		// entry would say that it binds a cluster.
+		anywhere := Workload{Namespace: w.Namespace, Name: w.Name}
+		if clustered, listed := bound[anywhere]; listed && clustered != (w.ClusterUID != "") {
+			return invalid(fmt.Sprintf("workloads[%d] %s is listed with and without a cluster; without one it selects the workload in every cluster", i, w))
+		}
+		bound[anywhere] = w.ClusterUID != ""
 		if w.ClusterUID != "" && !clusterUIDRe.MatchString(w.ClusterUID) {
 			return invalid(fmt.Sprintf("workloads[%d] cluster-uid %q is not a Kubernetes cluster uid (a lowercase UUID, the value of %s)", i, w.ClusterUID, fieldClusterUID))
 		}
@@ -338,9 +359,25 @@ func (e *Entry) validateSegments() *InvalidError {
 					return invalid(fmt.Sprintf("segments[%d] variable %q value %q %s", i, name, v, problem))
 				}
 			}
+			if twice := repeated(values); twice >= 0 {
+				return invalid(fmt.Sprintf("segments[%d] variable %q value %q is listed twice", i, name, values[twice]))
+			}
 		}
 	}
 	return nil
+}
+
+// repeated is the index of the first value that is already in values before
+// it, or -1.
+func repeated(values []string) int {
+	seen := make(map[string]bool, len(values))
+	for i, v := range values {
+		if seen[v] {
+			return i
+		}
+		seen[v] = true
+	}
+	return -1
 }
 
 // tooLong refuses a list beyond maxListItems.
@@ -362,6 +399,10 @@ func segmentValueProblem(v string) string {
 	case strings.ContainsAny(v, ",&="):
 		// String must read back as the reference it renders.
 		return "must not contain , & or =, which separate values where a segment is spelt as --segment takes it"
+	case strings.TrimSpace(v) != v:
+		// For the same reason: the space is dropped where that spelling is
+		// read.
+		return "must not start or end with a space"
 	}
 	if !printable(v) {
 		return "must not contain control or non-printing characters"
