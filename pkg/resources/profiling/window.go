@@ -99,8 +99,8 @@ func (e *WindowTooLongError) Error() string {
 }
 
 // ResolveWindow turns a requested start and end into an analysis window. Both
-// accept what `dtctl query` accepts (ISO-8601/RFC3339, epoch millis,
-// now()-relative), and either may be empty. A missing bound is DefaultWindow
+// are ISO-8601/RFC3339, epoch millis or now()-relative (now()-1d, now()-90m,
+// now()-1h30m), and either may be empty. A missing bound is DefaultWindow
 // from the other: a start alone covers the 2h after it (but not past now), an
 // end alone the 2h before it, neither the last 2h.
 //

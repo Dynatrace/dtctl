@@ -252,6 +252,14 @@ This document tracks the current implementation status of dtctl. For future plan
 - [x] Function metadata: title, description, resumable, stateful flags
 - [x] Wide output with all metadata
 
+### Code-Level Profiling Features (Experimental)
+- [x] CPU hotspots of a process: `dtctl exec profiling hotspots <entity>` (one row per call stack, with all five thread-state counts)
+- [x] Per-function views: `--view functions` (self and total samples per function) and `--focus <function>` (its callers and callees), for any thread state with `--state`
+- [x] Memory allocations of a process: `dtctl exec profiling allocations <entity>` (alias `memory`)
+- [x] `--app-only`, `--limit`, `--raw`, and a window of at most 2h anywhere in the past
+- [x] Importable from Go: `pkg/resources/profiling` (experimental)
+- [x] User guide: `docs/PROFILING.md`
+
 ### Azure Connection Features
 - [x] List connections: `dtctl get azure connections`
 - [ ] Filter connection list with dedicated flags

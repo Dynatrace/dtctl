@@ -288,7 +288,4 @@ func TestWindowLengths(t *testing.T) {
 	if DefaultWindow != 2*time.Hour || MaxWindow != 2*time.Hour {
 		t.Errorf("DefaultWindow = %s, MaxWindow = %s; want 2h each", DefaultWindow, MaxWindow)
 	}
-	if DefaultWindow > MaxWindow {
-		t.Error("the default window must fit the cap")
-	}
 }

@@ -71,10 +71,13 @@ com.example.ManufacturerController.issueCreditCard;...reserveSlot  running=2   l
   `alloc_bytes`, `survived_bytes`, `alloc_count`, `survived_count`, `stack`), capped
   by `--limit` like the table. `--raw` prints the API's whole compacted result instead
   (megabytes for a busy process).
+- `--plain` prints the rows as JSON, like `-o json`, in every view: stdout holds
+  the JSON document and no `#` line.
 - An empty result prints one `# no stacks for …` line saying why: no samples in
   the window, or `--app-only` removed every frame. A per-function view of a
   window that has samples, but none in the `--state` it counts, prints
-  `# no <state> samples for …` instead.
+  `# no <state> samples for …` instead. With a structured format or `--plain`
+  the line goes to stderr, and stdout holds the empty list.
 
 ### Agent envelope
 
@@ -144,7 +147,7 @@ time to the nearest application frame above it, as in the stack view.
 
 | Flag | Kinds | Meaning |
 |------|-------|---------|
-| `--default-timeframe-start` / `--default-timeframe-end` | all | Window — what `dtctl query` takes: ISO-8601/RFC3339, epoch millis, or `now()`-relative (`now()-1d`, `now()-90m`, `now()-1h30m`). Defaults to the last 2h; a start alone covers the 2h after it, an end alone the 2h before it. The window is at most 2h long but can lie anywhere in the past; an end in the future is rejected. |
+| `--default-timeframe-start` / `--default-timeframe-end` | all | Window — ISO-8601/RFC3339, epoch millis, or `now()`-relative (`now()-1d`, `now()-90m`, `now()-1h30m`). Defaults to the last 2h; a start alone covers the 2h after it, an end alone the 2h before it. The window is at most 2h long but can lie anywhere in the past; an end in the future is rejected. |
 | `--app-only` | all | Show only application frames, stripping runtime, library and OneAgent frames. The base is the profiler's `apiInfo.systemApi` (JRE, Spring, Apache are off). dtctl also drops the OneAgent's own frames (`com.dynatrace.agent.*`, `Dynatrace.OneAgent.*`), which the profiler counts as app code. On Node.js it drops npm packages and the `node:` runtime. |
 | `--limit N` | all | Cap output to the top N rows (`0` = all): stacks (default 100, 20 in agent mode), functions (default 30), or callers and callees each with `--focus` (default 10). |
 | `--raw` | all | Print the API's whole compacted result instead of rows (`-o json` or `yaml`). |

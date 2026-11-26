@@ -80,10 +80,10 @@ PROCESS_GROUP_INSTANCE-xxx, and PROCESS_GROUP-xxx for a whole process group.
 Find process ids:
   ` + profilingFindIDsHint + `
 
-Timeframe: --default-timeframe-start/--default-timeframe-end take what dtctl
-query takes: ISO-8601/RFC3339, epoch millis, or now()-relative (now()-1d,
-now()-90m, now()-1h30m). Without either, the last 2h. A start alone covers the 2h
-after it, an end alone the 2h before it. The window must not exceed 2h, must not
+Timeframe: --default-timeframe-start/--default-timeframe-end take ISO-8601/
+RFC3339, epoch millis, or a now()-relative time (now()-1d, now()-90m,
+now()-1h30m). Without either, the last ` + profilingDefaultSpan + `. A start alone covers the ` + profilingDefaultSpan + `
+after it, an end alone the ` + profilingDefaultSpan + ` before it. The window must not exceed ` + profilingMaxSpan + `, must not
 end in the future, and can lie anywhere in the past.
 
 Required token scopes: storage:entities:read, storage:profiles:read.`,
@@ -133,7 +133,18 @@ const (
 	profilingFocusDefaultLimit       = 10
 )
 
-const profilingLimitHelp = "cap the rows (0 = all). Default: 100 stacks (20 in agent mode); --view functions 30; --focus 10 callers and 10 callees"
+// The --limit help of each kind. allocations has the stack view only.
+const (
+	profilingAllocationsLimitHelp = "cap the rows (0 = all). Default: 100 stacks (20 in agent mode)"
+	profilingHotspotsLimitHelp    = profilingAllocationsLimitHelp + "; --view functions 30; --focus 10 callers and 10 callees"
+)
+
+// The default and the longest window as the help spells them, read from the
+// package that applies them.
+var (
+	profilingDefaultSpan = spanString(profiling.DefaultWindow)
+	profilingMaxSpan     = spanString(profiling.MaxWindow)
+)
 
 const profilingViewsHelp = `
 Views. The default prints one row per unique call stack, ranked by running
@@ -184,7 +195,7 @@ func newProfilingHotspotsCmd() *cobra.Command {
 			return runProfiling(cmd, "hotspots", args[0], f)
 		},
 	}
-	addProfilingCommonFlags(c, f)
+	addProfilingCommonFlags(c, f, profilingHotspotsLimitHelp)
 	c.Flags().StringVar(&f.leafType, "leaf-type", string(profiling.LeafTypeTotal), "CPU sample scope: total, service, or background")
 	c.Flags().BoolVar(&f.showWaiting, "show-waiting", false, "include waiting (non-running) samples")
 	c.Flags().StringVar(&f.view, "view", "stacks", "stacks (one row per call stack) or functions (one row per function, self and total)")
@@ -237,17 +248,17 @@ allocation site first.`,
 			return runProfiling(cmd, "allocations", args[0], f)
 		},
 	}
-	addProfilingCommonFlags(c, f)
+	addProfilingCommonFlags(c, f, profilingAllocationsLimitHelp)
 	c.Flags().BoolVar(&f.survivorsOnly, "survivors-only", false, "restrict to surviving allocations, ranked by survived bytes")
 	stability.Mark(c, stability.Experimental, profilingSince)
 	return c
 }
 
-func addProfilingCommonFlags(c *cobra.Command, f *profilingFlags) {
+func addProfilingCommonFlags(c *cobra.Command, f *profilingFlags, limitHelp string) {
 	fl := c.Flags()
-	fl.StringVar(&f.start, "default-timeframe-start", "", "window start — ISO-8601/RFC3339, epoch millis, or now()-<dur>, e.g. now()-1d (default: 2h before the end)")
-	fl.StringVar(&f.end, "default-timeframe-end", "", "window end — ISO-8601/RFC3339, epoch millis, or now()-<dur>; not in the future (default: 2h after the start, else now(); window max 2h)")
-	fl.IntVar(&f.limit, "limit", profilingStacksDefaultLimit, profilingLimitHelp)
+	fl.StringVar(&f.start, "default-timeframe-start", "", "window start — ISO-8601/RFC3339, epoch millis, or now()-<dur>, e.g. now()-1d (default: "+profilingDefaultSpan+" before the end)")
+	fl.StringVar(&f.end, "default-timeframe-end", "", "window end — ISO-8601/RFC3339, epoch millis, or now()-<dur>; not in the future (default: "+profilingDefaultSpan+" after the start, else now(); window max "+profilingMaxSpan+")")
+	fl.IntVar(&f.limit, "limit", profilingStacksDefaultLimit, limitHelp)
 	fl.BoolVar(&f.appOnly, "app-only", false, "show only application frames, stripping runtime/library frames (JRE, Spring, npm packages, node:) and OneAgent frames")
 	fl.BoolVar(&f.raw, "raw", false, "print the API's whole (compacted) result instead of rows; large. Use with -o json or yaml")
 }
@@ -332,7 +343,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	progress.Update(output.ProgressState{Label: fmt.Sprintf("running %s analysis", kind)})
 
 	if kind == "allocations" {
-		a, err := h.Allocations(cmd.Context(), profiling.AllocationsRequest{
+		a, err := h.Allocations(ctx, profiling.AllocationsRequest{
 			Entity:        entityID,
 			Window:        window,
 			SurvivorsOnly: f.survivorsOnly,
@@ -348,7 +359,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return renderProfilingAllocations(ctx, run, a, f)
 	}
 
-	hs, err := h.Hotspots(cmd.Context(), profiling.HotspotsRequest{
+	hs, err := h.Hotspots(ctx, profiling.HotspotsRequest{
 		Entity:      entityID,
 		Window:      window,
 		LeafType:    leafType,
@@ -379,7 +390,7 @@ func profilingWindowError(err error) error {
 	case errors.As(err, &bound):
 		return fmt.Errorf("invalid --default-timeframe-%s: %w", bound.Bound, bound.Err)
 	case errors.Is(err, profiling.ErrWindowStartInFuture):
-		return fmt.Errorf("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-2h')")
+		return fmt.Errorf("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-%s')", profilingDefaultSpan)
 	case errors.Is(err, profiling.ErrWindowEndInFuture):
 		return fmt.Errorf("invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now")
 	case errors.Is(err, profiling.ErrWindowEmpty):
@@ -497,8 +508,8 @@ type profilingStackOutput struct {
 
 // printProfilingStacks prints a stack view that has rows. A table (the default
 // outside agent mode) prints them as folded lines; every structured format,
-// --jq and the agent envelope get the same rows as fields. --limit caps every
-// one of them the same way.
+// --plain, --jq and the agent envelope get the same rows as fields. --limit
+// caps every one of them the same way.
 func printProfilingStacks(ctx context.Context, run *profilingRun, o profilingStackOutput) error {
 	truncated := ""
 	if o.shown < o.total {
@@ -541,11 +552,15 @@ func capProfilingRows[T any](rows []T, limit int) []T {
 	return rows
 }
 
-// isProfilingTableFormat reports whether the output format is a table, which
-// the stack view prints as folded lines.
+// isProfilingTableFormat reports whether the output is a table for a person to
+// read: the stack view then prints folded lines, and every view may add #
+// lines to stdout. --plain turns a table into JSON (output.NewPrinterWithOpts),
+// so with it the output is not one, and stdout carries the JSON alone.
 func isProfilingTableFormat(ctx context.Context) bool {
-	switch outputFormat(ctx) {
-	case "", "table", "wide", "folded":
+	switch format := outputFormat(ctx); format {
+	case "", "table", "wide":
+		return output.IsTabularFormat(format, plainMode(ctx))
+	case "folded":
 		return true
 	}
 	return false
@@ -626,7 +641,7 @@ func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.H
 // printProfilingRows prints a per-function view's rows. A table gets the note,
 // warnings and hints as trailing # lines; the agent envelope carries the
 // warnings (truncation) as context.warnings and the hints as suggestions;
-// structured formats get the rows alone.
+// structured formats and --plain get the rows alone.
 func printProfilingRows(ctx context.Context, run *profilingRun, view, state string, samples *int, rows interface{}, total int, note string, warnings, hints []string) error {
 	p := newPrinterCtx(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
@@ -641,29 +656,23 @@ func printProfilingRows(ctx context.Context, run *profilingRun, view, state stri
 	if err := p.PrintList(rows); err != nil {
 		return err
 	}
-	if agentMode(ctx) || jqFilter(ctx) != "" {
+	if agentMode(ctx) || jqFilter(ctx) != "" || !isProfilingTableFormat(ctx) {
 		return nil
 	}
-	switch outputFormat(ctx) {
-	case "", "table", "wide":
-		w := currentStdout(ctx)
-		if note != "" {
-			fmt.Fprintf(w, "# %s\n", note)
-		}
-		for _, h := range append(warnings, hints...) {
-			if h == note {
-				continue
-			}
-			fmt.Fprintf(w, "# %s\n", h)
-		}
+	w := currentStdout(ctx)
+	if note != "" {
+		fmt.Fprintf(w, "# %s\n", note)
+	}
+	for _, h := range append(warnings, hints...) {
+		fmt.Fprintf(w, "# %s\n", h)
 	}
 	return nil
 }
 
 // printProfilingEmpty prints a view that has no rows, with a note saying why.
 // A table gets the note in place of the rows; the agent envelope gets an empty
-// result with the note in context.warnings; structured formats get the empty
-// list on stdout and the note on stderr.
+// result with the note in context.warnings; structured formats and --plain get
+// the empty list on stdout and the note on stderr.
 func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state string, empty interface{}, reason profiling.EmptyReason) error {
 	note := profilingEmptyNote(reason, run, state)
 	if agentMode(ctx) {
@@ -687,13 +696,23 @@ func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state str
 // state is the thread state a per-function view counted.
 func profilingEmptyNote(reason profiling.EmptyReason, run *profilingRun, state string) string {
 	switch reason {
+	case profiling.EmptyNoSamples:
+		return fmt.Sprintf("no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most %s), or --raw for the API's whole result",
+			run.entity, run.status, profilingMaxSpan)
 	case profiling.EmptyState:
 		return fmt.Sprintf("no %s samples for %s in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting", state, run.entity)
 	case profiling.EmptyAppOnly:
+		if state != "" {
+			// A per-function view counts one state. Application frames may
+			// well have samples in another, so this says nothing about how
+			// the profiler classified the frames.
+			return fmt.Sprintf("no %s samples for %s on application frames: --app-only removed the frames that have them — re-run without --app-only", state, run.entity)
+		}
 		return fmt.Sprintf("no stacks for %s: --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only", run.entity)
 	}
-	return fmt.Sprintf("no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most %s), or --raw for the API's whole result",
-		run.entity, run.status, spanString(profiling.MaxWindow))
+	// A reason this command has no words for yet: show it rather than pass it
+	// off as one of the others.
+	return fmt.Sprintf("no rows for %s (%s)", run.entity, reason)
 }
 
 // profilingAPIError adds profiling-specific advice to the failures a caller
@@ -709,7 +728,7 @@ func profilingAPIError(err error) error {
 	switch f.Reason {
 	case profiling.FailureBadRequest:
 		suggestions = []string{
-			fmt.Sprintf("The API rejected the request parameters — check the timeframe (in the past, at most %s) and the entity id", spanString(profiling.MaxWindow)),
+			fmt.Sprintf("The API rejected the request parameters — check the timeframe (in the past, at most %s) and the entity id", profilingMaxSpan),
 		}
 	case profiling.FailureForbidden:
 		suggestions = []string{
