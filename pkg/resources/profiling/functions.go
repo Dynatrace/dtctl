@@ -2,6 +2,7 @@ package profiling
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -24,30 +25,84 @@ import (
 //
 // Both walk the same tree as the stack view, once, in time linear in the node
 // count. Self samples follow the stack view exactly (self = node − Σ children, per
-// thread state, clamped at zero), and with --app-only a hidden frame's self time
+// thread state, clamped at zero), and with appOnly a hidden frame's self time
 // goes to the nearest kept frame above it, so the numbers match the stack view.
 
-// States are the --state values: which thread-state samples the views count.
-var States = []string{"running", "lock", "net_io", "disk_io", "wait", "offcpu", "all"}
+// State selects which thread-state samples a per-function view counts. The
+// zero value counts as StateRunning.
+type State string
 
-// stateKeys maps a --state value to the API's sample keys it sums.
-var stateKeys = map[string][]string{
-	"running": {"RUNNING"},
-	"lock":    {"LOCK"},
-	"net_io":  {"NET_IO"},
-	"disk_io": {"DISK_IO"},
-	"wait":    {"WAIT"},
-	"offcpu":  {"LOCK", "NET_IO", "DISK_IO", "WAIT"},
-	"all":     {"RUNNING", "LOCK", "NET_IO", "DISK_IO", "WAIT"},
+const (
+	StateRunning State = "running"
+	StateLock    State = "lock"
+	StateNetIO   State = "net_io"
+	StateDiskIO  State = "disk_io"
+	StateWait    State = "wait"
+	// StateOffCPU counts the four non-running states together.
+	StateOffCPU State = "offcpu"
+	// StateAll counts every state.
+	StateAll State = "all"
+)
+
+// States returns every State, the single states first.
+func States() []State {
+	return []State{StateRunning, StateLock, StateNetIO, StateDiskIO, StateWait, StateOffCPU, StateAll}
 }
 
-// ValidState reports whether s is a --state value.
-func ValidState(s string) bool {
-	_, ok := stateKeys[s]
-	return ok
+// stateKeys maps a State to the API's sample keys it sums.
+var stateKeys = map[State][]string{
+	StateRunning: {"RUNNING"},
+	StateLock:    {"LOCK"},
+	StateNetIO:   {"NET_IO"},
+	StateDiskIO:  {"DISK_IO"},
+	StateWait:    {"WAIT"},
+	StateOffCPU:  {"LOCK", "NET_IO", "DISK_IO", "WAIT"},
+	StateAll:     {"RUNNING", "LOCK", "NET_IO", "DISK_IO", "WAIT"},
 }
 
-func stateValue(samples map[string]int, state string) int {
+// ErrUnknownState is the error for a State that is none of States.
+var ErrUnknownState = errors.New("profiling: unknown thread state")
+
+// ParseState returns the State named s, StateRunning for the empty string. A
+// name that is none of States is an error that wraps ErrUnknownState.
+func ParseState(s string) (State, error) {
+	if s == "" {
+		return StateRunning, nil
+	}
+	if _, ok := stateKeys[State(s)]; !ok {
+		return "", fmt.Errorf("%w %q", ErrUnknownState, s)
+	}
+	return State(s), nil
+}
+
+// SortKey selects what the functions view ranks its rows by. The zero value
+// counts as SortBySelf.
+type SortKey string
+
+const (
+	// SortBySelf ranks by the samples with the function running.
+	SortBySelf SortKey = "self"
+	// SortByTotal ranks by the samples with the function anywhere on the
+	// stack.
+	SortByTotal SortKey = "total"
+)
+
+// ErrUnknownSortKey is the error for a SortKey that is neither constant.
+var ErrUnknownSortKey = errors.New("profiling: unknown sort key")
+
+// ParseSortKey returns the SortKey named s, SortBySelf for the empty string. A
+// name that is neither constant is an error that wraps ErrUnknownSortKey.
+func ParseSortKey(s string) (SortKey, error) {
+	switch SortKey(s) {
+	case "", SortBySelf:
+		return SortBySelf, nil
+	case SortByTotal:
+		return SortByTotal, nil
+	}
+	return "", fmt.Errorf("%w %q", ErrUnknownSortKey, s)
+}
+
+func stateValue(samples map[string]int, state State) int {
 	v := 0
 	for _, k := range stateKeys[state] {
 		v += samples[k]
@@ -68,14 +123,77 @@ type FunctionRow struct {
 	Function string `json:"function" table:"FUNCTION"`
 }
 
-// FunctionTable is the functions view: all rows, sorted, before any limit.
-type FunctionTable struct {
+// FunctionView is the functions view of a hotspots analysis.
+type FunctionView struct {
+	// Rows has one row per function, by the samples of the sort key,
+	// descending.
 	Rows []FunctionRow
 	// Samples is the number of counted samples in the window, the base of the
 	// percentages.
 	Samples int
 	// Empty says why there are no rows, and is empty when there are some.
 	Empty EmptyReason
+}
+
+// FocusView is one function's callers and callees in a hotspots analysis.
+type FocusView struct {
+	// Function is the frame the pattern matched.
+	Function string
+	// Total is the number of counted samples with the function anywhere on
+	// the stack, and Self the number with it running.
+	Total, Self int
+	// Callers and Callees are the frames that call the function and the
+	// frames it calls, each by its samples, descending. Callers are taken at
+	// the function's outermost call on a stack and callees at its innermost,
+	// so with recursion each list still adds up to Total (the callees
+	// together with Self).
+	Callers, Callees []FocusRow
+	// Empty says why there is nothing to focus on, and is empty when the
+	// view has rows.
+	Empty EmptyReason
+}
+
+// Rows is the view as the rows `dtctl exec profiling hotspots --focus`
+// prints: the function's total, its self time, then at most limit callers and
+// limit callees (0 = all).
+func (v FocusView) Rows(limit int) []FocusRow {
+	if v.Function == "" {
+		return nil
+	}
+	rows := []FocusRow{
+		{Relation: "total", Samples: v.Total, Share: 100, Function: v.Function},
+		{Relation: "self", Samples: v.Self, Share: pct(v.Self, v.Total), Function: v.Function},
+	}
+	for _, edges := range [][]FocusRow{v.Callers, v.Callees} {
+		if limit > 0 && len(edges) > limit {
+			edges = edges[:limit]
+		}
+		rows = append(rows, edges...)
+	}
+	return rows
+}
+
+// NoMatchError is the error Focus returns when its pattern matches no function
+// of the view.
+type NoMatchError struct {
+	Pattern string
+}
+
+func (e *NoMatchError) Error() string {
+	return fmt.Sprintf("no function in the profile matches %q", e.Pattern)
+}
+
+// AmbiguousMatchError is the error Focus returns when its pattern is no
+// function's exact label and a substring of more than one.
+type AmbiguousMatchError struct {
+	Pattern string
+	// Candidates has every function the pattern matches, by total samples,
+	// descending.
+	Candidates []string
+}
+
+func (e *AmbiguousMatchError) Error() string {
+	return fmt.Sprintf("%q matches %d functions", e.Pattern, len(e.Candidates))
 }
 
 // FocusRow is one line of the focus (callers/callees) view.
@@ -102,7 +220,7 @@ type funcAcc struct {
 type funcWalk struct {
 	nodes   map[string]*treeNode
 	appOnly bool
-	state   string
+	state   State
 	focus   string
 
 	funcs   map[string]*funcAcc
@@ -205,7 +323,7 @@ func pathKey(parent uint64, label string) uint64 {
 	return h.Sum64()
 }
 
-func newFuncWalk(raw interface{}, appOnly bool, state, focus string) (*funcWalk, string) {
+func newFuncWalk(raw interface{}, appOnly bool, state State, focus string) (*funcWalk, string) {
 	nodes, root := hotspotTree(raw)
 	if nodes == nil {
 		return nil, ""
@@ -224,10 +342,10 @@ func newFuncWalk(raw interface{}, appOnly bool, state, focus string) (*funcWalk,
 }
 
 // hotspotFunctions builds the functions view of a hotspots result, counting the
-// samples of the given state. sortBy is "self" (default) or "total". The table
-// has no rows when the result has no samples to show.
-func hotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) FunctionTable {
-	var t FunctionTable
+// samples of the given state. The view has no rows when the result has no
+// samples to show.
+func hotspotFunctions(raw interface{}, appOnly bool, state State, sortBy SortKey) FunctionView {
+	var t FunctionView
 	w, root := newFuncWalk(raw, appOnly, state, "")
 	if w == nil {
 		return t
@@ -256,7 +374,7 @@ func hotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) Funct
 	sort.Slice(t.Rows, func(i, j int) bool {
 		a, b := t.Rows[i], t.Rows[j]
 		ka, kb := a.Self, b.Self
-		if sortBy == "total" {
+		if sortBy == SortByTotal {
 			ka, kb = a.Total, b.Total
 		}
 		if ka != kb {
@@ -270,27 +388,26 @@ func hotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) Funct
 	return t
 }
 
-// hotspotFocus builds the callers/callees view of one function. pattern names the
-// function: an exact frame label, or a substring of exactly one label. limit caps
-// the callers and the callees separately (0 = all). It also returns the matched
-// label, and how many callers and callees there were before the limit.
-func hotspotFocus(raw interface{}, appOnly bool, state, pattern string, limit int) (rows []FocusRow, function string, nCallers, nCallees int, err error) {
-	t := hotspotFunctions(raw, appOnly, state, "total")
+// hotspotFocus builds the callers/callees view of one function. pattern names
+// the function: an exact frame label, or a substring of exactly one label. The
+// view has no function when the result has no samples to show.
+func hotspotFocus(raw interface{}, appOnly bool, state State, pattern string) (FocusView, error) {
+	t := hotspotFunctions(raw, appOnly, state, SortByTotal)
 	if len(t.Rows) == 0 {
-		return nil, "", 0, 0, fmt.Errorf("no %s samples in the window to focus on", state)
+		return FocusView{}, nil
 	}
-	function, err = matchFunction(t.Rows, pattern)
+	function, err := matchFunction(t.Rows, pattern)
 	if err != nil {
-		return nil, "", 0, 0, err
+		return FocusView{}, err
 	}
 	w, root := newFuncWalk(raw, appOnly, state, function)
 	w.walk(root, "", 0, false, "")
-	a := w.funcs[function]
+	total := w.funcs[function].total
 
-	edges := func(m map[string]int) []FocusRow {
+	edges := func(relation string, m map[string]int) []FocusRow {
 		var out []FocusRow
 		for f, s := range m {
-			out = append(out, FocusRow{Samples: s, Share: pct(s, a.total), Function: f})
+			out = append(out, FocusRow{Relation: relation, Samples: s, Share: pct(s, total), Function: f})
 		}
 		sort.Slice(out, func(i, j int) bool {
 			if out[i].Samples != out[j].Samples {
@@ -300,37 +417,22 @@ func hotspotFocus(raw interface{}, appOnly bool, state, pattern string, limit in
 		})
 		return out
 	}
-	callers, callees := edges(w.callers), edges(w.callees)
-	nCallers, nCallees = len(callers), len(callees)
-
-	// The function's own time: samples with it running (or a frame --app-only
-	// hid below it). With the callees' time it adds up to the total.
-	own := w.ownSelf
-	if limit > 0 && len(callers) > limit {
-		callers = callers[:limit]
-	}
-	if limit > 0 && len(callees) > limit {
-		callees = callees[:limit]
-	}
-
-	rows = append(rows,
-		FocusRow{Relation: "total", Samples: a.total, Share: 100, Function: function},
-		FocusRow{Relation: "self", Samples: own, Share: pct(own, a.total), Function: function},
-	)
-	for _, c := range callers {
-		c.Relation = "caller"
-		rows = append(rows, c)
-	}
-	for _, c := range callees {
-		c.Relation = "callee"
-		rows = append(rows, c)
-	}
-	return rows, function, nCallers, nCallees, nil
+	return FocusView{
+		Function: function,
+		Total:    total,
+		// The function's own time: samples with it running (or a frame
+		// appOnly hid below it). With the callees' time it adds up to the
+		// total.
+		Self:    w.ownSelf,
+		Callers: edges("caller", w.callers),
+		Callees: edges("callee", w.callees),
+	}, nil
 }
 
-// matchFunction resolves a --focus pattern against the function labels: an exact
+// matchFunction resolves a focus pattern against the function labels: an exact
 // label wins, otherwise the pattern must be a substring of exactly one label.
-// rows must be sorted, so an ambiguous match lists the heaviest candidates.
+// rows must be sorted by total samples, the order an *AmbiguousMatchError
+// lists its candidates in.
 func matchFunction(rows []FunctionRow, pattern string) (string, error) {
 	var matches []string
 	for _, r := range rows {
@@ -343,15 +445,11 @@ func matchFunction(rows []FunctionRow, pattern string) (string, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("no function in the profile matches %q — list them with --view functions", pattern)
+		return "", &NoMatchError{Pattern: pattern}
 	case 1:
 		return matches[0], nil
 	}
-	shown := matches
-	if len(shown) > 8 {
-		shown = shown[:8]
-	}
-	return "", fmt.Errorf("%q matches %d functions; pass one exactly:\n  %s", pattern, len(matches), strings.Join(shown, "\n  "))
+	return "", &AmbiguousMatchError{Pattern: pattern, Candidates: matches}
 }
 
 // pct is part as a percentage of whole, to one decimal.

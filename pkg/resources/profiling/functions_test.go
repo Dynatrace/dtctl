@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -116,36 +117,71 @@ func TestHotspotFunctions_State(t *testing.T) {
 	}
 }
 
-func TestHotspotFocus_CallersAndCallees(t *testing.T) {
-	rows, fn, nCallers, nCallees, err := hotspotFocus(fnTree(), false, "running", "wrap", 0)
+func TestFocus_CallersAndCallees(t *testing.T) {
+	h := hotspotsOf(fnTree())
+	got, err := h.Focus(false, StateRunning, "wrap")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fn != "lib.wrap" || nCallers != 2 || nCallees != 0 {
-		t.Fatalf("fn=%q callers=%d callees=%d", fn, nCallers, nCallees)
+	want := FocusView{
+		Function: "lib.wrap", Total: 50, Self: 50,
+		Callers: []FocusRow{
+			{Relation: "caller", Samples: 30, Share: 60, Function: "lib.load"},
+			{Relation: "caller", Samples: 20, Share: 40, Function: "app.handle"},
+		},
 	}
-	want := []FocusRow{
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Focus(wrap):\n got %+v\nwant %+v", got, want)
+	}
+	wantRows := []FocusRow{
 		{Relation: "total", Samples: 50, Share: 100, Function: "lib.wrap"},
 		{Relation: "self", Samples: 50, Share: 100, Function: "lib.wrap"},
 		{Relation: "caller", Samples: 30, Share: 60, Function: "lib.load"},
 		{Relation: "caller", Samples: 20, Share: 40, Function: "app.handle"},
 	}
-	if !reflect.DeepEqual(rows, want) {
-		t.Fatalf("rows:\n got %+v\nwant %+v", rows, want)
+	if rows := got.Rows(0); !reflect.DeepEqual(rows, wantRows) {
+		t.Fatalf("Rows(0):\n got %+v\nwant %+v", rows, wantRows)
 	}
 
-	rows, _, _, _, err = hotspotFocus(fnTree(), false, "running", "app.main", 1)
+	got, err = h.Focus(false, StateRunning, "app.main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = []FocusRow{
+	want = FocusView{
+		Function: "app.main", Total: 100, Self: 10,
+		Callers: []FocusRow{{Relation: "caller", Samples: 100, Share: 100, Function: RootCaller}},
+		Callees: []FocusRow{
+			{Relation: "callee", Samples: 60, Share: 60, Function: "lib.load"},
+			{Relation: "callee", Samples: 30, Share: 30, Function: "app.handle"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Focus(app.main):\n got %+v\nwant %+v", got, want)
+	}
+	// A limit caps the callers and the callees separately.
+	wantRows = []FocusRow{
 		{Relation: "total", Samples: 100, Share: 100, Function: "app.main"},
 		{Relation: "self", Samples: 10, Share: 10, Function: "app.main"},
 		{Relation: "caller", Samples: 100, Share: 100, Function: RootCaller},
 		{Relation: "callee", Samples: 60, Share: 60, Function: "lib.load"}, // limit 1 drops app.handle
 	}
-	if !reflect.DeepEqual(rows, want) {
-		t.Fatalf("rows:\n got %+v\nwant %+v", rows, want)
+	if rows := got.Rows(1); !reflect.DeepEqual(rows, wantRows) {
+		t.Fatalf("Rows(1):\n got %+v\nwant %+v", rows, wantRows)
+	}
+
+	// Another state counts its own samples: the lock samples are all on
+	// lib.wrap under app.handle.
+	got, err = h.Focus(false, StateLock, "app.handle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = FocusView{
+		Function: "app.handle", Total: 5, Self: 0,
+		Callers: []FocusRow{{Relation: "caller", Samples: 5, Share: 100, Function: "app.main"}},
+		Callees: []FocusRow{{Relation: "callee", Samples: 5, Share: 100, Function: "lib.wrap"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Focus(app.handle, lock):\n got %+v\nwant %+v", got, want)
 	}
 }
 
@@ -154,47 +190,156 @@ func TestHotspotFocus_CallersAndCallees(t *testing.T) {
 // self time in the functions view and both splits add up to the total.
 //
 //	x.f (10) -> x.g (8) -> x.f (6)
-func TestHotspotFocus_Recursion(t *testing.T) {
+func TestFocus_Recursion(t *testing.T) {
 	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "x", "f", true, 10, 0, "B"),
 		hnode("B", "x", "g", true, 8, 0, "C"),
 		hnode("C", "x", "f", true, 6, 0),
 	)
-	rows, _, _, _, err := hotspotFocus(raw, false, "running", "x.f", 0)
+	got, err := hotspotsOf(raw).Focus(false, StateRunning, "x.f")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []FocusRow{
-		{Relation: "total", Samples: 10, Share: 100, Function: "x.f"},
-		{Relation: "self", Samples: 8, Share: 80, Function: "x.f"},
-		{Relation: "caller", Samples: 10, Share: 100, Function: RootCaller},
-		{Relation: "callee", Samples: 2, Share: 20, Function: "x.g"},
+	want := FocusView{
+		Function: "x.f", Total: 10, Self: 8,
+		Callers: []FocusRow{{Relation: "caller", Samples: 10, Share: 100, Function: RootCaller}},
+		Callees: []FocusRow{{Relation: "callee", Samples: 2, Share: 20, Function: "x.g"}},
 	}
-	if !reflect.DeepEqual(rows, want) {
-		t.Fatalf("rows:\n got %+v\nwant %+v", rows, want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
 	}
 	if self := hotspotFunctions(raw, false, "running", "self").Rows[0]; self.Function != "x.f" || self.Self != 8 {
 		t.Errorf("functions view self = %+v, want x.f self 8", self)
 	}
 }
 
-func TestHotspotFocus_Matching(t *testing.T) {
-	if _, _, _, _, err := hotspotFocus(fnTree(), false, "running", "lib.", 0); err == nil ||
-		!strings.Contains(err.Error(), "matches 2 functions") || !strings.Contains(err.Error(), "lib.wrap") {
-		t.Errorf("ambiguous pattern: err = %v", err)
+// A pattern that does not name one function is an error a caller can read:
+// the pattern, and for an ambiguous one every candidate, heaviest first.
+func TestFocus_Matching(t *testing.T) {
+	h := hotspotsOf(fnTree())
+
+	_, err := h.Focus(false, StateRunning, "lib.")
+	var ambiguous *AmbiguousMatchError
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("ambiguous pattern: err = %v (%T), want an *AmbiguousMatchError", err, err)
 	}
-	if _, _, _, _, err := hotspotFocus(fnTree(), false, "running", "nope", 0); err == nil ||
-		!strings.Contains(err.Error(), "--view functions") {
-		t.Errorf("no match: err = %v", err)
+	if ambiguous.Pattern != "lib." || !reflect.DeepEqual(ambiguous.Candidates, []string{"lib.load", "lib.wrap"}) {
+		t.Errorf("ambiguous = %+v, want lib. with lib.load (60) before lib.wrap (50)", ambiguous)
 	}
+	if got, want := err.Error(), `"lib." matches 2 functions`; got != want {
+		t.Errorf("err = %q, want %q", got, want)
+	}
+
+	_, err = h.Focus(false, StateRunning, "nope")
+	var noMatch *NoMatchError
+	if !errors.As(err, &noMatch) || noMatch.Pattern != "nope" {
+		t.Fatalf("no match: err = %v (%T), want a *NoMatchError for nope", err, err)
+	}
+	if got, want := err.Error(), `no function in the profile matches "nope"`; got != want {
+		t.Errorf("err = %q, want %q", got, want)
+	}
+
 	// An exact label wins over being a substring of others.
 	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "x", "f", true, 10, 0, "B"),
 		hnode("B", "x", "fg", true, 4, 0),
 	)
-	if _, fn, _, _, err := hotspotFocus(raw, false, "running", "x.f", 0); err != nil || fn != "x.f" {
-		t.Errorf("exact match: fn=%q err=%v", fn, err)
+	if got, err := hotspotsOf(raw).Focus(false, StateRunning, "x.f"); err != nil || got.Function != "x.f" {
+		t.Errorf("exact match: function %q, err %v", got.Function, err)
+	}
+
+	// Nothing to match against is not a failed match: the view says why.
+	got, err := h.Focus(false, StateDiskIO, "nope")
+	if err != nil || !reflect.DeepEqual(got, FocusView{Empty: EmptyState}) || got.Rows(0) != nil {
+		t.Errorf("no samples in the state: %+v, %v; want an empty view saying %q", got, err, EmptyState)
+	}
+}
+
+// The zero State and SortKey are the defaults, and a value that is no constant
+// is refused rather than read as one.
+func TestFunctions_StateAndSortKey(t *testing.T) {
+	h := hotspotsOf(fnTree())
+	order := func(v FunctionView) []string {
+		var out []string
+		for _, r := range v.Rows {
+			out = append(out, r.Function)
+		}
+		return out
+	}
+	bySelf := []string{"lib.wrap", "lib.load", "app.main", "app.handle"}
+	byTotal := []string{"app.main", "lib.load", "lib.wrap", "app.handle"}
+	cases := []struct {
+		state   State
+		by      SortKey
+		samples int
+		order   []string
+		err     error
+	}{
+		{state: "", by: "", samples: 100, order: bySelf},
+		{state: StateRunning, by: SortBySelf, samples: 100, order: bySelf},
+		{state: StateRunning, by: SortByTotal, samples: 100, order: byTotal},
+		// Self ties are broken by total, then by name.
+		{state: StateLock, by: SortBySelf, samples: 5, order: []string{"lib.wrap", "app.handle", "app.main"}},
+		{state: StateOffCPU, by: "", samples: 5, order: []string{"lib.wrap", "app.handle", "app.main"}},
+		{state: StateAll, by: SortByTotal, samples: 105, order: []string{"app.main", "lib.load", "lib.wrap", "app.handle"}},
+		{state: "sleeping", by: SortBySelf, err: ErrUnknownState},
+		{state: "RUNNING", by: SortBySelf, err: ErrUnknownState},
+		{state: StateRunning, by: "name", err: ErrUnknownSortKey},
+	}
+	for _, tc := range cases {
+		got, err := h.Functions(false, tc.state, tc.by)
+		if !errors.Is(err, tc.err) {
+			t.Errorf("Functions(%q, %q): err = %v, want %v", tc.state, tc.by, err, tc.err)
+			continue
+		}
+		if tc.err != nil {
+			if !reflect.DeepEqual(got, FunctionView{}) {
+				t.Errorf("Functions(%q, %q): a refused view must be empty, got %+v", tc.state, tc.by, got)
+			}
+			continue
+		}
+		if got.Samples != tc.samples || !reflect.DeepEqual(order(got), tc.order) {
+			t.Errorf("Functions(%q, %q) = %d samples, %v; want %d, %v", tc.state, tc.by, got.Samples, order(got), tc.samples, tc.order)
+		}
+	}
+
+	if _, err := h.Focus(false, "sleeping", "wrap"); !errors.Is(err, ErrUnknownState) {
+		t.Errorf("Focus(sleeping): err = %v, want ErrUnknownState", err)
+	}
+	if got, err := h.Focus(false, "", "wrap"); err != nil || got.Total != 50 {
+		t.Errorf("Focus with the zero State: %+v, %v; want the running samples", got, err)
+	}
+}
+
+func TestParseStateAndSortKey(t *testing.T) {
+	want := []State{"running", "lock", "net_io", "disk_io", "wait", "offcpu", "all"}
+	if got := States(); !reflect.DeepEqual(got, want) {
+		t.Errorf("States() = %v, want %v", got, want)
+	}
+	for _, s := range want {
+		if got, err := ParseState(string(s)); err != nil || got != s {
+			t.Errorf("ParseState(%q) = %q, %v", s, got, err)
+		}
+	}
+	if got, err := ParseState(""); err != nil || got != StateRunning {
+		t.Errorf(`ParseState("") = %q, %v; want running`, got, err)
+	}
+	if _, err := ParseState("sleeping"); !errors.Is(err, ErrUnknownState) || err.Error() != `profiling: unknown thread state "sleeping"` {
+		t.Errorf("ParseState(sleeping): err = %v", err)
+	}
+	for in, want := range map[string]SortKey{"": SortBySelf, "self": SortBySelf, "total": SortByTotal} {
+		if got, err := ParseSortKey(in); err != nil || got != want {
+			t.Errorf("ParseSortKey(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := ParseSortKey("name"); !errors.Is(err, ErrUnknownSortKey) || err.Error() != `profiling: unknown sort key "name"` {
+		t.Errorf("ParseSortKey(name): err = %v", err)
+	}
+	// The slice is the caller's: changing it does not change the next one.
+	States()[0] = "changed"
+	if States()[0] != StateRunning {
+		t.Error("States() hands out shared storage")
 	}
 }

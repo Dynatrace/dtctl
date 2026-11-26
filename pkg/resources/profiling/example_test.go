@@ -64,7 +64,12 @@ func Example() {
 	}
 
 	// A view without rows says why.
-	if fns := analysis.Functions(false, "lock", "self"); fns.Empty != "" {
+	fns, err := analysis.Functions(false, profiling.StateLock, profiling.SortBySelf)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if fns.Empty != "" {
 		fmt.Println("no functions:", fns.Empty)
 	}
 

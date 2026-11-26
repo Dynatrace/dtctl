@@ -298,7 +298,7 @@ func TestEmptyReason(t *testing.T) {
 		name    string
 		h       *Hotspots
 		appOnly bool
-		state   string
+		state   State
 		want    EmptyReason
 	}{
 		{"rows", full, false, "running", ""},
@@ -322,12 +322,21 @@ func TestEmptyReason(t *testing.T) {
 	}
 	for _, tc := range functions {
 		t.Run("functions: "+tc.name, func(t *testing.T) {
-			view := tc.h.Functions(tc.appOnly, tc.state, "self")
+			view, err := tc.h.Functions(tc.appOnly, tc.state, SortBySelf)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if view.Empty != tc.want {
 				t.Errorf("Empty = %q, want %q", view.Empty, tc.want)
 			}
 			if (len(view.Rows) == 0) != (tc.want != "") {
 				t.Errorf("%d rows with Empty = %q", len(view.Rows), view.Empty)
+			}
+			// The focus view of the same state and filter is empty for
+			// the same reason.
+			focus, err := tc.h.Focus(tc.appOnly, tc.state, "lib.take")
+			if tc.want != "" && (err != nil || focus.Empty != tc.want) {
+				t.Errorf("Focus: Empty = %q, err = %v; want %q", focus.Empty, err, tc.want)
 			}
 		})
 	}
@@ -400,11 +409,11 @@ func TestResults_ConcurrentReaders(t *testing.T) {
 				if got := h.Stacks(j%2 == 0); got.Samples != 100 {
 					t.Errorf("Stacks: %d samples, want 100", got.Samples)
 				}
-				if got := h.Functions(false, "running", "self"); got.Samples != 100 {
-					t.Errorf("Functions: %+v", got)
+				if got, err := h.Functions(false, StateRunning, SortBySelf); err != nil || got.Samples != 100 {
+					t.Errorf("Functions: %+v, %v", got, err)
 				}
-				if _, fn, _, _, err := h.Focus(false, "running", "wrap", 0); err != nil || fn != "lib.wrap" {
-					t.Errorf("Focus: %q, %v", fn, err)
+				if got, err := h.Focus(false, StateRunning, "wrap"); err != nil || got.Function != "lib.wrap" {
+					t.Errorf("Focus: %q, %v", got.Function, err)
 				}
 				if got := a.Stacks(false, false); got.AllocatedBytes != 100 {
 					t.Errorf("Allocations.Stacks: %+v", got)

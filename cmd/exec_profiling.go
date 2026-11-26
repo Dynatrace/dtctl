@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -303,7 +304,8 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	default:
 		return fmt.Errorf("invalid --leaf-type %q: use total, service, or background", f.leafType)
 	}
-	if err := validateProfilingView(f); err != nil {
+	state, sortKey, err := profilingViewOptions(f)
+	if err != nil {
 		return err
 	}
 	if f.raw {
@@ -370,42 +372,46 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	case f.raw:
 		return renderProfilingRaw(ctx, run, hs.Raw())
 	case f.focus != "":
-		return renderProfilingFocus(ctx, run, hs, f)
+		return renderProfilingFocus(ctx, run, hs, f, state)
 	case f.view == "functions":
-		return renderProfilingFunctions(ctx, run, hs, f)
+		return renderProfilingFunctions(ctx, run, hs, f, state, sortKey)
 	}
 	return renderProfilingStacks(ctx, run, hs, f)
 }
 
-// validateProfilingView checks the hotspots view flags. A flag that only one
-// view reads is refused with the others, rather than silently ignored. Flags a
-// kind does not register stay at their zero value and pass.
-func validateProfilingView(f *profilingFlags) error {
+// profilingViewOptions checks the hotspots view flags and returns the thread
+// state and the sort key they select. A flag that only one view reads is
+// refused with the others, rather than silently ignored. Flags a kind does not
+// register stay at their zero value and pass.
+func profilingViewOptions(f *profilingFlags) (profiling.State, profiling.SortKey, error) {
 	switch f.view {
 	case "", "stacks", "functions":
 	default:
-		return fmt.Errorf("invalid --view %q: use stacks or functions", f.view)
+		return "", "", fmt.Errorf("invalid --view %q: use stacks or functions", f.view)
 	}
 	if f.focus != "" && f.view == "functions" {
-		return fmt.Errorf("--focus prints its own view (callers and callees); drop --view functions")
+		return "", "", fmt.Errorf("--focus prints its own view (callers and callees); drop --view functions")
 	}
 	perFunction := f.focus != "" || f.view == "functions"
-	if f.state != "" && !profiling.ValidState(f.state) {
-		return fmt.Errorf("invalid --state %q: use %s", f.state, strings.Join(profiling.States, ", "))
-	}
-	if f.state != "" && f.state != "running" && !perFunction {
-		return fmt.Errorf("--state applies to --view functions and --focus; the stack view always carries all five thread-state counts")
-	}
-	switch f.sortBy {
-	case "", "self":
-	case "total":
-		if f.view != "functions" {
-			return fmt.Errorf("--sort applies to --view functions")
+	state, err := profiling.ParseState(f.state)
+	if err != nil {
+		var names []string
+		for _, s := range profiling.States() {
+			names = append(names, string(s))
 		}
-	default:
-		return fmt.Errorf("invalid --sort %q: use self or total", f.sortBy)
+		return "", "", fmt.Errorf("invalid --state %q: use %s", f.state, strings.Join(names, ", "))
 	}
-	return nil
+	if state != profiling.StateRunning && !perFunction {
+		return "", "", fmt.Errorf("--state applies to --view functions and --focus; the stack view always carries all five thread-state counts")
+	}
+	sortKey, err := profiling.ParseSortKey(f.sortBy)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid --sort %q: use self or total", f.sortBy)
+	}
+	if sortKey == profiling.SortByTotal && f.view != "functions" {
+		return "", "", fmt.Errorf("--sort applies to --view functions")
+	}
+	return state, sortKey, nil
 }
 
 // profilingLimit is the row cap for a view: --limit when given, else the
@@ -547,41 +553,54 @@ func renderProfilingRaw(ctx context.Context, run *profilingRun, raw map[string]i
 
 // renderProfilingFunctions prints the functions view: rows through the standard
 // printer, so a table, -o json/csv/yaml, --jq and the agent envelope all work.
-func renderProfilingFunctions(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags) error {
-	t := h.Functions(f.appOnly, f.state, f.sortBy)
-	if t.Empty != "" {
-		return printProfilingEmpty(ctx, run, "functions", f.state, []profiling.FunctionRow{}, t.Empty)
+func renderProfilingFunctions(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags, state profiling.State, sortKey profiling.SortKey) error {
+	view, err := h.Functions(f.appOnly, state, sortKey)
+	if err != nil {
+		return err
+	}
+	if view.Empty != "" {
+		return printProfilingEmpty(ctx, run, "functions", string(state), []profiling.FunctionRow{}, view.Empty)
 	}
 	limit := profilingLimit(ctx, f, profilingFunctionsDefaultLimit)
-	rows := capProfilingRows(t.Rows, limit)
-	sortKey := f.sortBy
-	if sortKey == "" {
-		sortKey = "self"
-	}
+	rows := capProfilingRows(view.Rows, limit)
 	note := fmt.Sprintf("%d of %d functions, by %s %s samples (%d %s samples in the window)",
-		len(rows), len(t.Rows), sortKey, f.state, t.Samples, f.state)
+		len(rows), len(view.Rows), sortKey, state, view.Samples, state)
 	var warnings, hints []string
-	if len(rows) < len(t.Rows) {
-		warnings = append(warnings, fmt.Sprintf("showing %d of %d functions, by %s %s samples; --limit 0 lists every function", len(rows), len(t.Rows), sortKey, f.state))
+	if len(rows) < len(view.Rows) {
+		warnings = append(warnings, fmt.Sprintf("showing %d of %d functions, by %s %s samples; --limit 0 lists every function", len(rows), len(view.Rows), sortKey, state))
 	}
 	if len(rows) > 0 {
 		hints = append(hints, fmt.Sprintf("--focus '%s' shows its callers and callees", rows[0].Function))
 	}
-	samples := t.Samples
-	return printProfilingRows(ctx, run, "functions", f.state, &samples, rows, len(t.Rows), note, warnings, hints)
+	return printProfilingRows(ctx, run, "functions", string(state), &view.Samples, rows, len(view.Rows), note, warnings, hints)
 }
 
+// profilingFocusCandidates caps the functions an ambiguous --focus lists.
+const profilingFocusCandidates = 8
+
 // renderProfilingFocus prints one function's callers and callees.
-func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags) error {
-	limit := profilingLimit(ctx, f, profilingFocusDefaultLimit)
-	rows, fn, nCallers, nCallees, err := h.Focus(f.appOnly, f.state, f.focus, limit)
-	if err != nil {
-		if t := h.Functions(f.appOnly, f.state, "self"); t.Empty != "" {
-			return printProfilingEmpty(ctx, run, "focus", f.state, []profiling.FocusRow{}, t.Empty)
+func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.Hotspots, f *profilingFlags, state profiling.State) error {
+	view, err := h.Focus(f.appOnly, state, f.focus)
+	var noMatch *profiling.NoMatchError
+	var ambiguous *profiling.AmbiguousMatchError
+	switch {
+	case errors.As(err, &noMatch):
+		return fmt.Errorf("no function in the profile matches %q — list them with --view functions", noMatch.Pattern)
+	case errors.As(err, &ambiguous):
+		shown := ambiguous.Candidates
+		if len(shown) > profilingFocusCandidates {
+			shown = shown[:profilingFocusCandidates]
 		}
+		return fmt.Errorf("%q matches %d functions; pass one exactly:\n  %s", ambiguous.Pattern, len(ambiguous.Candidates), strings.Join(shown, "\n  "))
+	case err != nil:
 		return err
 	}
-	note := fmt.Sprintf("%s: %d callers, %d callees, shares of its total %s samples", fn, nCallers, nCallees, f.state)
+	if view.Empty != "" {
+		return printProfilingEmpty(ctx, run, "focus", string(state), []profiling.FocusRow{}, view.Empty)
+	}
+	limit := profilingLimit(ctx, f, profilingFocusDefaultLimit)
+	nCallers, nCallees := len(view.Callers), len(view.Callees)
+	note := fmt.Sprintf("%s: %d callers, %d callees, shares of its total %s samples", view.Function, nCallers, nCallees, state)
 	var warnings []string
 	if limit > 0 && (nCallers > limit || nCallees > limit) {
 		warnings = append(warnings, fmt.Sprintf("showing up to %d callers and %d callees; --limit 0 lists them all", limit, limit))
@@ -589,7 +608,7 @@ func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.H
 	hints := []string{note, "--focus <caller or callee> walks the call graph further"}
 	// The total counts every row before --limit: the total and self rows plus
 	// all callers and callees, so has_more agrees with it.
-	return printProfilingRows(ctx, run, "focus", f.state, nil, rows, 2+nCallers+nCallees, "", warnings, hints)
+	return printProfilingRows(ctx, run, "focus", string(state), nil, view.Rows(limit), 2+nCallers+nCallees, "", warnings, hints)
 }
 
 // printProfilingRows prints a per-function view's rows. A table gets the note,

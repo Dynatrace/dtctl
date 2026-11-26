@@ -191,23 +191,46 @@ func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
 	return v
 }
 
-// Functions reads the analysis as one row per function, counting the samples
-// of state (one of States). sortBy is "self" (default) or "total".
-func (h *Hotspots) Functions(appOnly bool, state, sortBy string) FunctionTable {
-	t := hotspotFunctions(h.result, appOnly, state, sortBy)
-	if len(t.Rows) == 0 {
-		t.Empty = h.whyEmpty(state)
+// Functions reads the analysis as one row per function: its self samples
+// (with the function running), its total samples (with it anywhere on the
+// stack) and the number of call paths that reach it. state selects the thread
+// states counted and by the ranking; an unknown one is an error
+// (ErrUnknownState, ErrUnknownSortKey). appOnly gives a hidden frame's samples
+// to the nearest application frame above it, as in the stack view.
+func (h *Hotspots) Functions(appOnly bool, state State, by SortKey) (FunctionView, error) {
+	state, err := ParseState(string(state))
+	if err != nil {
+		return FunctionView{}, err
 	}
-	return t
+	if by, err = ParseSortKey(string(by)); err != nil {
+		return FunctionView{}, err
+	}
+	v := hotspotFunctions(h.result, appOnly, state, by)
+	if len(v.Rows) == 0 {
+		v.Empty = h.whyEmpty(state)
+	}
+	return v, nil
 }
 
-// Focus reads the analysis as one function's callers and callees. pattern
-// names the function: an exact frame label, or a substring of exactly one.
-// limit caps the callers and the callees separately (0 = all). It also returns
-// the matched label, and how many callers and callees there were before the
-// limit.
-func (h *Hotspots) Focus(appOnly bool, state, pattern string, limit int) (rows []FocusRow, function string, nCallers, nCallees int, err error) {
-	return hotspotFocus(h.result, appOnly, state, pattern, limit)
+// Focus reads the analysis as one function's callers and callees, counting
+// the samples of state. pattern names the function: an exact frame label, or a
+// substring of exactly one. A pattern that matches no function is a
+// *NoMatchError and one that matches several an *AmbiguousMatchError; an
+// unknown state is an error that wraps ErrUnknownState. An analysis with
+// nothing to match against is not an error: the view's Empty says why.
+func (h *Hotspots) Focus(appOnly bool, state State, pattern string) (FocusView, error) {
+	state, err := ParseState(string(state))
+	if err != nil {
+		return FocusView{}, err
+	}
+	v, err := hotspotFocus(h.result, appOnly, state, pattern)
+	if err != nil {
+		return FocusView{}, err
+	}
+	if v.Function == "" {
+		v.Empty = h.whyEmpty(state)
+	}
+	return v, nil
 }
 
 // EmptyReason names why a view of an analysis has no rows. A view carries the
@@ -232,11 +255,11 @@ const (
 // is read from the data, in a fixed order: no samples at all, then none in
 // that state, and only then appOnly, which is all that is left to have removed
 // them.
-func (h *Hotspots) whyEmpty(state string) EmptyReason {
+func (h *Hotspots) whyEmpty(state State) EmptyReason {
 	if len(hotspotStacks(h.result, false)) == 0 {
 		return EmptyNoSamples
 	}
-	if state != "" && hotspotFunctions(h.result, false, state, "").Samples == 0 {
+	if state != "" && hotspotFunctions(h.result, false, state, SortBySelf).Samples == 0 {
 		return EmptyState
 	}
 	return EmptyAppOnly

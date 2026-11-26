@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -68,6 +69,15 @@ func runProfilingCmd(t *testing.T, args ...string) (int, string) {
 
 const testProcess = "PROCESS_GROUP_INSTANCE-0000000000000001"
 
+// runProfilingStreams runs the command outside agent mode and returns its exit
+// code, stdout and stderr.
+func runProfilingStreams(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := Run(append([]string{"exec", "profiling"}, args...), RunOptions{Stdout: &stdout, Stderr: &stderr})
+	return code, stdout.String(), stderr.String()
+}
+
 // The default hotspots view prints one folded stack per line.
 func TestExecProfiling_StackView(t *testing.T) {
 	api := newProfilingAPI(t, http.StatusOK, profilingTree)
@@ -133,6 +143,35 @@ func TestExecProfiling_Focus(t *testing.T) {
 	require.Contains(t, out, "load")
 	require.Contains(t, out, "handle")
 	require.Contains(t, out, "--focus <caller or callee> walks the call graph further")
+}
+
+// A --focus that does not name one function fails saying what would: the view
+// that lists the functions, or the candidates it matched.
+func TestExecProfiling_FocusNeedsOneFunction(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--focus", "nope")
+	require.Equal(t, 1, code)
+	require.Empty(t, stdout)
+	require.Equal(t, "Error: no function in the profile matches \"nope\" — list them with --view functions\n", stderr)
+
+	// Candidates are listed heaviest first.
+	code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--focus", "Main")
+	require.Equal(t, 1, code)
+	require.Empty(t, stdout)
+	require.Equal(t, "Error: \"Main\" matches 2 functions; pass one exactly:\n  app.Main.main\n  app.Main.handle\n", stderr)
+
+	// At most eight are listed, and the count is of all of them.
+	var nodes, ids []string
+	for i := 0; i < 10; i++ {
+		ids = append(ids, fmt.Sprintf(`"n%d"`, i))
+		nodes = append(nodes, fmt.Sprintf(`{"id":"n%d","className":"app.C","methodName":"m%d","samples":{"RUNNING":%d},"childIds":[]}`, i, i, 10-i))
+	}
+	newProfilingAPI(t, http.StatusOK, fmt.Sprintf(`{"dataRootNodeId":"0","dataNodes":[{"id":"0","className":"","methodName":"","samples":{"RUNNING":0},"childIds":[%s]},%s]}`,
+		strings.Join(ids, ","), strings.Join(nodes, ",")))
+	code, _, stderr = runProfilingStreams(t, "hotspots", testProcess, "--focus", "app.C")
+	require.Equal(t, 1, code)
+	require.Equal(t, "Error: \"app.C\" matches 10 functions; pass one exactly:\n  app.C.m0\n  app.C.m1\n  app.C.m2\n  app.C.m3\n  app.C.m4\n  app.C.m5\n  app.C.m6\n  app.C.m7\n", stderr)
 }
 
 // A --limit that cuts the focus callers reports the full row count as the
