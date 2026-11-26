@@ -180,11 +180,7 @@ func sampleTotal(s map[string]int) int {
 // retained heap. appOnly keeps only profiler-classified application frames
 // (apiInfo.systemApi; see nodeIsApp) in each path. Returns nil for missing data.
 func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRow {
-	envelope, ok := raw.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	result, _ := envelope["result"].(map[string]interface{})
+	result, _ := raw.(map[string]interface{})
 	ar, _ := result["analysisResult"].(map[string]interface{})
 	if ar == nil {
 		return nil

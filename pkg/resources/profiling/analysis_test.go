@@ -16,13 +16,13 @@ import (
 
 const testEntity = "PROCESS-0000000000000001"
 
-// hotspotsOf wraps a hotspots envelope built by the fold tests' helpers.
+// hotspotsOf wraps a hotspots result built by the fold tests' helpers.
 func hotspotsOf(env map[string]interface{}) *Hotspots {
-	return newHotspots(&sdkcla.Response{Status: "completed", Kind: sdkcla.KindHotspots, EntityID: testEntity, Result: env["result"]})
+	return newHotspots(&sdkcla.Response{Status: "completed", Kind: sdkcla.KindHotspots, EntityID: testEntity, Result: env})
 }
 
 func allocationsOf(env map[string]interface{}) *Allocations {
-	return newAllocations(&sdkcla.Response{Status: "completed", Kind: sdkcla.KindAllocations, EntityID: testEntity, Result: env["result"]})
+	return newAllocations(&sdkcla.Response{Status: "completed", Kind: sdkcla.KindAllocations, EntityID: testEntity, Result: env})
 }
 
 func survnode(id float64, name string, app bool, alloc, surv int, children ...interface{}) map[string]interface{} {
@@ -206,13 +206,13 @@ func TestHotspots_Stacks(t *testing.T) {
 		t.Errorf("Stacks(true) = %+v\nwant %+v", got, want)
 	}
 
-	if got := hotspotsOf(envelope("0")).Stacks(false); got.Rows != nil || got.Samples != 0 {
+	if got := hotspotsOf(hotspotsResult("0")).Stacks(false); got.Rows != nil || got.Samples != 0 {
 		t.Errorf("empty analysis: %+v", got)
 	}
 }
 
 func TestAllocations_Stacks(t *testing.T) {
-	a := allocationsOf(memEnvelope([]interface{}{float64(1), float64(2)},
+	a := allocationsOf(allocationsResult([]interface{}{float64(1), float64(2)},
 		survnode(1, "Cache.put", true, 1000, 5000, float64(3)),
 		survnode(3, "Svc.get", true, 400, 100),
 		survnode(2, "Buf.grow", false, 3000, 20),
@@ -248,7 +248,7 @@ func TestAllocations_Stacks(t *testing.T) {
 
 func TestWhyEmpty(t *testing.T) {
 	// A tree whose frames are all library code.
-	libOnly := envelope("0",
+	libOnly := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "lib", "run", false, 10, 0),
 	)
@@ -268,7 +268,7 @@ func TestWhyEmpty(t *testing.T) {
 	}{
 		{name: "no data at all", h: noData, reason: EmptyNoSamples, note: fmt.Sprintf(noSamples, "no-data")},
 		{name: "no data, app-only", h: noData, appOnly: true, reason: EmptyNoSamples, note: fmt.Sprintf(noSamples, "no-data")},
-		{name: "completed without nodes", h: hotspotsOf(envelope("0")), reason: EmptyNoSamples, note: fmt.Sprintf(noSamples, "completed")},
+		{name: "completed without nodes", h: hotspotsOf(hotspotsResult("0")), reason: EmptyNoSamples, note: fmt.Sprintf(noSamples, "completed")},
 		{name: "app-only removed every frame", h: hotspotsOf(libOnly), appOnly: true, reason: EmptyAppOnly, note: appOnly},
 		{name: "running state reads like the stack view", h: hotspotsOf(libOnly), appOnly: true, state: "running", reason: EmptyAppOnly, note: appOnly},
 		{name: "a state without samples", h: hotspotsOf(fnTree()), state: "disk_io", reason: EmptyState, note: fmt.Sprintf(noState, "disk_io")},
@@ -286,15 +286,74 @@ func TestWhyEmpty(t *testing.T) {
 	}
 
 	t.Run("allocations, app-only removed every frame", func(t *testing.T) {
-		a := allocationsOf(memEnvelope([]interface{}{float64(1)}, survnode(1, "Buf.grow", false, 10, 0)))
+		a := allocationsOf(allocationsResult([]interface{}{float64(1)}, survnode(1, "Buf.grow", false, 10, 0)))
 		if reason, note := a.WhyEmpty(true); reason != EmptyAppOnly || note != appOnly {
 			t.Errorf("WhyEmpty = %q, %q", reason, note)
 		}
 	})
 	t.Run("allocations, nothing allocated", func(t *testing.T) {
-		a := allocationsOf(memEnvelope([]interface{}{}))
+		a := allocationsOf(allocationsResult([]interface{}{}))
 		if reason, note := a.WhyEmpty(false); reason != EmptyNoSamples || note != fmt.Sprintf(noSamples, "completed") {
 			t.Errorf("WhyEmpty = %q, %q", reason, note)
 		}
 	})
+}
+
+// Raw hands out a document of the caller's own: changing it does not reach the
+// result's views or a later Raw.
+func TestRaw_IsTheCallersToChange(t *testing.T) {
+	h := hotspotsOf(fnTree())
+	raw := h.Raw()
+	nodes := raw["result"].(map[string]interface{})["dataNodes"].([]interface{})
+	nodes[1].(map[string]interface{})["samples"].(map[string]interface{})["RUNNING"] = float64(0)
+	delete(raw, "result")
+
+	if got := h.Stacks(false); len(got.Rows) != 5 || got.Samples != 100 {
+		t.Errorf("after the caller changed Raw(): %d rows, %d samples; want 5, 100", len(got.Rows), got.Samples)
+	}
+	again, _ := h.Raw()["result"].(map[string]interface{})
+	if again == nil {
+		t.Fatal("a later Raw() lost the result the caller deleted from an earlier one")
+	}
+	main := again["dataNodes"].([]interface{})[1].(map[string]interface{})["samples"].(map[string]interface{})
+	if main["RUNNING"] != float64(100) {
+		t.Errorf("a later Raw() carries the caller's change: %v", main)
+	}
+
+	a := allocationsOf(allocationsResult([]interface{}{float64(1)}, survnode(1, "Cache.put", true, 100, 500)))
+	delete(a.Raw(), "result")
+	if got := a.Stacks(false, false); got.AllocatedBytes != 100 {
+		t.Errorf("after the caller changed Raw(): %+v", got)
+	}
+}
+
+// A result is safe for concurrent readers, Raw included. Run with -race.
+func TestResults_ConcurrentReaders(t *testing.T) {
+	h := hotspotsOf(fnTree())
+	a := allocationsOf(allocationsResult([]interface{}{float64(1)}, survnode(1, "Cache.put", true, 100, 500)))
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for j := 0; j < 50; j++ {
+				delete(h.Raw(), "result")
+				delete(a.Raw()["result"].(map[string]interface{}), "analysisResult")
+				if got := h.Stacks(j%2 == 0); got.Samples != 100 {
+					t.Errorf("Stacks: %d samples, want 100", got.Samples)
+				}
+				if got := h.Functions(false, "running", "self"); got == nil || got.Samples != 100 {
+					t.Errorf("Functions: %+v", got)
+				}
+				if _, fn, _, _, err := h.Focus(false, "running", "wrap", 0); err != nil || fn != "lib.wrap" {
+					t.Errorf("Focus: %q, %v", fn, err)
+				}
+				if got := a.Stacks(false, false); got.AllocatedBytes != 100 {
+					t.Errorf("Allocations.Stacks: %+v", got)
+				}
+			}
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		<-done
+	}
 }

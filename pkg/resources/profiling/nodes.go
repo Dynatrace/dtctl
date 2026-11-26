@@ -17,14 +17,11 @@ type treeNode struct {
 	children []string
 }
 
-// hotspotTree indexes a hotspots result's dataNodes by id and returns the root
-// id. It returns a nil map when the result holds no nodes.
+// hotspotTree indexes the dataNodes of a hotspots result (raw, the API's
+// decoded document) by id and returns the root id. It returns a nil map when
+// the result holds no nodes.
 func hotspotTree(raw interface{}) (map[string]*treeNode, string) {
-	envelope, ok := raw.(map[string]interface{})
-	if !ok {
-		return nil, ""
-	}
-	result, _ := envelope["result"].(map[string]interface{})
+	result, _ := raw.(map[string]interface{})
 	nodes := dataNodes(result)
 	if len(nodes) == 0 {
 		return nil, ""

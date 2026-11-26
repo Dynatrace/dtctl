@@ -23,16 +23,14 @@ func hnode(id string, cls, method string, app bool, running, lock int, children 
 	}
 }
 
-func envelope(rootID string, nodes ...map[string]interface{}) map[string]interface{} {
+func hotspotsResult(rootID string, nodes ...map[string]interface{}) map[string]interface{} {
 	arr := make([]interface{}, len(nodes))
 	for i, n := range nodes {
 		arr[i] = n
 	}
 	return map[string]interface{}{
-		"result": map[string]interface{}{
-			"dataRootNodeId": rootID,
-			"dataNodes":      arr,
-		},
+		"dataRootNodeId": rootID,
+		"dataNodes":      arr,
 	}
 }
 
@@ -78,7 +76,7 @@ func runOf(t *testing.T, line string) int {
 // emitted RUNNING telescopes back to the root total (10), never double-counts.
 func TestToCollapsed_EmitsInteriorSelfSamples(t *testing.T) {
 	// root(0, cumulative=10) -> A(cumulative running=10, has child) -> B(leaf, running=3)
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "com.ex.Foo", "a", true, 10, 0, "B"),
 		hnode("B", "com.ex.Foo", "b", true, 3, 0),
@@ -112,7 +110,7 @@ func TestToCollapsed_EmitsInteriorSelfSamples(t *testing.T) {
 func TestToCollapsed_AppOnlyMergesCollidingStacks(t *testing.T) {
 	// root -> App(app) -> Lib1(non-app, running=5), Lib2(non-app, running=7)
 	// Under --app-only both children collapse to the single path "App".
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "App"),
 		hnode("App", "com.ex.Svc", "handle", true, 0, 0, "L1", "L2"),
 		hnode("L1", "jdk.internal", "x", false, 5, 0),
@@ -138,7 +136,7 @@ func TestToCollapsed_AppOnlyMergesCollidingStacks(t *testing.T) {
 func TestToCollapsed_SelfIsPerStateAndSkipsPassThrough(t *testing.T) {
 	// root -> P(run=20,lock=5) -> X(run=8), Y(run=5,lock=2)
 	//      -> Q(run=4)         -> Z(run=4)              [Q is a pure pass-through]
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "P", "Q"),
 		hnode("P", "com.ex.T", "p", true, 20, 5, "X", "Y"),
 		hnode("X", "com.ex.T", "x", true, 8, 0),
@@ -172,7 +170,7 @@ func TestToCollapsed_SelfIsPerStateAndSkipsPassThrough(t *testing.T) {
 // that state's self to zero, never emit a negative count.
 func TestToCollapsed_ClampsNegativeSelf(t *testing.T) {
 	// A: run=3, lock=0 with child B: run=1, lock=5 -> A self lock = 0-5, clamp 0.
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "com.ex.C", "a", true, 3, 0, "B"),
 		hnode("B", "com.ex.C", "b", true, 1, 5),
@@ -189,7 +187,7 @@ func TestToCollapsed_ClampsNegativeSelf(t *testing.T) {
 // The schema is one line per unique stack regardless of top; top only caps
 // rows and never introduces per-state section headers.
 func TestToCollapsed_TopCapsRowsNoSections(t *testing.T) {
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A", "B", "C"),
 		hnode("A", "com.ex.C", "a", true, 9, 0),
 		hnode("B", "com.ex.C", "b", true, 5, 1),
@@ -235,7 +233,7 @@ func jsnode(id, method, filePath, fileName, ruleID string, running int, children
 // skip them, so a Node.js profile printed "no stacks" while -o json had thousands
 // of nodes. They must render as file:function.
 func TestToCollapsed_NodeJSFramesRender(t *testing.T) {
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "1"),
 		jsnode("1", "onconnection", "", "node:net", "default-rule-id-nodejs", 10, "2"),
 		jsnode("2", "Socket", "", "node:net", "default-rule-id-nodejs", 10),
@@ -273,7 +271,7 @@ func TestToCollapsed_AppOnlyDropsAgentFrames(t *testing.T) {
 		n["classPath"] = cp
 		return n
 	}
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		agent("A", "com.dynatrace.easytrade.flags", "FlagController", 10, "B", "C"),
 		agent("B", "com.dynatrace.agent.shaded.uem.impl", "AgentInjectingResponseWrapper", 4),
@@ -293,7 +291,7 @@ func TestToCollapsed_AppOnlyDropsAgentFrames(t *testing.T) {
 // On Node.js every frame is systemApi=true, so --app-only used to keep the
 // runtime and every npm package. It keeps only the app's own files now.
 func TestToCollapsed_AppOnlyNodeJSKeepsOwnFiles(t *testing.T) {
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "1"),
 		jsnode("1", "processTicksAndRejections", "node:internal/process", "task_queues", "default-rule-id-nodejs", 10, "2"),
 		jsnode("2", "handler", "/app/build", "server.js", "default-rule-id-nodejs", 10, "3"),
@@ -316,10 +314,10 @@ func memnode(id float64, name string, app bool, alloc, count int, children ...in
 	}
 }
 
-func memEnvelope(roots []interface{}, nodes ...interface{}) map[string]interface{} {
-	return map[string]interface{}{"result": map[string]interface{}{"analysisResult": map[string]interface{}{
+func allocationsResult(roots []interface{}, nodes ...interface{}) map[string]interface{} {
+	return map[string]interface{}{"analysisResult": map[string]interface{}{
 		"stacktreeRootIds": roots, "stacktreeNodes": nodes,
-	}}}
+	}}
 }
 
 // Values live on every level: Site.alloc (1000) is reached through Svc.get
@@ -327,7 +325,7 @@ func memEnvelope(roots []interface{}, nodes ...interface{}) map[string]interface
 // Job.run (300). Each line carries its own share, so the lines add up to the
 // root's total, and the interior share is not lost.
 func TestMemoryCollapsed_ValuesOnRootsAndDescendants(t *testing.T) {
-	raw := memEnvelope([]interface{}{float64(1)},
+	raw := allocationsResult([]interface{}{float64(1)},
 		memnode(1, "Site.alloc", true, 1000, 10, float64(2), float64(3)),
 		memnode(2, "Svc.get", true, 700, 7, float64(4)),
 		memnode(3, "Job.run", true, 300, 3),
@@ -359,7 +357,7 @@ func TestMemoryCollapsed_ValuesOnRootsAndDescendants(t *testing.T) {
 // --app-only drops Thread.run, so its line and Svc.get's own share land on the
 // same path and are merged into one line.
 func TestMemoryCollapsed_AppOnlyMergesCollidingPaths(t *testing.T) {
-	raw := memEnvelope([]interface{}{float64(1)},
+	raw := allocationsResult([]interface{}{float64(1)},
 		memnode(1, "Site.alloc", true, 1000, 10, float64(2), float64(3)),
 		memnode(2, "Svc.get", true, 700, 7, float64(4)),
 		memnode(3, "Job.run", true, 300, 3),
@@ -380,7 +378,7 @@ func TestAllocationStacks_BySurvivors(t *testing.T) {
 	keep := memnode(2, "Keep.alloc", true, 100, 1)
 	churn["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(10)
 	keep["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(90)
-	raw := memEnvelope([]interface{}{float64(1), float64(2)}, churn, keep)
+	raw := allocationsResult([]interface{}{float64(1), float64(2)}, churn, keep)
 
 	if rows := allocationStacks(raw, false, false); rows[0].Stack != "Churn.alloc" {
 		t.Errorf("by allocated bytes, Churn.alloc first: %+v", rows)
@@ -400,7 +398,7 @@ func TestAllocationStacks_BySurvivors(t *testing.T) {
 func TestAllocationStacks_SurvivedExceedsAllocated(t *testing.T) {
 	cache := memnode(1, "Cache.put", true, 100, 1)
 	cache["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(500)
-	raw := memEnvelope([]interface{}{float64(1)}, cache)
+	raw := allocationsResult([]interface{}{float64(1)}, cache)
 
 	rows := allocationStacks(raw, false, true)
 	if len(rows) != 1 || rows[0].AllocBytes != 100 || rows[0].SurvivedBytes != 500 {

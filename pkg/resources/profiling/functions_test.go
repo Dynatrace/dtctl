@@ -17,7 +17,7 @@ import (
 // Self: main 10, load 30, wrap 30+20, handle 10. lib.wrap is the scattered
 // function: the hottest by self time, split over two stacks.
 func fnTree() map[string]interface{} {
-	return envelope("0",
+	return hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "app", "main", true, 100, 5, "B", "D"),
 		hnode("B", "lib", "load", false, 60, 0, "C1"),
@@ -74,7 +74,7 @@ func TestHotspotFunctions_SelfMatchesStackView(t *testing.T) {
 // A recursive function is on the stack twice, but each sample counts once in its
 // total: total is taken at the outermost occurrence only.
 func TestHotspotFunctions_RecursionCountsOnce(t *testing.T) {
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "x", "f", true, 10, 0, "B"),
 		hnode("B", "x", "f", true, 6, 0),
@@ -155,7 +155,7 @@ func TestHotspotFocus_CallersAndCallees(t *testing.T) {
 //
 //	x.f (10) -> x.g (8) -> x.f (6)
 func TestHotspotFocus_Recursion(t *testing.T) {
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "x", "f", true, 10, 0, "B"),
 		hnode("B", "x", "g", true, 8, 0, "C"),
@@ -189,7 +189,7 @@ func TestHotspotFocus_Matching(t *testing.T) {
 		t.Errorf("no match: err = %v", err)
 	}
 	// An exact label wins over being a substring of others.
-	raw := envelope("0",
+	raw := hotspotsResult("0",
 		hnode("0", "", "", false, 0, 0, "A"),
 		hnode("A", "x", "f", true, 10, 0, "B"),
 		hnode("B", "x", "fg", true, 4, 0),

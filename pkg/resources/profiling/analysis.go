@@ -35,6 +35,9 @@ type AllocationsRequest struct {
 // Hotspots is the result of a hotspots analysis. Its methods read it as the
 // views `dtctl exec profiling hotspots` prints; each returns every row,
 // unlimited.
+//
+// A result is safe for concurrent use: no method changes it, and what a method
+// returns belongs to the caller.
 type Hotspots struct {
 	// Entity is the id the analysis was asked for, as the caller passed it
 	// (APIEntityID gives the id the API was asked about).
@@ -45,13 +48,14 @@ type Hotspots struct {
 	// answered the request with it.
 	PollCount int
 
-	// envelope is the result in the plain shape the folds and Raw read:
-	// {"status":..., "kind":..., "entityId":..., "pollCount":..., "result":{...}}.
-	envelope map[string]interface{}
+	// result is the API's decoded JSON document. It is never changed and never
+	// handed out, which is what makes the result safe for concurrent use.
+	result interface{}
 }
 
 // Allocations is the result of an allocations analysis. Stacks reads it as the
-// view `dtctl exec profiling allocations` prints.
+// view `dtctl exec profiling allocations` prints. Like a Hotspots, it is safe
+// for concurrent use.
 type Allocations struct {
 	// Entity is the id the analysis was asked for, as the caller passed it
 	// (APIEntityID gives the id the API was asked about).
@@ -62,7 +66,7 @@ type Allocations struct {
 	// answered the request with it.
 	PollCount int
 
-	envelope map[string]interface{} // as Hotspots.envelope
+	result interface{} // as Hotspots.result
 }
 
 // Hotspots runs a hotspots analysis and returns it ready to be read. An error
@@ -99,36 +103,38 @@ func (h *Handler) Allocations(ctx context.Context, r AllocationsRequest) (*Alloc
 }
 
 func newHotspots(resp *sdkcla.Response) *Hotspots {
-	return &Hotspots{Entity: resp.EntityID, Status: resp.Status, PollCount: resp.PollCount, envelope: newEnvelope(resp)}
+	return &Hotspots{Entity: resp.EntityID, Status: resp.Status, PollCount: resp.PollCount, result: resp.Result}
 }
 
 func newAllocations(resp *sdkcla.Response) *Allocations {
-	return &Allocations{Entity: resp.EntityID, Status: resp.Status, PollCount: resp.PollCount, envelope: newEnvelope(resp)}
+	return &Allocations{Entity: resp.EntityID, Status: resp.Status, PollCount: resp.PollCount, result: resp.Result}
 }
 
-// newEnvelope puts a response into the envelope shape. resp.Result is the
-// decoded JSON document as Run returns it; it is copied, not modified.
-func newEnvelope(resp *sdkcla.Response) map[string]interface{} {
-	return compactResult(map[string]interface{}{
-		"status":   resp.Status,
-		"kind":     string(resp.Kind),
-		"entityId": resp.EntityID,
-		// A float64, as every other number in the decoded document is.
-		"pollCount": float64(resp.PollCount),
-		"result":    resp.Result,
-	}).(map[string]interface{})
-}
-
-// Raw is the API's whole result under its envelope keys (status, kind,
-// entityId, pollCount, result), without the timeseries data points and the
-// fields that only carry chart rendering. Large: megabytes for a busy process.
+// Raw is the API's whole result under the envelope keys status, kind (the
+// API's name for the analysis), entityId, pollCount and result, without the
+// timeseries data points and the fields that only carry chart rendering.
+// Large: megabytes for a busy process. Every call builds a new document, which
+// the caller may change.
 func (h *Hotspots) Raw() map[string]interface{} {
-	return h.envelope
+	return rawEnvelope(sdkcla.KindHotspots, h.Entity, h.Status, h.PollCount, h.result)
 }
 
 // Raw is the API's whole result, as Hotspots.Raw gives it.
 func (a *Allocations) Raw() map[string]interface{} {
-	return a.envelope
+	return rawEnvelope(sdkcla.KindAllocations, a.Entity, a.Status, a.PollCount, a.result)
+}
+
+// rawEnvelope builds the document Raw returns. compactResult copies every map
+// and slice it walks, so the document shares nothing with result.
+func rawEnvelope(kind sdkcla.Kind, entity, status string, pollCount int, result interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"status":   status,
+		"kind":     string(kind),
+		"entityId": entity,
+		// A float64, as every other number in the decoded document is.
+		"pollCount": float64(pollCount),
+		"result":    compactResult(result),
+	}
 }
 
 // StackView is the stack view of a hotspots analysis.
@@ -142,7 +148,7 @@ type StackView struct {
 // Stacks reads the analysis as one row per unique call stack. appOnly keeps
 // only application frames in each stack.
 func (h *Hotspots) Stacks(appOnly bool) StackView {
-	v := StackView{Rows: hotspotStacks(h.envelope, appOnly)}
+	v := StackView{Rows: hotspotStacks(h.result, appOnly)}
 	for _, r := range v.Rows {
 		v.Samples += r.Running
 	}
@@ -164,7 +170,7 @@ type AllocationView struct {
 // keeps only application frames in each path; bySurvivors ranks the rows by
 // survived bytes.
 func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
-	v := AllocationView{Rows: allocationStacks(a.envelope, appOnly, bySurvivors)}
+	v := AllocationView{Rows: allocationStacks(a.result, appOnly, bySurvivors)}
 	for _, r := range v.Rows {
 		v.AllocatedBytes += int64(r.AllocBytes)
 		v.SurvivedBytes += int64(r.SurvivedBytes)
@@ -176,7 +182,7 @@ func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
 // of state (one of States). sortBy is "self" (default) or "total". It returns
 // nil when there are no samples of that state.
 func (h *Hotspots) Functions(appOnly bool, state, sortBy string) *FunctionTable {
-	return hotspotFunctions(h.envelope, appOnly, state, sortBy)
+	return hotspotFunctions(h.result, appOnly, state, sortBy)
 }
 
 // Focus reads the analysis as one function's callers and callees. pattern
@@ -185,7 +191,7 @@ func (h *Hotspots) Functions(appOnly bool, state, sortBy string) *FunctionTable 
 // the matched label, and how many callers and callees there were before the
 // limit.
 func (h *Hotspots) Focus(appOnly bool, state, pattern string, limit int) (rows []FocusRow, function string, nCallers, nCallees int, err error) {
-	return hotspotFocus(h.envelope, appOnly, state, pattern, limit)
+	return hotspotFocus(h.result, appOnly, state, pattern, limit)
 }
 
 // EmptyReason names why a view of an analysis has no rows. The values are
@@ -212,13 +218,13 @@ func (h *Hotspots) WhyEmpty(appOnly bool, state string) (EmptyReason, string) {
 	}
 	// Running samples absent from a per-function view means what an empty
 	// stack view means.
-	return whyNoStacks(h.Entity, h.Status, appOnly && len(hotspotStacks(h.envelope, false)) > 0)
+	return whyNoStacks(h.Entity, h.Status, appOnly && len(hotspotStacks(h.result, false)) > 0)
 }
 
 // WhyEmpty explains a stack view that came back without rows, as
 // Hotspots.WhyEmpty does.
 func (a *Allocations) WhyEmpty(appOnly bool) (EmptyReason, string) {
-	return whyNoStacks(a.Entity, a.Status, appOnly && len(allocationStacks(a.envelope, false, false)) > 0)
+	return whyNoStacks(a.Entity, a.Status, appOnly && len(allocationStacks(a.result, false, false)) > 0)
 }
 
 func whyNoStacks(entity, status string, removedByAppOnly bool) (EmptyReason, string) {
@@ -244,8 +250,8 @@ var emptyOnlyKeys = map[string]bool{
 	"filePath": true,
 }
 
-// compactResult strips timeseries dataPoints and visual-only fields from an
-// analysis result, so Raw carries signal without chart/render noise.
+// compactResult copies an analysis result without its timeseries dataPoints
+// and visual-only fields, so Raw carries signal without chart/render noise.
 func compactResult(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
