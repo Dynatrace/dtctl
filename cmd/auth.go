@@ -1155,7 +1155,7 @@ Non-interactive login (CI/CD):
 					// IdP, so there the two move together. Here they do not, and a
 					// narrowing safety level would otherwise read as if it had.
 					if scopeLevel != config.SafetyLevelDangerouslyUnrestricted {
-						output.FprintWarning(currentStderr(cmdContext(cmd)), "--safety-level %s gates dtctl itself; it does not narrow the token.", scopeLevel)
+						output.FprintWarning(currentStderr(cmdContext(cmd)), "The safety level %s gates dtctl itself; it does not narrow the token.", scopeLevel)
 						output.FprintHint(currentStderr(cmdContext(cmd)), "Pass --scopes, or provision the OAuth client with only the scopes this pipeline needs.")
 					}
 				}

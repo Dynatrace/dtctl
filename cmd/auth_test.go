@@ -972,7 +972,7 @@ func TestAuthLogin_ClientCredentials_ReportsTokenAuthority(t *testing.T) {
 			grantedFrom: "storage:logs:read storage:buckets:read",
 			wantStderr: []string{
 				"the token carries every scope the OAuth client was granted",
-				"--safety-level readonly gates dtctl itself; it does not narrow the token",
+				"The safety level readonly gates dtctl itself; it does not narrow the token",
 				// The endpoint may return fewer scopes than requested, so the
 				// token's real scopes are what gets reported.
 				"Granted scopes: storage:logs:read storage:buckets:read",
@@ -1460,8 +1460,9 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Safety level: readonly",
-		// The enforced level is the one that does not narrow the token.
-		"--safety-level readonly gates dtctl itself; it does not narrow the token.",
+		// The enforced level is the one that does not narrow the token. No
+		// --safety-level was given, so the line must not show one.
+		"The safety level readonly gates dtctl itself; it does not narrow the token.",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)
@@ -1471,6 +1472,9 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 	// client's scopes, so nothing may say the login requests a level's.
 	if strings.Contains(stderr, "so the login requests") {
 		t.Errorf("stderr says which scopes the login requests:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "--safety-level readonly") {
+		t.Errorf("stderr shows a flag that was not given:\n%s", stderr)
 	}
 	after, err := config.Load()
 	if err != nil {
