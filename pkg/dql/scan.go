@@ -162,3 +162,53 @@ func segments(code string, depth []int) []Segment {
 func Quote(v string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
 }
+
+var (
+	byParamRe = regexp.MustCompile(`\bby\s*:`)
+	// countAllRe is one whole aggregation that counts every record, with or
+	// without a name.
+	countAllRe = regexp.MustCompile(`^(?:([A-Za-z_][\w.]*)\s*=\s*)?count\(\s*\)$`)
+)
+
+// UngroupedCount reports the column in which query's last stage counts the
+// records it was given: a summarize without by: that holds count(), named or
+// not, as a whole aggregation. Such a stage returns one row even for no
+// records, so a zero in that column is an empty result that does not look
+// like one. ok is false for everything else: a grouped summarize, a stage
+// after it, an expression around the count, or a backtick-quoted name.
+func UngroupedCount(query string) (column string, ok bool) {
+	m, scanned := Scan(query)
+	if !scanned || len(m.Segments) == 0 {
+		return "", false
+	}
+	last := m.Segments[len(m.Segments)-1]
+	if last.Command != "summarize" {
+		return "", false
+	}
+	const blank = " \t\r\n#" // whitespace, and what Scan masks a comment with
+	start := last.Start + strings.Index(m.Code[last.Start:last.End], last.Command) + len(last.Command)
+	end := last.Start + len(strings.TrimRight(m.Code[last.Start:last.End], blank))
+	if byParamRe.MatchString(m.Code[start:end]) {
+		return "", false
+	}
+	// The aggregations sit at the stage's own depth, or one deeper when they
+	// are grouped in braces.
+	level := 0
+	if open := start + len(m.Code[start:end]) - len(strings.TrimLeft(m.Code[start:end], blank)); open < end && m.Code[open] == '{' && m.Code[end-1] == '}' {
+		start, end, level = open+1, end-1, 1
+	}
+	from := start
+	for i := start; i <= end; i++ {
+		if i < end && (m.Code[i] != ',' || m.Depth[i] != level) {
+			continue
+		}
+		if match := countAllRe.FindStringSubmatch(strings.Trim(m.Code[from:i], blank)); match != nil {
+			if match[1] == "" {
+				return "count()", true
+			}
+			return match[1], true
+		}
+		from = i + 1
+	}
+	return "", false
+}

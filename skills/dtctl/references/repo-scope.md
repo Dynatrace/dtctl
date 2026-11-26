@@ -45,7 +45,7 @@ dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20' -A
 
 `context.repo_scope` says what happened: `applied: true` with the `filter` inserted after `fetch`, or `applied: false` with a `code` and `reason` (the query then ran exactly as typed). Your own `filter` on a scoped field (`service.name`, `k8s.workload.name`, ...) wins over the scope. With `--repo-scope <name>`, a scope that cannot narrow the query is a `validation_error` and nothing is sent. `wait query` and `verify query` are scoped too, but report it only on stderr.
 
-- **0 records under a scope** — run the same query with `--no-repo-scope` before concluding the service is quiet; the bindings may not match what the records carry.
+- **0 records under a scope** — run the same query with `--no-repo-scope` before concluding the service is quiet; the bindings may not match what the records carry. The same goes for a `summarize count()` of 0, and for a `wait query` that ends with `condition not met under repo scope`.
 - **Unbounded scan under a scope** — the scope narrows rows, not the scan; when a suggestion says only the environment's default cap applies, add `scanLimitGBytes:` to the `fetch` or pass `--default-scan-limit-gbytes`.
 - **Check the scope** — compare a few counts (`summarize count(), by:{k8s.workload.name}`) with and without `--no-repo-scope`, and check the discovery evidence showed logs before trusting scoped `fetch logs`: a note such as `candidate 1 has spans, but no logs carry its k8s.workload.name or service.name` means the workload binding reaches no logs, and a `setCommand` with `--process-group` is discovery's fix for it.
 - **Environment-wide question** — add `--no-repo-scope`.

@@ -415,7 +415,11 @@ func (c *streamCollector) abort() {
 // started streaming has already emitted the rows and only has to close out.
 func (c *streamCollector) finish(query string, result *DQLQueryResponse, opts DQLExecuteOptions) error {
 	if !c.streaming {
-		opts.report(len(c.buf), result)
+		// The response was decoded without its rows. The hook gets a copy
+		// that holds them, so it reads this path like the buffered one.
+		held := *result
+		held.Records = c.buf
+		opts.report(len(c.buf), &held)
 		return c.e.printRecords(query, result, orEmptyRows(c.buf), opts)
 	}
 	opts.seriesAdvice = defaultSeriesAdvice(c.effect, opts)

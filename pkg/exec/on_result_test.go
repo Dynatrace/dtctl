@@ -103,5 +103,8 @@ func TestStreamCollector_OnResultBufferedReplay(t *testing.T) {
 
 	require.NoError(t, col.finish("fetch logs", result, opts))
 	assert.Equal(t, []int{3}, calls)
-	assert.Same(t, result, got, "called with the response")
+	require.NotNil(t, got)
+	assert.Same(t, result.Result, got.Result, "called with the response")
+	assert.Len(t, got.GetRecords(), 3, "and the rows the collector held, as on the buffered path")
+	assert.Empty(t, result.Records, "the response itself is left as it was decoded")
 }

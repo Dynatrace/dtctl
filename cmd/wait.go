@@ -176,7 +176,8 @@ Examples:
 				Locale:                 locale,
 				Timezone:               timezone,
 				// The waiter calls this on every attempt; zero rows are the
-				// condition not met yet, so only the scan-cap line applies.
+				// condition not met yet, so only the scan-cap line applies
+				// here, and the outcome names the scope once below.
 				OnResult: scoped.noticeScanCap,
 				// ShowProgress is left false: the waiter drives its own per-attempt
 				// progress output on stderr, and a per-query progress bar (plus a
@@ -205,6 +206,12 @@ Examples:
 			result, err := waiter.Wait(cmdContext(cmd))
 			if err != nil && err != context.DeadlineExceeded {
 				return fmt.Errorf("wait failed: %w", scoped.wrapError(err))
+			}
+
+			// A query error is the scope's to explain through wrapError, not
+			// an outcome of the condition.
+			if result.Success || result.FailureReason != "query error" {
+				scoped.noticeWaitOutcome(result.Success, result.RecordCount)
 			}
 
 			// Print results if output format specified and condition was met

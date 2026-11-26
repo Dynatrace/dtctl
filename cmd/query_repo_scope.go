@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -306,16 +307,63 @@ func (q *repoScopedQuery) onResult(n int, result *exec.DQLQueryResponse) {
 	if q.scope == nil || !q.scope.Applied {
 		return
 	}
-	if n == 0 {
+	if n == 0 || q.countedNothing(n, result) {
 		q.zeroRows = true
-		output.FprintInfo(q.stderr, "0 records under repo scope %s; compare with --%s", q.scope.Name, noRepoScopeFlag)
+		q.noticeZeroRecords()
 	}
 	q.noticeScanCap(n, result)
 }
 
+func (q *repoScopedQuery) noticeZeroRecords() {
+	output.FprintInfo(q.stderr, "0 records under repo scope %s; compare with --%s", q.scope.Name, noRepoScopeFlag)
+}
+
+// countedNothing reports the empty result that is not zero rows: a query
+// ending in an ungrouped summarize returns one row whatever it was given, and
+// its count() says how many records that was. Only that column is read. Any
+// other aggregate can be zero over plenty of records, and Grail's metadata
+// reports the records scanned, not the ones the filter let through.
+func (q *repoScopedQuery) countedNothing(n int, result *exec.DQLQueryResponse) bool {
+	if n != 1 || result == nil {
+		return false
+	}
+	column, ok := dql.UngroupedCount(q.typed)
+	records := result.GetRecords()
+	if !ok || len(records) != 1 {
+		return false
+	}
+	// Grail sends a long as a string.
+	switch v := records[0][column].(type) {
+	case string:
+		return v == "0"
+	case float64:
+		return v == 0
+	case json.Number:
+		return v == "0"
+	}
+	return false
+}
+
+// noticeWaitOutcome is what wait query says once its polling is over. Each
+// attempt's zero rows are the condition not met yet and get no line, but the
+// outcome is where a scope the records do not match shows: the wait never
+// sees its records, or a wait for none is satisfied at once. The scope line
+// was printed before the first attempt, which may be minutes of progress
+// output ago.
+func (q *repoScopedQuery) noticeWaitOutcome(met bool, records int64) {
+	switch {
+	case q.scope == nil || !q.scope.Applied:
+	case !met:
+		output.FprintInfo(q.stderr, "condition not met under repo scope %s; compare with --%s", q.scope.Name, noRepoScopeFlag)
+	case records == 0:
+		q.noticeZeroRecords()
+	}
+}
+
 // noticeScanCap is the part of onResult a polling caller wants: its zero rows
 // are the condition not being met yet, not something to explain on every
-// attempt. The line is printed once per run, however often it is called.
+// attempt (noticeWaitOutcome says it once, at the end). The line is printed
+// once per run, however often it is called.
 //
 // The inserted filter is an equality filter, one of the levers the
 // executor's own scan-limit hint lists, so the line says that lever is

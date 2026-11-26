@@ -181,7 +181,7 @@ fetch logs | filter (service.name == "checkout" or (k8s.namespace.name == "payme
 | filter loglevel == "ERROR" | limit 20
 ```
 
-When a scoped query returns no records, a second line says so, `0 records under repo scope checkout; compare with --no-repo-scope`, because a binding the records do not carry looks exactly like a quiet service.
+When a scoped query returns no records, a second line says so, `0 records under repo scope checkout; compare with --no-repo-scope`, because a binding the records do not carry looks exactly like a quiet service. A query that ends in an ungrouped `summarize` returns one row even for nothing, so the line is also printed when that row's `count()` is 0; no other aggregate is read that way, since a zero `countIf` or `sum` says nothing about how many records the scope let through. `wait query` polls, so it does not say this per attempt. It says once, when the wait ends, `condition not met under repo scope checkout; compare with --no-repo-scope`, or the `0 records` line when a condition such as `--for none` was satisfied by nothing.
 
 ### What a scope costs
 

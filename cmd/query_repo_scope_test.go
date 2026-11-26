@@ -395,6 +395,85 @@ func TestQueryRepoScope_ZeroRowsHint(t *testing.T) {
 	require.Contains(t, agentEnvelope(t, stdout).Context.Suggestions[0], "--no-repo-scope")
 }
 
+// An ungrouped summarize returns one row for nothing: the count is in the
+// row, and it is zero. That is the same empty answer, so it gets the same
+// hint. No other aggregate is read that way: a zero countIf says nothing
+// about how many records the scope let through.
+func TestQueryRepoScope_ZeroCountHint(t *testing.T) {
+	optInRepoScope(t)
+	chdirTestRepo(t, checkoutScope)
+	const hint = "0 records under repo scope checkout; compare with --no-repo-scope\n"
+	row := func(field, value string) string {
+		return `{"state":"SUCCEEDED","result":{"records":[{"` + field + `":` + value + `}]}}`
+	}
+	for _, tc := range []struct {
+		name, query, body string
+		hinted            bool
+	}{
+		{"a zero count", "fetch logs | summarize c = count()", row("c", `"0"`), true},
+		{"a zero count as a number", "fetch logs | summarize c = count()", row("c", `0`), true},
+		{"an unnamed zero count", "fetch logs | summarize count()", row("count()", `"0"`), true},
+		{"a count of records", "fetch logs | summarize c = count()", row("c", `"7"`), false},
+		{"a zero that is not a count of records", `fetch logs | summarize errors = countIf(loglevel == "ERROR")`, row("errors", `"0"`), false},
+		{"a zero field of a record", "fetch logs | fields c | limit 1", row("c", `"0"`), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newDQLRecorder(t, "readonly", answer(http.StatusOK, tc.body))
+			code, stdout, stderr := runRepoScoped([]string{"query", tc.query, "--agent"}, RunOptions{})
+			require.Zero(t, code, stderr)
+			suggestions := agentEnvelope(t, stdout).Context.Suggestions
+			if !tc.hinted {
+				require.NotContains(t, stderr, "0 records under repo scope")
+				require.NotContains(t, strings.Join(suggestions, "\n"), "0 records under repo scope")
+				return
+			}
+			require.True(t, strings.HasSuffix(stderr, hint), stderr)
+			require.True(t, strings.HasPrefix(suggestions[0], "0 records under repo scope checkout: "), suggestions[0])
+		})
+	}
+}
+
+// wait query prints no hint per attempt, since zero rows are usually the
+// condition not being met yet. Its outcome is where a scope matters: a wait
+// that ends unmet, or that is satisfied by zero records, says once that the
+// scope was applied, long after the line that announced it scrolled away.
+func TestWaitQueryRepoScope_OutcomeNamesTheScope(t *testing.T) {
+	optInRepoScope(t)
+	chdirTestRepo(t, checkoutScope)
+	const (
+		noRecords = `{"state":"SUCCEEDED","result":{"records":[]}}`
+		unmet     = "condition not met under repo scope checkout; compare with --no-repo-scope\n"
+		vacuous   = "0 records under repo scope checkout; compare with --no-repo-scope\n"
+	)
+	poll := []string{"--max-attempts", "2", "--min-interval", "1ms", "--max-interval", "1ms"}
+	for _, tc := range []struct {
+		name, body, condition string
+		extra                 []string
+		code                  int
+		line                  string
+	}{
+		{"none is satisfied by nothing", noRecords, "none", nil, 0, vacuous},
+		{"any never arrives", noRecords, "any", nil, 2, unmet},
+		{"a count is not reached", oneRecord, "count-gte=5", nil, 2, unmet},
+		{"any arrives", oneRecord, "any", nil, 0, ""},
+		{"unscoped and unmet", noRecords, "any", []string{"--no-repo-scope"}, 2, ""},
+		{"unscoped and satisfied by nothing", noRecords, "none", []string{"--no-repo-scope"}, 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newDQLRecorder(t, "readonly", answer(http.StatusOK, tc.body))
+			args := append([]string{"wait", "query", repoScopeTypedQuery, "--for=" + tc.condition}, poll...)
+			code, _, stderr := runRepoScoped(append(args, tc.extra...), RunOptions{})
+			require.Equal(t, tc.code, code, stderr)
+			if tc.line == "" {
+				require.NotContains(t, stderr, "under repo scope")
+				return
+			}
+			require.True(t, strings.HasSuffix(stderr, tc.line), stderr)
+			require.Equal(t, 1, strings.Count(stderr, "under repo scope"), stderr)
+		})
+	}
+}
+
 // scanCappedRecord is one record from a scan the 5 GB cap stopped.
 const scanCappedRecord = `{"state":"SUCCEEDED","result":{"records":[{"content":"hello"}],"metadata":{"grail":{"notifications":[` +
 	`{"notificationType":"SCAN_LIMIT_GBYTES","severity":"WARN","message":"Scan limit of 5 gigabytes reached"}]}}}}`

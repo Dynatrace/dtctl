@@ -175,3 +175,34 @@ func TestQuote(t *testing.T) {
 		assert.Equal(t, `"`+strings.Repeat("#", len(got)-2)+`"`, s.Code)
 	}
 }
+
+func TestUngroupedCount(t *testing.T) {
+	for _, tc := range []struct {
+		query  string
+		column string
+	}{
+		{"fetch logs | summarize c = count()", "c"},
+		{"fetch logs | filter x == 1 | summarize count()", "count()"},
+		{"fetch logs | summarize {total = count(), slow = countIf(duration > 1s)}", "total"},
+		{"fetch logs | summarize avg(duration), log.count = count( )", "log.count"},
+		{"fetch logs\n| summarize c = count() // every record\n", "c"},
+
+		// A grouped summarize has no row for nothing, and anything after the
+		// summarize may have changed the column.
+		{"fetch logs | summarize c = count(), by:{host}", ""},
+		{"fetch logs | summarize c = count() | fieldsAdd c = c + 1", ""},
+		// Not a count of every record.
+		{"fetch logs | summarize errors = countIf(loglevel == \"ERROR\")", ""},
+		{"fetch logs | summarize c = countDistinct(host)", ""},
+		{"fetch logs | summarize c = count() + 1", ""},
+		{"fetch logs | summarize share = sum(bytes) / count()", ""},
+		{"fetch logs | summarize `my count` = count()", ""},
+		{"fetch logs | summarize c = sum(1)", ""},
+		{"fetch logs | limit 5", ""},
+		{`fetch logs | summarize c = count(`, ""},
+	} {
+		column, ok := UngroupedCount(tc.query)
+		assert.Equal(t, tc.column, column, tc.query)
+		assert.Equal(t, tc.column != "", ok, tc.query)
+	}
+}
