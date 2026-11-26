@@ -1297,6 +1297,83 @@ func TestRungWithoutAMatchDatesNothing(t *testing.T) {
 	}
 }
 
+// tickingRunner advances a clock by a fixed step each time a logs query
+// returns, the way a walk of real queries takes time.
+type tickingRunner struct {
+	inner *mockRunner
+	now   time.Time
+	step  time.Duration
+}
+
+func (r *tickingRunner) RunQuery(ctx context.Context, dql string) (*RunResult, error) {
+	res, err := r.inner.RunQuery(ctx, dql)
+	if strings.Contains(dql, "fetch logs") {
+		r.now = r.now.Add(r.step)
+	}
+	return res, err
+}
+
+// TestEachRungIsDatedAgainstItsOwnClockReading: every rung asks the server for
+// a window that ends when the rung runs, so the age of what it returns is
+// measured from that moment. Measuring it from the reading taken before the
+// exhaustive probe made a record look younger by the time the walk had taken,
+// which turned a stale signal into a live one.
+func TestEachRungIsDatedAgainstItsOwnClockReading(t *testing.T) {
+	mock := windowRunner()
+	mock.responses = append([]mockResponse{
+		cappedLogs(),
+		unflaggedEmptyRung(100000, true),
+		// Four minutes old when the run starts, six when this rung is asked:
+		// the capped probe and the empty rung each took a minute.
+		sampledRung(10000, 100, 1000000, at(4, 0)),
+	}, mock.responses...)
+	runner := &tickingRunner{inner: mock, now: fixedNow, step: time.Minute}
+	opts := windowOpts()
+	opts.Now = func() time.Time { return runner.now }
+	opts.Signals = []string{"logs"}
+
+	inv, err := Discover(context.Background(), runner, windowDefs(), opts)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	logs := signalByName(t, inv, "logs")
+	if logs.State != SignalStale || logs.AgeSeconds != 360 {
+		t.Errorf("state/age = %q/%ds, want stale/360s against a 5m threshold: the record was 6m old when its rung was asked (evidence: %s)",
+			logs.State, logs.AgeSeconds, logs.Evidence)
+	}
+	if got := len(sampledCalls(mock)); got != 2 {
+		t.Errorf("ran %d sampled probes, want 2", got)
+	}
+}
+
+// TestNewestMatchKeepsTheReadingOfItsOwnRung: when the timestamp and the count
+// come from different rungs, the age is measured from the reading of the rung
+// that returned the timestamp, not from the later one the walk ended on.
+func TestNewestMatchKeepsTheReadingOfItsOwnRung(t *testing.T) {
+	mock := windowRunner()
+	mock.responses = append([]mockResponse{
+		cappedLogs(),
+		// Asked one minute into the run, about a record 30s older than the
+		// start: 90s old at this rung.
+		sampledRung(100000, 2, 200000, at(0, 30)),
+		// Asked two minutes in, and thick enough to end the walk.
+		sampledRung(10000, 40, 400000, at(9, 0)),
+	}, mock.responses...)
+	runner := &tickingRunner{inner: mock, now: fixedNow, step: time.Minute}
+	opts := windowOpts()
+	opts.Now = func() time.Time { return runner.now }
+	opts.Signals = []string{"logs"}
+
+	inv, err := Discover(context.Background(), runner, windowDefs(), opts)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	logs := signalByName(t, inv, "logs")
+	if logs.State != SignalLive || logs.LastSeen != at(0, 30) || logs.AgeSeconds != 90 {
+		t.Errorf("state/lastSeen/age = %q/%q/%ds, want live/%q/90s", logs.State, logs.LastSeen, logs.AgeSeconds, at(0, 30))
+	}
+}
+
 // TestCancellationEndsTheWalk: a run cancelled mid-walk surfaces the
 // cancellation from the walk itself and issues no further rung, also when the
 // rung before it was an empty one that the walk continues past. The walk is
@@ -1313,7 +1390,7 @@ func TestCancellationEndsTheWalk(t *testing.T) {
 	b := &budgetRunner{runner: runner, report: &Report{}, queries: 100, seconds: 100}
 
 	sig, err := b.recoverBySampling(ctx, Signal{Name: "logs"}, &CapabilityDef{DataObject: "logs"},
-		windowOpts(), DefaultTimeField, fixedNow, &RunResult{Truncated: true, TruncationCause: TruncationScanLimit})
+		windowOpts(), DefaultTimeField, func() time.Time { return fixedNow }, fixedNow, &RunResult{Truncated: true, TruncationCause: TruncationScanLimit})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("recoverBySampling = %+v, %v; want context.Canceled", sig, err)
 	}

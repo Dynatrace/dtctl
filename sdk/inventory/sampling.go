@@ -64,6 +64,10 @@ type sampledProbe struct {
 	// asked is the ratio the rung requested. It names the rung; it is never a
 	// multiplier.
 	asked int64
+	// askedAt is the clock reading taken just before the rung was issued. Each
+	// rung asks the server for a window that ends when the rung runs, so this
+	// is the instant an age read from its result is measured from.
+	askedAt time.Time
 	// ratio is the *effective* ratio, divided out of the data rather than
 	// copied from the request — see readSampledProbe.
 	ratio    int64
@@ -84,6 +88,10 @@ type sampledProbe struct {
 type sighting struct {
 	lastSeen string
 	at       time.Time
+	// askedAt is the reading of the rung that matched the record. The age is
+	// measured from it, not from the reading of the rung the walk ended on:
+	// what is known is how old the record was when it was seen.
+	askedAt time.Time
 	// asked is the ratio of the rung that matched the record, 0 for the
 	// exhaustive probe that hit the cap.
 	asked int64
@@ -100,7 +108,7 @@ func newerSighting(seen *sighting, p sampledProbe) *sighting {
 	if err != nil || (seen != nil && at.Before(seen.at)) {
 		return seen
 	}
-	return &sighting{lastSeen: p.lastSeen, at: at, asked: p.asked}
+	return &sighting{lastSeen: p.lastSeen, at: at, askedAt: p.askedAt, asked: p.asked}
 }
 
 // sampledProbeDQL builds a rung's probe.
@@ -116,9 +124,10 @@ func sampledProbeDQL(object string, opts DiscoverOptions, timeField string, rati
 		object, opts.Since, ratio, opts.Scope, timeField)
 }
 
-// readSampledProbe reads the result of the rung that asked for the given ratio.
-func readSampledProbe(res *RunResult, asked int64) sampledProbe {
-	p := sampledProbe{asked: asked}
+// readSampledProbe reads the result of the rung that asked for the given ratio
+// at the given clock reading.
+func readSampledProbe(res *RunResult, asked int64, askedAt time.Time) sampledProbe {
+	p := sampledProbe{asked: asked, askedAt: askedAt}
 	if len(res.Records) == 0 {
 		return p
 	}
@@ -257,15 +266,21 @@ func plural64(n int64, word string) string {
 }
 
 // recoverBySampling is reached when the exhaustive stream probe was cut short,
-// and is handed that probe's result. It walks samplingLadder for a verdict the
-// cap denied, and returns the capped "unknown" unchanged if it cannot find one.
+// and is handed that probe's result and the clock reading it was issued at. It
+// walks samplingLadder for a verdict the cap denied, and returns the capped
+// "unknown" unchanged if it cannot find one.
+//
+// clock is read again before every rung. The walk can run six queries, and
+// each asks for a window relative to the moment it runs, so one reading taken
+// before the first of them would date the last rung's records too young by
+// however long the walk took.
 //
 // The walk is deliberately biased toward admitting defeat. Every exit that is
 // not a genuine hit leaves the signal unknown, because the alternative — a
 // sampled miss presented as "empty" — would be this package's central error
 // (blaming a source for a question that was never fully asked) reintroduced one
 // level down, and at a scale where nobody could check it.
-func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, now time.Time, exhaustive *RunResult) (Signal, error) {
+func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, clock func() time.Time, now time.Time, exhaustive *RunResult) (Signal, error) {
 	cause := exhaustive.TruncationCause
 	capped := func() Signal {
 		sig.State = SignalUnknown
@@ -286,13 +301,14 @@ func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *C
 	// still the newest this scope is known to have. The capped probe is the
 	// first such response. What it counted is not a count of the window, and
 	// it is not a hit; its timestamp is a record's all the same.
-	newest := newerSighting(nil, readSampledProbe(exhaustive, 0))
+	newest := newerSighting(nil, readSampledProbe(exhaustive, 0, now))
 	// zeroAt remembers the least aggressive sampled rung that came back empty,
 	// since that is the rung whose bound is tightest and therefore worth
 	// reporting.
 	var zeroAt int64
 walk:
 	for _, ratio := range samplingLadder {
+		askedAt := clock()
 		res, err := b.run(ctx, sampledProbeDQL(def.DataObject, opts, timeField, ratio))
 		switch {
 		case err == nil:
@@ -305,7 +321,7 @@ walk:
 			// did not run.
 			break walk
 		}
-		p := readSampledProbe(res, ratio)
+		p := readSampledProbe(res, ratio, askedAt)
 		newest = newerSighting(newest, p)
 		if !res.Sampled {
 			if p.matched == 0 && !res.Truncated {
@@ -359,7 +375,7 @@ walk:
 		sig.Evidence = sampledZeroEvidence(def.DataObject, zeroAt, opts.Since, opts.ScanLimitGBytes)
 		return sig, nil
 	}
-	return b.sampledVerdict(sig, def, opts, timeField, now, *hit, newest), nil
+	return b.sampledVerdict(sig, def, opts, timeField, *hit, newest), nil
 }
 
 // sampledVerdict turns a sampled hit into live, stale, or — in the one band the
@@ -367,10 +383,10 @@ walk:
 //
 // The count, the ratio and the bias are those of the hit. The age is that of
 // newest, the newest record any rung of the walk matched, which is the hit's
-// own unless another rung saw a later one. newest is nil when no rung returned
-// a timestamp that parses, and the hit's raw value is then all there is to
-// report.
-func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, now time.Time, p sampledProbe, newest *sighting) Signal {
+// own unless another rung saw a later one, measured from the clock reading of
+// the rung that matched it. newest is nil when no rung returned a timestamp
+// that parses, and the hit's raw value is then all there is to report.
+func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, p sampledProbe, newest *sighting) Signal {
 	sig.Records = p.records
 	sig.SamplingRatio = p.ratio
 	sig.RecordsSampled = p.matched
@@ -380,12 +396,12 @@ func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts Disco
 	if own := newerSighting(nil, p); own != nil && (newest == nil || !newest.at.After(own.at)) {
 		newest = own
 	}
-	lastSeen := p.lastSeen
+	lastSeen, askedAt := p.lastSeen, p.askedAt
 	if newest != nil {
-		lastSeen = newest.lastSeen
+		lastSeen, askedAt = newest.lastSeen, newest.askedAt
 	}
 	bias := samplingBias(windowDuration(opts.Since), p.matched)
-	applyFreshness(&sig, lastSeen, timeField, now, opts.StaleAfter)
+	applyFreshness(&sig, lastSeen, timeField, askedAt, opts.StaleAfter)
 
 	// A sampled last-seen is biased old, so a stale verdict has to survive that
 	// bias to be worth making. The sample's bias bounds the gap also when the

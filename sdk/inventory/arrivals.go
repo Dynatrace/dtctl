@@ -56,7 +56,7 @@ func (b *budgetRunner) evaluateSignals(ctx context.Context, defs map[string]*Cap
 		if def.MetricKey != "" {
 			sig, serr = b.probeMetricSignal(ctx, name, def, facts, opts, fields, now())
 		} else {
-			sig, serr = b.probeStreamSignal(ctx, name, def, facts, opts, fields, now())
+			sig, serr = b.probeStreamSignal(ctx, name, def, facts, opts, fields, now)
 		}
 		if serr != nil {
 			return nil, serr
@@ -101,9 +101,12 @@ func scopeSyntaxError(scope string, err error) error {
 	return fmt.Errorf("the --scope expression does not parse as DQL, so no signal could be probed:\n  scope: %s\n  %s", scope, firstLine(err.Error()))
 }
 
-// probeStreamSignal evaluates one fetch-backed stream.
-func (b *budgetRunner) probeStreamSignal(ctx context.Context, name string, def *CapabilityDef, facts discoveredFacts, opts DiscoverOptions, fields []string, now time.Time) (Signal, error) {
+// probeStreamSignal evaluates one fetch-backed stream. It takes the clock
+// rather than a reading because a capped probe is followed by further queries,
+// each of which is dated against a reading of its own (see recoverBySampling).
+func (b *budgetRunner) probeStreamSignal(ctx context.Context, name string, def *CapabilityDef, facts discoveredFacts, opts DiscoverOptions, fields []string, clock func() time.Time) (Signal, error) {
 	sig := Signal{Name: name}
+	now := clock()
 
 	// A stream that is not in the catalog cannot be probed, and must not be:
 	// the query would fail and the failure would read as a probe error rather
@@ -146,7 +149,7 @@ func (b *budgetRunner) probeStreamSignal(ctx context.Context, name string, def *
 		// A cut-short probe that found nothing proves nothing: the match may
 		// sit in the part that was never read. Before settling for that,
 		// try to buy the answer more cheaply by sampling.
-		return b.recoverBySampling(ctx, sig, def, opts, timeField, now, res)
+		return b.recoverBySampling(ctx, sig, def, opts, timeField, clock, now, res)
 	}
 
 	var matched int64

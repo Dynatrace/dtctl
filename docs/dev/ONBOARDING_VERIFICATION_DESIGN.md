@@ -621,6 +621,11 @@ telemetry is not implicated.
     count and the ratio; the newest record the walk matched supplies last-seen, and the
     evidence names the rung it came from when that is not the hit's own
     (`TestNewestMatchOfTheWalkDatesTheHit`).
+    Each rung asks for a window that ends when the rung runs, so its records are dated
+    against a clock reading taken just before it, not against the one reading taken before
+    the exhaustive probe: a walk of six queries would otherwise report its last rung's
+    records younger than they are by the time the walk took
+    (`TestEachRungIsDatedAgainstItsOwnClockReading`).
 
   The error sampling introduces shrinks with volume, and the cap only binds on high volume, so
   the two failure modes barely overlap: the signals sampling is imprecise about are the ones
