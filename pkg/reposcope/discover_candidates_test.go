@@ -3,6 +3,7 @@ package reposcope
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -557,4 +558,74 @@ func TestDiscover_EntityNameAloneIsNotAMatch(t *testing.T) {
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"])
 	assert.False(t, r.Partial, "every query answered")
+}
+
+// Candidates of one tier rank by how busy they are, and an object a sample
+// read over an hour is compared per hour with one read whole over the day:
+// 100 hits in an hour outrank 2000 records in twenty-four.
+func TestDiscover_RanksByRecordsPerHour(t *testing.T) {
+	workload := func(namespace string, records int) []map[string]interface{} {
+		return []map[string]interface{}{{fieldNamespace: namespace, fieldWorkload: "checkout", fieldRecords: float64(records)}}
+	}
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {capped(nil), sampledAnswer(workload("z-sampled", 100), 1<<20)},
+		"logs":  {{records: workload("a-whole", 2000)}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 2)
+	assert.Equal(t, "1h", r.Queries[1].Window, "the rung that answered read an hour")
+	assert.Equal(t, []string{"z-sampled", "a-whole"}, []string{r.Candidates[0].Namespace, r.Candidates[1].Namespace})
+}
+
+// A workload name may join its segments with "." as well as "-", so the
+// first filter looks for a sent name of several words in both spellings.
+// Without the dotted one, a row for acme.ledger.writer never reaches the
+// filter that would keep it.
+func TestPlan_LooksForADottedMultiWordWorkload(t *testing.T) {
+	p, err := PlanDiscovery(fstest.MapFS{"go.mod": {Data: []byte("module example.invalid/ledger-writer\n")}}, ".", nil)
+	require.NoError(t, err)
+	for _, q := range p.Queries[:2] {
+		first := strings.Split(q.DQL, "\n")[1]
+		assert.Contains(t, first, `contains(k8s.workload.name, "ledger-writer")`)
+		assert.Contains(t, first, `contains(k8s.workload.name, "ledger.writer")`)
+		assert.Contains(t, q.DQL, `contains(workloadSegments, "-ledger-writer-")`, "the second filter folds the dots")
+	}
+
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{{fieldNamespace: "prod", fieldWorkload: "acme.ledger.writer", fieldRecords: float64(10)}}}},
+	}}, p, prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.Equal(t, "segment", r.Candidates[0].Tier)
+}
+
+// The lookup of logs by process group sends every candidate's ids in one
+// query, and that query takes at most 50: with 51 ids between two candidates
+// it is not sent, and the note says their logs were not looked up.
+func TestDiscover_ProcessGroupLookupIsSkippedPastItsIDLimit(t *testing.T) {
+	ids := processGroups(discoveryIDLimit + 1)
+	spans := func(namespace string, groups []interface{}) map[string]interface{} {
+		return map[string]interface{}{fieldNamespace: namespace, fieldWorkload: "checkout", fieldRecords: float64(10),
+			fieldProcessGroups: groups, fieldProcessGroupCount: float64(len(groups))}
+	}
+	run := func(first, second []interface{}) (*DiscoveryReport, *fakeRunner) {
+		runner := &fakeRunner{answers: map[string][]answer{
+			"spans": {{records: []map[string]interface{}{spans("a", first), spans("b", second)}}},
+			"logs":  {{}, {records: []map[string]interface{}{pgLogs(7, first[0])}}},
+		}}
+		r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+		require.NoError(t, err)
+		require.Len(t, r.Candidates, 2)
+		return r, runner
+	}
+
+	r, runner := run(ids[:26], ids[26:])
+	assert.Len(t, runner.sent, 2, "the two record queries, and no lookup")
+	assert.Zero(t, r.Candidates[0].LogsByProcessGroup+r.Candidates[1].LogsByProcessGroup)
+	assert.Contains(t, r.Notes, "candidates 1 and 2 have spans, but no logs carry their k8s.workload.name or service.name, so an entry bound by those reaches no logs; if their logs carry a process group, bind it with --process-group")
+
+	// Positive control: one id fewer, and the lookup runs.
+	r, runner = run(ids[:26], ids[26:50])
+	assert.Len(t, runner.sent, 3)
+	assert.EqualValues(t, 7, r.Candidates[0].LogsByProcessGroup+r.Candidates[1].LogsByProcessGroup)
 }

@@ -31,15 +31,25 @@ func TestExtract_GitConfigOnlyARegularFile(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := newRepo(t)
 			create(t, filepath.Join(root, ".git", "config"))
-			done := make(chan []token, 1)
+			// The goroutine only reports: after the timeout below the test
+			// is over, and nothing may assert on it any more.
+			type result struct {
+				tokens []token
+				err    error
+			}
+			done := make(chan result, 1)
 			go func() {
 				s, err := extract(os.DirFS(root), ".")
-				assert.NoError(t, err)
-				done <- s.tokens
+				if err != nil {
+					done <- result{err: err}
+					return
+				}
+				done <- result{tokens: s.tokens}
 			}()
 			select {
-			case tokens := <-done:
-				assert.Empty(t, tokenLines(tokens))
+			case got := <-done:
+				require.NoError(t, got.err)
+				assert.Empty(t, tokenLines(got.tokens))
 			case <-time.After(5 * time.Second):
 				t.Fatal("discovery blocked reading .git/config")
 			}
