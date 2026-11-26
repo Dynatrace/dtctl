@@ -590,18 +590,11 @@ func (r *DiscoveryReport) runFallback(ctx context.Context, runner inventory.Runn
 // It applies only when the logs query read the whole window, since a capped or
 // sampled read has not shown the logs to be absent. A candidate whose process
 // groups are known in full, and are no other workload's, is then looked up by
-// them in one query; the others are only reported.
+// them in one query; the others are only reported. A run cancelled by then
+// says so only when there was something to look up.
 func (r *DiscoveryReport) checkLogs(ctx context.Context, runner inventory.Runner, d *discovery) {
 	q := r.processGroupCheck()
-	switch {
-	case q == nil:
-		return
-	case ctx.Err() != nil:
-		// Like every query the cancellation kept from running.
-		q.Cause = failureCause(ctx, ctx.Err())
-		r.note(failureNote(q))
-		return
-	case !r.readWhole(objectLogs, d):
+	if q == nil || !r.readWhole(objectLogs, d) {
 		return
 	}
 	spansWhole := r.readWhole(objectSpans, d)
@@ -620,6 +613,14 @@ func (r *DiscoveryReport) checkLogs(ctx context.Context, runner inventory.Runner
 		}
 	}
 	if len(ids) == 0 || len(ids) > discoveryIDLimit {
+		return
+	}
+	if ctx.Err() != nil {
+		// Only now is the lookup known to have been due. An interruption
+		// that kept no query from running left nothing unread, and is not
+		// worth a note.
+		q.Cause = failureCause(ctx, ctx.Err())
+		r.note(failureNote(q))
 		return
 	}
 	*q = processGroupLogsQuery(ids)
@@ -918,6 +919,15 @@ func failureCause(ctx context.Context, err error) string {
 }
 
 func failureNote(q *Query) string {
+	if q.ProcessGroupCheck() && q.Skipped {
+		// What this lookup would have found is a binding, never a
+		// candidate, so the note does not call the result incomplete.
+		why := "was interrupted"
+		if q.Cause == causeTimeout {
+			why = "ran out of time"
+		}
+		return fmt.Sprintf("discovery %s before it looked for logs by process group", why)
+	}
 	switch q.Cause {
 	case causeAuth:
 		return fmt.Sprintf("the token cannot read %s", q.DataObject)

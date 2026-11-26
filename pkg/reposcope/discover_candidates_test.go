@@ -290,3 +290,47 @@ func TestDiscover_WorkloadWithoutANamespaceIsNoWorkloadBinding(t *testing.T) {
 		"workload": VerdictNone, "serviceName": VerdictNone, "processGroup": VerdictNone, "service": VerdictNone,
 	}, r.Verdicts)
 }
+
+// An interruption after both record queries answered leaves nothing unread
+// unless the lookup of logs by process group was still due. The report used
+// to say "discovery was interrupted, so the result is incomplete" above a
+// match it had read in full.
+func TestDiscover_InterruptionAfterTheRecordQueries(t *testing.T) {
+	interrupted := func(logs []map[string]interface{}) (*DiscoveryReport, *fakeRunner, error) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runner := &fakeRunner{
+			answers: map[string][]answer{"spans": {{records: rows(t, "spans-checkout")}}, "logs": {{records: logs}}},
+			onRun: func(_ context.Context, object string) {
+				if object == "logs" {
+					cancel() // while the last record query runs; its answer still arrives
+				}
+			},
+		}
+		r, err := Discover(ctx, runner, singleGo(t), prodHost)
+		return r, runner, err
+	}
+
+	r, runner, err := interrupted(rows(t, "logs-checkout"))
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Len(t, runner.sent, 2)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.False(t, r.Partial)
+	assert.Empty(t, r.Notes, "no lookup was due, so nothing was left unread")
+	assert.Empty(t, r.processGroupCheck().Cause)
+
+	// With no logs under the workload, the lookup was due and did not run.
+	// What it would have found is a binding, not a candidate.
+	r, runner, err = interrupted(nil)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Len(t, runner.sent, 2)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.False(t, r.Partial)
+	q := r.processGroupCheck()
+	assert.True(t, q.Skipped)
+	assert.Equal(t, causeCancelled, q.Cause)
+	assert.Equal(t, []string{
+		"discovery was interrupted before it looked for logs by process group",
+		"candidate 1 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group",
+	}, r.Notes)
+}

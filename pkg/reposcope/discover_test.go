@@ -785,6 +785,10 @@ func TestDiscover_DeadlineBeforeTheFirstQuery(t *testing.T) {
 	assert.True(t, r.Partial)
 	for _, q := range r.Queries {
 		assert.True(t, q.Skipped, q.Purpose)
+		if q.ProcessGroupCheck() {
+			assert.Empty(t, q.Cause, "it needs a candidate, and there was none to look up")
+			continue
+		}
 		assert.Equal(t, causeTimeout, q.Cause, q.Purpose)
 	}
 	assert.Len(t, r.Notes, 1, "every skipped query shares one note")
