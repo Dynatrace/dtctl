@@ -392,7 +392,13 @@ func (r *scopeCheckedRunner) RunQuery(ctx context.Context, dql string) (*invento
 // as it would be sent and every value in it. The agent envelope carries the
 // plans as its payload, one per unit and each with its own sent and dropped
 // values, in a list also when there is one; the details are one flat map.
+// A structured format prints that list and nothing else, as it prints the
+// list of reports for a run: the preview's prose is for a terminal.
 func printRepoScopeDiscoveryPlans(cmd *cobra.Command, plans []*reposcope.Plan) error {
+	ctx := cmdContext(cmd)
+	if format := outputFormat(ctx); format != "table" && format != "wide" && !agentMode(ctx) {
+		return newPrinterCtx(ctx).PrintList(plans)
+	}
 	report := newDryRunReport(cmd).As("discover", "repo-scope")
 	units := make([]string, len(plans))
 	for i, plan := range plans {

@@ -226,7 +226,31 @@ func TestRepoScopeDiscoverStructuredOutputIsAlwaysAList(t *testing.T) {
 		require.Equal(t, ".", reports[0].Unit)
 	}
 
-	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
+	// A dry run asked for a structured format prints the plans in it, the
+	// list the agent envelope carries as its payload, and sends nothing.
+	srv := newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	for _, format := range []string{"json", "yaml"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "-o", format}, RunOptions{})
+		require.Zero(t, code, stderr)
+		var plans []reposcope.Plan
+		if format == "json" {
+			require.NoError(t, json.Unmarshal([]byte(stdout), &plans), stdout)
+		} else {
+			require.NoError(t, yaml.Unmarshal([]byte(stdout), &plans), stdout)
+		}
+		require.Len(t, plans, 1, format)
+		require.Equal(t, ".", plans[0].Unit)
+		require.Equal(t, []string{"checkout"}, plans[0].Sent)
+		require.Len(t, plans[0].Queries, 11)
+		require.Contains(t, plans[0].Queries[0].DQL, "fetch spans")
+	}
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "-o", "toon"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.NotContains(t, stdout, "Dry run:")
+	require.Contains(t, stdout, "unit: .")
+	require.Empty(t, srv.queries())
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	plans := agentEnvelope(t, stdout).Result.(map[string]interface{})["payload"].([]interface{})
 	require.Len(t, plans, 1)
