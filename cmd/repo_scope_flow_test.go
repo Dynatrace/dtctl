@@ -456,6 +456,15 @@ func TestRepoScopeDiscoverPathAndTerm(t *testing.T) {
 		require.Equal(t, "validation_error", detail.Code)
 		require.True(t, strings.HasPrefix(detail.Message, flag+": "), detail.Message)
 	}
+	// A generic word is refused like a malformed one, with the way to link
+	// a service that is really called that.
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", "--term", "api", "--dry-run", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	detail := agentError(t, stdout)
+	require.Equal(t, "validation_error", detail.Code)
+	require.Contains(t, detail.Message, `--term: "api" is not looked for`)
+	require.Equal(t, []string{"a service that is really named so is linked by hand: dtctl repo-scope set <name> --service-name api"}, detail.Suggestions)
+
 	code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", "--path", "services/billing", "--dry-run", "--agent"}, RunOptions{})
 	require.NotZero(t, code)
 	require.Equal(t, "validation_error", agentError(t, stdout).Code)

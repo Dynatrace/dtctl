@@ -300,11 +300,9 @@ func (d *discovery) recordTier(key recordKey) tier {
 // workloadSegment is the sent name that is a run of workload's segments, the
 // longest when several are: it says the most about why the row was found.
 func (d *discovery) workloadSegment(workload string) (best matcher, ok bool) {
-	longest := ""
 	for _, m := range d.matchers {
-		p, long := segmentable(m.value)
-		if long && len(p) > len(longest) && containsSegment(workload, p) {
-			best, longest, ok = m, p, true
+		if segmentable(m.value) && len(m.value) > len(best.value) && containsSegment(workload, m.value) {
+			best, ok = m, true
 		}
 	}
 	return best, ok

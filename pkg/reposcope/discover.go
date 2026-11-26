@@ -157,7 +157,15 @@ type Plan struct {
 // candidate's spans carried, and runs only when the records leave a candidate
 // with spans and no logs; its ids come from the environment's own answer, so
 // the plan shows it with a placeholder.
+//
+// A term is held to what a name read from the repository is, and one that is
+// not is an InvalidError: it would otherwise be the one way a generic word, a
+// two-letter name or a character with a meaning in DQL reaches a query.
 func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
+	terms, err := checkTerms(terms)
+	if err != nil {
+		return nil, err
+	}
 	s, err := extract(repo, dir)
 	if err != nil {
 		return nil, err
@@ -197,6 +205,32 @@ func heldBack(dropped, sent []string) []string {
 	return out
 }
 
+// checkTerms trims the terms, drops the empty ones and refuses one that is
+// not a name discovery would send had it read it from the repository: made of
+// other characters than a name's, or with no variants, which is a generic
+// word or fewer than minTokenRunes letters and digits.
+func checkTerms(terms []string) ([]string, error) {
+	var out []string
+	for _, term := range terms {
+		term = strings.TrimSpace(term)
+		switch {
+		case term == "":
+			continue
+		case !PlainName(term):
+			return nil, &InvalidError{Source: "--term", Msg: fmt.Sprintf("%q may hold only letters, digits, '-', '_' and '.'", term)}
+		case len(variants(term)) == 0:
+			return nil, &InvalidError{Source: "--term",
+				Msg: fmt.Sprintf("%q is not looked for: a name needs at least %d letters or digits and must not be a generic word such as api, server or web, which every environment holds many of",
+					term, minTokenRunes),
+				Suggestions: []string{"a service that is really named so is linked by hand: dtctl repo-scope set <name> --service-name " + term}}
+		}
+		out = append(out, term)
+	}
+	return out, nil
+}
+
+// sendValues is every value the queries carry: each token's variants, and
+// each term as given, lowercased and in its variants. terms are checked.
 func sendValues(tokens []token, terms []string) []string {
 	set := map[string]bool{}
 	for _, t := range tokens {
@@ -208,12 +242,10 @@ func sendValues(tokens []token, terms []string) []string {
 		}
 	}
 	for _, term := range terms {
-		if term = strings.TrimSpace(term); term != "" {
-			set[term] = true
-			set[strings.ToLower(term)] = true
-			for _, v := range variants(term) {
-				set[v] = true
-			}
+		set[term] = true
+		set[strings.ToLower(term)] = true
+		for _, v := range variants(term) {
+			set[v] = true
 		}
 	}
 	return sortedKeys(set)
@@ -314,35 +346,37 @@ func recordDQL(fetch, records string, values []string) string {
 // workloads all over a cluster, so it matches a workload only whole.
 const minSegmentRunes = 5
 
-// segmentable reports whether v is long enough to be looked for as a run of
-// a workload name's segments, and returns it as it is compared there:
-// lowercase, its delimiters folded into "-".
-func segmentable(v string) (pattern string, ok bool) {
-	pattern = strings.Trim(segmentDelimiters.ReplaceAllString(strings.ToLower(v), "-"), "-")
-	n := 0
-	for _, r := range pattern {
+// segmentable reports whether v is looked for as a run of a workload name's
+// segments: it is spelled the way such a run is, lowercase letters and digits
+// in words joined by single "-", and has at least minSegmentRunes of them.
+// The other spellings of a name are not looked for there, and need not be:
+// every name is sent in this spelling too (the first of its variants), so the
+// queries carry no text that is not a sent value or, with "." for "-", one.
+func segmentable(v string) bool {
+	n, prev := 0, '-'
+	for _, r := range v {
 		switch {
 		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
 			n++
-		case r != '-':
-			return "", false // no workload name holds it
+		case r != '-' || prev == '-':
+			return false
 		}
+		prev = r
 	}
-	return pattern, n >= minSegmentRunes
+	return prev != '-' && n >= minSegmentRunes
 }
 
 // segmentPatterns are the names the record queries look for as a run of a
-// workload name's segments: each sent value long enough, once. One that holds
-// another as a run of its own segments is left out, since every workload name
-// it is in holds the shorter one too.
+// workload name's segments: each sent value spelled that way and long enough.
+// One that holds another as a run of its own segments is left out, since
+// every workload name it is in holds the shorter one too.
 func segmentPatterns(values []string) []string {
-	set := map[string]bool{}
+	var all []string
 	for _, v := range values {
-		if p, ok := segmentable(v); ok {
-			set[p] = true
+		if segmentable(v) {
+			all = append(all, v)
 		}
 	}
-	all := sortedKeys(set)
 	return slices.DeleteFunc(slices.Clone(all), func(p string) bool {
 		return slices.ContainsFunc(all, func(o string) bool { return o != p && containsSegment(p, o) })
 	})

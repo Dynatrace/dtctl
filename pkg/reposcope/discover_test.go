@@ -245,6 +245,71 @@ func TestPlan_Terms(t *testing.T) {
 		"a term is sent as given, lowercased, and in its variants")
 }
 
+// A term is held to what a name read from the repository is: plain
+// characters, at least three letters or digits, not a generic word. One that
+// is not is refused, never sent, so nothing the documentation says is never
+// sent can leave the machine through a flag.
+func TestPlan_RefusesATermThatIsNoName(t *testing.T) {
+	for term, want := range map[string]string{
+		"-":                      `--term: "-" is not looked for`,
+		"...":                    `--term: "..." is not looked for`,
+		"ab":                     `--term: "ab" is not looked for`,
+		"a-b":                    `--term: "a-b" is not looked for`,
+		"api":                    `--term: "api" is not looked for`,
+		"API":                    `--term: "API" is not looked for`,
+		"back_end":               `--term: "back_end" is not looked for`,
+		"backEnd":                `--term: "backEnd" is not looked for`,
+		"ledger\" or true or \"": `--term: "ledger\" or true or \"" may hold only letters, digits, '-', '_' and '.'`,
+		"ledger\nwriter":         `--term: "ledger\nwriter" may hold only letters, digits, '-', '_' and '.'`,
+		"shop/ledger":            `--term: "shop/ledger" may hold only letters, digits, '-', '_' and '.'`,
+	} {
+		p, err := PlanDiscovery(fixture(t, "single-go"), ".", []string{"ledger", term})
+		var invalid *InvalidError
+		require.ErrorAs(t, err, &invalid, term)
+		assert.True(t, strings.HasPrefix(err.Error(), want), err.Error())
+		assert.Nil(t, p, term)
+	}
+
+	// The refusal of a generic word says how to link a service that is
+	// really called that.
+	_, err := PlanDiscovery(fixture(t, "no-signals"), ".", []string{"api"})
+	var invalid *InvalidError
+	require.ErrorAs(t, err, &invalid)
+	assert.Equal(t, []string{"a service that is really named so is linked by hand: dtctl repo-scope set <name> --service-name api"}, invalid.Suggestions)
+}
+
+// Sent is the disclosure, so it has to be every value the queries carry. A
+// query also looks for a name inside workload names, in spellings it derives
+// itself; each of those must be a value Sent lists.
+func TestPlan_SentIsEveryValueInTheQueries(t *testing.T) {
+	literal := regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
+	fsys := fstest.MapFS{
+		"go.mod":           {Data: []byte("module example.invalid/BillingEngine\n")},
+		"package.json":     {Data: []byte(`{"name": "@acme/ledger_writer.v2"}`)},
+		"deploy/work.yaml": {Data: []byte("kind: Deployment\nmetadata:\n  name: HTTPGateway--edge\n  namespace: payments\n")},
+		"Dockerfile":       {Data: []byte("FROM scratch\nENTRYPOINT [\"/bin/order.api_Worker\"]\n")},
+	}
+	for _, terms := range [][]string{nil, {"Back-End.svc", "front_endGateway", "v2Router"}} {
+		p, err := PlanDiscovery(fsys, ".", terms)
+		require.NoError(t, err)
+		require.NotEmpty(t, p.Queries)
+		for _, q := range p.Queries {
+			for _, m := range literal.FindAllStringSubmatch(q.DQL, -1) {
+				v := m[1]
+				switch {
+				case v == "-" || v == ".":
+					continue // the delimiters the segment column is built with
+				case q.fallback():
+					v = strings.TrimSuffix(strings.TrimPrefix(v, "*"), "*")
+				case strings.HasPrefix(v, "-") && strings.HasSuffix(v, "-"):
+					v = strings.Trim(v, "-")
+				}
+				assert.Contains(t, p.Sent, v, "%s carries %q", q.Purpose, m[1])
+			}
+		}
+	}
+}
+
 // A name that looks like a test fixture is held back, but a --term never
 // passes through that rule: a user who means it can send it.
 func TestPlan_TermsBypassTestNames(t *testing.T) {

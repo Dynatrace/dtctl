@@ -66,7 +66,7 @@ dtctl repo-scope discover --term billing-engine     # a name the repository does
 dtctl repo-scope discover --path services/ledger    # another service of a monorepo
 ```
 
-`--term` takes letters, digits, `-`, `_` and `.`, the characters the names read from the repository are made of.
+`--term` takes what a name read from the repository is: letters, digits, `-`, `_` and `.`, at least three letters or digits, and not a generic word (`api`, `server`, `web`). Anything else is refused, never sent; a service that really is called `api` is linked by hand with `dtctl repo-scope set <name> --service-name api`.
 
 The `set` line saves exactly the candidate shown:
 

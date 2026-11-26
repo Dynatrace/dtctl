@@ -89,7 +89,7 @@ Examples:
 			return runDiscovery(cmd, plans)
 		},
 	}
-	c.Flags().StringArrayVar(&terms, "term", nil, "a name to look for besides those the repository holds (repeatable)")
+	c.Flags().StringArrayVar(&terms, "term", nil, "a name to look for besides those the repository holds, of at least three letters or digits and not a generic word (repeatable)")
 	c.Flags().StringVar(&dir, "path", "", "directory to discover for, relative to the repository root (default: the working directory)")
 	rejectEmptyFlag(c, "term")
 	rejectEmptyFlag(c, "path")
@@ -102,11 +102,6 @@ Examples:
 // since an entry for the directory would be none of theirs. It sends nothing,
 // so a dry run prints exactly what a real run would send.
 func discoveryPlans(ctx context.Context, dir string, terms []string) ([]*reposcope.Plan, error) {
-	for _, t := range terms {
-		if !reposcope.PlainName(t) {
-			return nil, &reposcope.InvalidError{Source: "--term", Msg: fmt.Sprintf("%q may hold only letters, digits, '-', '_' and '.'", t)}
-		}
-	}
 	loc, err := repoScopeLocation(ctx)
 	if err != nil {
 		return nil, err
