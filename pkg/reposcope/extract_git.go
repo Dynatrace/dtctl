@@ -47,7 +47,7 @@ func RepositoryName(fsys fs.FS) string {
 // .git is a file (a worktree or a submodule) the configuration lives outside
 // the repository root fsys is limited to, and there is none.
 func originURL(fsys fs.FS) (remote string, line int, ok bool) {
-	data, err := readRegular(fsys, gitConfig)
+	data, err := readSource(fsys, gitConfig)
 	if err != nil {
 		return "", 0, false
 	}

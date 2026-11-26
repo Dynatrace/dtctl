@@ -291,7 +291,7 @@ func gradleBuildAt(fsys fs.FS, dir string) *gradleBuild {
 	}
 	text := map[string]string{}
 	for _, f := range files {
-		if data, err := readRegular(fsys, f); err == nil {
+		if data, err := readSource(fsys, f); err == nil {
 			text[f] = string(data)
 		}
 	}

@@ -96,6 +96,26 @@ func TestExtractNamesAreReadNotTheirPlaceholders(t *testing.T) {
 	}
 }
 
+// An editor on Windows may save a file with a UTF-8 byte order mark. It is
+// not part of the file's first line.
+func TestExtractReadsAFileWithAByteOrderMark(t *testing.T) {
+	const bom = "\ufeff"
+	for file, tt := range map[string]struct{ data, want string }{
+		"go.mod":          {"module example.invalid/ledger-writer\n", "module ledger-writer go.mod:1"},
+		"package.json":    {`{"name": "ledger-writer"}`, "package ledger-writer package.json:1"},
+		"pyproject.toml":  {"[project]\nname = \"ledger-writer\"\n", "project ledger-writer pyproject.toml:2"},
+		"deployment.yaml": {"kind: Deployment\nmetadata:\n  name: ledger-writer\n", "workload ledger-writer deployment.yaml:3"},
+		"Chart.yaml":      {"name: ledger-writer\n", "chart ledger-writer Chart.yaml:1"},
+		".git/config":     {"[remote \"origin\"]\nurl = https://example.invalid/shop/ledger-writer.git\n", "remote ledger-writer .git/config:2"},
+	} {
+		t.Run(file, func(t *testing.T) {
+			p, err := PlanDiscovery(fstest.MapFS{file: {Data: []byte(bom + tt.data)}}, ".", nil)
+			require.NoError(t, err)
+			require.Equal(t, []string{tt.want}, tokenLines(p.tokens))
+		})
+	}
+}
+
 func TestExtractExplicitAssemblyName(t *testing.T) {
 	p, err := PlanDiscovery(fstest.MapFS{"Fallback.csproj": {Data: []byte("<Project>\n<AssemblyName>InvoiceWorker</AssemblyName>\n</Project>")}}, ".", nil)
 	require.NoError(t, err)

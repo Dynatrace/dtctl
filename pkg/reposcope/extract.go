@@ -1,6 +1,7 @@
 package reposcope
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"path"
@@ -123,7 +124,7 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 	var found []sourceNames
 	gradle := map[string]string{}
 	for _, f := range files {
-		data, err := readRegular(fsys, f)
+		data, err := readSource(fsys, f)
 		if err != nil {
 			continue
 		}
@@ -200,6 +201,14 @@ func newSignals(unit string, tokens []token) *signals {
 		s.dropped = sortedKeys(dropped)
 	}
 	return s
+}
+
+// readSource reads a file names are read from, without the UTF-8 byte order
+// mark some editors save one with: the mark is not part of the first line, and
+// the readers here match on line starts.
+func readSource(fsys fs.FS, name string) ([]byte, error) {
+	data, err := readRegular(fsys, name)
+	return bytes.TrimPrefix(data, []byte("\ufeff")), err
 }
 
 // dirSource is the source recorded for a directory's own name: the directory
