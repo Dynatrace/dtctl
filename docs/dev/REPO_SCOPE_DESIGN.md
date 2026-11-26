@@ -149,7 +149,7 @@ dtctl has no DQL parser by design. The rewrite (`dql.InsertFilter`) is a lexical
 
 Grail reads command and data object names without regard to case, and field names with it: on an environment `FETCH Spans`, `| FILTER` and `append [Fetch Spans]` ran like their lower-case spellings, while `K8S.Namespace.Name` matched nothing. The rewrite follows that. `fetch Spans` is scoped as `spans`; a nested `Fetch Spans` is the subquery it is, which matters more, since missing it would report "applied" over environment-wide rows; and a bound field counts as the user's own filter only as written.
 
-Two invariants are tested on every row of the rewrite table: when not applied, the output equals the input byte for byte; when applied, removing the inserted range gives back the input.
+Two invariants are tested on every row of the rewrite table: when not applied, the output equals the input byte for byte; when applied, removing the inserted range gives back the input. `FuzzInsertFilter` (`pkg/dql/fuzz_test.go`) holds the rewrite to them for any text, valid UTF-8 or not, and to three more: the inserted range is the stage `| filter (<expr>)` at the first depth-0 pipe, or at the end of the text; the result scans with that stage second and with every byte of the input reading as it did before, as code or as masked text and at the same bracket depth; and the rewrite is idempotent in the one sense it can be, that applied to its own result it inserts nothing, because the query now filters a bound field itself (`user_filter`).
 
 A scoped query that returns nothing is diagnosed on the text the user typed, not the one sent, so the empty-result diagnosis never blames a field the scope inserted.
 
@@ -296,7 +296,7 @@ Candidates are keyed by cluster, namespace, workload and service name, so the re
 
 ## Testing
 
-- `pkg/dql` and `pkg/reposcope`: the scanner and the insertion table, with both invariants on every row; schema, store, resolution, rendering, extraction over fixture repositories, and discovery over a fixture runner
+- `pkg/dql` and `pkg/reposcope`: the scanner and the insertion table, with both invariants on every row, and the fuzz targets `FuzzInsertFilter`, `FuzzScan`, `FuzzUngroupedCount` and `FuzzQuote` (`go test ./pkg/dql/ -run '^$' -fuzz '^FuzzInsertFilter$' -fuzztime 30s`); schema, store, resolution, rendering, extraction over fixture repositories, and discovery over a fixture runner
 - `pkg/output/testdata/golden/repo-scope/` and `cmd/testdata/golden/repo-scope/`: the structured printers and the terminal output of every subcommand
 - Guards: `TestQueryRepoScope_UnlinkedIsByteIdentical` (outside a linked repository nothing changes; each disabling factor is paired with a positive control), `TestQueryRepoScope_StableFloor`, `TestRepoScopeCodesAreDocumented`, `TestQueryRepoScope_SegmentUnavailable` (a deleted segment never fails a default-scoped query), `TestRepoScopeDiscoverKeepsNoState` (by each file's mode and sha256), and `cmd/main_test.go`, which fails the run if the checkout's own scope file changed
 
