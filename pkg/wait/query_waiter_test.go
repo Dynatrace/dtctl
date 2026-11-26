@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -225,6 +226,107 @@ func TestWait_PermanentQueryError_FailsFast(t *testing.T) {
 	if !strings.Contains(buf.String(), "not retryable") {
 		t.Errorf("expected progress output to explain the query is not retryable, got:\n%s", buf.String())
 	}
+}
+
+// A filter segment that requires a variable it was given no value for fails
+// the same way on every attempt. The wait ends on the first, says why, and
+// hands the error back.
+func TestWait_SegmentVariableError_FailsFast(t *testing.T) {
+	callCount := 0
+	executor, cleanup := newWaiterTestExecutor(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"code":400,"message":"Segment requires a variable.","details":{"errorType":"FILTER_SEGMENT_REQUIRES_VARIABLE","arguments":["`+"`seg-1`"+`","x","$region"]}}}`)
+	})
+	defer cleanup()
+
+	buf := &bytes.Buffer{}
+	waiter := NewQueryWaiter(executor, WaitConfig{
+		Query:        "fetch logs",
+		Condition:    Condition{Type: ConditionTypeAny, Operator: OpGreater, Value: 0},
+		MaxAttempts:  3,
+		ProgressOut:  buf,
+		Backoff:      BackoffConfig{MinInterval: 0, MaxInterval: 0},
+		QueryOptions: exec.DQLExecuteOptions{Segments: []exec.FilterSegmentRef{{ID: "seg-1"}}},
+	})
+
+	result, err := waiter.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected exactly 1 attempt, got %d", callCount)
+	}
+	if result.FailureReason != "query error" {
+		t.Errorf("FailureReason = %q, want %q", result.FailureReason, "query error")
+	}
+	var segErr *exec.SegmentVariableError
+	if !errors.As(result.Err, &segErr) || segErr.Segment != "seg-1" || segErr.Variable != "region" {
+		t.Errorf("Result.Err = %v, want the segment variable error", result.Err)
+	}
+	if out := buf.String(); !strings.Contains(out, `not retryable): segment seg-1 requires variable "region"`) {
+		t.Errorf("the cause is not printed:\n%s", out)
+	}
+}
+
+// ExplainError rewords the permanent error before it is printed and returned,
+// and what it suggests is printed under it. A transient error is retried and
+// never reaches it.
+func TestWait_ExplainError(t *testing.T) {
+	status := http.StatusBadRequest
+	executor, cleanup := newWaiterTestExecutor(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		fmt.Fprint(w, `{"error":{"code":400,"message":"no such field","details":{"errorType":"UNKNOWN_FIELD"}}}`)
+	})
+	defer cleanup()
+
+	explained := 0
+	config := WaitConfig{
+		Query:       "fetch logs",
+		Condition:   Condition{Type: ConditionTypeAny, Operator: OpGreater, Value: 0},
+		MaxAttempts: 2,
+		Backoff:     BackoffConfig{MinInterval: 0, MaxInterval: 0},
+		ExplainError: func(err error) error {
+			explained++
+			return &explainedError{err}
+		},
+	}
+	for _, quiet := range []bool{false, true} {
+		buf := &bytes.Buffer{}
+		config.ProgressOut, config.Quiet = buf, quiet
+		result, err := NewQueryWaiter(executor, config).Wait(context.Background())
+		if err != nil {
+			t.Fatalf("Wait() error = %v", err)
+		}
+		var got *explainedError
+		if !errors.As(result.Err, &got) {
+			t.Fatalf("Result.Err = %v, want the explained error", result.Err)
+		}
+		want := "\nQuery error (not retryable): explained: " + got.error.Error() + "\n  first suggestion\n  second suggestion\nElapsed: "
+		switch out := buf.String(); {
+		case quiet && out != "":
+			t.Errorf("--quiet printed %q", out)
+		case !quiet && !strings.Contains(out, want):
+			t.Errorf("output\n%q\ndoes not hold\n%q", out, want)
+		}
+	}
+
+	status, explained = http.StatusServiceUnavailable, 0
+	config.ProgressOut, config.Quiet = &bytes.Buffer{}, true
+	result, err := NewQueryWaiter(executor, config).Wait(context.Background())
+	if err != nil || result.FailureReason != "max attempts exceeded" || result.Err != nil || explained != 0 {
+		t.Errorf("a transient error: result %+v, err %v, explained %d times", result, err, explained)
+	}
+}
+
+type explainedError struct{ error }
+
+func (e *explainedError) Error() string { return "explained: " + e.error.Error() }
+func (e *explainedError) Unwrap() error { return e.error }
+func (e *explainedError) Suggestions() []string {
+	return []string{"first suggestion", "second suggestion"}
 }
 
 // --- Wait: context timeout ---

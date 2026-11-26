@@ -25,6 +25,10 @@ type WaitConfig struct {
 	OutputFormat string
 	Quiet        bool
 	Verbose      bool
+	// ExplainError, when set, rewords a query error that ends the wait
+	// before it is printed and returned: a caller that changed the query it
+	// was given knows what the platform's message leaves out.
+	ExplainError func(error) error
 	ProgressOut  io.Writer // Where to write progress messages (default: os.Stderr, even if Out is set)
 	Out          io.Writer // Where PrintResults writes (default: os.Stdout); progress goes to ProgressOut
 }
@@ -43,6 +47,9 @@ type Result struct {
 	RecordCount   int64
 	Records       []map[string]any
 	FailureReason string
+	// Err is the query error that ended the wait, when FailureReason is
+	// "query error": one that the same query would meet on every attempt.
+	Err error
 }
 
 // NewQueryWaiter creates a new query waiter
@@ -159,9 +166,18 @@ func (w *QueryWaiter) Wait(ctx context.Context) (*Result, error) {
 			// Permanent query errors (e.g. a malformed DQL query) can never
 			// succeed, so retrying with backoff is pointless — fail fast.
 			if isPermanentQueryError(err) {
+				if w.config.ExplainError != nil {
+					err = w.config.ExplainError(err)
+				}
 				elapsed := time.Since(startTime)
 				if !w.config.Quiet {
 					fmt.Fprintf(w.config.ProgressOut, "\nQuery error (not retryable): %v\n", err)
+					var advised interface{ Suggestions() []string }
+					if errors.As(err, &advised) {
+						for _, s := range advised.Suggestions() {
+							fmt.Fprintf(w.config.ProgressOut, "  %s\n", s)
+						}
+					}
 					fmt.Fprintf(w.config.ProgressOut, "Elapsed: %s\n", elapsed.Round(100*time.Millisecond))
 				}
 				return &Result{
@@ -169,6 +185,7 @@ func (w *QueryWaiter) Wait(ctx context.Context) (*Result, error) {
 					Attempts:      attempt + 1,
 					Elapsed:       elapsed,
 					FailureReason: "query error",
+					Err:           err,
 				}, nil
 			}
 
@@ -279,7 +296,16 @@ func (w *QueryWaiter) Wait(ctx context.Context) (*Result, error) {
 // exactly the re-run this waiter is about to do, a server-side cancellation
 // says nothing about the query itself, and an unrecognized state that outlived
 // the poll deadline may still be running on the backend.
+//
+// A filter segment's required variable that was given no value is permanent
+// as well. The executor replaces that 400 with a message of its own, which
+// does not carry the QueryError, so it is recognised by its type.
 func isPermanentQueryError(err error) bool {
+	var segmentErr *exec.SegmentVariableError
+	if errors.As(err, &segmentErr) {
+		return true
+	}
+
 	var stateErr *exec.QueryStateError
 	if errors.As(err, &stateErr) {
 		return stateErr.State == sdkquery.StateFailed && !stateErr.TimedOut

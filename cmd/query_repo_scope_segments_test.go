@@ -401,6 +401,53 @@ func TestQueryRepoScope_SegmentVariableErrorNamesTheEntry(t *testing.T) {
 	require.Contains(t, detail.Message, `-S "other-2?region=your-value-here"`)
 }
 
+// A wait under a scope ends on the first attempt the platform refuses for
+// good, and says what the scope had to do with it: a segment of the entry
+// that requires a variable is the entry's to correct, and any other refusal
+// is shown with the text that was sent. Polling on would never succeed, and
+// with --timeout 0 and no --max-attempts never end.
+func TestWaitQuery_PermanentErrorUnderAScope(t *testing.T) {
+	wait := func(args ...string) []string {
+		return append([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout",
+			"--timeout", "0", "--min-interval", "10ms", "--max-interval", "20ms"}, args...)
+	}
+	executes := func(srv *dqlRecorder) (n int) {
+		for _, r := range srv.requests() {
+			if strings.Contains(r, "/query:execute") {
+				n++
+			}
+		}
+		return n
+	}
+
+	srv := segmentRecorder(t, answer(http.StatusBadRequest,
+		`{"error":{"code":400,"message":"Segment requires a variable.","details":{"errorType":"FILTER_SEGMENT_REQUIRES_VARIABLE","arguments":["`+"`Ab3dEf9hIjk`"+`","x","$region"]}}}`))
+	chdirTestRepo(t, segmentScope)
+	code, _, stderr := runRepoScoped(wait("--max-attempts", "3"), RunOptions{})
+	require.Equal(t, 3, code, stderr)
+	require.Equal(t, 1, executes(srv), "a refusal that cannot pass is not retried")
+	require.Contains(t, stderr, `Query error (not retryable): segment Ab3dEf9hIjk requires variable "region", and repo scope checkout sends it without one`)
+	require.NotContains(t, stderr, `-S "`, "the executor's advice is for a segment the user typed")
+	require.NotContains(t, stderr, "condition not met", "a refused query is not an outcome of the condition")
+
+	// No attempt limit and no timeout: before, this never returned.
+	srv = segmentRecorder(t, answer(http.StatusBadRequest,
+		`{"error":{"code":400,"message":"mismatched input","details":{"errorType":"PARSE_ERROR"}}}`))
+	code, _, stderr = runRepoScoped(wait(), RunOptions{})
+	require.Equal(t, 3, code, stderr)
+	require.Equal(t, 1, executes(srv))
+	require.Contains(t, stderr, "Query error (not retryable): ")
+	require.Contains(t, stderr, "  the query ran under repo scope checkout, which inserted a filter after fetch logs; the text sent was: "+repoScopeScopedQuery+"\n")
+	require.Contains(t, stderr, "  repo scope checkout also sent the filter segments "+entrySegmentRefs)
+
+	// --quiet silences the wait's own lines, the error among them, as it
+	// does without a scope.
+	code, _, stderr = runRepoScoped(wait("--quiet"), RunOptions{})
+	require.Equal(t, 3, code, stderr)
+	require.NotContains(t, stderr, "Query error")
+	require.NotContains(t, stderr, "the text sent was")
+}
+
 // An entry that references only segments still scopes: what a scoped query
 // says about an empty result, a wait's outcome and a failure holds for it,
 // though it inserted no filter.

@@ -204,6 +204,10 @@ Examples:
 				OutputFormat: outputFormat(cmdContext(cmd)),
 				Quiet:        quiet,
 				Verbose:      verbose,
+				// A query the platform refuses for good ends the wait. Under a
+				// scope the text it refused is not the one typed, and the cause
+				// may be the entry's, so the scope words it.
+				ExplainError: scoped.wrapError,
 				ProgressOut:  currentStderr(cmdContext(cmd)),
 				Out:          currentStdout(cmdContext(cmd)),
 			}
@@ -217,9 +221,9 @@ Examples:
 				return fmt.Errorf("wait failed: %w", scoped.wrapError(err))
 			}
 
-			// A query error is the scope's to explain through wrapError, not
-			// an outcome of the condition.
-			if result.Success || result.FailureReason != "query error" {
+			// A refused query is not an outcome of the condition. The waiter
+			// printed it, as the scope words it (ExplainError).
+			if result.Err == nil {
 				scoped.noticeWaitOutcome(result.Success, result.RecordCount)
 			}
 
