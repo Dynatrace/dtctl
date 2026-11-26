@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -452,8 +453,9 @@ type repoScopeProposal struct {
 	// sharedNotes explain each service name the candidates' lines leave out.
 	sharedNotes []string
 	// lineNotes explain each candidate that has no line because it was
-	// sampled or lists only some of its ids, and each line that leaves the
-	// candidate's cluster out.
+	// sampled or lists only some of its ids, each line that leaves the
+	// candidate's cluster out, and how to bind a workload several lines bind
+	// one cluster of.
 	lineNotes []string
 }
 
@@ -466,7 +468,7 @@ type repoScopeSelectAll struct {
 // newRepoScopeProposal works out what r proposes beyond its candidates'
 // lines, which must already be set.
 func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string) repoScopeProposal {
-	p := repoScopeProposal{lineNotes: repoScopeNoLineNotes(r)}
+	p := repoScopeProposal{lineNotes: append(repoScopeNoLineNotes(r), repoScopeClusterNotes(r)...)}
 	lines := 0
 	for _, c := range r.Candidates {
 		if c.SetCommand != "" {
@@ -572,6 +574,32 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		case c.ServicesCapped || c.ProcessGroupsCapped:
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records carry more entity ids than discovery lists, so no --service or --process-group binding is proposed",
 				c.Rank))
+		}
+	}
+	return notes
+}
+
+// repoScopeClusterNotes says, for each namespace and workload the candidates
+// run in several clusters, how to bind more than the one cluster each line
+// binds. No line does: --cluster-uid takes one cluster for the whole command.
+func repoScopeClusterNotes(r *reposcope.DiscoveryReport) []string {
+	var workloads []reposcope.Workload
+	ranks := map[reposcope.Workload][]string{}
+	for _, c := range r.Candidates {
+		if !c.WorkloadShared || c.ClusterUID == "" || c.SetCommand == "" {
+			continue
+		}
+		w := reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}
+		if ranks[w] == nil {
+			workloads = append(workloads, w)
+		}
+		ranks[w] = append(ranks[w], strconv.Itoa(c.Rank))
+	}
+	var notes []string
+	for _, w := range workloads {
+		if n := len(ranks[w]); n > 1 {
+			notes = append(notes, fmt.Sprintf("candidates %s and %s are %s in different clusters, and each line binds one; to bind the workload in every cluster, run either line without --cluster-uid; to bind some of several, list the workload once per cluster-uid under workloads in %s",
+				strings.Join(ranks[w][:n-1], ", "), ranks[w][n-1], w, reposcope.FileName))
 		}
 	}
 	return notes

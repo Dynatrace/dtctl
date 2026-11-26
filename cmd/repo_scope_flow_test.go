@@ -344,6 +344,20 @@ func TestRepoScopeDiscoverClusterOnSpansOnly(t *testing.T) {
 	require.Contains(t, stdout, `fetch logs   | filter (service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))`)
 }
 
+// One workload in two clusters is two candidates, each line binding one. The
+// report also says how to bind both, which no line does.
+func TestRepoScopeDiscoverTwoClustersSaysHowToBindBoth(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": checkoutRows["spans"] + "," + otherCluster(checkoutRows["spans"])}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.Contains(t, suggestions, "candidates 1 and 2 are payments/checkout in different clusters, and each line binds one; "+
+		"to bind the workload in every cluster, run either line without --cluster-uid; "+
+		"to bind some of several, list the workload once per cluster-uid under workloads in .dtctl-repo-scope.yaml")
+}
+
 // A cluster value a scope file cannot hold is said to be that, not to be
 // missing.
 func TestRepoScopeDiscoverClusterValueTheFileRefuses(t *testing.T) {

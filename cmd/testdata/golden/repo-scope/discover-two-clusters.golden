@@ -19,3 +19,4 @@ Verdict: ambiguous (candidates: 2)
   1  dtctl repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout
   2  dtctl repo-scope set checkout --cluster-uid 66666666-7777-8888-9999-000000000000 --namespace payments --workload checkout
 Note: --service-name checkout is left out of the set lines: more than one candidate reports it, so it would select each of them
+Note: candidates 1 and 2 are payments/checkout in different clusters, and each line binds one; to bind the workload in every cluster, run either line without --cluster-uid; to bind some of several, list the workload once per cluster-uid under workloads in .dtctl-repo-scope.yaml
