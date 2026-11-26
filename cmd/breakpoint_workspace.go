@@ -84,6 +84,13 @@ func resolveBreakpointWorkspace(cmd *cobra.Command, cfg *config.Config) (breakpo
 	return ws, nil
 }
 
+// shown is the name as a message prints it. A workspace named after a
+// directory carries whatever the directory is called, and a name can hold an
+// escape sequence; the environment is sent the name itself.
+func (w breakpointWorkspace) shown() string {
+	return repoScopeText(w.name)
+}
+
 // requireScopeFile refuses a command that changes something when the scope
 // file did not load. The file decides which workspace the command works in,
 // and the working directory's is a different one: deleting or re-scoping
@@ -109,9 +116,9 @@ func (w breakpointWorkspace) changeNotes() []string {
 	case w.scope == nil:
 		return nil
 	case strings.Contains(w.name, "/"):
-		return []string{"workspace " + w.name + ` is named after the repository, so every clone of it names the same one: it is not verified that Live Debugger accepts "/" in a workspace name, nor that a workspace is private to its user`}
+		return []string{"workspace " + w.shown() + ` is named after the repository, so every clone of it names the same one: it is not verified that Live Debugger accepts "/" in a workspace name, nor that a workspace is private to its user`}
 	}
-	return []string{"workspace " + w.name + " is named after the repository, so every clone of it names the same one: it is not verified that a workspace is private to its user"}
+	return []string{"workspace " + w.shown() + " is named after the repository, so every clone of it names the same one: it is not verified that a workspace is private to its user"}
 }
 
 // unusableScopeFile is the error of a command that needs the scope file and
@@ -134,7 +141,7 @@ func (w breakpointWorkspace) readWarnings(ctx context.Context) []string {
 	if w.unusable == "" {
 		return nil
 	}
-	warning := w.unusable + "; reading workspace " + w.name + ", the one named after the working directory, not the one the file would name"
+	warning := w.unusable + "; reading workspace " + w.shown() + ", the one named after the working directory, not the one the file would name"
 	output.FprintWarning(currentStderr(ctx), "%s", warning)
 	return []string{warning}
 }

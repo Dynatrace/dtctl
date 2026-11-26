@@ -411,7 +411,7 @@ func repoScopeStatus(ctx context.Context, name string) (status *reposcope.Status
 // reason names it as the repository does, since it is printed beside the
 // query's own output and travels in the agent envelope.
 func (s *repoScopeFile) unusable(err error) string {
-	return strings.ReplaceAll(err.Error(), s.loc.Path, reposcope.FileName)
+	return strings.ReplaceAll(err.Error(), reposcope.Shown(s.loc.Path), reposcope.FileName)
 }
 
 // repoScopeReason is a Status's reason as a command prints it: where no

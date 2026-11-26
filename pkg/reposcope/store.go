@@ -69,15 +69,28 @@ func locate(startDir string, lstat func(string) (fs.FileInfo, error)) (loc Locat
 	case err == nil:
 		loc.Exists = true
 	case !errors.Is(err, fs.ErrNotExist):
-		// The cause without the file name the filesystem repeats in it.
-		var pathErr *fs.PathError
-		if errors.As(err, &pathErr) {
-			err = pathErr.Err
-		}
-		return loc, true, fmt.Errorf("%s: cannot be inspected: %w", loc.Path, err)
+		return loc, true, fmt.Errorf("%s: cannot be inspected: %w", Shown(loc.Path), cause(err))
 	}
 	return loc, true, nil
 }
+
+// cause is err without the file name the filesystem repeats in it: the
+// message names the file once, as Shown prints it.
+func cause(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
+}
+
+// shownError is a filesystem error whose text names a path in the checkout,
+// printed as Shown prints it. The error itself stays in the chain: a save
+// that failed names the temp file it could not write.
+type shownError struct{ err error }
+
+func (e shownError) Error() string { return Shown(e.err.Error()) }
+func (e shownError) Unwrap() error { return e.err }
 
 func gitRoot(dir string) (string, bool) {
 	for {
@@ -120,12 +133,7 @@ func Load(loc Location) (*File, error) {
 		invalidErr.Source = loc.Path
 		return nil, invalidErr
 	case err != nil:
-		// The cause without the file name the filesystem repeats in it.
-		var pathErr *fs.PathError
-		if errors.As(err, &pathErr) {
-			err = pathErr.Err
-		}
-		return nil, fmt.Errorf("%s: cannot be read: %w", loc.Path, err)
+		return nil, fmt.Errorf("%s: cannot be read: %w", Shown(loc.Path), cause(err))
 	}
 	f, invalidErr := decode(data)
 	if invalidErr != nil {
@@ -155,7 +163,7 @@ func Save(loc Location, f *File) error {
 	}
 	if f.Empty() {
 		if err := os.Remove(loc.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove %s: %w", loc.Path, err)
+			return fmt.Errorf("remove %s: %w", Shown(loc.Path), shownError{err})
 		}
 		return nil
 	}
@@ -187,7 +195,7 @@ func writeAtomic(path string, data []byte) error {
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+		return fmt.Errorf("write %s: %w", Shown(path), shownError{err})
 	}
 	return nil
 }

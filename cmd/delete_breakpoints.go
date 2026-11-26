@@ -74,7 +74,7 @@ Examples:
 			if err := ws.requireScopeFile(); err != nil {
 				return err
 			}
-			workspace := ws.name
+			workspace := ws.shown()
 			// Said before the confirmation and before anything is sent.
 			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
 
@@ -83,7 +83,7 @@ Examples:
 				return err
 			}
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)

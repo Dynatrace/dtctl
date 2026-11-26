@@ -3,6 +3,7 @@
 package reposcope
 
 import (
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -63,6 +64,50 @@ func TestLoadUnreadableFile(t *testing.T) {
 	_, err := Load(loc)
 	require.ErrorIs(t, err, os.ErrPermission)
 	require.ErrorContains(t, err, loc.Path+": cannot be read: permission denied")
+}
+
+// A checkout directory is named whatever the clone carries. The messages
+// that say where the file is show the path without the characters that would
+// act on a terminal, whichever step failed.
+func TestStoreErrorsShowAHostilePathSafely(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission bits do not stop root")
+	}
+	const hostile = "svc\x1b[31mRED\rdone"
+	root := filepath.Join(t.TempDir(), hostile)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+	loc, ok, err := Locate(root)
+	require.NoError(t, err)
+	require.True(t, ok)
+	safe := func(err error) {
+		t.Helper()
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "\x1b")
+		require.NotContains(t, err.Error(), "\r")
+		require.Contains(t, err.Error(), "svc\uFFFD[31mRED\uFFFDdone")
+	}
+
+	require.NoError(t, os.WriteFile(loc.Path, []byte("environments: [\n"), 0o644))
+	_, err = Load(loc)
+	safe(err)
+
+	require.NoError(t, os.Chmod(loc.Path, 0o000))
+	_, err = Load(loc)
+	safe(err)
+	require.NoError(t, os.Chmod(loc.Path, 0o644))
+
+	broken := errors.New("input/output error")
+	_, _, err = locate(root, func(name string) (fs.FileInfo, error) {
+		return nil, &fs.PathError{Op: "lstat", Path: name, Err: broken}
+	})
+	safe(err)
+
+	f := &File{}
+	f.Upsert("abc12345.apps.dynatrace.com", Entry{Name: "checkout", ServiceNames: []string{"checkout"}})
+	require.NoError(t, os.Chmod(root, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	safe(Save(loc, f))
+	safe(Save(loc, &File{}))
 }
 
 // Save replaces the file rather than writing into it: the new bytes arrive

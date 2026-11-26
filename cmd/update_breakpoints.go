@@ -128,7 +128,7 @@ Examples:
 				if err := ws.requireScopeFile(); err != nil {
 					return err
 				}
-				workspace := ws.name
+				workspace := ws.shown()
 
 				var sets []map[string][]string
 				var origin string // " from repo scope <name>", or empty
@@ -159,7 +159,7 @@ Examples:
 					return err
 				}
 
-				workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
+				workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 				if err != nil {
 					if verbose {
 						_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -225,7 +225,7 @@ Examples:
 			if err := ws.requireScopeFile(); err != nil {
 				return err
 			}
-			workspace := ws.name
+			workspace := ws.shown()
 			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
 			if dryRun(ctx) {
 				changes := describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)
@@ -237,7 +237,7 @@ Examples:
 				return err
 			}
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/Dynatrace/dtctl/pkg/output"
@@ -336,7 +335,7 @@ func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 		return b.String() + row[len(row)-1]
 	}
 
-	fmt.Fprintf(w, "Unit: %s\n\n%s\n", r.Unit, line(rows[0]))
+	fmt.Fprintf(w, "Unit: %s\n\n%s\n", repoScopeText(r.Unit), line(rows[0]))
 	for i, c := range r.Candidates {
 		fmt.Fprintln(w, line(rows[i+1]))
 		for _, e := range c.Evidence {
@@ -352,12 +351,7 @@ func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 // the table or act on the terminal beside a line meant to be pasted, so each
 // is shown as U+FFFD.
 func repoScopeText(s string) string {
-	return strings.Map(func(r rune) rune {
-		if !unicode.IsPrint(r) {
-			return unicode.ReplacementChar
-		}
-		return r
-	}, s)
+	return reposcope.Shown(s)
 }
 
 // idsColumn is a candidate's ids of one kind in the table: the first few,

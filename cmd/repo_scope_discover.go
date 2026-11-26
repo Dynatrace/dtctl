@@ -519,6 +519,12 @@ func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e r
 	if c.Indirect != "" {
 		return e, nil
 	}
+	// Nor is there a line for a directory set would refuse as --path: it
+	// would save nothing, and its path would be printed as the clone
+	// spells it.
+	if problem := repoScopeDirProblem(repoScopeDir(r, c)); problem != "" {
+		return e, []repoScopeUnheld{{"--path", problem}}
+	}
 	// holds reports whether a scope file can hold b, the bindings of one
 	// kind, and records them as left out when it cannot.
 	holds := func(b reposcope.Entry) bool {
@@ -676,6 +682,17 @@ func repoScopeDir(r *reposcope.DiscoveryReport, c reposcope.Candidate) string {
 	return "."
 }
 
+// repoScopeDirProblem says why a scope file cannot hold dir as an entry's
+// path, or returns "". A directory is named whatever the clone carries: a
+// control character, or a space at either end, is refused by set, which
+// composes the name itself and so is asked about the composed one.
+func repoScopeDirProblem(dir string) string {
+	if dir == "." {
+		return ""
+	}
+	return reposcope.Entry{Name: "x", Path: norm.NFC.String(dir), ServiceNames: []string{"x"}}.Problem()
+}
+
 // repoScopeSelectors are the global flags that pick the config and context
 // discovery ran against, for the set line to carry. Set files an entry under
 // the current context's environment, so a line run without the context
@@ -765,15 +782,20 @@ func newRepoScopeProposal(r *reposcope.DiscoveryReport, selectors []string, name
 
 // repoScopeHandLinks are the templates for linking the unit by hand.
 func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]string, string) {
-	dir := repoScopeDir(r, reposcope.Candidate{})
+	dir, hint := repoScopeDir(r, reposcope.Candidate{}), ""
+	const unheld = "each line covers the whole repository; a scope file cannot hold %s as --path: %s"
+	switch {
+	case repoScopeDirProblem(dir) != "":
+		dir, hint = ".", fmt.Sprintf(unheld, "the unit's directory", repoScopeDirProblem(dir))
+	case r.Unit == "." && repoScopeDirProblem(r.Dir) != "":
+		hint = fmt.Sprintf(unheld, "this directory", repoScopeDirProblem(r.Dir))
+	case r.Unit == "." && r.Dir != ".":
+		hint = fmt.Sprintf("each line covers the whole repository; add --path %s to cover only %s", exec.ShellQuote(r.Dir), r.Dir)
+	}
 	links := []string{
 		repoScopeSetLine("<name>", []string{"--namespace", "<namespace>", "--workload", "<workload>"}, dir, selectors),
 		repoScopeSetLine("<name>", []string{"--service-name", "<service.name>"}, dir, selectors),
 		repoScopeSetLine("<name>", []string{"--process-group", "PROCESS_GROUP-…", "--service", "SERVICE-…"}, dir, selectors),
-	}
-	hint := ""
-	if r.Unit == "." && r.Dir != "." {
-		hint = fmt.Sprintf("each line covers the whole repository; add --path %s to cover only %s", exec.ShellQuote(r.Dir), r.Dir)
 	}
 	return links, hint
 }

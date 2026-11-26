@@ -101,7 +101,7 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 	if err != nil {
 		return err
 	}
-	workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
+	workspace, warnings := ws.shown(), ws.readWarnings(cmdContext(cmd))
 
 	c, err := deps.newClient(cmdContext(cmd), cfg)
 	if err != nil {
@@ -113,7 +113,7 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, ws.name)
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)

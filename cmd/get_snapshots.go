@@ -74,7 +74,7 @@ Use -o json / -o yaml for structured output.`,
 			if err != nil {
 				return err
 			}
-			workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
+			workspace, warnings := ws.shown(), ws.readWarnings(cmdContext(cmd))
 
 			c, err := newClientFromConfig(cmdContext(cmd), cfg)
 			if err != nil {
@@ -85,7 +85,7 @@ Use -o json / -o yaml for structured output.`,
 				return err
 			}
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 			if err != nil {
 				if isDebugVerbose(cmdContext(cmd)) {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)

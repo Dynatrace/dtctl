@@ -133,7 +133,7 @@ Examples:
 			// A preview sends nothing, not even the read that finds the
 			// workspace: asking for a workspace may create it.
 			if dryRun(cmdContext(cmd)) {
-				preview.workspace, preview.filterSummary = workspace.name, filterSummary
+				preview.workspace, preview.filterSummary = workspace.shown(), filterSummary
 				if filterSets == nil {
 					preview.cov = coveringBreakpointEntry(cmd, workspace)
 				}
@@ -172,7 +172,7 @@ Examples:
 				if err != nil {
 					return err
 				}
-				changed = &workspaceFiltersChange{workspace: workspace.name, before: before, after: filterSummary, scopeName: scopeName, location: location}
+				changed = &workspaceFiltersChange{workspace: workspace.shown(), before: before, after: filterSummary, scopeName: scopeName, location: location}
 				cancelled, err := applyWorkspaceFilters(ctx, handler, workspaceID, filterSets,
 					workspaceFilterChange{creating: true, skipConfirm: skipConfirm})
 				if err != nil {
@@ -216,7 +216,7 @@ Examples:
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
 				suggestions = []string{hint}
 			}
-			return printBreakpointMessageWith(ctx, "create", inWorkspace(msg, workspace.name), suggestions)
+			return printBreakpointMessageWith(ctx, "create", inWorkspace(msg, workspace.shown()), suggestions)
 		},
 	}
 	c.Flags().String("filters", "", "workspace filters to set before creating the breakpoint (comma-separated key:value pairs)")
@@ -238,13 +238,13 @@ func unfilteredCreate(cmd *cobra.Command, workspace breakpointWorkspace, workspa
 		return "", err
 	}
 	if !hasFilters {
-		return "", cov.noFilters(workspace.name, location)
+		return "", cov.noFilters(workspace.shown(), location)
 	}
 	current, err := livedebugger.WorkspaceFilterSets(workspaceResp)
 	if err != nil {
 		return "", err
 	}
-	return cov.hint(workspace.name, current), nil
+	return cov.hint(workspace.shown(), current), nil
 }
 
 // liveDebuggerHandler is the Live Debugger handler for cfg's current context.

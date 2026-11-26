@@ -3,6 +3,7 @@ package reposcope
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // InvalidError is a file or value that failed validation, with what to do
@@ -15,7 +16,21 @@ type InvalidError struct {
 }
 
 func (e *InvalidError) Error() string {
-	return e.Source + ": " + e.Msg
+	return Shown(e.Source) + ": " + e.Msg
+}
+
+// Shown is s as a message may print it. A source is often a path, and a
+// directory name is whatever a clone carries: git stores any byte but NUL
+// and "/", so a name can hold an escape sequence that acts on the terminal
+// the message is printed to. Each character a terminal does not show as
+// itself is replaced by U+FFFD.
+func Shown(s string) string {
+	return strings.Map(func(r rune) rune {
+		if !unicode.IsPrint(r) {
+			return unicode.ReplacementChar
+		}
+		return r
+	}, s)
 }
 
 // NotFoundError is an explicitly named entry that the host's environment does
