@@ -428,7 +428,7 @@ Examples:
 			if err := scoped.yieldTo(segments); err != nil {
 				return err
 			}
-			if err := scoped.checkSegments(c); err != nil {
+			if err := scoped.checkSegments(ctx, c); err != nil {
 				return err
 			}
 			segments = scoped.withSegments(segments)

@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -399,6 +402,64 @@ func TestQueryRepoScope_SegmentVariableErrorNamesTheEntry(t *testing.T) {
 	detail := agentError(t, stdout)
 	require.Equal(t, "error", detail.Code)
 	require.Contains(t, detail.Message, `-S "other-2?region=your-value-here"`)
+}
+
+// slowSegmentReads makes every segment read of srv hang until its request is
+// abandoned, or for two seconds when nothing abandons it. started is closed
+// by the first read.
+func slowSegmentReads(srv *dqlRecorder) (started chan struct{}) {
+	started = make(chan struct{})
+	var once sync.Once
+	srv.onSegmentRead = func(r *http.Request) {
+		once.Do(func() { close(started) })
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return started
+}
+
+// The reads of the entry's segments belong to the invocation: Ctrl+C, or an
+// embedding caller going away, ends them, and nothing is sent afterwards.
+func TestQueryRepoScope_SegmentReadIsCancelled(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	started := slowSegmentReads(srv)
+	chdirTestRepo(t, segmentScope)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-started
+		cancel()
+	}()
+	begun := time.Now()
+	code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery}, RunOptions{Context: ctx})
+	require.NotZero(t, code)
+	require.Less(t, time.Since(begun), time.Second, "the read outlived its cancellation")
+	require.Empty(t, srv.queries(), "a cancelled invocation sends no query")
+	require.Contains(t, stderr, "reading filter segment Ab3dEf9hIjk was interrupted")
+	require.Contains(t, stderr, "the query was not sent")
+}
+
+// --timeout bounds the whole wait, the reads of the entry's segments
+// included: a wait that cannot start in time ends as a timeout, exit code 1.
+func TestWaitQuery_TimeoutCoversTheSegmentReads(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	slowSegmentReads(srv)
+	chdirTestRepo(t, segmentScope)
+
+	begun := time.Now()
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout", "--timeout", "100ms"}, RunOptions{})
+	require.Equal(t, 1, code, stderr)
+	require.Less(t, time.Since(begun), time.Second)
+	require.Empty(t, srv.queries(), "no attempt is made after the deadline")
+	require.Contains(t, stderr, "Timeout reached")
+	require.Contains(t, stderr, "reading filter segment Ab3dEf9hIjk was interrupted")
+
+	code, _, stderr = runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout", "--timeout", "100ms", "--quiet"}, RunOptions{})
+	require.Equal(t, 1, code, stderr)
+	require.NotContains(t, stderr, "Timeout reached")
 }
 
 // The entry's segments travel with every attempt of a wait, not only the

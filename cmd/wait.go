@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -122,19 +123,6 @@ Examples:
 				return err
 			}
 
-			scoped, err := applyRepoScope(cmd, cfg, query)
-			if err != nil {
-				return err
-			}
-			// Read once here, however often the wait polls.
-			if err := scoped.checkSegments(c); err != nil {
-				return err
-			}
-			if err := scoped.requireSegments("wait query"); err != nil {
-				return err
-			}
-			segments := scoped.withSegments(nil)
-
 			// Parse timing flags
 			timeout, _ := cmd.Flags().GetDuration("timeout")
 			maxAttempts, _ := cmd.Flags().GetInt("max-attempts")
@@ -146,6 +134,36 @@ Examples:
 			// Parse output flags
 			quiet, _ := cmd.Flags().GetBool("quiet")
 			verbose, _ := cmd.Flags().GetBool("verbose")
+
+			// --timeout bounds the whole wait. The deadline starts here so
+			// that it covers the reads of a scope's segments too; the waiter
+			// applies the same duration to this context, and the earlier
+			// deadline is the one that holds.
+			ctx := cmdContext(cmd)
+			if timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+			// Read once here, however often the wait polls.
+			if err := scoped.checkSegments(ctx, c); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					if !quiet {
+						fmt.Fprintf(currentStderr(ctx), "Timeout reached before the first attempt: %v\n", err)
+					}
+					return &silentExitError{code: 1, reason: "wait: timeout"}
+				}
+				return err
+			}
+			if err := scoped.requireSegments("wait query"); err != nil {
+				return err
+			}
+			segments := scoped.withSegments(nil)
 
 			// Build backoff config
 			backoffConfig := wait.BackoffConfig{
@@ -216,7 +234,7 @@ Examples:
 			executor := newDQLExecutorFromConfig(cmdContext(cmd), cfg, c)
 			waiter := wait.NewQueryWaiter(executor, waitConfig)
 
-			result, err := waiter.Wait(cmdContext(cmd))
+			result, err := waiter.Wait(ctx)
 			if err != nil && err != context.DeadlineExceeded {
 				return fmt.Errorf("wait failed: %w", scoped.wrapError(err))
 			}

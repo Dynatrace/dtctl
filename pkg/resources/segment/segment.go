@@ -119,9 +119,10 @@ func (h *Handler) Get(uid string) (*FilterSegment, error) {
 }
 
 // Check reads a filter segment by UID without its includes or variables, for
-// a caller that only needs to know the segment can be read.
-func (h *Handler) Check(uid string) error {
-	_, err := h.sdk.Get(context.Background(), uid)
+// a caller that only needs to know the segment can be read. The read ends
+// with ctx.
+func (h *Handler) Check(ctx context.Context, uid string) error {
+	_, err := h.sdk.Get(ctx, uid)
 	return err
 }
 

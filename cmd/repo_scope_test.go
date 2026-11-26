@@ -134,6 +134,9 @@ type dqlRecorder struct {
 	// segments are the filter segments the environment holds, by id, with
 	// the status reading one answers; any other id is a 404.
 	segments map[string]int
+	// onSegmentRead, when set, runs before the read of a held segment is
+	// answered: a test of a slow read blocks in it.
+	onSegmentRead func(r *http.Request)
 }
 
 // newDQLRecorder starts the server and points an isolated config's only
@@ -152,8 +155,12 @@ func newDQLRecorder(t *testing.T, safetyLevel string, respond func(r *http.Reque
 		if id, ok := strings.CutPrefix(r.URL.Path, "/platform/storage/filter-segments/v1/filter-segments/"); ok && r.Method == http.MethodGet {
 			s.mu.Lock()
 			status, known := s.segments[id]
+			hook := s.onSegmentRead
 			s.mu.Unlock()
 			if known {
+				if hook != nil {
+					hook(r)
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(status)
 				_, _ = fmt.Fprintf(w, `{"uid":%q,"name":"a segment"}`, id)

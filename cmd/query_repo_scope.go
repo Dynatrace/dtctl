@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -366,18 +367,24 @@ func (q *repoScopedQuery) segmentList() string {
 // when the platform reports it. The reads run one after another. An entry
 // holds at most ten, in parallel they would arrive as a burst against the
 // same rate limit, and a rate-limited read is now an error.
-func (q *repoScopedQuery) checkSegments(c *client.Client) error {
+//
+// The reads end with ctx: the invocation's, which Ctrl+C cancels, and for a
+// wait the one that carries its deadline. Up to ten reads, each with the
+// client's own timeout and retries, would otherwise outlast both.
+func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) error {
 	if q.scope == nil || len(q.segments) == 0 {
 		return nil
 	}
 	handler := segment.NewHandler(c)
 	for _, seg := range q.segments {
-		err := handler.Check(seg.ID)
+		err := handler.Check(ctx, seg.ID)
 		if err == nil {
 			continue
 		}
 		var reason string
 		switch {
+		case ctx.Err() != nil:
+			return fmt.Errorf("repo scope %s: reading filter segment %s was interrupted (%w); the query was not sent", q.scope.Name, seg.ID, ctx.Err())
 		case errors.Is(err, sdksegment.ErrNotFound):
 			reason = fmt.Sprintf("filter segment %s does not exist in this environment, or is not shared with you", seg.ID)
 		case errors.Is(err, httpclient.ErrForbidden):
