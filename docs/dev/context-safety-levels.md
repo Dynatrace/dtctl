@@ -213,6 +213,29 @@ dtctl config get-contexts -o wide  # Shows safety level details
 dtctl config describe-context <name>
 ```
 
+### Logging In
+
+`dtctl auth login` is the other writer of a context's level, and the browser
+flow requests the OAuth scopes of the level (`pkg/auth`, `GetScopesForSafetyLevel`).
+The rules live in `loginSafetyLevels` in `cmd/auth.go`:
+
+- `--safety-level` given: the flag is saved. An empty value is a usage error.
+- Not given, context exists: the stored level is kept, and a context that
+  stores none is left without one. A stored value that is not a level is
+  refused before a token is requested.
+- Not given, new context: the default is saved.
+
+The scopes follow the level dtctl *enforces*, which in an auto-discovered
+project config is the declared level clamped to the global binding of the token
+the login writes (`Config.EffectiveSafetyLevelFor`). The declared level is what
+gets saved; the file is not rewritten to the clamped one.
+
+A login replaces the stored token, which is keyed by OAuth tier and token name.
+Before the browser opens, the login names every other context on the same tier
+and token name, in the loaded config and in the global one, whose level requests
+a scope the login does not. The client credentials grant does not request the
+level's scopes, so there the login only says that the shared token is replaced.
+
 ## Implementation Notes
 
 ### Ownership Detection

@@ -336,6 +336,36 @@ dtctl config describe-context prod
 
 Safety levels are client-side only. For actual security, configure your API tokens with minimum required scopes.
 
+### Safety levels and `auth login`
+
+The browser login requests the OAuth scopes of the context's safety level, so
+the level also decides what the stored token can do.
+
+- **An existing context keeps its level.** `dtctl auth login` on a `readonly`
+  context renews a `readonly` session, and on a `dangerously-unrestricted`
+  context an unrestricted one. Only `--safety-level` changes the level. The
+  default, `readwrite-all`, applies to a context the login creates.
+- **Pin the level in CI.** A job that must end up at a known level passes
+  `--safety-level` on every login, so the result does not depend on what the
+  config held before.
+- **A project config cannot raise the scopes.** In a directory with a
+  `.dtctl.yaml`, dtctl enforces no more for a context than the global config
+  grants its token. The login requests the scopes of that enforced level, also
+  for a new context and when `--safety-level` asks for more, and prints why.
+- **A value that is not a level is refused.** If a context stores, say,
+  `read-only`, the login stops before it requests a token. Repair it with
+  `dtctl ctx set <name> --safety-level <level>`, or pass `--safety-level` to
+  the login.
+- **Shared tokens.** A login replaces the stored token. When another context
+  uses the same token and its level needs scopes the login does not request,
+  the login names that context before the browser opens. Log in to it
+  afterwards, or give one of the two its own `--token-name`. In a project
+  directory a new token name also needs a context in the global config that
+  binds it to the environment.
+
+None of this narrows a client credentials token: see
+[Non-Interactive OAuth](#non-interactive-oauth-cicd).
+
 ## Apply Hooks
 
 Apply hooks run external commands around `dtctl apply`:

@@ -781,6 +781,22 @@ After successful login, you can use dtctl commands without needing to manage API
 If --context and --environment are omitted, the current context is used. This is useful
 for re-authenticating when both the access token and refresh token have expired.
 
+Safety level:
+  A context that already exists keeps its safety level, whether that is below
+  or above the default: renewing a session does not change what the context
+  may do. Pass --safety-level to change it, and pass it in CI when the level
+  must not depend on what the config already holds. A context that stores a
+  value that is not a safety level is refused until it has one
+  (dtctl ctx set <name> --safety-level <level>, or --safety-level here).
+
+  In a directory with a .dtctl.yaml, dtctl enforces no more for a context than
+  the global config grants its token. The login requests the scopes of that
+  level, for a new context and with --safety-level too, and says so.
+
+  A login replaces the stored token. If another context uses the same token
+  and its level needs scopes this login does not request, the login names it
+  before the browser opens.
+
 Token storage:
   By default, OAuth tokens are stored in the OS keyring (macOS Keychain, Windows
   Credential Manager, or Linux Secret Service).
