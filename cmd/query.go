@@ -380,13 +380,17 @@ Examples:
 				}
 			}
 
-			// The command line's segments. A --segment-var aimed at a segment
-			// only the entry references is refused first, with the spelling
-			// that works.
-			if err := scoped.refuseSegmentVars(cmd); err != nil {
+			// The command line's segments. Between resolving them and
+			// binding --segment-var, a binding aimed at a segment only the
+			// entry references is refused with the spelling that works.
+			segments, origIDs, err := querySegmentRefs(cmd, c)
+			if err != nil {
 				return err
 			}
-			segments, err := querySegments(cmd, c)
+			if err := scoped.refuseSegmentVars(cmd, segments, origIDs); err != nil {
+				return err
+			}
+			segments, err = bindSegmentVars(cmd, segments, origIDs)
 			if err != nil {
 				return err
 			}
@@ -678,70 +682,81 @@ default: never for a bare command, auto in agent mode`)
 // maxSegmentsPerQuery is the maximum number of filter segments allowed per query (Dynatrace limit).
 const maxSegmentsPerQuery = 10
 
-// querySegments is the filter segments the command line names: --segment and
-// --segments-file, with the --segment-var bindings applied. A --segment
-// given by name is resolved to its UID, which is the one request it makes.
-func querySegments(cmd *cobra.Command, c *client.Client) ([]exec.FilterSegmentRef, error) {
-	var err error
+// querySegmentRefs is the filter segments the command line names with
+// --segment and --segments-file, before --segment-var is applied. A --segment
+// is resolved to its UID, which is the one request made here; origIDs maps
+// each resolved UID back to what was typed, so --segment-var can name a
+// segment either way.
+func querySegmentRefs(cmd *cobra.Command, c *client.Client) (refs []exec.FilterSegmentRef, origIDs map[string]string, err error) {
+	segmentFlags, _ := cmd.Flags().GetStringArray("segment")
+	segmentsFile, _ := cmd.Flags().GetString("segments-file")
+	if len(segmentFlags) == 0 && segmentsFile == "" {
+		return nil, nil, nil
+	}
+	var flagRefs, fileRefs []exec.FilterSegmentRef
+
+	// Track original (pre-resolution) IDs so --segment-var can
+	// reference segments by the same name/UID the user typed.
+	origIDs = make(map[string]string) // resolved UID -> original flag value
+
+	if len(segmentFlags) > 0 {
+		flagRefs, err = parseSegmentFlags(segmentFlags)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Resolve segment names to UIDs for --segment flag values.
+		// IDs from --segments-file are assumed to be UIDs already (the file
+		// format mirrors the API and should use UIDs).
+		res := resolver.NewResolver(c)
+		for i, ref := range flagRefs {
+			orig := ref.ID
+			resolved, resolveErr := res.ResolveID(resolver.TypeSegment, ref.ID)
+			if resolveErr != nil {
+				return nil, nil, fmt.Errorf("failed to resolve segment %q: %w", ref.ID, resolveErr)
+			}
+			flagRefs[i].ID = resolved
+			origIDs[resolved] = orig
+		}
+	}
+
+	if segmentsFile != "" {
+		fileRefs, err = parseSegmentsFile(cmdContext(cmd), segmentsFile)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return mergeSegmentRefs(flagRefs, fileRefs), origIDs, nil
+}
+
+// bindSegmentVars applies the --segment-var bindings to the segments
+// querySegmentRefs returned, and holds them to what a query takes.
+func bindSegmentVars(cmd *cobra.Command, segments []exec.FilterSegmentRef, origIDs map[string]string) ([]exec.FilterSegmentRef, error) {
 	segmentFlags, _ := cmd.Flags().GetStringArray("segment")
 	segmentsFile, _ := cmd.Flags().GetString("segments-file")
 	segmentVarFlags, _ := cmd.Flags().GetStringArray("segment-var")
-
-	var segments []exec.FilterSegmentRef
-	if len(segmentFlags) > 0 || segmentsFile != "" {
-		var flagRefs, fileRefs []exec.FilterSegmentRef
-
-		// Track original (pre-resolution) IDs so --segment-var can
-		// reference segments by the same name/UID the user typed.
-		origIDs := make(map[string]string) // resolved UID -> original flag value
-
-		if len(segmentFlags) > 0 {
-			flagRefs, err = parseSegmentFlags(segmentFlags)
-			if err != nil {
-				return nil, err
-			}
-
-			// Resolve segment names to UIDs for --segment flag values.
-			// IDs from --segments-file are assumed to be UIDs already (the file
-			// format mirrors the API and should use UIDs).
-			res := resolver.NewResolver(c)
-			for i, ref := range flagRefs {
-				orig := ref.ID
-				resolved, resolveErr := res.ResolveID(resolver.TypeSegment, ref.ID)
-				if resolveErr != nil {
-					return nil, fmt.Errorf("failed to resolve segment %q: %w", ref.ID, resolveErr)
-				}
-				flagRefs[i].ID = resolved
-				origIDs[resolved] = orig
-			}
-		}
-
-		if segmentsFile != "" {
-			fileRefs, err = parseSegmentsFile(cmdContext(cmd), segmentsFile)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		segments = mergeSegmentRefs(flagRefs, fileRefs)
-
-		// Apply --segment-var bindings
+	if len(segmentFlags) == 0 && segmentsFile == "" {
 		if len(segmentVarFlags) > 0 {
-			varMap, varErr := parseSegmentVarFlags(segmentVarFlags)
-			if varErr != nil {
-				return nil, varErr
-			}
-			segments, err = applySegmentVars(segments, varMap, origIDs)
-			if err != nil {
-				return nil, err
-			}
+			return nil, fmt.Errorf("--segment-var requires at least one --segment or --segments-file")
 		}
+		return nil, nil
+	}
 
-		if len(segments) > maxSegmentsPerQuery {
-			return nil, fmt.Errorf("too many segments: %d specified, maximum is %d per query", len(segments), maxSegmentsPerQuery)
+	// Apply --segment-var bindings
+	if len(segmentVarFlags) > 0 {
+		varMap, err := parseSegmentVarFlags(segmentVarFlags)
+		if err != nil {
+			return nil, err
 		}
-	} else if len(segmentVarFlags) > 0 {
-		return nil, fmt.Errorf("--segment-var requires at least one --segment or --segments-file")
+		segments, err = applySegmentVars(segments, varMap, origIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(segments) > maxSegmentsPerQuery {
+		return nil, fmt.Errorf("too many segments: %d specified, maximum is %d per query", len(segments), maxSegmentsPerQuery)
 	}
 	return segments, nil
 }

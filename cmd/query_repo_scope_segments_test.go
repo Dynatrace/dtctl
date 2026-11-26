@@ -333,6 +333,31 @@ func TestQueryRepoScope_SegmentVarForAnEntrysSegment(t *testing.T) {
 		agentError(t, stdout).Message)
 	require.Empty(t, srv.requests(), "nothing is read or sent")
 	require.Empty(t, stderr)
+
+	// Still refused beside a --segment that names another segment.
+	srv.segments["other-2"] = http.StatusOK
+	code, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment", "other-2", "--segment-var", " Ab3dEf9hIjk : environment=staging"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, stderr, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, pass --segment "Ab3dEf9hIjk?environment=staging"`)
+	require.Empty(t, srv.queries())
+}
+
+// --segment takes a name, and --segment-var the id the name resolves to:
+// that works outside a repository, so it works under an entry that lists the
+// same segment. The segment is then the user's, sent once with their value.
+func TestQueryRepoScope_SegmentVarForASegmentGivenByName(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+	srv.segments = map[string]int{"plain-1": http.StatusOK}
+	repo := chdirTestRepo(t, segmentScope)
+	writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
+	chdirSubdir(t, "tools")
+
+	code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment", "a segment", "--segment-var", "plain-1:host=a"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	body, reads := srv.executed(t)
+	require.Contains(t, body, `"filterSegments":[{"id":"plain-1","variables":[{"name":"host","values":["a"]}]}]`)
+	require.Empty(t, reads, "the entry's copy is not read")
+	require.Contains(t, stderr, "repo scope tools: segment plain-1 is also given on the command line; its variables there are used")
 }
 
 // wait query sends the entry's segments on every attempt and reads them
