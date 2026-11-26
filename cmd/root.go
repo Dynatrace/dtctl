@@ -790,7 +790,7 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		return detail
 	}
 
-	// filtersChangedError — a create breakpoint that failed after it set the
+	// filtersChangedError: a create breakpoint that failed after it set the
 	// workspace's filters. Like ScopedQueryError it wraps the failure, which
 	// decides the code; the message says what was changed, and how to see
 	// and restore it comes first among the suggestions.

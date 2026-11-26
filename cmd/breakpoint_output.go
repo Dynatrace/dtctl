@@ -67,7 +67,7 @@ func printWorkspaceName(ctx context.Context, workspace string) {
 }
 
 // inWorkspace ends a message about a change with the workspace it was made
-// in, which depends on where the command ran (see workspaceName).
+// in, which depends on where the command ran (see resolveBreakpointWorkspace).
 func inWorkspace(message, workspace string) string {
 	return message + " (workspace " + workspace + ")"
 }
