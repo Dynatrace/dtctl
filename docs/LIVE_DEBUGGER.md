@@ -397,7 +397,13 @@ Use `-o json` or `-o yaml` when you want automation-friendly output.
 
 Live Debugger mutating commands follow `dtctl` safety conventions:
 
-- filter updates use update safety checks
+- filter updates use update safety checks, whichever command makes them:
+  `create breakpoint --filters` and `create breakpoint --repo-scope` need the
+  update level as well as the create level, because a workspace's filters
+  re-scope every breakpoint in it. A `readwrite-mine` context therefore creates
+  breakpoints in a workspace that has filters and refuses to set them, on
+  create as on `update breakpoint --filters`. (Up to 0.46 `create breakpoint
+  --filters` was checked as a create only and went through there.)
 - breakpoint creation uses create safety checks
 - edit operations use update safety checks
 - delete operations use delete safety checks

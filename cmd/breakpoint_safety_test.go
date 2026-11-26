@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,4 +163,43 @@ func TestCreateBreakpoint_NeedsOnlyTheCreateLevel(t *testing.T) {
 	require.NotZero(t, code)
 	require.Equal(t, "safety_blocked", agentError(t, stdout).Code)
 	require.Empty(t, srv.ops())
+}
+
+// Setting a workspace's filters is an update, whichever command does it:
+// they re-scope every breakpoint in the workspace. A context that may not
+// update refuses a create that would set them, as it refuses update
+// breakpoint --filters, before the entry is read or anything is sent.
+func TestCreateBreakpoint_SettingFiltersNeedsTheUpdateLevel(t *testing.T) {
+	for _, level := range []string{"readonly", "readwrite-mine"} {
+		for _, tc := range []struct {
+			name string
+			args []string
+			// reads are the requests a refused run has sent.
+			reads []string
+		}{
+			{"--filters", []string{"--filters", "k8s.namespace.name:web"}, []string{}},
+			{"--repo-scope", []string{"--repo-scope", "split"}, []string{}},
+			{"the default", nil, []string{"GetOrCreateWorkspaceV2"}},
+		} {
+			for _, yes := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/yes=%t", level, tc.name, yes), func(t *testing.T) {
+					if level == "readonly" && tc.args == nil {
+						t.Skip("refused as a create, see TestCreateBreakpoint_NeedsOnlyTheCreateLevel")
+					}
+					srv := newLiveDebuggerStub(t, level)
+					chdirTestRepo(t, breakpointScope)
+					argv := append([]string{"create", "breakpoint", "A.java:1", "--agent"}, tc.args...)
+					if yes {
+						argv = append(argv, "--yes")
+					}
+
+					code, stdout, stderr := runRepoScoped(argv, RunOptions{})
+					require.NotZero(t, code, stdout)
+					require.Equal(t, "safety_blocked", agentError(t, stdout).Code)
+					require.Equal(t, tc.reads, append([]string{}, srv.ops()...))
+					require.Empty(t, stderr, "a refused run has said nothing about the entry")
+				})
+			}
+		}
+	}
 }

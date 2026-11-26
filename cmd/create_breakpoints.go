@@ -84,22 +84,38 @@ Examples:
 				filterSummary = formatFilters(parsed)
 			}
 
-			// A named entry is a filter source like --filters, resolved before
-			// any network call. It needs the config: the entries are keyed by
-			// the context's environment.
+			// A dry run with no named entry loads its config in the preview,
+			// which never newly requires one. Every other run needs it here:
+			// for the safety level, and because the entries are keyed by the
+			// context's environment.
 			var cfg *config.Config
-			if scopeName != "" {
+			if !dryRun(cmdContext(cmd)) || scopeName != "" {
 				if cfg, err = loadConfig(cmdContext(cmd)); err != nil {
 					return err
 				}
+				if err := checkSafety(cmdContext(cmd), cfg, safety.OperationCreate, safety.OwnershipUnknown); err != nil {
+					return err
+				}
+				// Setting the workspace's filters re-scopes every breakpoint in
+				// it, so it is checked as the update it is, like update
+				// breakpoint --filters, before the entry is read or anything
+				// is sent.
+				if filtersChanged || scopeName != "" {
+					if err := checkSafety(cmdContext(cmd), cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
+						return err
+					}
+				}
+			}
+
+			// A named entry is a filter source like --filters, resolved before
+			// any network call.
+			if scopeName != "" {
 				if filterSets, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
 					return err
 				}
 				filterSummary = filterSetsSummary(filterSets)
 			}
 
-			// The preview writes nothing; checkSafety, which it passes
-			// through before its one read, exempts it.
 			if dryRun(cmdContext(cmd)) {
 				msg, err := previewCreateBreakpoint(cmd, cfg, location, scopeName, filtersChanged, filterSummary)
 				if err != nil {
@@ -108,14 +124,6 @@ Examples:
 				return printBreakpointMessage(cmdContext(cmd), "create", msg)
 			}
 
-			if cfg == nil {
-				if cfg, err = loadConfig(cmdContext(cmd)); err != nil {
-					return err
-				}
-			}
-			if err := checkSafety(cmdContext(cmd), cfg, safety.OperationCreate, safety.OwnershipUnknown); err != nil {
-				return err
-			}
 			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
 			if err != nil {
 				return err

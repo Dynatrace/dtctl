@@ -14,6 +14,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
+	"github.com/Dynatrace/dtctl/pkg/safety"
 )
 
 // A repo scope entry binds the labels a Live Debugger workspace is filtered
@@ -160,6 +161,10 @@ func applyDefaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config, ws br
 		return appliedDefault{}, errors.New(cov.noFilters(location))
 	}
 
+	// Setting the filters is an update, as on every other path that does.
+	if err := checkSafety(ctx, cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
+		return appliedDefault{}, err
+	}
 	cancelled, err := applyWorkspaceFilters(ctx, ws.handler, ws.id, []map[string][]string{cov.set},
 		workspaceFilterChange{creating: true, skipConfirm: skipConfirm, unasked: true})
 	switch {
