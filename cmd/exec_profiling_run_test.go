@@ -34,10 +34,12 @@ const profilingTree = `{"dataRootNodeId":"0","dataNodes":[
 ]}`
 
 // profilingAPI is a code-level analysis endpoint that answers every submit
-// synchronously with one canned status and body, and records the paths hit.
+// synchronously with one canned status and body, and records the paths hit
+// and their queries.
 type profilingAPI struct {
-	mu    sync.Mutex
-	paths []string
+	mu      sync.Mutex
+	paths   []string
+	queries []string
 }
 
 func newProfilingAPI(t *testing.T, status int, body string) *profilingAPI {
@@ -46,6 +48,7 @@ func newProfilingAPI(t *testing.T, status int, body string) *profilingAPI {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.mu.Lock()
 		api.paths = append(api.paths, r.URL.Path)
+		api.queries = append(api.queries, r.URL.RawQuery)
 		api.mu.Unlock()
 		if !strings.HasPrefix(r.URL.Path, "/platform-reserved/codelevelanalysis/") {
 			w.WriteHeader(http.StatusNotFound)
@@ -288,6 +291,28 @@ type profilingEnvelope struct {
 	} `json:"context"`
 }
 
+// profilingErrorEnvelope is the whole agent envelope of a failure that has no
+// HTTP status: decoding refuses any other key.
+type profilingErrorEnvelope struct {
+	OK     bool                   `json:"ok"`
+	Result interface{}            `json:"result"`
+	Error  profilingEnvelopeError `json:"error"`
+}
+
+type profilingEnvelopeError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func decodeProfilingError(t *testing.T, stdout string) profilingErrorEnvelope {
+	t.Helper()
+	var env profilingErrorEnvelope
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	dec.DisallowUnknownFields()
+	require.NoError(t, dec.Decode(&env), stdout)
+	return env
+}
+
 func runProfilingAgent(t *testing.T, args ...string) profilingEnvelope {
 	t.Helper()
 	code, out := runProfilingCmd(t, append(args, "-A", "-o", "json")...)
@@ -480,13 +505,27 @@ func TestExecProfiling_WindowErrors(t *testing.T) {
 		// around, and this was refused as a start in the future.
 		{"end out of range", []string{"--default-timeframe-end=-9223372036854775808"},
 			`invalid --default-timeframe-end: time "-9223372036854775808" is out of range`},
+		// A start so early that end minus start does not fit. The difference
+		// used to wrap around to a short window, and the request was sent.
+		{"longer than a duration can say", []string{"--default-timeframe-start=-9223372036854775808", "--default-timeframe-end", "1700000000000"},
+			"invalid timeframe: the window must not exceed 2h (got 2562047h47m16.854775807s) — narrow it; the window can lie anywhere in the past"},
+		// A now()-relative duration that does not fit either. It used to wrap
+		// around too, to some other instant that was then analysed.
+		{"duration out of range", []string{"--default-timeframe-start", "now()-9999999999999h"},
+			`invalid --default-timeframe-start: invalid duration in "now()-9999999999999h": duration "9999999999999h" is out of range`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			code, stdout, stderr := runProfilingStreams(t, append([]string{"hotspots", testProcess}, tc.args...)...)
+			args := append([]string{"hotspots", testProcess}, tc.args...)
+			code, stdout, stderr := runProfilingStreams(t, args...)
 			require.Equal(t, 1, code)
 			require.Empty(t, stdout)
 			require.Equal(t, "Error: "+tc.want+"\n", stderr)
+
+			code, stdout, stderr = runProfilingStreams(t, append(args, "--agent")...)
+			require.Equal(t, 1, code)
+			require.Empty(t, stderr)
+			require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{Code: "validation_error", Message: tc.want}}, decodeProfilingError(t, stdout))
 		})
 	}
 	require.Empty(t, api.paths, "a refused window must not reach the API")
@@ -609,6 +648,15 @@ func TestExecProfiling_ErrorsPassedThrough(t *testing.T) {
 		require.Equal(t, 1, code)
 		require.Empty(t, stdout)
 		require.Equal(t, "Error: codelevelanalysis: submit: API error (501): boom\n", stderr)
+	})
+	// A submit answers 200, 202 or 204. Another status under 400 is named: it
+	// used to be read as a 202 that carried no token.
+	t.Run("unexpected submit status", func(t *testing.T) {
+		newProfilingAPI(t, http.StatusCreated, `{}`)
+		code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess)
+		require.Equal(t, 1, code)
+		require.Empty(t, stdout)
+		require.Equal(t, "Error: codelevelanalysis: submit: unexpected status 201\n", stderr)
 	})
 	t.Run("ineligible entity", func(t *testing.T) {
 		api := newProfilingAPI(t, http.StatusOK, profilingTree)
