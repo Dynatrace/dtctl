@@ -232,8 +232,9 @@ gets saved; the file is not rewritten to the clamped one.
 
 The clamp is by rank, and the scope sets are not nested (`readonly` requests six
 read scopes `readwrite-mine` does not), so in a project config the login requests
-only scopes that both the declared level and the bound level request
-(`projectLoginScopes`).
+the scopes of the enforced level that the bound level requests too
+(`projectLoginScopes`). Only `readonly` under a `readwrite-mine` binding loses
+scopes that way; a context clamped to the binding's level requests all of it.
 
 A login replaces the stored token, which is keyed by OAuth tier and token name.
 Before the browser opens, the login names every other context on the same tier

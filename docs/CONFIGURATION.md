@@ -356,9 +356,10 @@ the level also decides what the stored token can do.
   scopes that `readwrite-mine` does not (`storage:application.snapshots:read`,
   `storage:user.events:read`, `storage:user.sessions:read`,
   `storage:user.replays:read`, `storage:fieldsets:read`,
-  `storage:fieldset-definitions:read`). When one of the two is declared and the
-  other is what the global config grants, the login leaves those six out and
-  lists them.
+  `storage:fieldset-definitions:read`). A context that declares `readonly` under
+  a `readwrite-mine` grant therefore logs in without those six, and the login
+  lists them. A context clamped down to a `readonly` grant gets all of
+  `readonly`.
 - **A value that is not a level is refused.** If a context stores, say,
   `read-only`, the login stops before it requests a token. Repair it with
   `dtctl ctx set <name> --safety-level <level>`, or pass `--safety-level` to

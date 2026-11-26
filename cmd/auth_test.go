@@ -2200,7 +2200,8 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 // sets of the levels are not nested. readonly requests six read scopes that
 // readwrite-mine does not, so a rank alone lets a project context obtain
 // scopes its token's owner never asked for. In a project directory the login
-// requests only what both the declared level and the global binding request.
+// requests the scopes of the enforced level that the global binding requests
+// too. A context clamped to the binding's own level loses nothing.
 func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.T) {
 	const envURL = "https://abc12345.apps.dynatrace.com"
 	onlyReadonly := []string{
@@ -2211,14 +2212,18 @@ func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.
 		"storage:fieldsets:read",
 		"storage:fieldset-definitions:read",
 	}
-	const notice = `The login requests only scopes that both the declared level (%s) and the global binding of token "prod-oauth" (%s) request. Left out: storage:application.snapshots:read, storage:user.events:read, storage:user.sessions:read, storage:user.replays:read, storage:fieldsets:read, storage:fieldset-definitions:read.`
+	const leftOut = `The login requests only scopes that the global binding of token "prod-oauth" (readwrite-mine) requests too. Left out: storage:application.snapshots:read, storage:user.events:read, storage:user.sessions:read, storage:user.replays:read, storage:fieldsets:read, storage:fieldset-definitions:read.`
 
 	tests := []struct {
 		name            string
 		bound, declared config.SafetyLevel
+		wantScopes      int
+		wantSix         bool // whether the six read scopes are requested
 	}{
-		{"readonly under a readwrite-mine binding", config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly},
-		{"readwrite-mine under a readonly binding", config.SafetyLevelReadOnly, config.SafetyLevelReadWriteMine},
+		// Enforced readonly, bound readwrite-mine: the binding lacks the six.
+		{"readonly under a readwrite-mine binding", config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly, 38, false},
+		// Enforced readonly, bound readonly: the binding requests all of it.
+		{"readwrite-mine under a readonly binding", config.SafetyLevelReadOnly, config.SafetyLevelReadWriteMine, 44, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2233,12 +2238,12 @@ func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.
 			if want := "Safety level: readonly\n"; !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
 			}
-			if got, want := len(oauthConfig.Scopes), 38; got != want {
-				t.Errorf("%d scopes requested, want %d (the 44 of readonly without the six)", got, want)
+			if got := len(oauthConfig.Scopes); got != tt.wantScopes {
+				t.Errorf("%d scopes requested, want %d", got, tt.wantScopes)
 			}
 			for _, s := range onlyReadonly {
-				if slices.Contains(oauthConfig.Scopes, s) {
-					t.Errorf("%s is requested; readwrite-mine does not request it", s)
+				if got := slices.Contains(oauthConfig.Scopes, s); got != tt.wantSix {
+					t.Errorf("%s requested = %v, want %v", s, got, tt.wantSix)
 				}
 			}
 			for _, s := range oauthConfig.Scopes {
@@ -2246,13 +2251,17 @@ func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.
 					t.Errorf("%s is requested; readonly does not request it", s)
 				}
 			}
-			if want := fmt.Sprintf(notice, tt.declared, tt.bound); !strings.Contains(stderr, want) {
-				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			if got := strings.Contains(stderr, leftOut); got == tt.wantSix {
+				t.Errorf("left-out line printed = %v, want %v:\n%s", got, !tt.wantSix, stderr)
 			}
-			// The global context holds the token and needs a scope the login
-			// does not request, in both directions.
-			if want := `Token 'prod-oauth' is also used by "prod" (global config), whose safety level requests scopes this login does not.`; !strings.Contains(stderr, want) {
-				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			if tt.wantSix && strings.Contains(stderr, "Left out") {
+				t.Errorf("stderr reports scopes left out:\n%s", stderr)
+			}
+			// The global readwrite-mine context needs write scopes a readonly
+			// login does not request; the global readonly one loses nothing.
+			warned := strings.Contains(stderr, `Token 'prod-oauth' is also used by "prod" (global config), whose safety level requests scopes this login does not.`)
+			if warned == tt.wantSix {
+				t.Errorf("shared-token warning printed = %v, want %v:\n%s", warned, !tt.wantSix, stderr)
 			}
 		})
 	}
