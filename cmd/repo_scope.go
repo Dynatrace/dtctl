@@ -21,7 +21,7 @@ import (
 
 // repoScopeSince is the release that introduced repo scopes. The command tree
 // and the query flags that apply a scope all declare it.
-const repoScopeSince = "0.47.0"
+const repoScopeSince = "0.48.0"
 
 // The advice the repo-scope commands give in more than one place.
 const (
