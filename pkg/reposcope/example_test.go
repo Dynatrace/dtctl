@@ -41,6 +41,12 @@ func Example() {
 	if !ok {
 		panic("not in a repository")
 	}
+	// Load answers a repository without a file with an empty one, for a
+	// caller that is about to save. A reader asks first.
+	if !loc.Exists {
+		fmt.Println("unscoped: this repository has no scope file")
+		return
+	}
 	file, err := reposcope.Load(loc)
 	must(err)
 	status, err := reposcope.Resolve(reposcope.RepoFS(loc), file, "abc12345.apps.dynatrace.com", loc.RelDir, "")

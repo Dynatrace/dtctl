@@ -28,8 +28,8 @@ import (
 // Secret Service, or Windows Credential Manager — and on macOS can block the
 // run behind a GUI keychain prompt.
 //
-// Individual tests opt back in with optInRepoScope, which restores this
-// default when they finish.
+// Individual tests opt back in with t.Setenv, which restores this default
+// when they finish.
 //
 // It also replaces the interactive browser login. Tests that drive `auth login`
 // past the keyring gate would otherwise open the developer's browser against

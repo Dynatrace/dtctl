@@ -8,8 +8,8 @@ A repo scope links the git repository you are working in to the Dynatrace entiti
 dtctl repo-scope current -A
 ```
 
-- `result.linked: true` — queries from here are already scoped to `result.entry`; `result.filters` shows the exact filter per data object. Query without naming the service.
-- `result.linked: false` — `result.reason` says why: not in a git repository, no scope file, no entry for this environment, or no entry covering this directory (`result.others` lists the entries; select one with `--repo-scope <name>`).
+- `result.code: "linked"` — queries from here are already scoped to `result.entry`; `result.filters` shows the exact filter per data object. Query without naming the service.
+- any other `result.code` — no entry applies, and the code says why: `not_a_repository`, `no_file`, `no_entry_for_environment`, `no_entry` (none covers this directory; `result.others` lists the entries, select one with `--repo-scope <name>`), `ambiguous_entry` (`result.tied` lists the entries that cover it equally; select one the same way), or `invalid_file` (the file does not load; `result.reason` names the line, the user corrects it, and discovering again is not the fix).
 - `result.warning` — the file holds document keys this dtctl does not know (a typo, or a newer dtctl's). The entries apply without them; tell the user. An unknown key inside an entry is different: the file is not applied (`reason` names the key), because it could be a constraint.
 
 ## Link a repository
@@ -26,7 +26,7 @@ dtctl repo-scope current -A
 
    A candidate is a workload first: `clusterUid` and `clusterName`, `namespace`, `workload`, then `serviceName`, then the entity ids. The same namespace and workload in two clusters are two candidates (`workloadShared: true`); ask which cluster the user means, by `clusterName`. `tier: "segment"` means the repository's name is only part of the workload's name (`acme-prod-checkout` for `checkout`): such a candidate is never a `match`, so confirm it is the user's deployment before saving.
 
-3. On the user's confirmation, run the candidate's `setCommand` exactly as given. It already carries the `--cluster-uid` of the cluster the candidate runs in (left out, with a suggestion saying so, when some of its records name no cluster: `withoutCluster`), the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone (on a partial or sampled result only a workload binding is proposed, and ids only when they are the candidate's own); the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
+3. On the user's confirmation, run the candidate's `setCommand` exactly as given. `set` replaces the whole entry of that name: if `dtctl repo-scope describe <name> -A` shows one already (`result.code: "linked"`), show the user its bindings and segments first, because the ones the line does not repeat are removed. It already carries the `--cluster-uid` of the cluster the candidate runs in (left out, with a suggestion saying so, when some of its records name no cluster: `withoutCluster`), the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone (on a partial or sampled result only a workload binding is proposed, and ids only when they are the candidate's own); the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
 
 On `none`: retry with a name the user knows (`--term <name>`) or another directory of a monorepo (`--path services/<dir>`), or ask for the namespace and workload, or the OpenTelemetry `service.name`, and set it by hand:
 

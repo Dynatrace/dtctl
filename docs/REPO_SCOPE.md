@@ -176,9 +176,9 @@ The entry is filed under the current context's environment host. `set` always re
 | `--process-group` | `dt.entity.process_group` on logs | `PROCESS_GROUP-` and 16 hex digits (repeatable) |
 | `--service` | `dt.entity.service` on spans | `SERVICE-` and 16 hex digits (repeatable) |
 | `--segment` | an existing filter segment a query under the entry also sends | the segment's id, with variables inline: `"ID?var=val&var2=val1,val2"` (repeatable, at most 10) |
-| `--path` | the directory the entry covers | relative to the repository root; default the whole repository |
+| `--path` | the directory the entry covers | a directory of the repository, relative to its root, not a symbolic link; saved in the spelling the repository holds it in; default the whole repository |
 
-A cluster is bound by its uid, never its name: the uid is what identifies a cluster, while a name is chosen at deployment and can be changed or given to another cluster. `discover` shows the name beside the uid so you can tell which cluster a line is for. `--cluster-uid` applies to every `--workload` of the command and to no other flag: a `--service-name`, `--process-group` or `--service` beside it still selects records of every cluster (see [the file](#the-file)). An entry whose workloads run in different clusters is written by hand in [the file](#the-file).
+A cluster is bound by its uid, never its name: the uid is what identifies a cluster, while a name is chosen at deployment and can be changed or given to another cluster. `discover` shows the name beside the uid so you can tell which cluster a line is for. `--cluster-uid` applies to every `--workload` of the command and to no other flag: a `--service-name`, `--process-group` or `--service` beside it still selects records of every cluster (see [the file](#the-file)). `--namespace` and `--cluster-uid` are each given once, for every `--workload` of the command; a second value is refused, because the last one would silently rebind the workloads named before it. An entry whose workloads run in different namespaces or clusters is written by hand in [the file](#the-file).
 
 Workload and service-name bindings are the ones to prefer: they are names you already know and they need no entity ids. They select only records that carry those fields, though, and logs do not always: an environment may record a workload's spans with `k8s.workload.name` and its logs with `dt.entity.process_group` alone, and a workload binding then returns no logs. `discover` checks this and proposes `--process-group` beside the workload when the logs need it; for an entry written by hand, [check your scope](#check-your-scope). They are also stable fields in the Dynatrace semantic dictionary, while both id fields are deprecated there (`dt.entity.service` in favour of `dt.smartscape.service`, `dt.entity.process_group` in favour of `dt.process_group.id`). Spans and logs carry the classic ids today, so `--service` and `--process-group` bind them; a later version of the file will move id bindings to their successors, and workload and service-name bindings are unaffected.
 
@@ -261,6 +261,24 @@ An entry's bindings are also the labels a Live Debugger workspace is filtered by
 
 Filter segments do not apply to breakpoints. A workspace is filtered by labels, and has no place to take a segment, so the segments an entry references narrow its queries only, and an entry that holds nothing else sets no workspace filters.
 
+## Reading the answer
+
+`current` and `describe` print a view for a terminal (`-o table`, the default, and `-o wide`) or the value itself (`-o json`, `-o yaml`, `-o toon`, and agent mode); any other format is refused, because the answer is one entry and not rows. `list` prints its rows in `table`, `wide` and `csv`, and the entries themselves in the other formats. As everywhere in dtctl, `--plain` leaves `current` and `describe` as text and turns the table of `list` into JSON.
+
+The value says what kind of answer it is in `code`, so a program need not read `reason`:
+
+| `code` | Meaning |
+|---|---|
+| `linked` | `entry` is the entry asked for. `selected` says how it was chosen: `directory` (it covers the working directory), `build` (it covers it through the Gradle build) or `name` (it was named, and need not cover this directory) |
+| `no_entry` | the environment has entries and none covers the directory; `others` lists them |
+| `ambiguous_entry` | the entries in `tied` cover the directory as closely, so none applies |
+| `no_entry_for_environment` | the file has no entry for this context's environment; `hosts` lists the ones it has |
+| `no_file` | the repository has no scope file |
+| `invalid_file` | the file is there and does not load: it fails validation or cannot be read |
+| `not_a_repository` | the working directory is in no git repository |
+
+`current` exits 0 with every one of these. A command that names an entry (`describe <name>`, `delete <name>`, `--repo-scope <name>`) exits 4 when the environment does not define it, and a value or a file that is refused exits 2.
+
 ## Monorepos
 
 Give each service its own entry with `--path`:
@@ -299,7 +317,7 @@ A query in a context whose environment has no entry runs unscoped and prints not
 
 ```yaml
 # .dtctl-repo-scope.yaml — at the repository root, committed like code.
-apiVersion: v1                        # optional
+apiVersion: v1                        # written by set; a file without it is read as v1
 environments:
   abc12345.apps.dynatrace.com:        # environment host, lowercase
     - name: checkout
@@ -349,6 +367,18 @@ The cluster narrows the workload it is written on, and nothing else. A service n
 
 The file spells its keys in kebab-case (`process-groups`, `service-names`, `cluster-uid`). A result is not the file: what `-o json`, `-o yaml`, `-o toon` and agent mode print uses camelCase (`processGroups`, `serviceNames`, `clusterUid`) in every format, for an entry as for everything around it, so `-o yaml` output is not something to paste into the file.
 
+What a file may hold is bounded, and a file outside the bounds is not applied, like one with a value that fails its format:
+
+- **Plain YAML, one document.** Anchors, aliases and merge keys (`&a`, `*a`, `<<`) are refused, as is a second `---` document, a key given twice, and a key without a value (`environments:` or `service-names:` with nothing after it): each can make a line mean something other than what it shows.
+- **`apiVersion`** is `v1` or absent. Any other version is refused by name with the advice to upgrade dtctl, before anything else in the file is read.
+- **Size.** At most 1 MiB, 64 environments, 1000 entries per environment and 1000 items per list. `set` refuses a change that would take the file past them.
+- **Hosts** are lowercase, without a trailing dot, at most 253 characters. The host is the key because a context name means nothing on another machine, and an environment has one host; a context whose URL ends its host with a dot uses the entries of the host without it.
+- **Paths** are relative to the repository root with forward slashes, clean (no `.`, `..` or trailing slash), printable, without a space at either end, and in composed Unicode (NFC), the spelling `set` writes. Two entries of one environment may not have paths that differ only in case or composition.
+- **Each value once.** A service name, an id, a workload or a segment value listed twice in one entry is refused, and so is a workload listed with a cluster and without one: without one it already selects every cluster.
+- **`variables`** of a segment is a map from name to values, so a variable cannot be given twice. That differs from `--segments-file`, which takes the list the platform's API takes.
+
+`apiVersion: v1` is defined by its first release. A file written by a development build from before that release may hold something the release refuses; correct it by hand, or delete the entry and `set` it again.
+
 Hand edits are fine; `set` and `delete` rewrite the file in a canonical layout without your comments. A key this dtctl does not know is a typo, or one a newer dtctl wrote, and where it sits decides what happens. Beside `apiVersion` and `environments` it is reported by `current`, `describe` and every scoped query, and the entries apply without it; `set` and `delete` refuse to rewrite the file rather than drop it. Inside an entry, on the entry or on one of its workloads or segments, the file is not applied at all, as with a value that fails its format: such a key may be a constraint (`cluster_uid` for `cluster-uid`), and an entry applied without its constraint would select more than the file says while reporting that it was applied. Queries then run unscoped with a warning naming the key, until it is corrected or dtctl is upgraded.
 
 ## Turning it off
@@ -391,3 +421,4 @@ In agent mode `discover` returns its reports as the envelope `result`: a list wi
 - One discovery sends at most 200 values. A unit whose files name more, such as a repository root that holds the manifests of many services, is refused with the count rather than cut down to some of them: run `discover` for one service with `--path`, or link by hand. A string longer than 253 characters is not read as a name.
 - Entity ids per candidate are listed up to 50 per row. `-o json` has the list, whether it was cut (`servicesCapped`) and the count (`serviceCount`): the ids listed when the list is whole, and an estimate of at least 51 when it was cut.
 - `inventory arrivals --scope` does not use the repo scope.
+- `set` and `delete` rewrite the whole file: comments and hand formatting are lost, and of two that run at the same moment the later one wins, so the other's entry is gone although both reported success. `git diff` shows it.

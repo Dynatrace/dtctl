@@ -38,9 +38,11 @@ type Capabilities struct {
 	LongRunningStreams bool
 	// HostWorkingDirectory allows commands to read the process working
 	// directory and walk up from it to the enclosing git repository, which is
-	// where the repo scope file (.dtctl-repo-scope.yaml) lives. The working
-	// directory and that file are host state: a service request has neither,
-	// so an embedded invocation never scopes a query to a repository.
+	// where the repo scope file (.dtctl-repo-scope.yaml) lives: to read that
+	// file, and for `repo-scope set` and `delete` to write and remove it. The
+	// working directory and the file are host state: a service request has
+	// neither, so an embedded invocation never scopes a query to a
+	// repository and never touches a file in one.
 	HostWorkingDirectory bool
 }
 

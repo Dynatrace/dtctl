@@ -16,4 +16,10 @@
 // then dql.InsertFilter (see the package example). Those calls only read.
 // Save is the one function that writes, and Discover the one that queries an
 // environment.
+//
+// Load returns an empty File for a repository that has none, so that a
+// caller which saves can start from it. A caller that reads checks
+// Location.Exists first: resolving the empty File answers "no entry for
+// this environment", which is true and is not what a repository without a
+// file should be told. Status.Code says which answer a Status is.
 package reposcope

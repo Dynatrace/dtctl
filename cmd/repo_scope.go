@@ -44,10 +44,11 @@ func newRepoScopeCmd() *cobra.Command {
 		Long: `Link this git repository to the entities that run its code.
 
 The link is .dtctl-repo-scope.yaml at the repository root: per environment, the
-services, process groups, service names and Kubernetes workloads that run the
-repository's code. Inside a linked repository 'dtctl query', 'wait query' and
-'verify query' narrow 'fetch logs' and 'fetch spans' to them and say so on
-stderr. Commit the file to share it. Nothing here writes to Dynatrace.
+Kubernetes workloads, service names, process groups and services that run the
+repository's code, and the filter segments to query under. Inside a linked
+repository 'dtctl query', 'wait query' and 'verify query' narrow 'fetch logs'
+and 'fetch spans' to them and say so on stderr. Commit the file to share it.
+Nothing here writes to Dynatrace.
 
 When called without a subcommand, lists the entries for the current context's
 environment.
