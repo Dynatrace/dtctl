@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 	"github.com/Dynatrace/dtctl/pkg/safety"
 )
@@ -26,12 +27,10 @@ Set filters in the same step with --filters, or beforehand with
 'dtctl update breakpoint --filters key:value'. Filters are workspace-scoped and
 persist, so once set you can create more breakpoints without repeating them.
 
-In a repository linked with 'dtctl repo-scope', a workspace without filters
-gets the namespace and workload filter of the entry covering the working
-directory, when it has exactly one; --repo-scope <name> sets every filter set
-of a named entry, service names and process groups included, and
---no-repo-scope turns the default off. A workspace that already has filters
-keeps them.
+In a repository linked with 'dtctl repo-scope', --repo-scope <name> sets the
+filters from the named entry: every filter set it renders, service names and
+process groups included. Nothing is set from an entry you did not name: where
+an entry covers the working directory, the command says so and names the flag.
 
 Because filters are workspace-scoped, changing them with --filters also re-scopes
 every existing breakpoint in the workspace. When active breakpoints would be
@@ -131,12 +130,7 @@ Examples:
 			if dryRun(cmdContext(cmd)) {
 				preview.workspace, preview.filterSummary = workspace.name, filterSummary
 				if filterSets == nil {
-					if preview.cov, err = defaultBreakpointFilters(cmd, cfg); err != nil {
-						return err
-					}
-					if preview.cov.set != nil {
-						noteClusterNotSent(currentStderr(cmdContext(cmd)), preview.cov.entry)
-					}
+					preview.cov = coveringBreakpointEntry(cmd, workspace)
 				}
 				return printBreakpointMessage(cmdContext(cmd), "create", preview.message())
 			}
@@ -161,9 +155,10 @@ Examples:
 				}
 			}
 
-			// appliedScope names the entry the filters came from, when one did.
-			appliedScope := scopeName
-			var suggestions []string
+			// Filters are set only from a source the user named. Without one
+			// the workspace must have its own, and hint says afterwards when
+			// they are not the covering entry's.
+			var hint string
 			if filterSets != nil {
 				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, filterSets,
 					workspaceFilterChange{creating: true, skipConfirm: skipConfirm})
@@ -173,20 +168,8 @@ Examples:
 				if cancelled {
 					return printBreakpointMessage(cmdContext(cmd), "create", "Cancelled")
 				}
-			} else {
-				applied, err := applyDefaultBreakpointFilters(cmd, cfg, handler, workspaceID, workspaceResp, location, skipConfirm)
-				if err != nil {
-					return err
-				}
-				if applied.cancelled {
-					return printBreakpointMessage(cmdContext(cmd), "create", "Cancelled")
-				}
-				if applied.scope != "" {
-					appliedScope, filterSummary = applied.scope, applied.summary
-					suggestions = []string{fmt.Sprintf(
-						"the workspace filters were set from the workload filter of repo scope %s, the entry covering the working directory; pass --filters to set them by hand, --%s to turn this default off, or --%s <name> to set every filter set of an entry",
-						applied.scope, noRepoScopeFlag, repoScopeFlag)}
-				}
+			} else if hint, err = unfilteredCreate(cmd, workspace, workspaceResp, location); err != nil {
+				return err
 			}
 
 			createResp, err := handler.CreateBreakpoint(workspaceID, fileName, lineNumber)
@@ -206,19 +189,43 @@ Examples:
 			if id := extractCreatedBreakpointStableID(createResp); id != "" {
 				msg += fmt.Sprintf(" (id: %s)", id)
 			}
-			if appliedScope != "" {
-				msg += fmt.Sprintf("; workspace filters set from repo scope %s: %s", appliedScope, filterSummary)
+			if scopeName != "" {
+				msg += fmt.Sprintf("; workspace filters set from repo scope %s: %s", scopeName, filterSummary)
+			}
+			var suggestions []string
+			if hint != "" {
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
+				suggestions = []string{hint}
 			}
 			return printBreakpointMessageWith(cmdContext(cmd), "create", inWorkspace(msg, workspace.name), suggestions)
 		},
 	}
 	c.Flags().String("filters", "", "workspace filters to set before creating the breakpoint (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
-	addRepoScopeFlags(c, createBreakpointRepoScopeUsage, createBreakpointNoRepoScopeUsage)
+	addRepoScopeFlags(c, createBreakpointRepoScopeUsage, "")
 	c.MarkFlagsMutuallyExclusive(repoScopeFlag, "filters")
 	markPrompts(c, "yes", "dry-run")
 	markLiveDebuggerExperimental(c)
 	return c
+}
+
+// unfilteredCreate is a create at location that names no filters, in the
+// workspace workspaceResp describes: it fails when the workspace has none,
+// and otherwise returns the hint to print once the breakpoint exists.
+func unfilteredCreate(cmd *cobra.Command, workspace breakpointWorkspace, workspaceResp map[string]interface{}, location string) (hint string, err error) {
+	cov := coveringBreakpointEntry(cmd, workspace)
+	hasFilters, err := livedebugger.WorkspaceHasFilters(workspaceResp)
+	if err != nil {
+		return "", err
+	}
+	if !hasFilters {
+		return "", cov.noFilters(workspace.name, location)
+	}
+	current, err := livedebugger.WorkspaceFilterSets(workspaceResp)
+	if err != nil {
+		return "", err
+	}
+	return cov.hint(workspace.name, current), nil
 }
 
 // liveDebuggerHandler is the Live Debugger handler for cfg's current context.
@@ -236,17 +243,17 @@ func liveDebuggerHandler(ctx context.Context, cfg *config.Config) (*livedebugger
 
 // createBreakpointPreview is what a create's dry run knows without asking
 // the environment: the filter source it was given, if any, and otherwise
-// what the repo scope default offers a workspace without filters (cov).
-// workspace is empty when no config loaded.
+// what the scope file says about the working directory (cov). workspace is
+// empty when no config loaded.
 type createBreakpointPreview struct {
 	location, workspace, scopeName string
 	filtersChanged                 bool
 	filterSummary                  string
-	cov                            coveringFilters
+	cov                            coveringEntry
 }
 
 // message words the preview. Whether the workspace has filters is not
-// known, so what depends on it is worded as the condition it is.
+// known, so the breakpoint's need for them is said rather than checked.
 func (p createBreakpointPreview) message() string {
 	const rescopeNote = "(note: changing filters also re-scopes existing breakpoints in the workspace)"
 	filtersOf := "workspace filters"
@@ -258,23 +265,10 @@ func (p createBreakpointPreview) message() string {
 		return fmt.Sprintf("Dry run: would set %s (%s) and create breakpoint at %s %s", filtersOf, p.filterSummary, p.location, rescopeNote)
 	case p.scopeName != "":
 		return fmt.Sprintf("Dry run: would set %s from repo scope %s (%s) and create breakpoint at %s %s", filtersOf, p.scopeName, p.filterSummary, p.location, rescopeNote)
+	case p.workspace == "":
+		return "Dry run: would create breakpoint at " + p.location
 	}
-	msg := "Dry run: would create breakpoint at " + p.location
-	if p.workspace == "" {
-		return msg
-	}
-	msg += " in workspace " + p.workspace
-	switch {
-	case p.cov.set != nil:
-		return msg + fmt.Sprintf("; if it has no filters, would set them from repo scope %s: %s; a workspace that has filters keeps them, and one with active breakpoints asks first",
-			p.cov.name, formatFilters(p.cov.set))
-	case p.cov.name != "":
-		return msg + fmt.Sprintf(", if it has filters: repo scope %s has no single workload filter set (it renders %s), so pass --%s %s for all of them, or --filters key:value",
-			p.cov.name, filterSetsSummary(p.cov.sets), repoScopeFlag, p.cov.name)
-	case p.cov.skipped != "":
-		return msg + fmt.Sprintf(", if it has filters: %s, or pass --filters key:value", p.cov.skipped)
-	}
-	return msg + ", if it has filters: otherwise pass --filters key:value"
+	return "Dry run: would create breakpoint at " + p.location + " in workspace " + p.workspace + p.cov.preview()
 }
 
 func extractCreatedBreakpointStableID(resp map[string]interface{}) string {

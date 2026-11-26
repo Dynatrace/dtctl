@@ -59,7 +59,7 @@ dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20' -A
 
 ## Live Debugger
 
-- `dtctl create breakpoint File.java:N` in a linked repository gives a workspace without filters the covering entry's namespace-and-workload set, in workspace `<repo>/<entry>`; `--repo-scope <name>` sets every set, `--no-repo-scope` turns the default off, and `dtctl repo-scope describe <name> -A` → `result.liveDebuggerFilters` lists the sets. An entry's filter segments do not apply to breakpoints. A workload's cluster is not sent: a workspace set from an entry that binds one includes the same workload in other clusters, and the command says so on stderr; tell the user. Details: [LIVE_DEBUGGER.md](https://github.com/Dynatrace/dtctl/blob/main/docs/LIVE_DEBUGGER.md#filters-from-the-repo-scope).
+- `dtctl create breakpoint File.java:N` in a linked repository works in workspace `<repo>/<entry>` and sets no filters on its own: `--repo-scope <name>` sets every filter set of the named entry (on `update breakpoint` too), a workspace without filters fails with an error naming the covering entry, and `dtctl repo-scope describe <name> -A` → `result.liveDebuggerFilters` lists the sets. An entry's filter segments do not apply to breakpoints. A workload's cluster is not sent: a workspace set from an entry that binds one includes the same workload in other clusters, and the command says so on stderr; tell the user. Details: [LIVE_DEBUGGER.md](https://github.com/Dynatrace/dtctl/blob/main/docs/LIVE_DEBUGGER.md#filters-from-the-repo-scope).
 
 ## Manage
 

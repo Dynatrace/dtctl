@@ -93,7 +93,6 @@ func TestBreakpoint_DeclinedFilterChangeSendsNoWrite(t *testing.T) {
 	}{
 		{"create with --filters", []string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:web"}},
 		{"create with --repo-scope", []string{"create", "breakpoint", "A.java:1", "--repo-scope", "ledger"}},
-		{"create by default", []string{"create", "breakpoint", "A.java:1"}},
 		{"update with --filters", []string{"update", "breakpoint", "--filters", "k8s.namespace.name:web"}},
 		{"update with --repo-scope", []string{"update", "breakpoint", "--repo-scope", "ledger"}},
 	} {
@@ -174,18 +173,12 @@ func TestCreateBreakpoint_SettingFiltersNeedsTheUpdateLevel(t *testing.T) {
 		for _, tc := range []struct {
 			name string
 			args []string
-			// reads are the requests a refused run has sent.
-			reads []string
 		}{
-			{"--filters", []string{"--filters", "k8s.namespace.name:web"}, []string{}},
-			{"--repo-scope", []string{"--repo-scope", "split"}, []string{}},
-			{"the default", nil, []string{"GetOrCreateWorkspaceV2"}},
+			{"--filters", []string{"--filters", "k8s.namespace.name:web"}},
+			{"--repo-scope", []string{"--repo-scope", "split"}},
 		} {
 			for _, yes := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/yes=%t", level, tc.name, yes), func(t *testing.T) {
-					if level == "readonly" && tc.args == nil {
-						t.Skip("refused as a create, see TestCreateBreakpoint_NeedsOnlyTheCreateLevel")
-					}
 					srv := newLiveDebuggerStub(t, level)
 					chdirTestRepo(t, breakpointScope)
 					argv := append([]string{"create", "breakpoint", "A.java:1", "--agent"}, tc.args...)
@@ -196,7 +189,7 @@ func TestCreateBreakpoint_SettingFiltersNeedsTheUpdateLevel(t *testing.T) {
 					code, stdout, stderr := runRepoScoped(argv, RunOptions{})
 					require.NotZero(t, code, stdout)
 					require.Equal(t, "safety_blocked", agentError(t, stdout).Code)
-					require.Equal(t, tc.reads, append([]string{}, srv.ops()...))
+					require.Empty(t, srv.ops())
 					require.Empty(t, stderr, "a refused run has said nothing about the entry")
 				})
 			}

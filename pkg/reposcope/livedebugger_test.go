@@ -108,29 +108,6 @@ func TestLiveDebuggerFilters_NothingToCarry(t *testing.T) {
 	assert.Equal(t, `entry "empty" binds nothing a Live Debugger filter can carry (service.name, k8s.namespace.name with k8s.workload.name, or dt.entity.process_group)`, reason)
 }
 
-// The default a workspace takes is the one workload set; an entry without
-// one, or with one per namespace, has none.
-func TestWorkloadFilterSet(t *testing.T) {
-	render := func(e Entry) []map[string][]string {
-		sets, ok, reason := LiveDebuggerFilters(&e)
-		require.True(t, ok, reason)
-		return sets
-	}
-	set, ok := WorkloadFilterSet(render(Entry{Name: "checkout", ServiceNames: []string{"checkout"},
-		Workloads: []Workload{{Namespace: "payments", Name: "checkout"}}}))
-	require.True(t, ok)
-	assert.Equal(t, map[string][]string{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout"}}, set)
-
-	_, ok = WorkloadFilterSet(render(Entry{Name: "ledger", ServiceNames: []string{"ledger"}}))
-	assert.False(t, ok, "no workload")
-	_, ok = WorkloadFilterSet(render(Entry{Name: "split", Workloads: []Workload{{Namespace: "web", Name: "checkout"}, {Namespace: "payments", Name: "checkout"}}}))
-	assert.False(t, ok, "a workload set per namespace")
-	set, ok = WorkloadFilterSet(render(Entry{Name: "clusters", Workloads: []Workload{
-		{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"}, {Namespace: "payments", Name: "checkout"}}}))
-	require.True(t, ok, "a cluster makes no set of its own")
-	assert.Equal(t, map[string][]string{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout"}}, set)
-}
-
 func TestEntry_BindsCluster(t *testing.T) {
 	assert.True(t, (&Entry{Workloads: []Workload{{Namespace: "payments", Name: "ledger"}, {ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"}}}).BindsCluster())
 	assert.False(t, (&Entry{ServiceNames: []string{"checkout"}, Workloads: []Workload{{Namespace: "payments", Name: "checkout"}}}).BindsCluster())

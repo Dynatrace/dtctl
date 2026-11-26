@@ -405,9 +405,11 @@ instead. What qualifies a line (a binding it leaves out, the reason a
 candidate has none) is in the report's `notes` as well as in `suggestions`,
 so it is not lost where the report is read without the envelope.
 
-When `dtctl create breakpoint` sets workspace filters from the repo scope, a
-suggestion names `--filters` and `--no-repo-scope`, and a workspace that holds
-active breakpoints is refused with an error naming `--yes` (see
+`dtctl create breakpoint` never sets workspace filters from a repo scope entry
+you did not name. Where an entry covers the working directory and the
+workspace holds other filters, a suggestion names the command that applies the
+entry; where the workspace has no filters, the `validation_error` names
+`--repo-scope <entry>` (see
 [Filters from the repo scope](LIVE_DEBUGGER.md#filters-from-the-repo-scope)).
 
 ### Result notes: samples and durations

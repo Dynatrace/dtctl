@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -261,26 +260,8 @@ func TestApplyWorkspaceFilters(t *testing.T) {
 		})
 	}
 
-	t.Run("an unasked change is declined where nobody can confirm it", func(t *testing.T) {
-		stub := &filterOpsStub{activeRules: 1}
-		cancelled, out, err := call(stub, true, workspaceFilterChange{unasked: true}, "y\n")
-		if !errors.Is(err, errFiltersDeclined) || cancelled || !stub.counted || stub.updated || out != "" {
-			t.Fatalf("err=%v cancelled=%t counted=%t updated=%t prompt=%q, want a count, errFiltersDeclined, no update and no prompt", err, cancelled, stub.counted, stub.updated, out)
-		}
-	})
-
-	// Outside plain mode with stdin at its end, as from /dev/null or a closed
-	// pipe, the prompt reads nothing: that is nobody to ask, as in plain mode,
-	// not a user who said no.
-	t.Run("an unasked change at a prompt whose input ended is declined", func(t *testing.T) {
-		stub := &filterOpsStub{activeRules: 1}
-		cancelled, _, err := call(stub, false, workspaceFilterChange{unasked: true}, "")
-		if !errors.Is(err, errFiltersDeclined) || cancelled || stub.updated {
-			t.Fatalf("err=%v cancelled=%t updated=%t, want errFiltersDeclined and no update", err, cancelled, stub.updated)
-		}
-	})
-
-	t.Run("a typed change at a prompt whose input ended is cancelled", func(t *testing.T) {
+	// A prompt whose input ended, as from a closed pipe, has no yes.
+	t.Run("a change at a prompt whose input ended is cancelled", func(t *testing.T) {
 		stub := &filterOpsStub{activeRules: 1}
 		cancelled, _ := run(t, stub, false, workspaceFilterChange{}, "")
 		if !cancelled || stub.updated {
@@ -288,13 +269,6 @@ func TestApplyWorkspaceFilters(t *testing.T) {
 		}
 	})
 
-	t.Run("an unasked change that re-scopes nothing is applied without asking", func(t *testing.T) {
-		stub := &filterOpsStub{}
-		cancelled, out := run(t, stub, true, workspaceFilterChange{unasked: true}, "")
-		if cancelled || !stub.counted || !stub.updated || out != "" {
-			t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want a silent count and an update", cancelled, stub.counted, stub.updated, out)
-		}
-	})
 }
 
 func TestFormatFilters(t *testing.T) {

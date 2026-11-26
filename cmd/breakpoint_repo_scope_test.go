@@ -304,35 +304,124 @@ func filterSetsJSON(sets ...string) string {
 	return "[" + strings.Join(sets, ",") + "]"
 }
 
-const (
-	checkoutApplying = "set the workspace filters from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout (--filters sets them by hand, --no-repo-scope turns this default off)\n"
-	noFiltersError   = "no workspace filters configured"
-)
+// mainNoFilters is the error of a create in a workspace without filters
+// where no repo scope has anything to say, as it was before repo scopes.
+const mainNoFilters = "no workspace filters configured; set filters first with:\n  dtctl update breakpoint --filters key:value\nor pass --filters when creating:\n  dtctl create breakpoint A.java:1 --filters key:value"
 
-// A workspace without filters takes them from the entry covering the working
-// directory, says so on stderr and in the result, and then gets its
-// breakpoint; an agent is told how to opt out.
-func TestCreateBreakpoint_RepoScopeDefault(t *testing.T) {
+// Nothing sets a workspace's filters unless the user names them: in a linked
+// repository a create without --filters or --repo-scope writes no filters,
+// whatever the workspace holds and however it is run, and says in the error
+// that the covering entry exists and how to apply it.
+func TestCreateBreakpoint_SetsNoFiltersUnasked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dir  string
+		want string // formatted with the workspace name
+	}{
+		{"an entry covers the directory", "",
+			"workspace %s has no filters, and a breakpoint needs them: repo scope checkout covers this directory, so pass --repo-scope checkout to set its filters (k8s.namespace.name:payments,k8s.workload.name:checkout), or --filters key:value"},
+		{"an entry with several sets", filepath.Join("services", "regions"),
+			"workspace %s has no filters, and a breakpoint needs them: repo scope regions covers this directory, so pass --repo-scope regions to set its filters (k8s.namespace.name:payments,k8s.workload.name:regions; k8s.namespace.name:web,k8s.workload.name:regions), or --filters key:value"},
+	} {
+		for _, mode := range [][]string{{"--agent"}, {"--agent", "--yes"}, {"--plain"}, {"--no-agent", "--yes"}, {"--no-agent"}} {
+			t.Run(tc.name+" "+strings.Join(mode, " "), func(t *testing.T) {
+				srv := newLiveDebuggerStub(t, "readwrite-all")
+				srv.activeRules = 1
+				repo := filepath.Base(chdirTestRepo(t, breakpointScope))
+				entry := "checkout"
+				if tc.dir != "" {
+					chdirSubdir(t, tc.dir)
+					entry = filepath.Base(tc.dir)
+				}
+
+				code, stdout, stderr := runRepoScoped(append([]string{"create", "breakpoint", "A.java:1"}, mode...), RunOptions{Stdin: strings.NewReader("y\n")})
+				require.Equal(t, 2, code, "stdout: %s\nstderr: %s", stdout, stderr)
+				want := fmt.Sprintf(tc.want, repo+"/"+entry)
+				if mode[0] == "--agent" {
+					detail := agentError(t, stdout)
+					require.Equal(t, "validation_error", detail.Code)
+					require.Equal(t, want, detail.Message)
+				} else {
+					require.Contains(t, stdout+stderr, want)
+				}
+				require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops(), "the workspace is read and nothing is written")
+			})
+		}
+	}
+}
+
+// A workspace that has filters gets its breakpoint and keeps them. When the
+// entry covering the directory renders other filters, one line says so and
+// names the command that applies them: an update, since the breakpoint
+// exists by then. In agent mode the line is a suggestion.
+func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
+	const hint = "workspace %s's filters (k8s.namespace.name:web) are not the ones repo scope checkout, which covers this directory, renders (k8s.namespace.name:payments,k8s.workload.name:checkout); to apply them: dtctl update breakpoint --repo-scope checkout"
+	t.Run("other filters", func(t *testing.T) {
+		srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+		repo := filepath.Base(chdirTestRepo(t, breakpointScope))
+		want := fmt.Sprintf(hint, repo+"/checkout")
+
+		code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, want+"\n", stderr)
+		require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
+		require.Equal(t, "Created breakpoint at A.java:1 (id: dtctl-rule-0001) (workspace "+repo+"/checkout)", breakpointMessage(t, stdout))
+
+		code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, []string{want}, agentEnvelope(t, stdout).Context.Suggestions)
+	})
+	for name, seed := range map[string][]string{
+		"the entry's filters":         {checkoutSetJSON},
+		"every set of the entry":      nil, // seeded below, in the split directory
+		"the hint turned off":         {webSetJSON},
+		"a floor that hides the flag": {webSetJSON},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if seed == nil {
+				seed = []string{splitServiceSet, splitWorkloadSet}
+			}
+			srv := newLiveDebuggerStub(t, "readwrite-all", seed...)
+			chdirTestRepo(t, breakpointScope)
+			var env map[string]string
+			switch name {
+			case "every set of the entry":
+				chdirSubdir(t, filepath.Join("services", "split"))
+			case "the hint turned off":
+				env = map[string]string{noRepoScopeEnv: "1"}
+			case "a floor that hides the flag":
+				writeIsolatedConfig(t, strings.Replace(safetyLevelConfig(srv.URL, "readwrite-all"), "      safety-level:",
+					"      min-stability: stable\n      stability-exceptions: [create breakpoint]\n      safety-level:", 1))
+			}
+
+			code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{Env: env})
+			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+			require.Empty(t, stderr)
+			require.Empty(t, agentEnvelope(t, stdout).Context.Suggestions)
+			require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
+		})
+	}
+}
+
+// Where the hint is off, a workspace without filters fails as it did before
+// repo scopes existed. create breakpoint has no --no-repo-scope: there is no
+// default to turn off.
+func TestCreateBreakpoint_RepoScopeOff(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all")
 	chdirTestRepo(t, breakpointScope)
 
-	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
-	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-	require.Equal(t, checkoutApplying, stderr)
-	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "GetWorkspaceRules", "UpdateWorkspaceV2", "CreateRule"}, srv.ops(),
-		"the default counts the active breakpoints even in a non-interactive run")
-	require.JSONEq(t, filterSetsJSON(checkoutSetJSON), srv.sentFilterSets(t))
-	require.Contains(t, stdout, "Created breakpoint at A.java:1 (id: dtctl-rule-0001); workspace filters set from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout")
+	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{Env: map[string]string{noRepoScopeEnv: "1"}})
+	require.Equal(t, 2, code)
+	require.Equal(t, mainNoFilters, agentError(t, stdout).Message)
+	require.Equal(t, "validation_error", agentError(t, stdout).Code)
+	require.Empty(t, stderr)
+	require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops())
 
-	// A second create finds the filters the first one set, so the envelope
-	// of the default is read from a workspace that has none yet.
-	newLiveDebuggerStub(t, "readwrite-all")
-	code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
-	require.Zero(t, code, stderr)
-	resp := agentEnvelope(t, stdout)
-	require.True(t, resp.OK)
-	require.Contains(t, strings.Join(resp.Context.Suggestions, "\n"), "pass --filters to set them by hand, --no-repo-scope to turn this default off")
-	require.Contains(t, strings.Join(resp.Context.Suggestions, "\n"), "--repo-scope <name>")
+	srv.reset()
+	code, stdout, _ = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent", "--no-repo-scope"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, agentError(t, stdout).Message, "unknown flag --no-repo-scope")
+	require.Empty(t, srv.ops())
 }
 
 // A workspace is not narrowed by cluster: the label is not sent, since
@@ -350,192 +439,43 @@ func TestBreakpoint_RepoScopeClusterIsNotSent(t *testing.T) {
 `
 	const note = "repo scope checkout binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters\n"
 	for _, tc := range []struct {
-		name   string
-		args   []string
-		stderr string
-		sends  bool
+		name  string
+		args  []string
+		sends bool
 	}{
-		{"create by default", []string{"create", "breakpoint", "A.java:1"}, checkoutApplying + note, true},
-		{"create by default, dry run", []string{"create", "breakpoint", "A.java:1", "--dry-run"}, note, false},
-		{"create named", []string{"create", "breakpoint", "A.java:1", "--repo-scope", "checkout", "--yes"}, note, true},
-		{"create named, dry run", []string{"create", "breakpoint", "A.java:1", "--repo-scope", "checkout", "--dry-run"}, note, false},
-		{"update named", []string{"update", "breakpoint", "--repo-scope", "checkout", "--yes"}, note, true},
-		{"update named, dry run", []string{"update", "breakpoint", "--repo-scope", "checkout", "--dry-run"}, note, false},
+		{"create named", []string{"create", "breakpoint", "A.java:1", "--repo-scope", "checkout", "--yes"}, true},
+		{"create named, dry run", []string{"create", "breakpoint", "A.java:1", "--repo-scope", "checkout", "--dry-run"}, false},
+		{"update named", []string{"update", "breakpoint", "--repo-scope", "checkout", "--yes"}, true},
+		{"update named, dry run", []string{"update", "breakpoint", "--repo-scope", "checkout", "--dry-run"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newLiveDebuggerStub(t, "readwrite-all")
 			chdirTestRepo(t, scope)
 			code, stdout, stderr := runRepoScoped(append(tc.args, "--plain"), RunOptions{})
 			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-			require.Equal(t, tc.stderr, stderr)
+			require.Equal(t, note, stderr)
 			require.NotContains(t, stdout, "k8s.cluster.uid")
 			if tc.sends {
 				require.JSONEq(t, filterSetsJSON(checkoutSetJSON), srv.sentFilterSets(t))
 			} else {
-				require.NotContains(t, srv.ops(), "UpdateWorkspaceV2")
+				require.Empty(t, srv.ops())
 			}
 		})
 	}
-
-	// An entry without a cluster has nothing to say.
-	newLiveDebuggerStub(t, "readwrite-all")
-	chdirTestRepo(t, breakpointScope)
-	code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
-	require.Zero(t, code, stderr)
-	require.Equal(t, checkoutApplying, stderr)
 }
 
-// A workspace without filters holds no breakpoints, so the default asks
-// nothing, even where it could: interactive, with nothing on stdin.
-func TestCreateBreakpoint_RepoScopeDefaultAsksOnlyWhenItRescopes(t *testing.T) {
+// A named entry sends every set it renders, and says that its service ids
+// are not among them.
+func TestCreateBreakpoint_NamedRepoScopeSendsEverySet(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all")
 	chdirTestRepo(t, breakpointScope)
 
-	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--no-agent"}, RunOptions{Stdin: strings.NewReader("")})
-	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-	require.NotContains(t, stdout, "Continue?")
-	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "GetWorkspaceRules", "UpdateWorkspaceV2", "CreateRule"}, srv.ops())
-
-	srv = newLiveDebuggerStub(t, "readwrite-all")
-	srv.activeRules = 1
-	code, stdout, _ = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--no-agent"}, RunOptions{Stdin: strings.NewReader("y\n")})
-	require.Zero(t, code)
-	require.Contains(t, stdout, filterChangeConfirmMessage(1, true))
-	require.Contains(t, srv.ops(), "UpdateWorkspaceV2")
-}
-
-// A prompt whose input ended asked nobody, so the run fails as in plain mode,
-// naming --yes, rather than reporting a cancel nobody chose.
-func TestCreateBreakpoint_RepoScopeDefaultAtAClosedStdin(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all")
-	srv.activeRules = 2
-	chdirTestRepo(t, breakpointScope)
-
-	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--no-agent"}, RunOptions{Stdin: strings.NewReader("")})
-	require.NotZero(t, code, "stdout: %s", stdout)
-	require.Contains(t, stderr, "pass --yes")
-	require.NotContains(t, stdout, "Cancelled")
-	require.NotContains(t, stderr, "set the workspace filters from repo scope", "nothing was set")
-	require.NotContains(t, srv.ops(), "UpdateWorkspaceV2")
-}
-
-// The default changes filters nobody typed, so a workspace that holds active
-// breakpoints but no filters is never re-scoped without a confirmation, and a
-// non-interactive run, which cannot ask, refuses without a prompt on stdout.
-func TestCreateBreakpoint_RepoScopeDefaultNeverRescopesUnasked(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all")
-	srv.activeRules = 2
-	chdirTestRepo(t, breakpointScope)
-
-	code, stdout, _ := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
-	require.NotZero(t, code)
-	require.Contains(t, agentError(t, stdout).Message, "pass --yes")
-	require.NotContains(t, srv.ops(), "UpdateWorkspaceV2")
-
-	srv.reset()
-	code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--yes"}, RunOptions{})
+	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--repo-scope", "split"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "UpdateWorkspaceV2", "CreateRule"}, srv.ops())
-}
-
-func TestCreateBreakpoint_RepoScopeOff(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		args []string
-		env  map[string]string
-	}{
-		{"--no-repo-scope", []string{"--no-repo-scope"}, nil},
-		{"DTCTL_NO_REPO_SCOPE=1", nil, map[string]string{noRepoScopeEnv: "1"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := newLiveDebuggerStub(t, "readwrite-all")
-			chdirTestRepo(t, breakpointScope)
-
-			argv := append([]string{"create", "breakpoint", "A.java:1", "--agent"}, tc.args...)
-			code, stdout, stderr := runRepoScoped(argv, RunOptions{Env: tc.env})
-			require.NotZero(t, code)
-			require.True(t, strings.HasPrefix(agentError(t, stdout).Message, noFiltersError), stdout)
-			require.Empty(t, stderr)
-			require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops())
-		})
-	}
-
-	// "Use what I typed" does not conflict with typed filters.
-	srv := newLiveDebuggerStub(t, "readwrite-all")
-	chdirTestRepo(t, breakpointScope)
-	code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--no-repo-scope", "--filters", "k8s.namespace.name:web"}, RunOptions{})
-	require.Zero(t, code, stderr)
-	require.JSONEq(t, filterSetsJSON(webSetJSON), srv.sentFilterSets(t))
-}
-
-// A workspace that already has filters keeps them. When the covering entry
-// would set different ones, one warning says how to apply it.
-func TestCreateBreakpoint_RepoScopeLeavesExistingFilters(t *testing.T) {
-	t.Run("different", func(t *testing.T) {
-		srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
-		chdirTestRepo(t, breakpointScope)
-
-		code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
-		require.Zero(t, code, stderr)
-		require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
-		require.Contains(t, stderr, "the workspace already has filters (k8s.namespace.name:web); repo scope checkout would set k8s.namespace.name:payments,k8s.workload.name:checkout; pass --repo-scope checkout to apply it")
-	})
-	t.Run("the same", func(t *testing.T) {
-		srv := newLiveDebuggerStub(t, "readwrite-all", checkoutSetJSON)
-		chdirTestRepo(t, breakpointScope)
-
-		code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
-		require.Zero(t, code, stderr)
-		require.Empty(t, stderr)
-		require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
-	})
-}
-
-// The entry discovery proposes binds a workload and a service name. The
-// default sends only its workload set, says what it left out, and the whole
-// entry takes --repo-scope, which says that its service id is not sent.
-func TestCreateBreakpoint_RepoScopeDefaultSendsTheWorkloadSet(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all")
-	chdirTestRepo(t, breakpointScope)
-	chdirSubdir(t, filepath.Join("services", "split"))
-
-	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
-	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-	require.JSONEq(t, filterSetsJSON(splitWorkloadSet), srv.sentFilterSets(t))
-	require.Contains(t, stderr, "repo scope split's other filter sets (service.name:split) are set only with --repo-scope split")
-	require.Contains(t, stdout, "workspace filters set from repo scope split: k8s.namespace.name:payments,k8s.workload.name:split")
-
-	srv.reset()
-	code, _, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--repo-scope", "split"}, RunOptions{})
-	require.Zero(t, code, stderr)
 	require.JSONEq(t, filterSetsJSON(splitWorkloadSet, splitServiceSet), srv.sentFilterSets(t))
 	require.Equal(t, "repo scope split's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label\n", stderr)
-}
-
-// A workspace that holds every set of the covering entry, from an earlier
-// --repo-scope, is not warned about.
-func TestCreateBreakpoint_RepoScopeKnowsTheWholeEntry(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all", splitServiceSet, splitWorkloadSet)
-	chdirTestRepo(t, breakpointScope)
-	chdirSubdir(t, filepath.Join("services", "split"))
-
-	code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
-	require.Zero(t, code, stderr)
-	require.Empty(t, stderr)
-	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
-}
-
-// An entry with a workload set per namespace has no one default set, so the
-// caller has to ask for them.
-func TestCreateBreakpoint_RepoScopeSeveralWorkloadSets(t *testing.T) {
-	srv := newLiveDebuggerStub(t, "readwrite-all")
-	chdirTestRepo(t, breakpointScope)
-	chdirSubdir(t, filepath.Join("services", "regions"))
-
-	code, stdout, _ := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
-	require.NotZero(t, code)
-	require.Contains(t, agentError(t, stdout).Message, "repo scope regions has no single workload filter set (it renders k8s.namespace.name:payments,k8s.workload.name:regions; k8s.namespace.name:web,k8s.workload.name:regions): pass --repo-scope regions for all of them")
-	require.NotContains(t, srv.ops(), "UpdateWorkspaceV2")
+	require.Contains(t, stdout, "workspace filters set from repo scope split: k8s.namespace.name:payments,k8s.workload.name:split; service.name:split")
 }
 
 func TestBreakpoint_NamedRepoScope(t *testing.T) {
@@ -584,30 +524,30 @@ func TestBreakpoint_NamedRepoScope(t *testing.T) {
 	}
 }
 
-// A scope file that offers no entry here says why in the error, ahead of
-// --filters, rather than in a warning beside it.
-func TestCreateBreakpoint_RepoScopeSkipped(t *testing.T) {
+// A linked repository whose entries do not cover the directory says so in
+// the error, ahead of --filters.
+func TestCreateBreakpoint_RepoScopeCoversNothingHere(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all")
-	chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: ledger\n      path: services/ledger\n      service-names: [ledger]\n")
+	repo := filepath.Base(chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: ledger\n      path: services/ledger\n      service-names: [ledger]\n"))
 	chdirSubdir(t, "docs")
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Equal(t, `no workspace filters configured: no entry covers "docs"; entries here cover services/ledger; pick one with --repo-scope <name>, or pass --filters key:value`,
+	require.Equal(t, "workspace "+repo+` has no filters, and a breakpoint needs them: no entry covers "docs"; entries here cover services/ledger; pick one with --repo-scope <name>, or pass --filters key:value`,
 		agentError(t, stdout).Message)
 	require.Empty(t, stderr)
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops())
 }
 
-// Outside a git repository the default is off and the command is what it was;
-// a named entry is an error, since there is no file to name it in.
+// Outside a git repository the command is what it was; a named entry is an
+// error, since there is no file to name it in.
 func TestCreateBreakpoint_OutsideARepository(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all")
 	t.Chdir(t.TempDir())
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
 	require.NotZero(t, code)
-	require.True(t, strings.HasPrefix(agentError(t, stdout).Message, noFiltersError), stdout)
+	require.Equal(t, mainNoFilters, agentError(t, stdout).Message)
 	require.Empty(t, stderr)
 
 	srv.reset()
@@ -618,22 +558,22 @@ func TestCreateBreakpoint_OutsideARepository(t *testing.T) {
 }
 
 // A dry run sends nothing, whatever the workspace holds, and needs no safety
-// level. Without a filter source it says what the default does to a
-// workspace without filters, as a condition it has not checked.
+// level. Without a filter source it cannot know whether the workspace has
+// filters, so it says that the breakpoint needs them and what would set
+// them.
 func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
-	const keeps = "; a workspace that has filters keeps them, and one with active breakpoints asks first"
 	for _, tc := range []struct {
 		name string
 		dir  string
-		args []string
+		env  map[string]string
 		want string // formatted with the workspace name
 	}{
-		{"an entry with one workload set", "", nil,
-			"Dry run: would create breakpoint at A.java:1 in workspace %s; if it has no filters, would set them from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout" + keeps},
-		{"no single set", filepath.Join("services", "regions"), nil,
-			"Dry run: would create breakpoint at A.java:1 in workspace %s, if it has filters: repo scope regions has no single workload filter set (it renders k8s.namespace.name:payments,k8s.workload.name:regions; k8s.namespace.name:web,k8s.workload.name:regions), so pass --repo-scope regions for all of them, or --filters key:value"},
-		{"the default turned off", "", []string{"--no-repo-scope"},
-			"Dry run: would create breakpoint at A.java:1 in workspace %s, if it has filters: otherwise pass --filters key:value"},
+		{"an entry covers the directory", "", nil,
+			"Dry run: would create breakpoint at A.java:1 in workspace %s, which must have filters; repo scope checkout covers this directory, and --repo-scope checkout sets its filters (k8s.namespace.name:payments,k8s.workload.name:checkout)"},
+		{"several sets", filepath.Join("services", "regions"), nil,
+			"Dry run: would create breakpoint at A.java:1 in workspace %s, which must have filters; repo scope regions covers this directory, and --repo-scope regions sets its filters (k8s.namespace.name:payments,k8s.workload.name:regions; k8s.namespace.name:web,k8s.workload.name:regions)"},
+		{"the hint turned off", "", map[string]string{noRepoScopeEnv: "1"},
+			"Dry run: would create breakpoint at A.java:1 in workspace %s, which must have filters; --filters key:value sets them"},
 	} {
 		for _, filters := range [][]string{nil, {webSetJSON}} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -645,7 +585,7 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 					chdirSubdir(t, tc.dir)
 					entry = filepath.Base(tc.dir)
 				}
-				code, stdout, stderr := runRepoScoped(append([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, tc.args...), RunOptions{})
+				code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, RunOptions{Env: tc.env})
 				require.Zero(t, code, stderr)
 				require.Equal(t, fmt.Sprintf(tc.want, repo+"/"+entry), breakpointMessage(t, stdout))
 				require.Empty(t, srv.ops(), "a preview sends nothing: asking for a workspace may create it")
@@ -658,7 +598,7 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 		t.Chdir(t.TempDir())
 		code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, RunOptions{})
 		require.Zero(t, code, stderr)
-		require.Contains(t, breakpointMessage(t, stdout), ", if it has filters: otherwise pass --filters key:value")
+		require.Contains(t, breakpointMessage(t, stdout), ", which must have filters; --filters key:value sets them")
 		require.Empty(t, srv.ops())
 	})
 
@@ -699,9 +639,8 @@ func breakpointMessage(t *testing.T, stdout string) string {
 	return out.Message
 }
 
-// Naming is not scoping: opted out of the repo scope or not, every breakpoint
-// command uses the workspace named after the repository and the entry
-// covering the working directory, and says which.
+// Every breakpoint command uses the workspace named after the repository and
+// the entry covering the working directory, and says which.
 func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all", ledgerSetJSON)
 	root := chdirTestRepo(t, breakpointScope)
@@ -716,7 +655,6 @@ func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
 		stderr string
 	}{
 		{"create", []string{"create", "breakpoint", "A.java:1", "--plain"}, "(workspace storefront/ledger)", ""},
-		{"create --no-repo-scope", []string{"create", "breakpoint", "A.java:1", "--plain", "--no-repo-scope"}, "(workspace storefront/ledger)", ""},
 		{"update", []string{"update", "breakpoint", "--plain", "--filters", "service.name:ledger", "--yes"}, "(workspace storefront/ledger)", ""},
 		{"get", []string{"get", "breakpoints", "--no-agent"}, "", "workspace: storefront/ledger\n"},
 		{"get --plain", []string{"get", "breakpoints", "--no-agent", "--plain"}, "", "workspace: storefront/ledger\n"},
@@ -804,7 +742,6 @@ func TestBreakpointRepoScopeFlagsAreExperimental(t *testing.T) {
 		flag string
 	}{
 		{"create breakpoint", repoScopeFlag},
-		{"create breakpoint", noRepoScopeFlag},
 		{"update breakpoint", repoScopeFlag},
 	} {
 		c, _, err := rootCmd.Find(strings.Fields(tc.cmd))

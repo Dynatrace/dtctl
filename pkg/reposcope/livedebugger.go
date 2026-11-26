@@ -76,24 +76,6 @@ func LiveDebuggerFilters(e *Entry) (sets []map[string][]string, ok bool, reason 
 	return sets, true, ""
 }
 
-// WorkloadFilterSet is the one namespace-and-workload set among sets, the
-// rendering of LiveDebuggerFilters: the set a workspace can take from an
-// entry without the caller asking for the rest. ok is false when sets holds
-// no such set, because the entry binds no workload, or several, because its
-// workloads run in more than one namespace.
-func WorkloadFilterSet(sets []map[string][]string) (set map[string][]string, ok bool) {
-	var found []map[string][]string
-	for _, s := range sets {
-		if _, workload := s[fieldWorkload]; workload {
-			found = append(found, s)
-		}
-	}
-	if len(found) != 1 {
-		return nil, false
-	}
-	return found[0], true
-}
-
 // sortedCopy returns values sorted, without duplicates, leaving the entry's
 // own slice as it was.
 func sortedCopy(values []string) []string {

@@ -257,7 +257,7 @@ dtctl query 'fetch logs | summarize count(), by:{k8s.workload.name}' --no-repo-s
 
 ## 4. Live Debugger
 
-An entry's bindings are also the labels a Live Debugger workspace is filtered by: `dtctl create breakpoint` gives a workspace without filters the covering entry's namespace-and-workload set, and `--repo-scope <name>` on `create breakpoint` and `update breakpoint` sets every set of a named entry, in workspace `<repo>/<entry>`. [Filters from the repo scope](LIVE_DEBUGGER.md#filters-from-the-repo-scope) says what is sent, what is verified, and how to turn the default off.
+An entry's bindings are also the labels a Live Debugger workspace is filtered by: `--repo-scope <name>` on `create breakpoint` and `update breakpoint` sets every filter set of the named entry, in workspace `<repo>/<name>`. Nothing is set from an entry you did not name: `dtctl create breakpoint` only says that an entry covers the working directory and how to apply it. [Filters from the repo scope](LIVE_DEBUGGER.md#filters-from-the-repo-scope) says what is sent and what is verified.
 
 Filter segments do not apply to breakpoints. A workspace is filtered by labels, and has no place to take a segment, so the segments an entry references narrow its queries only, and an entry that holds nothing else sets no workspace filters.
 
