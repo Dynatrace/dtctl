@@ -470,7 +470,7 @@ func entityQuery(object, purpose string, values []string) Query {
 
 // Verdict is how certain discovery is, per kind of binding and overall:
 // match is exactly one exact-tier value, ambiguous is several (or a partial
-// result), none is none.
+// or sampled result), none is none.
 type Verdict string
 
 const (
@@ -498,8 +498,9 @@ type DiscoveryReport struct {
 	// Partial is a query that failed, timed out, was truncated or never ran
 	// because the run was cancelled, a sample that matched nothing, or a
 	// repository too large to read whole (Plan.Truncated), so a "none" is
-	// not evidence that nothing runs this code. A sample that
-	// matched is complete at the floor its note states.
+	// not evidence that nothing runs this code. A sample that matched is
+	// complete at the floor its note states, so it is not partial, but it
+	// is never a match either: see SampledRecords.
 	Partial bool `json:"partial,omitempty" yaml:"partial,omitempty"`
 }
 

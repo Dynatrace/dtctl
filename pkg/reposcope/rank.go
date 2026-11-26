@@ -670,7 +670,9 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.tier, c.cluster, c.sources, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, "", nil, "", 0, false, false
 		r.Candidates[i] = *c
 	}
-	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial)
+	// A sample can have missed a second candidate, as its note says, so what
+	// it found is no more a match than a partial result is.
+	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial || r.SampledRecords())
 }
 
 // sharedServiceNames is the service names more than one candidate carries.
@@ -802,8 +804,9 @@ func VerdictLabel(kind string) string {
 	return kind
 }
 
-// verdicts decides each kind and the whole. A partial result is never a
-// match: what was not seen could be a second candidate. A kind is tallied by
+// verdicts decides each kind and the whole. A result that is partial, or that
+// a sample read, is never a match: what was not seen could be a second
+// candidate. A kind is tallied by
 // its count where it has one, so a candidate listing one of its 200 service
 // ids is 200 services, not one.
 func verdicts(candidates []Candidate, partial bool) (Verdict, map[string]Verdict) {

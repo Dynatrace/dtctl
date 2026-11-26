@@ -257,14 +257,17 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 
 // repoScopeDoubt says, after a verdict that is not a match, what stands in
 // the way of one. With several candidates it is their number. With one it is
-// not: that candidate's name matched only in part, or the result is partial
-// and a query that did not answer could have found another.
+// not: that candidate's name matched only in part, the result is partial and
+// a query that did not answer could have found another, or a sample read the
+// records and could have missed another.
 func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 	switch {
 	case len(r.Candidates) != 1:
 		return fmt.Sprintf(" (candidates: %d)", len(r.Candidates))
 	case r.Partial:
 		return ": one candidate, but the result is partial (see the notes)"
+	case r.SampledRecords():
+		return ": one candidate, but the records were sampled, which can miss another (see the notes)"
 	}
 	return fmt.Sprintf(": one candidate, matched by a %s of its name rather than the whole of it", r.Candidates[0].Tier)
 }

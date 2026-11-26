@@ -1016,7 +1016,12 @@ func TestDiscover_ScanCapFallsBackToSampling(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Len(t, runner.sent, 3, "the first rung that completes ends the walk")
-	assert.Equal(t, VerdictMatch, r.Verdict)
+	// A sample can have missed a second candidate, as its note says, so what
+	// it found is never a match, for any kind of binding.
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Equal(t, map[string]Verdict{
+		"service": VerdictAmbiguous, "processGroup": VerdictAmbiguous, "workload": VerdictAmbiguous, "serviceName": VerdictAmbiguous,
+	}, r.Verdicts)
 	assert.False(t, r.Partial)
 	assert.True(t, r.Queries[0].Truncated)
 	assert.Equal(t, causeTruncated, r.Queries[0].Cause)
@@ -1094,7 +1099,7 @@ func TestDiscover_SampledRungCollectedArrayCapIsNotACutPage(t *testing.T) {
 	assert.Len(t, runner.sent, 3, "the rung answered, so the walk ended there")
 	assert.False(t, r.Queries[1].Truncated)
 	assert.Empty(t, r.Queries[1].Cause)
-	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict, "sampled")
 	assert.False(t, r.Partial)
 	require.Len(t, r.Candidates, 1)
 	assert.True(t, r.Candidates[0].Sampled)

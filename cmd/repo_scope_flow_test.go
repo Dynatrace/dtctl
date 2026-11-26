@@ -435,22 +435,23 @@ func TestRepoScopeDiscoverClusterValueTheFileRefuses(t *testing.T) {
 	}
 }
 
-// A sampled match is complete at its floor, but a quieter candidate sharing
-// its service name could sit below it: the line binds the workload alone,
-// and the floor is said to the agent too. A sampled candidate with no
-// workload gets no line, and a note says why.
+// A sampled answer is complete at its floor, but a quieter candidate could
+// sit below it: the verdict is ambiguous, the line binds the workload alone,
+// since that candidate could share the service name, and the floor is said
+// to the agent too. A sampled candidate with no workload gets no line, and a
+// note says why.
 func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) {
 	srv := newDQLRecorder(t, "readonly", cappedThenSampled(sampledCheckoutRows))
 	chdirCheckoutRepo(t)
 
 	report, suggestions := discoverReport(t)
 	require.Len(t, srv.queries(), 4, "each record query and its first rung")
-	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
 	require.False(t, report.Partial)
 	require.True(t, report.Candidates[0].Sampled)
 	const line = "dtctl repo-scope set checkout --namespace payments --workload checkout"
 	require.Equal(t, line, report.Candidates[0].SetCommand)
-	require.Equal(t, "confirm with the user, then: "+line, suggestions[0])
+	require.Equal(t, "show the user the candidates and ask which runs this code, then run its setCommand", suggestions[0])
 	var sampling []string
 	for _, n := range report.Notes {
 		if strings.Contains(n, "so they were sampled 1-in-") {
@@ -458,7 +459,7 @@ func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) 
 			require.NotContains(t, suggestions, n, "the notes carry it once")
 		}
 	}
-	require.Len(t, sampling, 2, "the floor is in the notes on a match too")
+	require.Len(t, sampling, 2)
 
 	newDQLRecorder(t, "readonly", cappedThenSampled(map[string]string{
 		"spans": `{"service.name":"checkout","records":"12","serviceCount":"1","services":["` + flowService + `"]}`,
