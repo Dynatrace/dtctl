@@ -766,7 +766,14 @@ func TestAuthLogout_RemoveContext_DoesNotPersistEnvOverride(t *testing.T) {
 	viper.Reset()
 	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 	t.Setenv(config.EnvTokenStorage, "file")
-	t.Setenv("XDG_DATA_HOME", t.TempDir()) // keep the file token store off the real one
+	// The logout deletes "doomed-oauth" from the file token store, which must
+	// be this test's own directory. Setting the variable alone does not move
+	// it: the xdg package keeps the paths it read earlier.
+	dataHome := t.TempDir()
+	setXDGHome(t, "XDG_DATA_HOME", dataHome)
+	if dir := config.DataDir(); !strings.HasPrefix(dir, dataHome) {
+		t.Fatalf("the file token store is in %s, outside the test's directory %s", dir, dataHome)
+	}
 
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.NewConfig()
