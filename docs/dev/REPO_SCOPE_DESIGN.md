@@ -73,7 +73,7 @@ Entries are filed under the environment host (`urls.Host` of the context's envir
 
 ### Bindings, never DQL
 
-The file holds structured bindings (service ids, process group ids, service names, namespace/workload pairs), and dtctl renders the filter from them. The alternative, a DQL snippet per entry, is the obvious design and the wrong one: the file arrives with every clone, so it is untrusted input to every query run in the checkout. A snippet could widen a query (`or true`), redirect it, or inject text. Rendered bindings can only narrow: every value is held to its format (`^SERVICE-[0-9A-F]{16}$`, DNS labels for namespaces, DNS subdomains for workloads, printable service names without `"` or `\`) and quoted with `dql.Quote`, and the rendered expression is a disjunction of equality and membership tests on a fixed set of fields.
+The file holds structured bindings (namespace/workload pairs, service names, process group ids, service ids), and dtctl renders the filter from them. The alternative, a DQL snippet per entry, is the obvious design and the wrong one: the file arrives with every clone, so it is untrusted input to every query run in the checkout. A snippet could widen a query (`or true`), redirect it, or inject text. Rendered bindings can only narrow: every value is held to its format (`^SERVICE-[0-9A-F]{16}$`, DNS labels for namespaces, DNS subdomains for workloads, printable service names without `"` or `\`) and quoted with `dql.Quote`, and the rendered expression is a disjunction of equality and membership tests on a fixed set of fields.
 
 | Data object | `workloads` | `service-names` | `process-groups` | `services` |
 |---|---|---|---|---|

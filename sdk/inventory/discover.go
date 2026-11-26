@@ -43,8 +43,10 @@ type RunResult struct {
 	// refused object's count by that whole factor.
 	Sampled bool
 	// ScannedBytes is how much the query read, as the environment reports
-	// it; 0 when it does not. A caller choosing its next query predicts that
-	// one's scan from it.
+	// it; 0 when it does not. So 0 means two things, "read nothing" and "not
+	// reported", and a caller cannot tell them apart: it may predict its
+	// next query's scan from a value above 0, and must take 0 as no
+	// prediction rather than as a query that costs nothing.
 	ScannedBytes int64
 }
 

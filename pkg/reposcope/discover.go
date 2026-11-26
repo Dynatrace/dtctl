@@ -531,7 +531,7 @@ type DiscoveryReport struct {
 	Dir     string  `json:"dir" yaml:"dir"`
 	Unit    string  `json:"unit" yaml:"unit"`
 	Verdict Verdict `json:"verdict" yaml:"verdict"`
-	// Verdicts is keyed by service, processGroup, workload and serviceName.
+	// Verdicts is keyed by workload, serviceName, processGroup and service.
 	Verdicts   map[string]Verdict `json:"verdicts" yaml:"verdicts"`
 	Candidates []Candidate        `json:"candidates" yaml:"candidates"`
 	// Queries is every planned query, run or skipped.
@@ -639,10 +639,10 @@ func (r *DiscoveryReport) runFallback(ctx context.Context, runner inventory.Runn
 // says so only when there was something to look up.
 func (r *DiscoveryReport) checkLogs(ctx context.Context, runner inventory.Runner, d *discovery) {
 	q := r.processGroupCheck()
-	if q == nil || !r.readWhole(objectLogs, d) {
+	if q == nil || !r.readWhole(objectLogs) {
 		return
 	}
-	spansWhole := r.readWhole(objectSpans, d)
+	spansWhole := r.readWhole(objectSpans)
 	var checked []*Candidate
 	var ids []string
 	for _, c := range d.records {
@@ -707,12 +707,13 @@ func (r *DiscoveryReport) processGroupCheck() *Query {
 }
 
 // readWhole reports whether the record query for object answered for the
-// whole window: it ran, nothing cut it short, and no sampled retry stood in.
-func (r *DiscoveryReport) readWhole(object string, d *discovery) bool {
+// whole window: it ran and nothing cut it short. A sampled retry stands in
+// only for a query the scan cap stopped, which has a cause.
+func (r *DiscoveryReport) readWhole(object string) bool {
 	for i := range r.Queries {
 		q := &r.Queries[i]
 		if q.DataObject == object && !q.SampledRetry() && !q.ProcessGroupCheck() {
-			return !q.Skipped && q.Error == "" && q.Cause == "" && d.samples[object] == nil
+			return !q.Skipped && q.Error == "" && q.Cause == ""
 		}
 	}
 	return false

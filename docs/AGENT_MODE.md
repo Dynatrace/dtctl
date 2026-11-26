@@ -392,8 +392,8 @@ text and the `--no-repo-scope` retry.
 `dtctl repo-scope discover` returns its report as `result`, or, from a
 directory several Gradle deployables share, a list of reports, one per
 deployable; `context.total` counts the reports. A report's `verdict` is
-the overall answer and `verdicts` has one per kind of binding (`service`,
-`processGroup`, `workload`, `serviceName`). A per-kind verdict can be
+the overall answer and `verdicts` has one per kind of binding (`workload`,
+`serviceName`, `processGroup`, `service`). A per-kind verdict can be
 `ambiguous` while the overall one is `match`: a single candidate whose logs
 name two process groups is one candidate but two process groups. It is never
 the other way round: no kind is `match` unless the overall verdict is. Each
