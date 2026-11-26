@@ -117,7 +117,7 @@ func readScopeFile(t *testing.T, repo string) []byte {
 
 func loadScopeFile(t *testing.T, repo string) *reposcope.File {
 	t.Helper()
-	f, err := reposcope.Load(reposcope.Location{Path: reposcope.FileName})
+	f, err := reposcope.Load(reposcope.Location{Path: filepath.Join(repo, reposcope.FileName)})
 	require.NoError(t, err)
 	return f
 }
@@ -370,7 +370,6 @@ func TestRepoScopeHostWithATrailingDot(t *testing.T) {
 
 	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "tools", "--service-name", "tools"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	t.Chdir(repo)
 	f := loadScopeFile(t, repo)
 	require.Equal(t, []string{repoScopeTestEnvHost}, f.Hosts())
 	require.Equal(t, []string{"checkout", "ledger", "tools"}, f.Names(repoScopeTestEnvHost))
@@ -650,6 +649,16 @@ func TestRepoScopeHumanOutput(t *testing.T) {
       service-names: [checkout]
       process-groups: [PROCESS_GROUP-FEDCBA9876543210]
 `
+	// A cluster on the only binding narrows the whole entry, so there is
+	// nothing for the cluster note to say.
+	clusterOnly := `environments:
+  abc12345.apps.dynatrace.com:
+    - name: checkout
+      workloads:
+        - cluster-uid: 11111111-2222-3333-4444-555555555555
+          namespace: payments
+          name: checkout
+`
 	// An entry that references only segments still narrows every query, and
 	// one with both sends its segments where its bindings filter nothing.
 	segments := `environments:
@@ -686,6 +695,8 @@ func TestRepoScopeHumanOutput(t *testing.T) {
 		{golden: "describe-gradle-library", repo: true, fixture: gradle, scopeFile: webproxy, dir: "webproxy-api", args: []string{"describe"}},
 		{golden: "current-cluster", repo: true, scopeFile: oneCluster, args: []string{"current"}},
 		{golden: "describe-cluster", repo: true, scopeFile: oneCluster, args: []string{"describe"}},
+		{golden: "current-cluster-only", repo: true, scopeFile: clusterOnly, args: []string{"current"}},
+		{golden: "describe-cluster-only", repo: true, scopeFile: clusterOnly, args: []string{"describe"}},
 		{golden: "describe-segments-only", repo: true, scopeFile: segments, args: []string{"describe", "tools"}},
 		{golden: "describe-segments-and-bindings", repo: true, scopeFile: segments, args: []string{"describe", "billing"}},
 		{golden: "list", repo: true, scopeFile: billing, args: []string{"list"}},

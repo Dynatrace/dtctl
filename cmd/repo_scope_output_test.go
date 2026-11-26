@@ -53,6 +53,12 @@ func TestRepoScopeListFormats(t *testing.T) {
 	code, csv, stderr := runRepoScoped([]string{"repo-scope", "list", "-o", "csv"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	testutil.AssertGolden(t, "repo-scope/list-csv", csv)
+	// The other formats print the entries themselves, through the command.
+	for _, format := range []string{"json", "yaml", "toon"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "list", "-o", format}, RunOptions{})
+		require.Zero(t, code, stderr)
+		testutil.AssertGolden(t, "repo-scope/list-"+format, stdout)
+	}
 	// The group without a subcommand is list.
 	code, group, stderr := runRepoScoped([]string{"repo-scope", "-o", "csv"}, RunOptions{})
 	require.Zero(t, code, stderr)

@@ -21,6 +21,14 @@ func TestSkillReferencesAreCommitted(t *testing.T) {
 		t.Fatal("SKILL.md links no reference; the pattern no longer matches its links")
 	}
 
+	// Embedded first: that holds wherever the test runs, and a skip for a
+	// missing git must not skip it.
+	for _, link := range links {
+		if _, err := fs.Stat(Content, link[1]); err != nil {
+			t.Errorf("SKILL.md links %s, which is not embedded: %v", link[1], err)
+		}
+	}
+
 	out, err := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard", "--", ".").Output()
 	if err != nil {
 		t.Skipf("not in a git checkout: %v", err)
@@ -31,9 +39,6 @@ func TestSkillReferencesAreCommitted(t *testing.T) {
 	}
 	for _, link := range links {
 		ref := link[1]
-		if _, err := fs.Stat(Content, ref); err != nil {
-			t.Errorf("SKILL.md links %s, which is not embedded: %v", ref, err)
-		}
 		if !committed[ref] {
 			t.Errorf("SKILL.md links %s, which git ignores", ref)
 		}

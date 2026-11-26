@@ -1,0 +1,8 @@
+[2]:
+  - name: checkout
+    path: services/checkout
+    serviceNames[1]: checkout
+  - name: ledger
+    path: services/ledger
+    workloads[1]{name,namespace}:
+      ledger,payments

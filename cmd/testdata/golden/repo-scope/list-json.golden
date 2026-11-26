@@ -1,0 +1,19 @@
+[
+  {
+    "name": "checkout",
+    "path": "services/checkout",
+    "serviceNames": [
+      "checkout"
+    ]
+  },
+  {
+    "name": "ledger",
+    "path": "services/ledger",
+    "workloads": [
+      {
+        "namespace": "payments",
+        "name": "ledger"
+      }
+    ]
+  }
+]

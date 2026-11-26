@@ -1,0 +1,11 @@
+Name:           checkout
+Path:           whole repository
+Environment:    abc12345.apps.dynatrace.com
+File:           .dtctl-repo-scope.yaml
+Workloads:      payments/checkout in cluster 11111111-2222-3333-4444-555555555555
+Filters:
+  fetch logs   | filter ((k8s.cluster.uid == "11111111-2222-3333-4444-555555555555" and k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))
+  fetch spans  | filter ((k8s.cluster.uid == "11111111-2222-3333-4444-555555555555" and k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))
+Live Debugger filters:
+  k8s.namespace.name:payments,k8s.workload.name:checkout
+  not narrowed by cluster: the filters include the same workload in other clusters
