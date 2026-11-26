@@ -373,13 +373,21 @@ func repoScopeStatus(ctx context.Context, name string) (status *reposcope.Status
 	case err == nil:
 		status, err = scope.resolve(name)
 		return status, nil, err
-	case name != "" || !errors.As(err, &invalid):
+	case name != "":
 		return nil, nil, err
-	case scope == nil:
+	case scope != nil:
+		// The file is there and did not load: it does not validate, or it
+		// cannot be read.
+		status = &reposcope.Status{Code: reposcope.StatusInvalidFile, File: reposcope.FileName, Environment: scope.host, Dir: scope.loc.RelDir,
+			Reason: scope.unusable(err)}
+		if errors.As(err, &invalid) {
+			advice = invalid.Suggestions
+		}
+		return status, advice, nil
+	case errors.As(err, &invalid):
 		return &reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, nil, nil
 	}
-	return &reposcope.Status{Code: reposcope.StatusInvalidFile, File: reposcope.FileName, Environment: scope.host, Dir: scope.loc.RelDir,
-		Reason: scope.unusable(invalid)}, invalid.Suggestions, nil
+	return nil, nil, err
 }
 
 // unusable is why the file did not load, for a command that reports it and
@@ -583,7 +591,11 @@ func listRepoScopes(cmd *cobra.Command, _ []string) error {
 	case ap != nil:
 		ap.SetTotal(len(entries))
 	}
+	if warning := scope.file.Warning(); ap != nil && warning != "" {
+		ap.SetWarnings([]string{reposcope.FileName + ": " + warning})
+	}
 	if ap == nil {
+		warnRepoScopeFile(currentStderr(ctx), scope.file.Warning())
 		// Every format that prints rows prints the rows of the table; the
 		// others print the entries themselves.
 		if format := outputFormat(ctx); format != "toon" && output.IsTabularFormat(format, plainMode(ctx)) {

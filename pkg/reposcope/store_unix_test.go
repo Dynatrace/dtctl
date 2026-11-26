@@ -60,5 +60,5 @@ func TestLoadUnreadableFile(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(loc.Path, 0o644) })
 	_, err := Load(loc)
 	require.ErrorIs(t, err, os.ErrPermission)
-	require.ErrorContains(t, err, "read "+loc.Path)
+	require.ErrorContains(t, err, loc.Path+": cannot be read: permission denied")
 }

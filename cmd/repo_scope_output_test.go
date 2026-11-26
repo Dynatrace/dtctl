@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"bytes"
+	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/Dynatrace/dtctl/cmd/testutil"
 	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
 // current and describe have a view for a terminal and a value for a program,
@@ -97,4 +101,61 @@ func TestRepoScopeUnknownSubcommand(t *testing.T) {
 		require.Equal(t, client.ExitUsageError, code)
 		require.Equal(t, "unknown_command", agentError(t, stdout).Code)
 	}
+}
+
+// A scope file that is there and cannot be read is an answer of current like
+// one that does not validate: exit 0, the file named as the repository names
+// it, and no path of this machine.
+func TestRepoScopeUnreadableFileIsAStatus(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a file mode that denies its owner")
+	}
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, monorepoScope)
+	require.NoError(t, os.Chmod(reposcope.FileName, 0))
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "none  (.dtctl-repo-scope.yaml: cannot be read: permission denied)\n", stdout)
+	require.NotContains(t, stdout+stderr, repo)
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "current", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var status reposcope.Status
+	agentResult(t, stdout, &status)
+	require.Equal(t, reposcope.StatusInvalidFile, status.Code)
+
+	// A name asks for one entry, so there it is the error.
+	code, _, _ = runRepoScoped([]string{"repo-scope", "describe", "checkout"}, RunOptions{})
+	require.NotZero(t, code)
+}
+
+// current answers on one line, whatever the reason holds.
+func TestRepoScopeCurrentIsOneLine(t *testing.T) {
+	var out bytes.Buffer
+	printRepoScopeCurrent(&out, &reposcope.Status{Code: reposcope.StatusInvalidFile, Reason: "first:\n  second\tthird"})
+	require.Equal(t, "none  (first: second third)\n", out.String())
+}
+
+// A key the file holds that this dtctl does not know is said once by every
+// command that reads the file, on stderr, where it does not end up in what a
+// pipe reads.
+func TestRepoScopeWarnsOncePerCommand(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, "kind: scope\n"+monorepoScope)
+	chdirSubdir(t, "services/checkout")
+	const warning = `.dtctl-repo-scope.yaml: unknown key "kind" on line 1`
+	for _, verb := range []string{"current", "describe", "list"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", verb}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, 1, bytes.Count([]byte(stdout+stderr), []byte(`unknown key "kind"`)), "%s:\n%s%s", verb, stdout, stderr)
+		require.Contains(t, stderr, warning, verb)
+	}
+	// A list of entries has no place for it, so in agent mode the envelope
+	// carries it.
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "list", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	warnings := agentEnvelope(t, stdout).Context.Warnings
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], warning)
 }

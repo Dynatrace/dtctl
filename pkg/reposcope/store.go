@@ -100,7 +100,12 @@ func Load(loc Location) (*File, error) {
 		invalidErr.Source = loc.Path
 		return nil, invalidErr
 	case err != nil:
-		return nil, fmt.Errorf("read %s: %w", loc.Path, err)
+		// The cause without the file name the filesystem repeats in it.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			err = pathErr.Err
+		}
+		return nil, fmt.Errorf("%s: cannot be read: %w", loc.Path, err)
 	}
 	f, invalidErr := decode(data)
 	if invalidErr != nil {
