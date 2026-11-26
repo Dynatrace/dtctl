@@ -305,7 +305,15 @@ func repoScopeStatus(ctx context.Context, name string) (*reposcope.Status, error
 		return &reposcope.Status{Reason: "not inside a git repository"}, nil
 	}
 	return &reposcope.Status{File: reposcope.FileName, Environment: scope.host, Dir: scope.loc.RelDir,
-		Reason: reposcope.FileName + ": " + invalid.Msg}, nil
+		Reason: scope.unusable(invalid)}, nil
+}
+
+// unusable is why the file did not load, for a command that reports it and
+// carries on. The error names the file by its path on this machine; the
+// reason names it as the repository does, since it is printed beside the
+// query's own output and travels in the agent envelope.
+func (s *repoScopeFile) unusable(err error) string {
+	return strings.ReplaceAll(err.Error(), s.loc.Path, reposcope.FileName)
 }
 
 // showRepoScope is current and describe: the same Status, one line or in

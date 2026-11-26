@@ -193,13 +193,19 @@ func TestQueryRepoScope_Environment(t *testing.T) {
 func TestQueryRepoScope_InvalidFile(t *testing.T) {
 	optInRepoScope(t)
 	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
-	chdirTestRepo(t, strings.Replace(checkoutScope, "[checkout]", `["check\"out"]`, 1))
+	repo := chdirTestRepo(t, strings.Replace(checkoutScope, "[checkout]", `["check\"out"]`, 1))
 
 	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, repoScopeTypedQuery, srv.first(t))
 	require.Equal(t, 1, strings.Count(stderr, "\n"), stderr)
-	require.Equal(t, "invalid_file", repoScopeContext(t, stdout).Code)
+	scope := repoScopeContext(t, stdout)
+	require.Equal(t, "invalid_file", scope.Code)
+	// The file is named the way repo-scope current names it, relative to the
+	// repository root: an envelope may be forwarded, and where the checkout
+	// sits on this machine is nobody else's business.
+	require.True(t, strings.HasPrefix(scope.Reason, ".dtctl-repo-scope.yaml: "), scope.Reason)
+	require.NotContains(t, stdout+stderr, filepath.Base(filepath.Dir(repo)))
 
 	srv.reset()
 	code, stdout, _ = runRepoScoped([]string{"query", repoScopeTypedQuery, "--repo-scope", "checkout", "--agent"}, RunOptions{})

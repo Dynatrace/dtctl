@@ -155,7 +155,7 @@ func resolveRepoScope(cmd *cobra.Command, cfg *config.Config, name string) (*rep
 		return nil, err
 	case err != nil && scope != nil:
 		return &repoScopeResolution{Scope: &output.RepoScope{
-			File: reposcope.FileName, Environment: scope.host, Code: repoScopeInvalidFile, Reason: err.Error(),
+			File: reposcope.FileName, Environment: scope.host, Code: repoScopeInvalidFile, Reason: scope.unusable(err),
 		}}, nil
 	case status == nil:
 		return nil, nil
