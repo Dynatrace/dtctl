@@ -11,8 +11,9 @@ import (
 
 // Example is the read path a program other than dtctl takes to honour a
 // checkout's scope file: locate it from a directory, load it, resolve the
-// entry for one environment host, and insert the entry's filter into a query.
-// None of these calls writes, and none reaches an environment.
+// entry for one environment host, insert the entry's filter into a query, and
+// take the filter segments the entry references, which travel beside the
+// query. None of these calls writes, and none reaches an environment.
 func Example() {
 	repo, err := os.MkdirTemp("", "reposcope-example")
 	if err != nil {
@@ -29,6 +30,10 @@ func Example() {
       workloads:
         - namespace: payments
           name: checkout
+      segments:
+        - id: Ab3dEf9hIjk
+          variables:
+            environment: [production]
 `), 0o644))
 
 	loc, ok, err := reposcope.Locate(dir)
@@ -53,11 +58,18 @@ func Example() {
 	// reason; the caller must not claim it was scoped.
 	rewrite = dql.InsertFilter("timeseries avg(dt.host.cpu.usage)", reposcope.Filters(status.Entry))
 	fmt.Println(rewrite.Outcome, rewrite.Query)
+
+	// The segments are validated data, to send with either query: an entry
+	// without bindings (HasBindings) has nothing else to apply.
+	for _, segment := range status.Entry.Segments {
+		fmt.Println(segment.ID, segment.Variables)
+	}
 	// Output:
 	// checkout applied
 	// fetch logs | filter ((k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))
 	// | limit 20
 	// not_fetch timeseries avg(dt.host.cpu.usage)
+	// Ab3dEf9hIjk map[environment:[production]]
 }
 
 func must(err error) {

@@ -20,7 +20,7 @@ The commands that manage the file:
 - `dtctl repo-scope discover` finds the entities that run this repository's code and prints the line that saves them
 - `dtctl repo-scope set <name>` saves an entry
 - `dtctl repo-scope current` shows the entry that applies in the working directory, or why none does
-- `dtctl repo-scope describe [name]` shows an entry's bindings, the DQL filter they render, and the Live Debugger workspace filters they set
+- `dtctl repo-scope describe [name]` shows an entry's bindings and segments, the DQL filter the bindings render, and the Live Debugger workspace filters they set
 - `dtctl repo-scope list` lists the entries for the current context's environment (also bare `dtctl repo-scope`)
 - `dtctl repo-scope delete <name>` removes an entry
 
@@ -169,6 +169,7 @@ The entry is filed under the current context's environment host. `set` always re
 | `--service-name` | `service.name` on spans and logs | any printable text without `"` or `\` (repeatable) |
 | `--process-group` | `dt.entity.process_group` on logs | `PROCESS_GROUP-` and 16 hex digits (repeatable) |
 | `--service` | `dt.entity.service` on spans | `SERVICE-` and 16 hex digits (repeatable) |
+| `--segment` | an existing filter segment a query under the entry also sends | the segment's id, with variables inline: `"ID?var=val&var2=val1,val2"` (repeatable, at most 10) |
 | `--path` | the directory the entry covers | relative to the repository root; default the whole repository |
 
 A cluster is bound by its uid, never its name: the uid is what identifies a cluster, while a name is chosen at deployment and can be changed or given to another cluster. `discover` shows the name beside the uid so you can tell which cluster a line is for. `--cluster-uid` applies to every `--workload` of the command; an entry whose workloads run in different clusters is written by hand in [the file](#the-file).
@@ -216,6 +217,29 @@ With `--repo-scope <name>` each of these is an error instead, and nothing is sen
 
 `dtctl exec dql` is the raw passthrough and is never scoped.
 
+### Filter segments
+
+An entry can also name filter segments that already exist in the environment. A query under the entry then sends them as if you had typed `--segment`, with the variable values the entry gives:
+
+```bash
+dtctl get segments                                    # find the id
+dtctl repo-scope set checkout --namespace payments --workload checkout \
+  --segment "Ab3dEf9hIjk?environment=production"
+```
+
+```text
+applying repo scope checkout to fetch logs: (k8s.namespace.name == "payments" and k8s.workload.name == "checkout") with segments Ab3dEf9hIjk?environment=production (use --no-repo-scope to ignore it)
+```
+
+- **By id.** A segment is referenced by its id, never its name: a committed file must not change meaning when a segment is renamed. dtctl only reads segments; it never creates or changes one.
+- **Both must hold.** The bindings are alternatives among themselves; the filter they render and every segment narrow the query together.
+- **Segments alone.** An entry may hold only segments (`dtctl repo-scope set platform --segment Ab3dEf9hIjk`). It inserts no filter and applies to every query, `timeseries` and events included, which bindings do not reach.
+- **Where the filter cannot go.** When the filter cannot be inserted for one of the reasons above, the entry's segments are still sent, and a warning says which half applied.
+- **With your own.** `--segment` and `--segments-file` are sent as well. A segment you name that the entry also lists is sent once, with your variables. A query takes ten segments; more than that, yours and the entry's together, is an error.
+- **A segment that is gone.** Before sending, dtctl reads each segment the entry references. If one was deleted, is not shared with you, or your token cannot read segments (`storage:filter-segments:read`), the query runs exactly as typed, without the filter either, and a warning names the segment. With `--repo-scope <name>` it is an error.
+- **Variables.** The entry has to give a value for every variable the segment requires. Only the platform knows which those are, so a missing one fails the query; the error names the segment and the variable.
+- **Commands.** `query` and `wait query` send the segments. `verify query` checks the query text only and says so. Breakpoints are not affected: see [Live Debugger](#4-live-debugger).
+
 ### Check your scope
 
 A scope can be valid and still miss the records you care about, so check it once against real data. For a breakpoint, `dtctl describe breakpoint <id>` lists the hostnames of the rooks (agents) it reached; compare them with the nodes the workload runs on. Under the scope, count what `fetch logs` and `fetch spans` reach, and before relying on scoped `fetch logs`, check that the discovery evidence showed logs as well as spans. Then rerun one query with `--no-repo-scope` and compare.
@@ -228,6 +252,8 @@ dtctl query 'fetch logs | summarize count(), by:{k8s.workload.name}' --no-repo-s
 ## 4. Live Debugger
 
 An entry's bindings are also the labels a Live Debugger workspace is filtered by: `dtctl create breakpoint` gives a workspace without filters the covering entry's namespace-and-workload set, and `--repo-scope <name>` on `create breakpoint` and `update breakpoint` sets every set of a named entry, in workspace `<repo>/<entry>`. [Filters from the repo scope](LIVE_DEBUGGER.md#filters-from-the-repo-scope) says what is sent, what is verified, and how to turn the default off.
+
+Filter segments do not apply to breakpoints. A workspace is filtered by labels, and has no place to take a segment, so the segments an entry references narrow its queries only, and an entry that holds nothing else sets no workspace filters.
 
 ## Monorepos
 
@@ -279,6 +305,10 @@ environments:
       service-names: [checkout]
       process-groups: [PROCESS_GROUP-FEDCBA9876543210]
       services: [SERVICE-0123456789ABCDEF]
+      segments:                       # optional; existing filter segments, by id
+        - id: Ab3dEf9hIjk
+          variables:                  # optional; name: [values]
+            environment: [production]
     - name: ledger
       path: services/ledger
       workloads:
@@ -302,6 +332,8 @@ Within an entry the bindings are alternatives, OR-ed together; each data object 
 A workload with a `cluster-uid` renders `(k8s.cluster.uid == "…" and k8s.namespace.name == "…" and k8s.workload.name == "…")`, so it selects only records that carry all three fields. `k8s.cluster.uid` then counts as a field the scope filters on: a `filter` of your own on it wins, as one on the namespace or the workload does.
 
 `dtctl repo-scope describe <name>` prints the exact filter for each.
+
+`segments` are not alternatives: each one, and the filter, must hold (see [Filter segments](#filter-segments)). Ids and variable values are checked like every other value, and travel beside the query, never in its text.
 
 The file spells its keys in kebab-case (`process-groups`, `service-names`); the JSON and YAML that `-o json`, `-o yaml` and agent mode print for a result use camelCase (`processGroups`, `serviceNames`), except an entry in YAML output, which keeps the file's spelling.
 
@@ -333,13 +365,15 @@ To query with the segments your `.dtui.yaml` names, pass them yourself; they com
 dtctl query 'fetch logs | limit 20' --segment payments-prod
 ```
 
+Segments the whole repository should query under belong in the scope file instead, as an entry's `segments` (see [Filter segments](#filter-segments)): there they are validated, can differ per directory, and reach everyone who clones the repository.
+
 ## AI agents
 
 In agent mode `discover` returns its report as the envelope `result`, with each candidate's `setCommand` and the top one in `context.suggestions`, offered for confirmation and never to run on the agent's own initiative. A scoped query's envelope carries `context.repo_scope`; see [AGENT_MODE.md](AGENT_MODE.md#repo-scope-contextrepo_scope). The `dtctl` skill has the procedure in [references/repo-scope.md](../skills/dtctl/references/repo-scope.md).
 
 ## Limits
 
-- Only `fetch logs` and `fetch spans` are scoped. Metrics (`timeseries`), events and business events are not; their queries run unscoped with a warning.
+- Only `fetch logs` and `fetch spans` are filtered by bindings. Metrics (`timeseries`), events and business events are not; their queries run unscoped with a warning, unless the entry references filter segments, which apply to them too.
 - Discovery looks at the last 24 hours, or the last hour when it has to sample, and says so in its notes. A service that has been quiet longer, quieter than a sample's floor, or that runs under a name the repository does not spell out, needs `--term` or a `set` by hand. So does a workload that only holds a name shorter than five letters and digits (`shop-cart` for `cart`), and a `service.name` that is longer than the repository's name: service names are compared whole.
 - Entity ids per candidate are counted exactly and listed up to 50; `-o json` has the list and the count (`serviceCount`, `servicesCapped`).
 - `inventory arrivals --scope` does not use the repo scope.

@@ -49,7 +49,7 @@ A repo scope is that connection, written down once and committed: per environmen
 | `pkg/reposcope` | `schema.go`, `decode.go`, `store.go`, `resolve.go`, `grail.go`, `render.go`, `extract*.go`, `tokens.go`, `discover.go`, `rank.go` | Validate, load and save the file, resolve an entry for a directory, render filters, read names from a repository, plan and run discovery |
 | `pkg/dql` | `scan.go`, `insert.go` | The offset-preserving DQL scanner, and the lexical insertion of the filter |
 | `cmd/repo_scope.go` | `dtctl repo-scope discover\|set\|current\|describe\|delete\|list` | Manage the file |
-| `cmd/query_repo_scope.go` | `query`, `wait query`, `verify query` | Apply the scope, print the notice, decorate the envelope |
+| `cmd/query_repo_scope.go` | `query`, `wait query`, `verify query` | Apply the scope, read and send the entry's segments, print the notice, decorate the envelope |
 | `pkg/reposcope/livedebugger.go` | `LiveDebuggerFilters`, `WorkloadFilterSet` | Render an entry as Live Debugger workspace filter sets; pick the one set create applies by default |
 | `cmd/breakpoint_repo_scope.go` | `create breakpoint`, `update breakpoint` | Set workspace filters from a named entry, or by default on create |
 
@@ -252,7 +252,7 @@ Candidates are keyed by cluster, namespace, workload and service name, so the re
 
 - `pkg/dql` and `pkg/reposcope`: the scanner and the insertion table, with both invariants on every row; schema, store, resolution, rendering, extraction over fixture repositories, and discovery over a fixture runner
 - `pkg/output/testdata/golden/repo-scope/` and `cmd/testdata/golden/repo-scope/`: the structured printers and the terminal output of every subcommand
-- Guards: `TestQueryRepoScope_UnlinkedIsByteIdentical` (outside a linked repository nothing changes; each disabling factor is paired with a positive control), `TestQueryRepoScope_StableFloor`, `TestRepoScopeCodesAreDocumented`, `TestRepoScopeDiscoverKeepsNoState` (by each file's mode and sha256), and `cmd/main_test.go`, which fails the run if the checkout's own scope file changed
+- Guards: `TestQueryRepoScope_UnlinkedIsByteIdentical` (outside a linked repository nothing changes; each disabling factor is paired with a positive control), `TestQueryRepoScope_StableFloor`, `TestRepoScopeCodesAreDocumented`, `TestQueryRepoScope_SegmentUnavailable` (a deleted segment never fails a default-scoped query), `TestRepoScopeDiscoverKeepsNoState` (by each file's mode and sha256), and `cmd/main_test.go`, which fails the run if the checkout's own scope file changed
 
 ## Follow-ups
 

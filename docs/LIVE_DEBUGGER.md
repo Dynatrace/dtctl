@@ -103,6 +103,11 @@ Live Debugger filters:
   k8s.cluster.uid:11111111-2222-3333-4444-555555555555,k8s.namespace.name:payments,k8s.workload.name:checkout
 ```
 
+Filter segments an entry references (`segments` in the scope file) narrow its
+queries and nothing else: a workspace is filtered by labels and cannot take a
+segment, so they are never part of a filter set, and an entry that holds only
+segments renders none.
+
 `k8s.cluster.uid` has not been verified as a workspace label. The namespace,
 workload and process group labels have; this one is sent because leaving it
 out would place breakpoints in the same workload of a cluster the entry
