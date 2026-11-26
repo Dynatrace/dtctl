@@ -130,9 +130,9 @@ var (
 	segmentVariableRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]{0,127}$`)
 )
 
-// MaxSegments is how many filter segments one query takes, the platform's
+// maxSegments is how many filter segments one query takes, the platform's
 // limit, and so how many an entry may reference.
-const MaxSegments = 10
+const maxSegments = 10
 
 // The sizes a file may have. They are part of the format: a reader may rely
 // on them, and a file beyond one is refused whole, never read in part.
@@ -327,8 +327,8 @@ func (e Entry) Problem() string {
 
 // validateSegments checks the segments the entry references.
 func (e *Entry) validateSegments() *InvalidError {
-	if len(e.Segments) > MaxSegments {
-		return invalid(fmt.Sprintf("lists %d segments; a query takes at most %d", len(e.Segments), MaxSegments))
+	if len(e.Segments) > maxSegments {
+		return invalid(fmt.Sprintf("lists %d segments; a query takes at most %d", len(e.Segments), maxSegments))
 	}
 	seen := map[string]bool{}
 	for i, s := range e.Segments {
