@@ -488,6 +488,13 @@ func TestExecProfiling_AgentCodeIgnoresWhatTheMessageQuotes(t *testing.T) {
 		{"sort", []string{"hotspots", testProcess, "--view", "functions", "--sort", "timeout"}, "validation_error"},
 		{"start", []string{"hotspots", testProcess, "--default-timeframe-start", "config"}, "validation_error"},
 		{"end", []string{"allocations", testProcess, "--default-timeframe-end", "now()-1timeout"}, "validation_error"},
+		// The wording of cobra's own flag errors, which the root reads to
+		// suggest a flag: a value that quotes it was answered unknown_command
+		// with the usage exit code.
+		{"view, unknown flag", []string{"hotspots", testProcess, "--view", "unknown flag: --agin"}, "validation_error"},
+		{"focus, unknown flag", []string{"hotspots", testProcess, "--focus", "unknown flag: --agin"}, "error"},
+		{"leaf type, unknown shorthand", []string{"hotspots", testProcess, "--leaf-type", "unknown shorthand flag: 'x' in -x"}, "validation_error"},
+		{"entity, unknown command", []string{"hotspots", `unknown command "x" for "dtctl"`}, "validation_error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -502,7 +509,7 @@ func TestExecProfiling_AgentCodeIgnoresWhatTheMessageQuotes(t *testing.T) {
 			require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{Code: tc.code, Message: want}}, decodeProfilingError(t, stdout))
 		})
 	}
-	require.Len(t, api.paths, 10, "only the --focus cases reach the API, once with and once without --agent")
+	require.Len(t, api.paths, 12, "only the --focus cases reach the API, once with and once without --agent")
 }
 
 // The hints about a wrong environment URL and an expired login are for a

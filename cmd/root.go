@@ -558,6 +558,13 @@ func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool
 // into dtctl's typed ones, so they carry suggestions and the usage exit code.
 // Execute and Parse share it, so both report a command line the same way.
 func classifyCommandLineError(root *cobra.Command, err error, devSignpost bool) error {
+	// A failure `exec profiling` worded itself is none of cobra's, whatever
+	// its text quotes: --view 'unknown flag: --agin' was answered with a flag
+	// suggestion and the usage exit code.
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return err
+	}
 	errStr := err.Error()
 	if strings.Contains(errStr, "unknown command") {
 		// A disabled development feature explains itself only to a caller who
