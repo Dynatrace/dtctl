@@ -141,6 +141,18 @@ func TestSave(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, exampleFile(), loaded, "what Save writes, Load reads back")
 	})
+	t.Run("states the version a file left out", func(t *testing.T) {
+		root := newRepo(t)
+		require.NoError(t, os.WriteFile(filepath.Join(root, FileName), []byte("environments:\n  "+prodHost+":\n    - name: checkout\n      service-names: [checkout]\n"), 0o644))
+		loc, _, err := Locate(root)
+		require.NoError(t, err)
+		f, err := Load(loc)
+		require.NoError(t, err)
+		require.NoError(t, Save(loc, f))
+		data, err := os.ReadFile(loc.Path)
+		require.NoError(t, err)
+		assert.Equal(t, fileHeader+"apiVersion: v1\nenvironments:\n  "+prodHost+":\n    - name: checkout\n      service-names:\n        - checkout\n", string(data))
+	})
 	t.Run("removes the file when nothing is left", func(t *testing.T) {
 		root := newRepo(t)
 		loc, _, err := Locate(root)

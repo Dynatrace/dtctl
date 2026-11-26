@@ -31,7 +31,7 @@ func readFixture(t *testing.T, name string) []byte {
 
 // exampleFile is testdata/scope/example.yaml as a value.
 func exampleFile() *File {
-	return &File{Environments: map[string][]Entry{
+	return &File{APIVersion: apiVersion, Environments: map[string][]Entry{
 		prodHost: {
 			{
 				Name:          "checkout",
@@ -350,7 +350,7 @@ func TestCheck_NoBindingSuggestsWhatToAdd(t *testing.T) {
 // existed reads and writes back unchanged.
 func TestWorkloadClusterUID(t *testing.T) {
 	const other = "66666666-7777-8888-9999-000000000000"
-	doc := "environments:\n  " + prodHost + ":\n    - name: checkout\n      workloads:\n" +
+	doc := "apiVersion: v1\nenvironments:\n  " + prodHost + ":\n    - name: checkout\n      workloads:\n" +
 		"        - cluster-uid: " + clusterUID + "\n          namespace: payments\n          name: checkout\n" +
 		"        - cluster-uid: " + other + "\n          namespace: payments\n          name: checkout\n" +
 		"        - namespace: batch\n          name: checkout\n"
@@ -374,7 +374,7 @@ func TestWorkloadClusterUID(t *testing.T) {
 // An entry may reference existing filter segments, beside its bindings or
 // alone, and they survive a rewrite of the file as written.
 func TestEntrySegments(t *testing.T) {
-	doc := "environments:\n  " + prodHost + ":\n    - name: checkout\n      service-names:\n        - checkout\n" +
+	doc := "apiVersion: v1\nenvironments:\n  " + prodHost + ":\n    - name: checkout\n      service-names:\n        - checkout\n" +
 		"      segments:\n        - id: Ab3dEf9hIjk\n          variables:\n            environment:\n              - production\n" +
 		"            k8s.namespace.name:\n              - payments\n              - billing\n" +
 		"        - id: plain-segment_1\n" +

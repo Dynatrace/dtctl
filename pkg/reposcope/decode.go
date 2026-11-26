@@ -367,13 +367,14 @@ func unknownKeys(keys []string) string {
 
 // encode renders f the way Save writes it: the header, then the document
 // with two-space indentation. Map keys come out sorted, so the same File
-// always produces the same bytes.
+// always produces the same bytes. A written file states its version, whether
+// or not the one it was read from did.
 func encode(f *File) ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteString(fileHeader)
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(f); err != nil {
+	if err := enc.Encode(File{APIVersion: apiVersion, Environments: f.Environments}); err != nil {
 		return nil, fmt.Errorf("encode %s: %w", FileName, err)
 	}
 	if err := enc.Close(); err != nil {
