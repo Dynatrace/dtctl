@@ -292,6 +292,11 @@ diagnostic one for onboarding: a source that emitted during rollout and then sto
 identical to a healthy one under any retention-scoped check. Default `--stale-after` is
 `max(2m, window/3)`.
 
+One condition in the table is narrower for a signal that had to be sampled (D22). A sample
+of fewer than 30 records cannot date when a source stopped, so such a signal is `live` or
+`unknown` and never `stale`; from 30 records up it is `stale` only when its age is past the
+threshold by more than the sampling can shift it.
+
 For `--require` purposes `live` passes; `stale`, `empty`, `no-data`, `n/a`, and `absent`
 fail; `unknown` and an unprobed name exit 11. A required `n/a` signal is reported as a gate
 that *can never pass* rather than as a telemetry failure.
@@ -615,6 +620,14 @@ telemetry is not implicated.
     for 11 records over 15m, and under a second for 676. A `stale` verdict the bias alone could
     explain is therefore withheld as `unknown`, because inventing an ingest outage is the most
     expensive wrong answer this command can give (`TestSampledStaleInsideTheBiasIsUnknown`).
+    That figure is the gap to expect from a source that emits evenly, not a bound. A burst
+    early in the window followed by a trickle leaves a thin sample holding only old
+    timestamps while the source is alive, and subtracting the expected gap does not help. So a
+    hit of fewer than 30 sampled records never says `stale`: it is `live` when its newest
+    record is inside the threshold and `unknown` otherwise, with the sampled count and
+    last-seen kept so the arrival it did prove is still on the record. The price is that a
+    real outage on a source sampled that thinly exits 11 instead of 10
+    (`TestThinSampleNeverSaysStale`, `TestThinSampleStillSaysLive`).
     The age is therefore not taken from the hit alone. Every rung filters the same window by
     the same scope, so a record any of them matched is a record of this scope, whether or not
     that response was sampled or ran to completion. The hit the walk ends on supplies the

@@ -57,6 +57,14 @@ var samplingLadder = []int64{100000, 10000, 1000, 100, 10}
 // 676 put it within a second. At 30 records the bias is a thirtieth of the
 // window, comfortably inside a stale threshold that defaults to a third of it,
 // so a live signal cannot be flipped to stale by the sampling alone.
+//
+// The floor does two things. The walk keeps descending until a rung reaches
+// it, and a hit that never does may not say stale (see sampledVerdict). The
+// sampling interval is the gap to expect for a source that emits evenly, not a
+// bound: a burst early in the window followed by a trickle leaves a thin
+// sample with only old timestamps while the source is alive. Subtracting the
+// interval from the age does not help there, so below the floor an old
+// timestamp is reported as unknown.
 const minSampledRecords = 30
 
 // sampledProbe is one rung's outcome.
@@ -226,6 +234,15 @@ func sampledAmbiguousEvidence(object string, age, bias, staleAfter time.Duration
 		object, formatCount(ratio), roundDuration(age), roundDuration(staleAfter), roundDuration(bias))
 }
 
+// sampledThinEvidence phrases a hit that is too thin to date. It keeps what the
+// sample did establish, that records of this scope arrived in the window, and
+// says why the age next to it is not a verdict.
+func sampledThinEvidence(object string, p sampledProbe, age, staleAfter time.Duration) string {
+	return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and %s sampled %s are proof that data arrived but too few to say when the data stopped: the newest record seen is %s old against a %s stale threshold, and a sample this thin can miss a newer one; raise --scan-limit-gbytes for an exact answer",
+		object, formatCount(p.ratio), formatCount(p.matched), plural64(p.matched, "record"),
+		roundDuration(age), roundDuration(staleAfter))
+}
+
 // samplingRefusedEvidence phrases the case where the environment would not
 // sample the object, so the retry was the original capped query over again.
 //
@@ -378,8 +395,10 @@ walk:
 	return b.sampledVerdict(sig, def, opts, timeField, *hit, newest), nil
 }
 
-// sampledVerdict turns a sampled hit into live, stale, or — in the one band the
-// sampling cannot resolve — unknown.
+// sampledVerdict turns a sampled hit into live, stale, or unknown. Unknown is
+// the answer in two cases: the hit is below minSampledRecords and looks old,
+// or it is thick enough to date but its age is past the threshold by less
+// than the sampling can shift it.
 //
 // The count, the ratio and the bias are those of the hit. The age is that of
 // newest, the newest record any rung of the walk matched, which is the hit's
@@ -403,6 +422,15 @@ func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts Disco
 	bias := samplingBias(windowDuration(opts.Since), p.matched)
 	applyFreshness(&sig, lastSeen, timeField, askedAt, opts.StaleAfter)
 
+	// A hit below the floor proves arrival and cannot date it, so it never
+	// says stale: an old timestamp there is unknown, with the count kept.
+	age := time.Duration(sig.AgeSeconds) * time.Second
+	if sig.State == SignalStale && p.matched < minSampledRecords {
+		sig.State = SignalUnknown
+		sig.Evidence = sampledThinEvidence(def.DataObject, p, age, opts.StaleAfter)
+		return sig
+	}
+
 	// A sampled last-seen is biased old, so a stale verdict has to survive that
 	// bias to be worth making. The sample's bias bounds the gap also when the
 	// timestamp came from another rung: that record is no older than the
@@ -410,7 +438,6 @@ func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts Disco
 	// indistinguishable and the honest answer is that the probe cannot tell —
 	// reporting stale there would invent an ingest outage out of the sampling,
 	// which during onboarding verification is the most expensive kind of wrong.
-	age := time.Duration(sig.AgeSeconds) * time.Second
 	if sig.State == SignalStale && age-bias <= opts.StaleAfter {
 		sig.State = SignalUnknown
 		sig.Evidence = sampledAmbiguousEvidence(def.DataObject, age, bias, opts.StaleAfter, p.ratio)

@@ -1419,29 +1419,100 @@ func TestSampledCountIgnoresRequestedRatio(t *testing.T) {
 	}
 }
 
+// TestThinSampleNeverSaysStale: fewer than minSampledRecords sampled records
+// prove arrival and nothing about when it stopped. Window divided by the
+// sample count is the expected gap between sampled records, not a bound on
+// it: a burst fourteen minutes ago and one recent record the sample missed
+// give exactly these two timestamps. So a thin hit that looks old stays
+// unknown, with the count it did establish, and a real outage on a thinly
+// sampled source costs the gate its exit 10.
+func TestThinSampleNeverSaysStale(t *testing.T) {
+	timedOut := mockResponse{match: "samplingRatio:10000 |", truncated: true, cause: TruncationTimeout}
+	for _, tc := range []struct {
+		name    string
+		rungs   []mockResponse
+		sampled int64
+		ratio   int64
+		records int64
+	}{
+		{
+			// Fourteen minutes is past the threshold by more than 15m/2.
+			name:    "two records, then a rung that timed out",
+			rungs:   []mockResponse{sampledRung(100000, 2, 200000, at(14, 0)), timedOut},
+			sampled: 2, ratio: 100000, records: 200000,
+		},
+		{
+			// One short of the floor on the last rung, and far beyond the bias.
+			name: "twenty-nine records on the last rung",
+			rungs: []mockResponse{
+				sampledRung(100000, 0, 0, ""), sampledRung(10000, 0, 0, ""), sampledRung(1000, 0, 0, ""),
+				sampledRung(100, 3, 300, at(14, 0)), sampledRung(10, 29, 290, at(14, 0)),
+			},
+			sampled: 29, ratio: 10, records: 290,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append(append([]mockResponse{cappedLogs()}, tc.rungs...), runner.responses...)
+
+			inv := discoverWith(t, runner, windowOpts())
+			logs := signalByName(t, inv, "logs")
+			if logs.State != SignalUnknown {
+				t.Fatalf("state = %q, want unknown: %d sampled records cannot date an outage (evidence: %s)", logs.State, tc.sampled, logs.Evidence)
+			}
+			// The arrival the sample proved is kept, as is what it was last seen at.
+			if logs.RecordsSampled != tc.sampled || logs.SamplingRatio != tc.ratio || logs.Records != tc.records || logs.LastSeen != at(14, 0) {
+				t.Errorf("sampled/ratio/records/lastSeen = %d/%d/%d/%q, want %d/%d/%d/%q",
+					logs.RecordsSampled, logs.SamplingRatio, logs.Records, logs.LastSeen, tc.sampled, tc.ratio, tc.records, at(14, 0))
+			}
+			for _, want := range []string{"too few to say when the data stopped", "14m0s old", "5m0s stale threshold"} {
+				if !strings.Contains(logs.Evidence, want) {
+					t.Errorf("evidence %q missing %q", logs.Evidence, want)
+				}
+			}
+			if strings.Contains(logs.Evidence, "stopped 14m") {
+				t.Errorf("evidence %q still asserts that the source stopped", logs.Evidence)
+			}
+			if got := CheckRequired(inv, []string{"logs"}).ExitCode(); got != ExitRequiredSignalUnknown {
+				t.Errorf("gate exit = %d, want %d", got, ExitRequiredSignalUnknown)
+			}
+		})
+	}
+}
+
+// TestThinSampleStillSaysLive: the floor withholds only the stale verdict. A
+// record inside the threshold is fresh however few others the sample holds.
+func TestThinSampleStillSaysLive(t *testing.T) {
+	runner := windowRunner()
+	rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, at(1, 0))}
+	for _, ratio := range []int64{10000, 1000, 100, 10} {
+		rungs = append(rungs, sampledRung(ratio, 0, 0, ""))
+	}
+	runner.responses = append(rungs, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State != SignalLive || logs.RecordsSampled != 2 || logs.AgeSeconds != 60 {
+		t.Errorf("state/sampled/age = %q/%d/%d, want live/2/60 (evidence: %s)", logs.State, logs.RecordsSampled, logs.AgeSeconds, logs.Evidence)
+	}
+}
+
 // TestSampledStaleInsideTheBiasIsUnknown: a sampled last-seen is biased old,
 // so a stale verdict that the bias alone could explain is a false ingest
 // outage. During onboarding verification that is the most expensive wrong
-// answer available, so the probe declines to make it.
+// answer available, so the probe declines to make it. The band exists at and
+// above the floor too: thirty records over 15m leave 30s of bias.
 func TestSampledStaleInsideTheBiasIsUnknown(t *testing.T) {
 	opts := windowOpts()
 	opts.StaleAfter = 2 * time.Minute
 	runner := windowRunner()
-	// 5 sampled records over 15m → ~3m of bias, and a measured age of 3m is
-	// past the threshold by less than that.
 	runner.responses = append([]mockResponse{
 		cappedLogs(),
-		sampledRung(100000, 5, 500000, fixedNow.Add(-3*time.Minute).Format(time.RFC3339)),
-		sampledRung(10000, 6, 600000, fixedNow.Add(-3*time.Minute).Format(time.RFC3339)),
-		sampledRung(1000, 7, 700000, fixedNow.Add(-3*time.Minute).Format(time.RFC3339)),
-		sampledRung(100, 8, 800000, fixedNow.Add(-3*time.Minute).Format(time.RFC3339)),
-		sampledRung(10, 9, 900000, fixedNow.Add(-3*time.Minute).Format(time.RFC3339)),
+		sampledRung(100000, 30, 3000000, at(2, 20)),
 	}, runner.responses...)
 
 	logs := signalByName(t, discoverWith(t, runner, opts), "logs")
 	if logs.State != SignalUnknown {
-		t.Fatalf("state = %q, want unknown: %s of sampling bias can fully explain a %s age against a 2m threshold",
-			logs.State, "~1m40s", "3m")
+		t.Fatalf("state = %q, want unknown: 30s of sampling bias can fully explain a 2m20s age against a 2m threshold", logs.State)
 	}
 	if !strings.Contains(logs.Evidence, "cannot be told apart") {
 		t.Errorf("evidence %q should say the two states are indistinguishable here", logs.Evidence)
@@ -1450,20 +1521,29 @@ func TestSampledStaleInsideTheBiasIsUnknown(t *testing.T) {
 
 // TestSampledStaleBeyondTheBiasIsStale is the converse: a signal that really
 // did stop must still be reported, or the fallback would have traded one blind
-// spot for another.
+// spot for another. Thirty records is the fewest that may say so.
 func TestSampledStaleBeyondTheBiasIsStale(t *testing.T) {
-	opts := windowOpts()
-	opts.StaleAfter = 2 * time.Minute
-	runner := windowRunner()
-	// 300 sampled records → 3s of bias, nowhere near enough to explain a 9m age.
-	runner.responses = append([]mockResponse{
-		cappedLogs(),
-		sampledRung(100000, 300, 30000000, fixedNow.Add(-9*time.Minute).Format(time.RFC3339)),
-	}, runner.responses...)
+	// 300 sampled records leave 3s of bias and 30 leave 30s, neither anywhere
+	// near enough to explain a 9m age.
+	for _, matched := range []int64{300, 30} {
+		t.Run(fmt.Sprintf("%d records", matched), func(t *testing.T) {
+			opts := windowOpts()
+			opts.StaleAfter = 2 * time.Minute
+			runner := windowRunner()
+			runner.responses = append([]mockResponse{
+				cappedLogs(),
+				sampledRung(100000, matched, matched*100000, at(9, 0)),
+			}, runner.responses...)
 
-	logs := signalByName(t, discoverWith(t, runner, opts), "logs")
-	if logs.State != SignalStale {
-		t.Errorf("state = %q, want stale: a 9m age survives 3s of bias (evidence: %s)", logs.State, logs.Evidence)
+			inv := discoverWith(t, runner, opts)
+			logs := signalByName(t, inv, "logs")
+			if logs.State != SignalStale {
+				t.Errorf("state = %q, want stale: a 9m age survives the bias of %d records (evidence: %s)", logs.State, matched, logs.Evidence)
+			}
+			if got := CheckRequired(inv, []string{"logs"}).ExitCode(); got != ExitRequiredSignalNotLive {
+				t.Errorf("gate exit = %d, want %d", got, ExitRequiredSignalNotLive)
+			}
+		})
 	}
 }
 
