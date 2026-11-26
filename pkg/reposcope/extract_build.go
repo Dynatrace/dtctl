@@ -1,11 +1,14 @@
 package reposcope
 
 import (
+	"cmp"
 	"encoding/json"
 	"path"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Build files name the artifact a unit produces; that name is often what the
@@ -17,8 +20,6 @@ var (
 	pomParentRe    = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
 	pomArtifactRe  = regexp.MustCompile(`<artifactId>\s*([^<]+?)\s*</artifactId>`)
 	assemblyNameRe = regexp.MustCompile(`<AssemblyName>\s*([^<]+?)\s*</AssemblyName>`)
-	tomlSectionRe  = regexp.MustCompile(`^\s*\[([^\]]+)\]\s*$`)
-	tomlNameRe     = regexp.MustCompile(`^\s*name\s*=\s*["']([^"']+)["']`)
 	dockerRunRe    = regexp.MustCompile(`(?im)^[ \t]*(ENTRYPOINT|CMD)[ \t]+(.+)$`)
 
 	// The Gradle expressions read one assignment in either DSL: `name = "x"`
@@ -84,20 +85,32 @@ func gradleArchivesName(text, file string) (token, bool) {
 	return token{}, false
 }
 
-// pyprojectName reads `name = "…"` from [project] or [tool.poetry]; no TOML
-// parser is needed for one key.
+// pyprojectName reads the project's name from [project], or from
+// [tool.poetry] when that is where the project keeps it. The file is decoded
+// rather than searched: a name key also sits in the tables beside those two,
+// an author's among them, and only a decoder knows which table a line is in.
 func pyprojectName(text, file string) (token, bool) {
-	section := ""
-	for i, line := range strings.Split(text, "\n") {
-		if m := tomlSectionRe.FindStringSubmatch(line); m != nil {
-			section = strings.TrimSpace(m[1])
-			continue
-		}
-		if m := tomlNameRe.FindStringSubmatch(line); m != nil && (section == "project" || section == "tool.poetry") {
-			return newToken(kindProject, m[1], file, i+1)
-		}
+	var doc struct {
+		Project struct {
+			Name string `toml:"name"`
+		} `toml:"project"`
+		Tool struct {
+			Poetry struct {
+				Name string `toml:"name"`
+			} `toml:"poetry"`
+		} `toml:"tool"`
 	}
-	return token{}, false
+	if toml.Unmarshal([]byte(text), &doc) != nil {
+		return token{}, false
+	}
+	name := cmp.Or(doc.Project.Name, doc.Tool.Poetry.Name)
+	// The decoder keeps no positions, so the line is the first that assigns
+	// the name; none when the file spells the key another way.
+	line := 0
+	if at := regexp.MustCompile(`(?m)^[ \t]*name[ \t]*=[ \t]*["']` + regexp.QuoteMeta(name) + `["']`).FindStringIndex(text); at != nil {
+		line = strings.Count(text[:at[0]], "\n") + 1
+	}
+	return newToken(kindProject, name, file, line)
 }
 
 // assemblyName reads a .csproj's AssemblyName, which defaults to the project

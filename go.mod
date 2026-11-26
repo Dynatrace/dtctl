@@ -11,6 +11,7 @@ require (
 	github.com/itchyny/gojq v0.12.20
 	github.com/olekukonko/tablewriter v1.1.5
 	github.com/parquet-go/parquet-go v0.32.1
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.1.0
 	github.com/spf13/viper v1.21.0
@@ -54,7 +55,6 @@ require (
 	github.com/olekukonko/ll v0.1.6 // indirect
 	github.com/parquet-go/bitpack v1.0.3 // indirect
 	github.com/parquet-go/jsonlite v1.5.5 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.33 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect

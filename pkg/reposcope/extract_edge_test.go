@@ -29,6 +29,41 @@ func TestExtractBuildFilesWithoutNames(t *testing.T) {
 	}
 }
 
+// A pyproject.toml names the project in [project] or [tool.poetry] and
+// nowhere else: an author's name is a person's, not the project's.
+func TestExtractPyprojectReadsOnlyTheProjectName(t *testing.T) {
+	for name, tt := range map[string]struct {
+		data string
+		want []string
+	}{
+		"the project table": {
+			"[build-system]\nrequires = [\"hatchling\"]\n\n[project]\nname = \"fraud-scoring\"\n",
+			[]string{"project fraud-scoring pyproject.toml:5"}},
+		"poetry's table": {
+			"[tool.poetry]\nname = 'fraud-scoring'\n",
+			[]string{"project fraud-scoring pyproject.toml:2"}},
+		"a dotted key": {
+			"project.name = \"fraud-scoring\"\n",
+			[]string{"project fraud-scoring pyproject.toml"}},
+		"an array of author tables after a dynamic name": {
+			"[project]\ndynamic = [\"name\"]\n\n[[project.authors]]\nname = \"Alice Smith\"\n", []string{}},
+		"an inline author table over several lines before the name": {
+			"[project]\nauthors = [\n  { name = \"Jane Doe\" },\n]\nname = \"fraud-scoring\"\n",
+			[]string{"project fraud-scoring pyproject.toml:5"}},
+		"a nested table of the project": {
+			"[project]\nname = \"fraud-scoring\"\n\n[project.urls]\nname = \"elsewhere\"\n",
+			[]string{"project fraud-scoring pyproject.toml:2"}},
+		"a name that is not a string": {"[project]\nname = 5\n", []string{}},
+		"not TOML":                    {"[project\nname = \"fraud-scoring\"\n", []string{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := PlanDiscovery(fstest.MapFS{"pyproject.toml": {Data: []byte(tt.data)}}, ".", nil)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, tokenLines(p.tokens))
+		})
+	}
+}
+
 func TestExtractExplicitAssemblyName(t *testing.T) {
 	p, err := PlanDiscovery(fstest.MapFS{"Fallback.csproj": {Data: []byte("<Project>\n<AssemblyName>InvoiceWorker</AssemblyName>\n</Project>")}}, ".", nil)
 	require.NoError(t, err)
