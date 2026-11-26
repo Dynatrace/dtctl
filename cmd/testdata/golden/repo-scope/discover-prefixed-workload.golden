@@ -1,0 +1,13 @@
+Unit: .
+
+#  CLUSTER  WORKLOAD                     SERVICE NAME  PROCESS GROUP  SERVICE  TIER
+1  prod-eu  payments/acme-prod-checkout  -             -              -        segment
+   k8s.cluster.uid "11111111-2222-3333-4444-555555555555" (k8s.cluster.name "prod-eu")
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   k8s.workload.name "acme-prod-checkout" contains workload "checkout" (deploy/k8s/deployment.yaml:4) (segment match)
+   900 spans in 24h
+
+Verdict: ambiguous: one candidate, matched by a segment of its name rather than the whole of it
+2 of 11 queries ran in 0.6s. Nothing was written. If it is what runs this code, save it with:
+  dtctl repo-scope set acme-prod-checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload acme-prod-checkout
+Note: candidate 1 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group

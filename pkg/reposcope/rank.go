@@ -102,8 +102,9 @@ type Candidate struct {
 	logsMissed, logsChecked bool
 }
 
-// tier is how well a candidate's name matches, best first. Records found by
-// the record queries are exact by construction: in() is equality.
+// tier is how well a candidate's name matches, best first. A row of the
+// record queries is exact when its workload or service name is a sent value,
+// and a segment match when a sent name is only part of its workload name.
 type tier int
 
 const (
@@ -181,7 +182,7 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 	}
 	c := d.records[key]
 	if c == nil {
-		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName, cluster: key.cluster}
+		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName, cluster: key.cluster, tier: d.recordTier(key)}
 		if clusterUIDRe.MatchString(key.cluster) {
 			c.ClusterUID = key.cluster
 		}
@@ -221,6 +222,35 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 	} else {
 		*logs += n
 	}
+}
+
+// recordTier says which of the record query's two conditions kept a row: a
+// segment match when a sent name is a run of the workload name's segments
+// and neither the workload nor the service name is a sent value, exact
+// otherwise, since in() is equality.
+func (d *discovery) recordTier(key recordKey) tier {
+	for _, m := range d.matchers {
+		if m.value == key.workload || m.value == key.serviceName {
+			return tierExact
+		}
+	}
+	if _, ok := d.workloadSegment(key.workload); ok {
+		return tierSegment
+	}
+	return tierExact
+}
+
+// workloadSegment is the sent name that is a run of workload's segments, the
+// longest when several are: it says the most about why the row was found.
+func (d *discovery) workloadSegment(workload string) (best matcher, ok bool) {
+	longest := ""
+	for _, m := range d.matchers {
+		p, long := segmentable(m.value)
+		if long && len(p) > len(longest) && containsSegment(workload, p) {
+			best, longest, ok = m, p, true
+		}
+	}
+	return best, ok
 }
 
 // addEntity turns one row of an entity-table query into a candidate carrying
@@ -320,6 +350,10 @@ func (d *discovery) explain(c *Candidate) {
 			}
 		}
 		c.cite(field.name, field.value, from)
+		if m, ok := d.workloadSegment(c.Workload); ok && field.name == fieldWorkload && len(from) == 0 {
+			c.sources[m.token.file] = true
+			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(m.token), tierSegment))
+		}
 	}
 	if counts := d.counts(c); counts != "" {
 		c.Evidence = append(c.Evidence, counts)

@@ -173,11 +173,14 @@ func TestListingSeesChangedFiles(t *testing.T) {
 // value is "checkout".
 func recordQuery(object string) string {
 	return "fetch " + object + ", from:now()-24h, scanLimitGBytes:5\n" +
-		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))` + "\n" +
+		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")` + "\n" +
 		"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" +
 		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
 		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
 		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n" +
+		`| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-")` + "\n" +
+		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(workloadSegments, "-checkout-")` + "\n" +
+		"| fieldsRemove workloadSegments\n" +
 		"| sort records desc\n" +
 		"| limit 200"
 }
@@ -238,6 +241,8 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		{"discover-sampled-empty", cappedThenSampled(nil)},
 		{"discover-many-ids", rowsByObject(manyIDRows())},
 		{"discover-ambiguous", rowsByObject(map[string]string{"spans": checkoutRows["spans"] + "," + ledger})},
+		{"discover-prefixed-workload", rowsByObject(map[string]string{
+			"spans": `{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"acme-prod-checkout","records":"900"}`})},
 		{"discover-two-clusters", rowsByObject(map[string]string{
 			"spans": checkoutRows["spans"] + "," + otherCluster(checkoutRows["spans"]),
 			"logs":  checkoutRows["logs"] + "," + otherCluster(checkoutRows["logs"])})},

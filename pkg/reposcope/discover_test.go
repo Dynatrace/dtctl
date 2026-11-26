@@ -113,12 +113,19 @@ func TestPlan(t *testing.T) {
 	ids := "    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
 		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
 		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n"
+	// Only "checkout" is looked for inside a workload name: every other
+	// value holds it, so a name holding one of them holds it too, except
+	// "checkoutservice" as a segment, which the second filter keeps.
+	segments := "| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\")\n" +
+		"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))" +
+		" or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-checkoutservice-\")\n" +
+		"| fieldsRemove workloadSegments\n"
 	assert.Equal(t, Query{
 		Purpose:    "spans by workload or service name",
 		DataObject: "spans",
 		DQL: "fetch spans, from:now()-24h, scanLimitGBytes:5\n" +
-			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids +
+			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + ")) or contains(k8s.workload.name, \"checkout\")\n" +
+			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids + segments +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[0])
@@ -128,8 +135,8 @@ func TestPlan(t *testing.T) {
 		Window:        "1h",
 		SamplingRatio: 100000,
 		DQL: "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n" +
-			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids +
+			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + ")) or contains(k8s.workload.name, \"checkout\")\n" +
+			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids + segments +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[1])
@@ -1245,4 +1252,53 @@ func TestDiscover_ClusterUIDTheFileWouldRefuse(t *testing.T) {
 	assert.Empty(t, r.Candidates[0].ClusterUID)
 	assert.True(t, r.Candidates[0].WorkloadShared)
 	assert.Equal(t, clusterUID, r.Candidates[1].ClusterUID)
+}
+
+// A workload is often deployed under a longer name than the repository
+// spells: <org>-<env>-<name>. It is found when the name is a whole run of its
+// segments, ranked below a workload named exactly, and never as a match: the
+// repository does not say which prefix is its own.
+func TestDiscover_WorkloadNamedWithAPrefix(t *testing.T) {
+	row := func(workload string, records float64) map[string]interface{} {
+		return map[string]interface{}{fieldNamespace: "payments", fieldWorkload: workload, fieldRecords: records}
+	}
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{
+			row("acme-prod-checkout", 900), row("checkout", 10), row("eu.checkout.v2", 5),
+		}}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	var got []string
+	for _, c := range r.Candidates {
+		got = append(got, fmt.Sprintf("%d %s %s %s", c.Rank, c.Workload, c.Tier, c.Name))
+	}
+	assert.Equal(t, []string{
+		"1 checkout exact checkout",
+		"2 acme-prod-checkout segment acme-prod-checkout",
+		"3 eu.checkout.v2 segment eu-checkout-v2",
+	}, got, "exact first, whatever the volume")
+	assert.Equal(t, `k8s.workload.name "acme-prod-checkout" contains entrypoint "checkout" (Dockerfile:4) (segment match)`,
+		r.Candidates[1].Evidence[1])
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+
+	runner = &fakeRunner{answers: map[string][]answer{"spans": {{records: []map[string]interface{}{row("acme-prod-checkout", 900)}}}}}
+	r, err = Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict, "one candidate found by a part of its name is not a match")
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["workload"])
+}
+
+// A short name is a segment of half a cluster's workloads (shop-cart,
+// cart-db, ...), so only a name of at least five letters and digits is
+// looked for inside a workload name; a shorter one still matches whole.
+func TestPlan_ShortNamesMatchOnlyWhole(t *testing.T) {
+	for term, inside := range map[string]bool{"cart": false, "a-b-c": false, "carts": true, "my-app": true, "ab.cde": true} {
+		p, err := PlanDiscovery(fixture(t, "no-signals"), ".", []string{term})
+		require.NoError(t, err)
+		assert.Equal(t, inside, strings.Contains(p.Queries[0].DQL, "contains("), "%s:\n%s", term, p.Queries[0].DQL)
+	}
+	assert.Equal(t, []string{"billing-engine", "billingengine"}, segmentPatterns([]string{"BillingEngine", "billing-engine", "billing.engine", "billing_engine", "billingengine", "cart"}))
 }

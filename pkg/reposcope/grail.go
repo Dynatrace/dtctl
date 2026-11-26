@@ -37,8 +37,11 @@ const (
 	// records of one cluster uid carry, taken from any of them: it is shown,
 	// never compared. Each id field is counted and collected: the count says
 	// how many there are, the collection lists up to discoveryIDLimit of them.
-	fieldRecords           = "records"
-	fieldAnyClusterName    = "clusterName"
+	fieldRecords        = "records"
+	fieldAnyClusterName = "clusterName"
+	// workloadSegments is the workload name as the record queries compare
+	// a name's segments in it; it is removed before the rows are returned.
+	fieldWorkloadSegments  = "workloadSegments"
 	fieldServiceCount      = "serviceCount"
 	fieldServices          = "services"
 	fieldProcessGroupCount = "processGroupCount"

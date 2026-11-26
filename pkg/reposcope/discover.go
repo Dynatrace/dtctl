@@ -253,23 +253,107 @@ func sampledRecordQuery(object, purpose string, values []string, rung samplingRu
 // a binding that selects whichever the user did not mean. Its name is taken
 // from any record of the group rather than grouped by, so a renamed cluster
 // stays one row.
+//
+// A workload deployed under a longer name than the repository spells
+// (acme-prod-checkout for checkout) is found in the same query, so it costs no
+// further scan: the first filter also keeps records whose workload name holds
+// a sent name, and a second one, after the aggregation, keeps of those only
+// the rows where the name is a whole run of the workload name's segments. The
+// service name is compared whole: it is free text, with no segments to trust.
 func recordDQL(fetch, records string, values []string) string {
 	list := quotedList(values)
+	exact := fmt.Sprintf("in(%s, array(%s)) or in(%s, array(%s))", fieldWorkload, list, fieldServiceName, list)
+	inside, segments := "", []string(nil)
+	if patterns := segmentPatterns(values); len(patterns) > 0 {
+		for _, n := range segmentNeedles(patterns) {
+			inside += fmt.Sprintf(" or contains(%s, %s)", fieldWorkload, dql.Quote(n))
+		}
+		whole := exact
+		for _, p := range patterns {
+			whole += fmt.Sprintf(" or contains(%s, %s)", fieldWorkloadSegments, dql.Quote("-"+p+"-"))
+		}
+		segments = []string{
+			// A workload name is lowercase letters, digits, "-" and ".":
+			// with "." folded into "-" and a "-" at each end, a name is a
+			// run of its segments exactly when "-name-" is in it.
+			fmt.Sprintf(`| fieldsAdd %s = concat("-", replaceString(%s, ".", "-"), "-")`, fieldWorkloadSegments, fieldWorkload),
+			"| filter " + whole,
+			"| fieldsRemove " + fieldWorkloadSegments,
+		}
+	}
 	ids := func(count, collected, field, end string) string {
 		return fmt.Sprintf("    %s = countDistinct(%s), %s = collectDistinct(%s, maxLength:%d)%s", count, field, collected, field, discoveryIDLimit, end)
 	}
-	return strings.Join([]string{
+	lines := []string{
 		fetch,
-		fmt.Sprintf("| filter in(%s, array(%s)) or in(%s, array(%s))", fieldWorkload, list, fieldServiceName, list),
+		"| filter " + exact + inside,
 		// Several aggregations are grouped in braces; ungrouped, Grail
 		// answers with a PARAMETERS_SHOULD_BE_GROUPED notification.
 		fmt.Sprintf("| summarize {%s, %s = takeAny(%s),", records, fieldAnyClusterName, fieldClusterName),
 		ids(fieldServiceCount, fieldServices, fieldService, ","),
 		ids(fieldProcessGroupCount, fieldProcessGroups, fieldProcessGroup, "},"),
 		fmt.Sprintf("    by:{%s, %s, %s, %s}", fieldClusterUID, fieldNamespace, fieldWorkload, fieldServiceName),
+	}
+	lines = append(lines, segments...)
+	return strings.Join(append(lines,
 		fmt.Sprintf("| sort %s desc", fieldRecords),
 		fmt.Sprintf("| limit %d", discoveryRowLimit),
-	}, "\n")
+	), "\n")
+}
+
+// minSegmentRunes is the fewest letters and digits a name needs to be looked
+// for inside a workload name. A shorter one (api, web, cart) is a segment of
+// workloads all over a cluster, so it matches a workload only whole.
+const minSegmentRunes = 5
+
+// segmentable reports whether v is long enough to be looked for as a run of
+// a workload name's segments, and returns it as it is compared there:
+// lowercase, its delimiters folded into "-".
+func segmentable(v string) (pattern string, ok bool) {
+	pattern = strings.Trim(segmentDelimiters.ReplaceAllString(strings.ToLower(v), "-"), "-")
+	n := 0
+	for _, r := range pattern {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			n++
+		case r != '-':
+			return "", false // no workload name holds it
+		}
+	}
+	return pattern, n >= minSegmentRunes
+}
+
+// segmentPatterns are the names the record queries look for as a run of a
+// workload name's segments: each sent value long enough, once. One that holds
+// another as a run of its own segments is left out, since every workload name
+// it is in holds the shorter one too.
+func segmentPatterns(values []string) []string {
+	set := map[string]bool{}
+	for _, v := range values {
+		if p, ok := segmentable(v); ok {
+			set[p] = true
+		}
+	}
+	all := sortedKeys(set)
+	return slices.DeleteFunc(slices.Clone(all), func(p string) bool {
+		return slices.ContainsFunc(all, func(o string) bool { return o != p && containsSegment(p, o) })
+	})
+}
+
+// segmentNeedles are the texts the first filter looks for in a workload name
+// so that every row the second filter keeps reaches it: each pattern as
+// written with "-" and with ".", without those that hold another. A workload
+// name that joins the words of one name with both delimiters is not found.
+func segmentNeedles(patterns []string) []string {
+	set := map[string]bool{}
+	for _, p := range patterns {
+		set[p] = true
+		set[strings.ReplaceAll(p, "-", ".")] = true
+	}
+	all := sortedKeys(set)
+	return slices.DeleteFunc(slices.Clone(all), func(n string) bool {
+		return slices.ContainsFunc(all, func(o string) bool { return o != n && strings.Contains(n, o) })
+	})
 }
 
 // processGroupLogsQuery counts the logs that carry one of ids. Its filter is
