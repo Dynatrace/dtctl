@@ -301,9 +301,11 @@ func repoScopeLocation(ctx context.Context) (reposcope.Location, error) {
 		return loc, err
 	}
 	if !ok {
+		// Without the directory's path: the message travels in an agent
+		// envelope and in logs, and the path is this machine's.
 		return reposcope.Location{}, &reposcope.InvalidError{
-			Source:      dir,
-			Msg:         "is not inside a git repository: a repo scope lives in " + reposcope.FileName + " at the repository root",
+			Source:      "repo scope",
+			Msg:         "the working directory is not inside a git repository: a repo scope lives in " + reposcope.FileName + " at the repository root",
 			Suggestions: []string{repoScopeCheckoutHint},
 		}
 	}
