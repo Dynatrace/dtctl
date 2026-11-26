@@ -233,15 +233,23 @@ have been seen to select processes; the labels of one set must all match, and
 several sets are alternatives. The rest of what the repo scope integration
 relies on has not been tried against an environment:
 
-- whether a workspace honours `service.name` as a label. A filter set whose
-  label a workspace does not know selects nothing, and a breakpoint under it
-  is created without complaint and never hits;
-- whether a workspace honours `k8s.cluster.uid`, which is why it is not sent;
 - whether a workspace name may contain `/`, as `<repo>/<entry>` does;
 - whether a workspace is private to the user who created it, or shared by
-  everyone who runs a command in a clone of the same repository;
-- whether a new workspace reports its filters as empty or as absent (`dtctl`
-  treats both as "no filters").
+  everyone who runs a command in a clone of the same repository. If it is
+  shared, one user's filter change or `delete breakpoint --all` reaches
+  another's breakpoints;
+- whether a workspace honours `service.name` as a label;
+- whether a workspace honours `k8s.cluster.uid`, which is why it is not sent;
+- that a filter set whose label a workspace does not honour selects nothing,
+  so a breakpoint under it is created without complaint and never hits. That
+  is how an unhonoured `service.name` or `k8s.cluster.uid` is expected to
+  show, and why nothing is set from an entry you did not name;
+- whether a new workspace reports its filters, and its breakpoints, as empty
+  or as absent, and what it answers to a filter update (`dtctl` reads these
+  as "no filters", "no breakpoints" and "applied");
+- whether a workspace created through `dtctl` ever has `sources`, a list a
+  workspace holds beside its filters: every filter update sends it empty, as
+  it did before repo scopes.
 
 After setting filters from an entry, check with
 `dtctl describe breakpoint <id>` that the breakpoint reaches the processes you
@@ -479,7 +487,7 @@ Live Debugger mutating commands follow `dtctl` safety conventions:
   update level as well as the create level, because a workspace's filters
   re-scope every breakpoint in it. A `readwrite-mine` context therefore creates
   breakpoints in a workspace that has filters and refuses to set them, on
-  create as on `update breakpoint --filters`. (Up to 0.46 `create breakpoint
+  create as on `update breakpoint --filters`. (Up to 0.47 `create breakpoint
   --filters` was checked as a create only and went through there.)
 - breakpoint creation uses create safety checks
 - edit operations use update safety checks
