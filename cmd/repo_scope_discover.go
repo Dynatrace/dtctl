@@ -276,6 +276,12 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	if err != nil && agentMode(ctx) {
 		return err
 	}
+	// A structured report is read without the lines the table prints under
+	// it, and outside agent mode without suggestions either, so what
+	// qualifies its set lines travels in its notes.
+	for i, r := range reports {
+		r.Notes = append(r.Notes, proposals[i].notes()...)
+	}
 	printer := newPrinterCtx(ctx)
 	if ap := enrichAgent(printer, "discover", "repo-scope"); ap != nil {
 		var suggestions []string
@@ -672,6 +678,17 @@ type repoScopeSelectAll struct {
 	serviceName string
 	all         bool // every candidate reports it
 	line        string
+}
+
+// notes is what the proposal says about the candidates' lines, for a report
+// that is read without the table: the line that selects several candidates,
+// which no candidate carries, and what the lines leave out.
+func (p repoScopeProposal) notes() []string {
+	var notes []string
+	for _, a := range p.selectAll {
+		notes = append(notes, a.sentence()+"; the line that does: "+a.line)
+	}
+	return slices.Concat(notes, p.sharedNotes, p.lineNotes)
 }
 
 // newRepoScopeProposal works out what r proposes beyond its candidates'

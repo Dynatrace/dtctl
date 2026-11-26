@@ -399,7 +399,9 @@ name two process groups is one candidate but two process groups. It is never
 the other way round: no kind is `match` unless the overall verdict is. Each
 candidate's `setCommand` is the line that saves it; a candidate without one has
 no binding that selects it alone, and `suggestions` then says what to do
-instead.
+instead. What qualifies a line (a binding it leaves out, the reason a
+candidate has none) is in the report's `notes` as well as in `suggestions`,
+so it is not lost where the report is read without the envelope.
 
 When `dtctl create breakpoint` sets workspace filters from the repo scope, a
 suggestion names `--filters` and `--no-repo-scope`, and a workspace that holds

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -315,11 +316,21 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 			newDQLRecorder(t, "readonly", tc.respond)
 			chdirCheckoutRepo(t)
 			report, _ := discoverReport(t)
-			var out strings.Builder
-			printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), 600*time.Millisecond)
-			testutil.AssertGolden(t, "repo-scope/"+tc.golden, out.String())
+			testutil.AssertGolden(t, "repo-scope/"+tc.golden, discoveryTable(report, 600*time.Millisecond))
 		})
 	}
+}
+
+// discoveryTable is the terminal output for a report read back from a
+// structured run. Such a report carries the proposal's notes itself, which
+// the table prints from the proposal, so they are taken out of the report
+// first.
+func discoveryTable(report *reposcope.DiscoveryReport, elapsed time.Duration) string {
+	proposal := newRepoScopeProposal(report, nil, repoScopeNames{})
+	report.Notes = slices.DeleteFunc(report.Notes, func(n string) bool { return slices.Contains(proposal.notes(), n) })
+	var out strings.Builder
+	printRepoScopeDiscovery(&out, report, proposal, elapsed)
+	return out.String()
 }
 
 // otherCluster is row as a second cluster reports it: the same namespace,
@@ -387,9 +398,18 @@ func TestRepoScopeDiscoverClusterOnSpansOnly(t *testing.T) {
 	require.Len(t, report.Candidates, 1)
 	const line = "dtctl --context c repo-scope set checkout --namespace payments --workload checkout"
 	require.Equal(t, line, report.Candidates[0].SetCommand)
-	require.Empty(t, report.Notes)
-	require.Contains(t, suggestions, "candidate 1's line leaves --cluster-uid out: its logs carry no k8s.cluster.uid, so a binding with it would return none of them; "+
-		"without it the entry selects payments/checkout in any cluster")
+	const leftOut = "candidate 1's line leaves --cluster-uid out: its logs carry no k8s.cluster.uid, so a binding with it would return none of them; " +
+		"without it the entry selects payments/checkout in any cluster"
+	require.Contains(t, suggestions, leftOut)
+	require.Equal(t, []string{leftOut}, report.Notes)
+
+	// Outside agent mode there are no suggestions, so the report itself has
+	// to say what its line leaves out.
+	for _, format := range []string{"json", "yaml", "toon"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", format, "--plain"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Contains(t, stdout, "leaves --cluster-uid out", format)
+	}
 
 	runSetCommand(t, line)
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe"}, RunOptions{})
@@ -1124,9 +1144,9 @@ func TestRepoScopeDiscoverSharedServiceName(t *testing.T) {
 	require.Len(t, notes, 1, "one note for the one shared name")
 	require.Contains(t, suggestions, notes[0])
 
-	var out strings.Builder
-	printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil, repoScopeNames{}), time.Second)
-	require.Equal(t, 1, strings.Count(out.String(), "Note: "+notes[0]+"\n"), out.String())
+	require.Contains(t, report.Notes, notes[0], "the report says so itself, for a reader with no suggestions")
+	table := discoveryTable(report, time.Second)
+	require.Equal(t, 1, strings.Count(table, "Note: "+notes[0]+"\n"), table)
 
 	// The saved entry selects payments alone.
 	runSetCommand(t, lines[0])

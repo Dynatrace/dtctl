@@ -377,7 +377,7 @@ Segments the whole repository should query under belong in the scope file instea
 
 ## AI agents
 
-In agent mode `discover` returns its report as the envelope `result`, with each candidate's `setCommand` and the top one in `context.suggestions`, offered for confirmation and never to run on the agent's own initiative. A scoped query's envelope carries `context.repo_scope`; see [AGENT_MODE.md](AGENT_MODE.md#repo-scope-contextrepo_scope). The `dtctl` skill has the procedure in [references/repo-scope.md](../skills/dtctl/references/repo-scope.md).
+In agent mode `discover` returns its report as the envelope `result`, with each candidate's `setCommand` and the top one in `context.suggestions`, offered for confirmation and never to run on the agent's own initiative. With `-o json`, `-o yaml` or `-o toon` the same report is printed without the envelope. Its `notes` then carry what the table prints under the candidates: what a `setCommand` leaves out, why a candidate has none, and the line that selects several candidates when nothing tells them apart. A scoped query's envelope carries `context.repo_scope`; see [AGENT_MODE.md](AGENT_MODE.md#repo-scope-contextrepo_scope). The `dtctl` skill has the procedure in [references/repo-scope.md](../skills/dtctl/references/repo-scope.md).
 
 ## Limits
 
