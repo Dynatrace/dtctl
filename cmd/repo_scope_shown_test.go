@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,9 @@ import (
 	"unicode"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
 // expectTerminalSafe fails when text holds a control character other than
@@ -88,5 +93,35 @@ func TestRepoScopeRefusalHoldsTheFilesValues(t *testing.T) {
 				expectTerminalSafe(t, stdout+stderr, args)
 			}
 		})
+	}
+}
+
+// The printers are the boundary. A reason or a warning is written from a
+// file and from directory names, and whatever one comes to hold, the lines a
+// person reads show it without what would act on the terminal.
+func TestRepoScopePrintersHoldAReasonAndAWarning(t *testing.T) {
+	const hostile = "a\x1b[2Jb\ac"
+	const shown = "a�[2Jb�c"
+	entry := &reposcope.Entry{Name: "checkout", ServiceNames: []string{"checkout"}, Segments: []reposcope.Segment{{ID: "abc"}}}
+	for name, print := range map[string]func(w io.Writer){
+		"current, no entry":  func(w io.Writer) { printRepoScopeCurrent(w, &reposcope.Status{Reason: hostile}) },
+		"current, an entry":  func(w io.Writer) { printRepoScopeCurrent(w, &reposcope.Status{Entry: entry, Reason: hostile}) },
+		"describe, no entry": func(w io.Writer) { printRepoScopeDescribe(w, &reposcope.Status{Reason: hostile}) },
+		"describe, an entry": func(w io.Writer) { printRepoScopeDescribe(w, &reposcope.Status{Entry: entry, Reason: hostile}) },
+		"the file's warning": func(w io.Writer) { warnRepoScopeFile(w, hostile) },
+		"query, not applied": func(w io.Writer) {
+			(&repoScopedQuery{stderr: w, scope: &output.RepoScope{}, notApplied: hostile, warning: hostile}).announce(nil)
+		},
+		"query, a segment of the command line": func(w io.Writer) {
+			(&repoScopedQuery{stderr: w, scope: &output.RepoScope{Name: "checkout", Code: repoScopeUserSegment}, notApplied: hostile}).announce(nil)
+		},
+		"query, the filter refused beside segments": func(w io.Writer) {
+			(&repoScopedQuery{stderr: w, scope: &output.RepoScope{Name: "checkout"}, bound: true, segments: entry.Segments, refusedReason: hostile}).announce(nil)
+		},
+	} {
+		var out bytes.Buffer
+		print(&out)
+		expectTerminalSafe(t, out.String(), []string{name})
+		require.Contains(t, out.String(), shown, name)
 	}
 }
