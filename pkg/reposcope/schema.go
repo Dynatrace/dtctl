@@ -263,6 +263,16 @@ func (e *Entry) validate() *InvalidError {
 	return nil
 }
 
+// Problem says why the entry's own fields could not be saved, or returns "".
+// It is the check Save applies to each entry of a file, for a caller that
+// proposes an entry and must not propose one that would be refused.
+func (e Entry) Problem() string {
+	if err := e.validate(); err != nil {
+		return err.Msg
+	}
+	return ""
+}
+
 // validateSegments checks the segments the entry references.
 func (e *Entry) validateSegments() *InvalidError {
 	if len(e.Segments) > MaxSegments {

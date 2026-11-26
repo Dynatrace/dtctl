@@ -132,6 +132,23 @@ func TestRepoScopeSetLine(t *testing.T) {
 			}},
 			want: "dtctl repo-scope set checkout --service " + svc,
 		},
+		{
+			// set would refuse the line, so the part a scope file cannot
+			// hold is left out and named.
+			name: "a workload a scope file cannot hold is left out",
+			report: reposcope.DiscoveryReport{Sent: []string{"BillingEngine"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "billingengine", Namespace: "Payments", Workload: "BillingEngine", ServiceName: "BillingEngine", Tier: "exact", Spans: 10},
+			}},
+			want:  "dtctl repo-scope set billingengine --service-name BillingEngine",
+			notes: []string{`candidate 1's line leaves --namespace Payments --workload BillingEngine out, which a scope file cannot hold: workloads[0] namespace "Payments" is not a Kubernetes namespace name`},
+		},
+		{
+			name: "an entity id a scope file cannot hold gets no line",
+			report: reposcope.DiscoveryReport{Sent: []string{"pay"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "pay", Tier: "exact", Services: []string{"dt.smartscape.service-1234"}},
+			}},
+			notes: []string{`candidate 1 has no set line: a scope file cannot hold --service dt.smartscape.service-1234: services[0] "dt.smartscape.service-1234" is not a service id (SERVICE- and 16 hex digits)`},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.report

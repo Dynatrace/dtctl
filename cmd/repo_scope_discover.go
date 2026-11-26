@@ -408,36 +408,79 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // a query that did not answer could have found that other candidate. An id
 // binding is held to more still, see repoScopeIDRefusal.
 func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
-	var bindings []string
-	flag := func(name string, values ...string) {
-		for _, v := range values {
-			bindings = append(bindings, name, exec.ShellQuote(v))
+	e, _ := repoScopeBindings(r, c)
+	if !e.HasBindings() {
+		return ""
+	}
+	return repoScopeSetLine(exec.ShellQuote(c.Name), repoScopeFlags(e), repoScopeDir(r, c), selectors)
+}
+
+// repoScopeBindings is what a line for c binds, as the entry `set` would
+// build from it, and the bindings left out because a scope file cannot hold
+// them: set would refuse the whole line for one such value. Records carry
+// what their sender wrote, a namespace in capitals or an entity id of
+// another kind, and a line that is refused saves nothing.
+func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e reposcope.Entry, unheld []repoScopeUnheld) {
+	// holds reports whether a scope file can hold b, the bindings of one
+	// kind, and records them as left out when it cannot.
+	holds := func(b reposcope.Entry) bool {
+		b.Name = c.Name
+		problem := b.Problem()
+		if problem != "" {
+			unheld = append(unheld, repoScopeUnheld{strings.Join(repoScopeFlags(b), " "), problem})
 		}
+		return problem == ""
 	}
 	if c.Namespace != "" && c.Workload != "" && (c.ClusterUID != "" || !c.WorkloadShared) {
-		if c.ClusterUID != "" && len(c.WithoutCluster) == 0 {
-			flag("--cluster-uid", c.ClusterUID)
+		w := reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}
+		if len(c.WithoutCluster) == 0 {
+			w.ClusterUID = c.ClusterUID
 		}
-		flag("--namespace", c.Namespace)
-		flag("--workload", c.Workload)
+		if holds(reposcope.Entry{Workloads: []reposcope.Workload{w}}) {
+			e.Workloads = []reposcope.Workload{w}
+		}
 	}
-	if c.ServiceName != "" && slices.Contains(r.Sent, c.ServiceName) && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() && !r.Partial {
-		flag("--service-name", c.ServiceName)
+	if c.ServiceName != "" && slices.Contains(r.Sent, c.ServiceName) && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() && !r.Partial &&
+		holds(reposcope.Entry{ServiceNames: []string{c.ServiceName}}) {
+		e.ServiceNames = []string{c.ServiceName}
 	}
 	switch {
-	case len(bindings) == 0:
-		if repoScopeIDRefusal(r, c, true) != nil {
-			return ""
+	case !e.HasBindings():
+		ids := reposcope.Entry{ProcessGroups: c.ProcessGroups, Services: c.Services}
+		if repoScopeIDRefusal(r, c, true) == nil && ids.HasBindings() && holds(ids) {
+			e.ProcessGroups, e.Services = c.ProcessGroups, c.Services
 		}
-		flag("--process-group", c.ProcessGroups...)
-		flag("--service", c.Services...)
-		if len(bindings) == 0 {
-			return ""
-		}
-	case c.LogsByProcessGroup > 0 && repoScopeIDRefusal(r, c, false) == nil:
-		flag("--process-group", c.ProcessGroups...)
+	case c.LogsByProcessGroup > 0 && repoScopeIDRefusal(r, c, false) == nil && holds(reposcope.Entry{ProcessGroups: c.ProcessGroups}):
+		e.ProcessGroups = c.ProcessGroups
 	}
-	return repoScopeSetLine(exec.ShellQuote(c.Name), bindings, repoScopeDir(r, c), selectors)
+	return e, unheld
+}
+
+// repoScopeUnheld is the bindings of one kind that a scope file cannot hold:
+// the flags they would have been, and the schema's reason.
+type repoScopeUnheld struct{ flags, problem string }
+
+// repoScopeFlags spells an entry's bindings as `repo-scope set` flags,
+// shell-quoted, in the order they are listed everywhere: the workload, the
+// service name, then the two deprecated ids, process group first.
+func repoScopeFlags(e reposcope.Entry) []string {
+	var flags []string
+	flag := func(name string, values ...string) {
+		for _, v := range values {
+			flags = append(flags, name, exec.ShellQuote(v))
+		}
+	}
+	for _, w := range e.Workloads {
+		if w.ClusterUID != "" {
+			flag("--cluster-uid", w.ClusterUID)
+		}
+		flag("--namespace", w.Namespace)
+		flag("--workload", w.Name)
+	}
+	flag("--service-name", e.ServiceNames...)
+	flag("--process-group", e.ProcessGroups...)
+	flag("--service", e.Services...)
+	return flags
 }
 
 // repoScopeRefusal is why a line binds none of a candidate's entity ids:
@@ -671,7 +714,11 @@ func repoScopeSharedNameNotes(r *reposcope.DiscoveryReport) []string {
 func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 	var notes []string
 	for _, c := range r.Candidates {
+		_, unheld := repoScopeBindings(r, c)
 		if c.SetCommand != "" {
+			for _, u := range unheld {
+				notes = append(notes, fmt.Sprintf("candidate %d's line leaves %s out, which a scope file cannot hold: %s", c.Rank, u.flags, u.problem))
+			}
 			if c.ClusterUID != "" && len(c.WithoutCluster) > 0 {
 				notes = append(notes, fmt.Sprintf("candidate %d's line leaves --cluster-uid out: its %s carry no k8s.cluster.uid, so a binding with it would return none of them; without it the entry selects %s/%s in any cluster",
 					c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
@@ -684,6 +731,12 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 		why := repoScopeIDRefusal(r, c, true)
 		switch {
+		case len(unheld) > 0:
+			var all []string
+			for _, u := range unheld {
+				all = append(all, fmt.Sprintf("%s: %s", u.flags, u.problem))
+			}
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: a scope file cannot hold %s", c.Rank, strings.Join(all, "; nor ")))
 		case c.WorkloadShared && c.ClusterRefused != "":
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records carry k8s.cluster.uid %q, which is not a cluster uid a scope file can hold (a lowercase UUID), and another candidate runs the same namespace and workload, so a binding without --cluster-uid would select both",
 				c.Rank, c.ClusterRefused))
