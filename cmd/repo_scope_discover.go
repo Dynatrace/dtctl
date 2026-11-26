@@ -23,10 +23,22 @@ import (
 	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
-// repoScopeDiscoverTimeout bounds one discovery run. A run that needs longer
-// is better narrowed with --path or --term than waited for. A variable so a
-// test can run out of time without waiting a minute.
-var repoScopeDiscoverTimeout = 60 * time.Second
+// repoScopeDiscoverTimeout bounds the discovery of one unit. A run that needs
+// longer is better narrowed with --path or --term than waited for.
+const repoScopeDiscoverTimeout = 60 * time.Second
+
+// repoScopeDiscoverTimeoutKey is the context key of a bound that replaces
+// repoScopeDiscoverTimeout for one invocation: a test runs out of time
+// without waiting a minute, and without a variable every other run shares.
+type repoScopeDiscoverTimeoutKey struct{}
+
+// repoScopeDiscoverBound is the time one unit's discovery may take in ctx.
+func repoScopeDiscoverBound(ctx context.Context) time.Duration {
+	if d, ok := ctx.Value(repoScopeDiscoverTimeoutKey{}).(time.Duration); ok {
+		return d
+	}
+	return repoScopeDiscoverTimeout
+}
 
 var repoScopeDiscoverCmd = newRepoScopeDiscoverCmd()
 
@@ -238,7 +250,7 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 			output.FprintInfo(currentStderr(ctx), "Sending to %s: %s (compared to %s); nothing else leaves this machine",
 				host, quotedValues(plan.Sent), strings.Join(reposcope.MatchedFields(), ", "))
 		}
-		runCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverTimeout)
+		runCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverBound(runCtx))
 		defer cancelTimeout()
 		began := time.Now()
 		report, err := reposcope.Discover(runCtx, runner, plan, host)

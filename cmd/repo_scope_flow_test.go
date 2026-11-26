@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -941,11 +942,14 @@ func TestRepoScopeDiscoverTimeout(t *testing.T) {
 		return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`
 	})
 	chdirCheckoutRepo(t)
-	prev := repoScopeDiscoverTimeout
-	repoScopeDiscoverTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { repoScopeDiscoverTimeout = prev })
+	require.Equal(t, time.Minute, repoScopeDiscoverBound(context.Background()), "the bound the docs state")
 
-	report, _ := discoverReport(t)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--agent"}, RunOptions{
+		Context: context.WithValue(context.Background(), repoScopeDiscoverTimeoutKey{}, 200*time.Millisecond),
+	})
+	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+	var report reposcope.DiscoveryReport
+	agentResult(t, stdout, &report)
 	require.Equal(t, "timeout", report.Queries[0].Cause)
 	require.True(t, report.Queries[4].Skipped, "the logs query")
 	require.True(t, report.Partial)
