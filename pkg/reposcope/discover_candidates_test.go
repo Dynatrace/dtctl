@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
 	"github.com/Dynatrace/dtctl/sdk/inventory"
 )
 
@@ -405,5 +406,45 @@ func TestDiscover_QualifiedEntityNameIsNotExact(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, r.Candidates, 1, name)
 		assert.Equal(t, want, r.Candidates[0].Tier, name)
+	}
+}
+
+// A record query's table missing from the environment is said as that, not
+// in the words meant for an entity table ("the record queries are what
+// applies here" about a record query). It hides nothing, so the report is not
+// partial for it.
+func TestDiscover_MissingRecordTable(t *testing.T) {
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{err: &sdkquery.QueryError{ErrorType: "UNKNOWN_DATA_OBJECT"}}},
+		"logs":  {{records: rows(t, "logs-checkout")}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.False(t, r.Partial)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+	assert.Equal(t, []string{"spans is not available on this environment, so nothing was looked for there"}, r.Notes)
+
+	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"dt.entity.service": {{err: &sdkquery.QueryError{ErrorType: "UNKNOWN_DATA_OBJECT"}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"dt.entity.service is not available on this environment; the record queries are what applies here"}, r.Notes)
+}
+
+// Grail may report a table the token cannot read in the message alone, with
+// no error type. It is the same denial, and gets the same note.
+func TestDiscover_DenialReportedInTheMessage(t *testing.T) {
+	for name, qe := range map[string]*sdkquery.QueryError{
+		"typed":       {StatusCode: 403, ErrorType: "NOT_AUTHORIZED_FOR_TABLE"},
+		"the message": {StatusCode: 403, Message: "NOT_AUTHORIZED_FOR_TABLE: missing permission for table logs"},
+		"the detail":  {StatusCode: 403, ErrorType: "FORBIDDEN", Detail: "NOT_AUTHORIZED_FOR_TABLE"},
+	} {
+		r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+			"spans": {{records: rows(t, "spans-checkout")}},
+			"logs":  {{err: fmt.Errorf("query: %w", qe)}},
+		}}, singleGo(t), prodHost)
+		require.NoError(t, err, name)
+		assert.Equal(t, causeAuth, r.Queries[4].Cause, name)
+		assert.Contains(t, r.Notes, "the token cannot read logs", name)
+		assert.True(t, r.Partial, name)
 	}
 }

@@ -792,8 +792,8 @@ func (r *DiscoveryReport) skip(ctx context.Context, q *Query) {
 func (r *DiscoveryReport) fail(ctx context.Context, q *Query, err error) {
 	q.Cause = failureCause(ctx, err)
 	q.Error, _, _ = strings.Cut(err.Error(), "\n")
-	// A missing entity table is a known absence, not a gap in the answer:
-	// only the fallbacks query one.
+	// A table the environment does not have is a known absence, not a gap in
+	// the answer: nothing is hidden in it.
 	r.Partial = r.Partial || q.Cause != causeUnknownObject
 	r.note(failureNote(q))
 }
@@ -911,10 +911,13 @@ func failureCause(ctx context.Context, err error) string {
 	}
 	var qe *sdkquery.QueryError
 	if errors.As(err, &qe) {
-		switch qe.ErrorType {
-		case "NOT_AUTHORIZED_FOR_TABLE":
+		// Grail reports a table the token cannot read as the error type, or
+		// only in the text beside another type.
+		const denied = "NOT_AUTHORIZED_FOR_TABLE"
+		switch {
+		case qe.ErrorType == denied || strings.Contains(qe.Message, denied) || strings.Contains(qe.Detail, denied):
 			return causeAuth
-		case "UNKNOWN_DATA_OBJECT", "DATA_OBJECT_NOT_SUPPORTED":
+		case qe.ErrorType == "UNKNOWN_DATA_OBJECT" || qe.ErrorType == "DATA_OBJECT_NOT_SUPPORTED":
 			return causeUnknownObject
 		}
 	}
@@ -944,6 +947,9 @@ func failureNote(q *Query) string {
 		return fmt.Sprintf("%s returned %d rows, the most a discovery query reads, so the verdict is capped at ambiguous",
 			q.DataObject, discoveryRowLimit)
 	case causeUnknownObject:
+		if !q.fallback() {
+			return fmt.Sprintf("%s is not available on this environment, so nothing was looked for there", q.DataObject)
+		}
 		return fmt.Sprintf("%s is not available on this environment; the record queries are what applies here", q.DataObject)
 	case causeSamplingRefused:
 		return fmt.Sprintf("this environment did not sample %s, so there is no cheaper query than the capped one", q.DataObject)
