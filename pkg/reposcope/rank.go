@@ -762,8 +762,10 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		r.Candidates[i] = *c
 	}
 	// A sample can have missed a second candidate, as its note says, so what
-	// it found is no more a match than a partial result is.
-	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial || r.SampledRecords())
+	// it found is no more a match than a partial result is. Nor is a name
+	// found in the entity table alone: an entity outlives its last record,
+	// so with no span or log in the window nothing shows that it runs.
+	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial || r.SampledRecords() || len(d.records) == 0)
 }
 
 // sharedServiceNames is the service names more than one candidate carries.
@@ -900,12 +902,12 @@ func VerdictLabel(kind string) string {
 	return kind
 }
 
-// verdicts decides each kind and the whole. A result that is partial, or that
-// a sample read, is never a match: what was not seen could be a second
-// candidate. A kind is tallied by
+// verdicts decides each kind and the whole. unsure is a result that is
+// partial, that a sample read, or that rests on entity names alone: it is
+// never a match. A kind is tallied by
 // its count where it has one, so a candidate listing one of its 200 service
 // ids is 200 services, not one. No kind is a match unless the whole is.
-func verdicts(candidates []Candidate, partial bool) (Verdict, map[string]Verdict) {
+func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict) {
 	per := make(map[string]Verdict, len(verdictKinds))
 	for kind, k := range verdictKinds {
 		distinct := map[string]bool{}
@@ -925,9 +927,9 @@ func verdicts(candidates []Candidate, partial bool) (Verdict, map[string]Verdict
 				exact = exact && c.Tier == tierExact.String()
 			}
 		}
-		per[kind] = decide(max(len(distinct), int(most)), exact, partial)
+		per[kind] = decide(max(len(distinct), int(most)), exact, unsure)
 	}
-	overall := decide(len(candidates), len(candidates) == 1 && candidates[0].Tier == tierExact.String(), partial)
+	overall := decide(len(candidates), len(candidates) == 1 && candidates[0].Tier == tierExact.String(), unsure)
 	if overall != VerdictMatch {
 		// No kind is settled while the candidates are not: the one value of
 		// a kind may be what two candidates share.
@@ -940,11 +942,11 @@ func verdicts(candidates []Candidate, partial bool) (Verdict, map[string]Verdict
 	return overall, per
 }
 
-func decide(distinct int, exact, partial bool) Verdict {
+func decide(distinct int, exact, unsure bool) Verdict {
 	switch {
 	case distinct == 0:
 		return VerdictNone
-	case distinct == 1 && exact && !partial:
+	case distinct == 1 && exact && !unsure:
 		return VerdictMatch
 	}
 	return VerdictAmbiguous

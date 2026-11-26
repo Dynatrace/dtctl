@@ -38,7 +38,7 @@ func TestDiscoverTermEvidenceAndMalformedRows(t *testing.T) {
 		require.Len(t, r.Candidates, 1)
 		require.Equal(t, []string{pgID}, r.Candidates[0].ProcessGroups)
 		require.Equal(t, []string{`entity.name "checkout" = term "checkout" (exact match)`}, r.Candidates[0].Evidence)
-		require.Equal(t, VerdictMatch, r.Verdicts["processGroup"])
+		require.Equal(t, VerdictAmbiguous, r.Verdicts["processGroup"], "an entity name alone is never a match")
 	})
 }
 

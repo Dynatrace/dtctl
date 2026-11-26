@@ -137,7 +137,7 @@ fetch dt.entity.service, from:now()-24h
 | limit 200
 ```
 
-and the same over `dt.entity.process_group`.
+and the same over `dt.entity.process_group`. A name found only there is never a `match`, however exactly it fits: an entity outlives its last record, so with no span or log in 24 hours nothing shows that it runs. One such candidate is `ambiguous`, with its line under "If it is what runs this code".
 
 When the records leave a candidate with spans and no logs, and both record queries read the whole day, its logs are looked up by the process groups its spans carried, with the filter a `--process-group` binding renders. The dry run shows this query with a placeholder, since the ids are the environment's answer:
 

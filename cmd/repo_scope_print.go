@@ -260,8 +260,9 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 // repoScopeDoubt says, after a verdict that is not a match, what stands in
 // the way of one. With several candidates it is their number. With one it is
 // not: that candidate's name matched only in part, the result is partial and
-// a query that did not answer could have found another, or a sample read the
-// records and could have missed another.
+// a query that did not answer could have found another, a sample read the
+// records and could have missed another, or only the entity table holds the
+// name.
 func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 	switch {
 	case len(r.Candidates) != 1:
@@ -270,6 +271,11 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 		return ": one candidate, but the result is partial (see the notes)"
 	case r.SampledRecords():
 		return ": one candidate, but the records were sampled, which can miss another (see the notes)"
+	case r.Candidates[0].Tier == "exact" && r.Candidates[0].Workload == "" && r.Candidates[0].ServiceName == "":
+		// Named exactly, but found by the entity-name search, which runs
+		// only when the records find nothing: the entity exists, and
+		// nothing shows that it runs.
+		return ": one candidate, found by its entity name alone; no span or log in 24h carries a name of this repository"
 	}
 	return fmt.Sprintf(": one candidate, matched by a %s of its name rather than the whole of it", r.Candidates[0].Tier)
 }

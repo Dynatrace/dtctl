@@ -534,6 +534,25 @@ func TestRepoScopeDiscoverNoMatch(t *testing.T) {
 	require.Equal(t, repoScopeNarrowHint, suggestions[0])
 }
 
+// One entity named exactly like the repository, and no span or log in the
+// window: the entity table shows that it existed, not that it runs. It is a
+// candidate to confirm, and the verdict line says why.
+func TestRepoScopeDiscoverEntityNameAlone(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"dt.entity.service": `{"id":"` + flowService + `","entity.name":"checkout"}`}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.False(t, report.Partial)
+	require.Equal(t, "show the user the candidates and ask which runs this code, then run its setCommand", suggestions[0])
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its entity name alone; no span or log in 24h carries a name of this repository\n")
+	require.Contains(t, stdout, "Nothing was written. If it is what runs this code, save it with:\n  dtctl repo-scope set checkout --service "+flowService+"\n")
+}
+
 // --path picks another directory of a monorepo, and --term adds a name; both
 // are held to what they may carry.
 func TestRepoScopeDiscoverPathAndTerm(t *testing.T) {

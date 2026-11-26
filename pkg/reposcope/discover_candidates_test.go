@@ -543,3 +543,18 @@ func TestDiscover_CountsOfAStoppedQueryAreLowerBounds(t *testing.T) {
 		})
 	}
 }
+
+// A name in the entity table is not evidence that the code runs: an entity
+// outlives its last record. One exact entity-name match with no span or log
+// in the window is therefore a candidate to confirm, not a match.
+func TestDiscover_EntityNameAloneIsNotAMatch(t *testing.T) {
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"dt.entity.service": {{records: []map[string]interface{}{{fieldEntityID: svcID, fieldEntityName: "checkout"}}}},
+	}}, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.Equal(t, "exact", r.Candidates[0].Tier)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["service"])
+	assert.False(t, r.Partial, "every query answered")
+}
