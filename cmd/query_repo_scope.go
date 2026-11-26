@@ -638,8 +638,14 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	if s.Name != "" {
 		label += " " + s.Name
 	}
-	output.FprintWarning(q.stderr, "%s not applied: %s; the query runs unscoped%s",
-		label, q.notApplied, q.ignoreHint("silence this"))
+	// A query that filters a bound field itself is not unscoped the way the
+	// other refusals leave it: its own condition is what narrows it.
+	runs := "the query runs unscoped"
+	if s.Code == string(dql.UserFilter) {
+		runs = "the query runs as typed, with its own filter and none inserted"
+	}
+	output.FprintWarning(q.stderr, "%s not applied: %s; %s%s",
+		label, q.notApplied, runs, q.ignoreHint("silence this"))
 }
 
 // onResult is the executor's OnResult hook. A scoped query that returns

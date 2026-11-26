@@ -443,7 +443,17 @@ func TestQueryRepoScope_ExplicitNameRefusals(t *testing.T) {
 		require.Zero(t, code, stderr)
 		require.Equal(t, ownFilter, srv.first(t))
 		require.Equal(t, "user_filter", repoScopeContext(t, stdout).Code)
-		require.Contains(t, stderr, "the query runs unscoped")
+		// The query is not unscoped in the sense of the other refusals: it
+		// carries the user's own condition on the field, and the line says
+		// that this is what ran.
+		require.Equal(t, "Warning: repo scope checkout not applied: the query filters on k8s.namespace.name itself, and its own filter wins; "+
+			"the query runs as typed, with its own filter and none inserted\n", stderr)
+
+		// Without the name it says the same, and how to silence it.
+		code, _, stderr = runRepoScoped([]string{"query", ownFilter, "--agent"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, "Warning: repo scope checkout not applied: the query filters on k8s.namespace.name itself, and its own filter wins; "+
+			"the query runs as typed, with its own filter and none inserted (use --no-repo-scope to silence this)\n", stderr)
 	})
 }
 
