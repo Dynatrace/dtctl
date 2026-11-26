@@ -1,0 +1,70 @@
+package reposcope
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// Logs of a workload need not carry a service name while its spans do. The
+// two rows are one workload: as two candidates the report said the first had
+// no logs under its workload, beside a second candidate that was those logs.
+func TestDiscover_RowWithoutServiceNameJoinsItsWorkload(t *testing.T) {
+	row := func(uid, serviceName string, records float64) map[string]interface{} {
+		r := map[string]interface{}{fieldNamespace: "payments", fieldWorkload: "checkout", fieldRecords: records,
+			fieldProcessGroups: collected(pgID), fieldProcessGroupCount: float64(1)}
+		if uid != "" {
+			r[fieldClusterUID] = uid
+		}
+		if serviceName != "" {
+			r[fieldServiceName] = serviceName
+		}
+		return r
+	}
+	for name, uid := range map[string]string{"in a cluster": clusterUID, "without a cluster": ""} {
+		t.Run(name, func(t *testing.T) {
+			runner := &fakeRunner{answers: map[string][]answer{
+				"spans": {{records: []map[string]interface{}{row(uid, "checkout", 300)}}},
+				"logs":  {{records: []map[string]interface{}{row(uid, "", 500)}}},
+			}}
+			r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+			require.NoError(t, err)
+
+			require.Len(t, r.Candidates, 1)
+			c := r.Candidates[0]
+			assert.Equal(t, []string{uid, "checkout", "checkout"}, []string{c.ClusterUID, c.Workload, c.ServiceName})
+			assert.Equal(t, []int64{300, 500, 0}, []int64{c.Spans, c.Logs, c.LogsByProcessGroup})
+			assert.Equal(t, VerdictMatch, r.Verdict)
+			assert.Empty(t, r.Notes, "its logs were found")
+			assert.Len(t, runner.sent, 2, "no lookup by process group")
+		})
+	}
+
+	t.Run("then its cluster", func(t *testing.T) {
+		// A row with neither joins the service name first, then the cluster.
+		runner := &fakeRunner{answers: map[string][]answer{
+			"spans": {{records: []map[string]interface{}{row(clusterUID, "checkout", 300), row(clusterUID, "", 20)}}},
+			"logs":  {{records: []map[string]interface{}{row("", "", 500)}}},
+		}}
+		r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+		require.NoError(t, err)
+		require.Len(t, r.Candidates, 1)
+		c := r.Candidates[0]
+		assert.Equal(t, []int64{320, 500}, []int64{c.Spans, c.Logs})
+		assert.Equal(t, []string{"logs"}, c.WithoutCluster)
+	})
+
+	t.Run("not beside two service names", func(t *testing.T) {
+		// Which of the two the row belongs to is not known.
+		runner := &fakeRunner{answers: map[string][]answer{
+			"spans": {{records: []map[string]interface{}{row(clusterUID, "checkout", 300), row(clusterUID, "checkout-service", 100)}}},
+			"logs":  {{records: []map[string]interface{}{row(clusterUID, "", 500)}}},
+		}}
+		r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+		require.NoError(t, err)
+		require.Len(t, r.Candidates, 3)
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	})
+}

@@ -554,6 +554,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 	for _, n := range r.samplingNotes() {
 		r.note(n)
 	}
+	d.foldServiceless()
 	d.foldClusterless()
 	r.checkLogs(ctx, runner, d)
 	d.finish(r)

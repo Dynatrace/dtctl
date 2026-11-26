@@ -234,6 +234,34 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 	}
 }
 
+// foldServiceless joins a candidate whose records carry no service name into
+// the candidate that is the same workload with one. Records of one workload
+// need not all carry service.name: spans do, while the logs of the same
+// cluster, namespace and workload may carry none, and the two rows would
+// otherwise be two candidates, one of them with spans and no logs.
+//
+// It joins only what is plainly one workload: the cluster, namespace and
+// workload have exactly one candidate with a service name. Beside two, which
+// of them the row belongs to is not known, and it stays a candidate of its
+// own.
+func (d *discovery) foldServiceless() {
+	for key, c := range d.records {
+		if key.serviceName != "" || key.workload == "" {
+			continue
+		}
+		var named []*Candidate
+		for k, o := range d.records {
+			if k.serviceName != "" && k.cluster == key.cluster && k.namespace == key.namespace && k.workload == key.workload {
+				named = append(named, o)
+			}
+		}
+		if len(named) == 1 {
+			named[0].absorb(c)
+			delete(d.records, key)
+		}
+	}
+}
+
 // foldClusterless joins a candidate whose records name no cluster into the
 // candidate that is the same workload in one. Records of one workload need
 // not all carry k8s.cluster.uid: spans may, while the logs of the same
@@ -246,6 +274,9 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 // another service name, the row stays a candidate of its own. The candidate
 // keeps its cluster and lists in WithoutCluster the data objects that do not
 // carry it, since a binding with the cluster would select none of those.
+//
+// It runs after foldServiceless, so a workload's rows without a service name
+// are already part of the candidate in each cluster.
 func (d *discovery) foldClusterless() {
 	for key, c := range d.records {
 		if key.cluster != "" || key.workload == "" {
@@ -260,24 +291,32 @@ func (d *discovery) foldClusterless() {
 		if len(in) != 1 || (key.serviceName != "" && key.serviceName != in[0].ServiceName) {
 			continue
 		}
-		into := in[0]
 		for _, n := range c.recordCounts() {
-			into.WithoutCluster = addSorted(into.WithoutCluster, n.object)
+			in[0].WithoutCluster = addSorted(in[0].WithoutCluster, n.object)
 		}
-		into.Spans, into.Logs = into.Spans+c.Spans, into.Logs+c.Logs
-		into.SpansSampled, into.LogsSampled = into.SpansSampled+c.SpansSampled, into.LogsSampled+c.LogsSampled
-		into.Sampled = into.Sampled || c.Sampled
-		for _, id := range c.Services {
-			into.Services = addSorted(into.Services, id)
-		}
-		for _, id := range c.ProcessGroups {
-			into.ProcessGroups = addSorted(into.ProcessGroups, id)
-		}
-		into.ServiceCount = max(into.ServiceCount, c.ServiceCount, int64(len(into.Services)))
-		into.ProcessGroupCount = max(into.ProcessGroupCount, c.ProcessGroupCount, int64(len(into.ProcessGroups)))
-		into.ServicesCapped = into.ServicesCapped || c.ServicesCapped
-		into.ProcessGroupsCapped = into.ProcessGroupsCapped || c.ProcessGroupsCapped
+		in[0].absorb(c)
 		delete(d.records, key)
+	}
+}
+
+// absorb adds the records and ids of o, another row set of the same workload,
+// to c.
+func (c *Candidate) absorb(o *Candidate) {
+	c.Spans, c.Logs = c.Spans+o.Spans, c.Logs+o.Logs
+	c.SpansSampled, c.LogsSampled = c.SpansSampled+o.SpansSampled, c.LogsSampled+o.LogsSampled
+	c.Sampled = c.Sampled || o.Sampled
+	for _, id := range o.Services {
+		c.Services = addSorted(c.Services, id)
+	}
+	for _, id := range o.ProcessGroups {
+		c.ProcessGroups = addSorted(c.ProcessGroups, id)
+	}
+	c.ServiceCount = max(c.ServiceCount, o.ServiceCount, int64(len(c.Services)))
+	c.ProcessGroupCount = max(c.ProcessGroupCount, o.ProcessGroupCount, int64(len(c.ProcessGroups)))
+	c.ServicesCapped = c.ServicesCapped || o.ServicesCapped
+	c.ProcessGroupsCapped = c.ProcessGroupsCapped || o.ProcessGroupsCapped
+	if c.ClusterName == "" {
+		c.ClusterName = o.ClusterName
 	}
 }
 
