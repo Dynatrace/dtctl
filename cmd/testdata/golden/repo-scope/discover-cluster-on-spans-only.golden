@@ -10,5 +10,5 @@ Unit: .
 
 Verdict: match: workload, service name, process group, service
 2 of 11 queries ran in 0.6s. Nothing was written. Save it with:
-  dtctl repo-scope set checkout --namespace payments --workload checkout
+  dtctl --context c repo-scope set checkout --namespace payments --workload checkout
 Note: candidate 1's line leaves --cluster-uid out: its logs carry no k8s.cluster.uid, so a binding with it would return none of them; without it the entry selects payments/checkout in any cluster

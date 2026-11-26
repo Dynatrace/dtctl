@@ -32,7 +32,7 @@ import (
 const (
 	flowService      = "SERVICE-0123456789ABCDEF"
 	flowProcessGroup = "PROCESS_GROUP-FEDCBA9876543210"
-	flowSetCommand   = "dtctl repo-scope set checkout --cluster-uid " + flowClusterUID + " --namespace payments --workload checkout"
+	flowSetCommand   = "dtctl --context c repo-scope set checkout --cluster-uid " + flowClusterUID + " --namespace payments --workload checkout"
 )
 
 // checkoutRows are the aggregates an environment running the checkout
@@ -385,7 +385,7 @@ func TestRepoScopeDiscoverClusterOnSpansOnly(t *testing.T) {
 	report, suggestions := discoverReport(t)
 	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
 	require.Len(t, report.Candidates, 1)
-	const line = "dtctl repo-scope set checkout --namespace payments --workload checkout"
+	const line = "dtctl --context c repo-scope set checkout --namespace payments --workload checkout"
 	require.Equal(t, line, report.Candidates[0].SetCommand)
 	require.Empty(t, report.Notes)
 	require.Contains(t, suggestions, "candidate 1's line leaves --cluster-uid out: its logs carry no k8s.cluster.uid, so a binding with it would return none of them; "+
@@ -500,7 +500,7 @@ func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) 
 	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
 	require.False(t, report.Partial)
 	require.True(t, report.Candidates[0].Sampled)
-	const line = "dtctl repo-scope set checkout --namespace payments --workload checkout"
+	const line = "dtctl --context c repo-scope set checkout --namespace payments --workload checkout"
 	require.Equal(t, line, report.Candidates[0].SetCommand)
 	require.Equal(t, "show the user the candidates and ask which runs this code, then run its setCommand", suggestions[0])
 	var sampling []string
@@ -550,7 +550,7 @@ func TestRepoScopeDiscoverEntityNameAlone(t *testing.T) {
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its entity name alone; no span or log in 24h carries a name of this repository\n")
-	require.Contains(t, stdout, "Nothing was written. If it is what runs this code, save it with:\n  dtctl repo-scope set checkout --service "+flowService+"\n")
+	require.Contains(t, stdout, "Nothing was written. If it is what runs this code, save it with:\n  dtctl --context c repo-scope set checkout --service "+flowService+"\n")
 }
 
 // --path picks another directory of a monorepo, and --term adds a name; both
@@ -759,7 +759,7 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 
 	t.Chdir(filepath.Join(repo, "webproxy-api"))
 	report, _ := discoverReport(t)
-	const line = "dtctl repo-scope set webproxy --namespace edge --workload webproxy --path webproxy"
+	const line = "dtctl --context c repo-scope set webproxy --namespace edge --workload webproxy --path webproxy"
 	require.Equal(t, line, report.Candidates[0].SetCommand)
 	runSetCommand(t, line)
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
@@ -776,7 +776,7 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 		resp := agentResult(t, stdout, &reports)
 		require.Equal(t, 2, *resp.Context.Total)
 		require.Len(t, reports, 2)
-		require.Equal(t, "dtctl repo-scope set admin --namespace edge --workload admin --path admin", reports[0].Candidates[0].SetCommand)
+		require.Equal(t, "dtctl --context c repo-scope set admin --namespace edge --workload admin --path admin", reports[0].Candidates[0].SetCommand)
 		require.Equal(t, line, reports[1].Candidates[0].SetCommand)
 		require.Equal(t, "admin: confirm with the user, then: "+reports[0].Candidates[0].SetCommand, resp.Context.Suggestions[0])
 		require.Contains(t, resp.Context.Suggestions, "webproxy: confirm with the user, then: "+line)
@@ -1051,11 +1051,18 @@ tokens:
 		})
 	}
 
-	// Positive control: without a selection the line names none.
-	writeIsolatedConfig(t, strings.Replace(cfg, "current-context: prod", "current-context: staging", 1))
-	chdirCheckoutRepo(t)
+	// The config's own current context is named too: it is the one a
+	// `dtctl ctx` changes while the line is still on the screen.
+	staging := strings.Replace(cfg, "current-context: prod", "current-context: staging", 1)
+	writeIsolatedConfig(t, staging)
+	repo := chdirCheckoutRepo(t)
 	report, _ := discoverReport(t)
-	require.Equal(t, flowSetCommand, report.Candidates[0].SetCommand)
+	line := report.Candidates[0].SetCommand
+	require.Equal(t, strings.Replace(flowSetCommand, "--context c", "--context staging", 1), line)
+
+	writeIsolatedConfig(t, cfg)
+	runSetCommand(t, line)
+	require.Equal(t, []string{repoScopeTestHost}, loadScopeFile(t, repo).Hosts(), "saved for the environment discovery asked, not the one now current")
 }
 
 // Two namespaces, and a canary beside the main workload, run the same service
@@ -1079,10 +1086,10 @@ func TestRepoScopeDiscoverSharedServiceName(t *testing.T) {
 		lines = append(lines, c.SetCommand)
 	}
 	require.Equal(t, []string{
-		"dtctl repo-scope set checkout --namespace payments --workload checkout",
-		"dtctl repo-scope set checkout --namespace staging --workload checkout",
-		"dtctl repo-scope set checkout --service " + vmService,
-		"dtctl repo-scope set checkout-canary --namespace payments --workload checkout-canary",
+		"dtctl --context c repo-scope set checkout --namespace payments --workload checkout",
+		"dtctl --context c repo-scope set checkout --namespace staging --workload checkout",
+		"dtctl --context c repo-scope set checkout --service " + vmService,
+		"dtctl --context c repo-scope set checkout-canary --namespace payments --workload checkout-canary",
 	}, lines)
 	notes := repoScopeSharedNameNotes(report)
 	require.Len(t, notes, 1, "one note for the one shared name")
@@ -1127,13 +1134,13 @@ func TestRepoScopeDiscoverRootUnitSubdirectory(t *testing.T) {
 	report, _ := discoverReport(t)
 	require.Equal(t, ".", report.Unit)
 	require.Equal(t, "services/ledger", report.Dir)
-	require.Equal(t, "dtctl repo-scope set ledger --service-name ledger --path services/ledger", report.Candidates[0].SetCommand)
+	require.Equal(t, "dtctl --context c repo-scope set ledger --service-name ledger --path services/ledger", report.Candidates[0].SetCommand)
 	runSetCommand(t, report.Candidates[0].SetCommand)
 
 	// --path from the root proposes the same, for the other service.
 	t.Chdir(repo)
 	report, _ = discoverReport(t, "--path", "services/checkout")
-	require.Equal(t, "dtctl repo-scope set checkout --service-name checkout --path services/checkout", report.Candidates[0].SetCommand)
+	require.Equal(t, "dtctl --context c repo-scope set checkout --service-name checkout --path services/checkout", report.Candidates[0].SetCommand)
 	runSetCommand(t, report.Candidates[0].SetCommand)
 
 	for dir, want := range map[string]string{"services/ledger": "ledger", "services/checkout": "checkout"} {
@@ -1213,7 +1220,7 @@ func TestRepoScopeDiscoverMatchWithoutABinding(t *testing.T) {
 	require.Len(t, report.Candidates, 1)
 	require.Empty(t, report.Candidates[0].SetCommand)
 	require.Equal(t, repoScopeNarrowHint, suggestions[0])
-	require.True(t, strings.HasPrefix(suggestions[1], "link by hand: dtctl repo-scope set <name> "), suggestions[1])
+	require.True(t, strings.HasPrefix(suggestions[1], "link by hand: dtctl --context c repo-scope set <name> "), suggestions[1])
 	for _, s := range suggestions {
 		require.False(t, strings.HasPrefix(s, "confirm with the user"), s)
 	}
@@ -1227,14 +1234,14 @@ func TestRepoScopeDiscoverMatchWithoutABinding(t *testing.T) {
 	require.Contains(t, stdout, "\nVerdict: match: one candidate, with no binding that selects it\n")
 	require.Equal(t, reposcope.VerdictNone, report.Verdicts["workload"])
 	require.NotContains(t, stdout, "\n  \n", "no empty line where a set line would be")
-	require.Contains(t, stdout, "\n  dtctl repo-scope set <name> --namespace <namespace> --workload <workload>\n")
+	require.Contains(t, stdout, "\n  dtctl --context c repo-scope set <name> --namespace <namespace> --workload <workload>\n")
 }
 
 // Two namespaces report one service name and no workload, so no binding
 // selects either candidate alone. Discovery says so and offers the one line
 // there is, the service name, as selecting both.
 func TestRepoScopeDiscoverNothingTellsCandidatesApart(t *testing.T) {
-	const line = "dtctl repo-scope set checkout --service-name checkout"
+	const line = "dtctl --context c repo-scope set checkout --service-name checkout"
 	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": `{"k8s.namespace.name":"payments","service.name":"checkout","records":"90"},` +
 		`{"k8s.namespace.name":"staging","service.name":"checkout","records":"80"}`}))
 	repo := chdirCheckoutRepo(t)

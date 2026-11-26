@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
@@ -217,7 +218,7 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	runCtx, cancel := inventoryCancelContext(cmd)
 	defer cancel()
 	runner := scopeCheckedRunner{&inventoryRunner{executor: newDQLExecutorFromConfig(ctx, cfg, c), scanLimitGB: reposcope.ScanLimitGB}}
-	selectors := repoScopeSelectors(ctx)
+	selectors := repoScopeSelectors(ctx, cfg)
 	// Each plan is a run of its own with its own time bound. After a Ctrl-C
 	// the rest still report, every query marked as never run, so in table
 	// output no deployable drops out of the answer unsaid. The only error is
@@ -584,17 +585,19 @@ func repoScopeDir(r *reposcope.DiscoveryReport, c reposcope.Candidate) string {
 // discovery ran against, for the set line to carry. Set files an entry under
 // the current context's environment, so a line run without the context
 // discovery used, in another shell or after the current context changed,
-// would save the candidate for the wrong environment. The context is carried
-// however it was chosen. The config only when --config named it: DTCTL_CONFIG
-// is set for the shell, the set line included, while --config names it for
-// one command.
-func repoScopeSelectors(ctx context.Context) []string {
+// would save the candidate for the wrong environment. The context is always
+// named, also when it was the config's current one: that is the one a later
+// `dtctl ctx` changes under a line still on the screen. (A session has no
+// context a caller could name, and no working directory either, so discovery
+// never runs in one.) The config is named only when --config named it: DTCTL_CONFIG is set for the shell, the set
+// line included, while --config names it for one command.
+func repoScopeSelectors(ctx context.Context, cfg *config.Config) []string {
 	var args []string
 	if path := cfgFile(ctx); path != "" {
 		args = append(args, "--config", exec.ShellQuote(path))
 	}
-	if name := contextOverride(ctx); name != "" {
-		args = append(args, "--context", exec.ShellQuote(name))
+	if cfg.CurrentContext != "" {
+		args = append(args, "--context", exec.ShellQuote(cfg.CurrentContext))
 	}
 	return args
 }

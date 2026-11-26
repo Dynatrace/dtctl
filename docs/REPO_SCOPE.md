@@ -54,7 +54,7 @@ Unit: .
 
 Verdict: match: workload, service name, process group, service
 2 of 11 queries ran in 0.6s. Nothing was written. Save it with:
-  dtctl repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout
+  dtctl --context prod repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout
 ```
 
 A candidate is listed workload first: its cluster, namespace and workload, then its service name, then the entity ids, the same order its `set` line and every other `repo-scope` output use. The cluster column shows the cluster's name; the uid a binding uses is in the evidence and the line.
@@ -80,7 +80,7 @@ The `set` line saves exactly the candidate shown:
 - A workload deployed under a longer name than the repository spells (`acme-prod-checkout` for `checkout`) is found when the repository's name is a whole run of the workload name's segments, the parts between `-` and `.`. Its tier is `segment`, it ranks below a workload named exactly, its evidence says which name it holds (`k8s.workload.name "acme-prod-checkout" contains workload "checkout" (deploy/k8s/deployment.yaml:4) (segment match)`), and on its own it is `ambiguous`, never a match: the repository does not say which prefix is its own. Only a name of at least five letters and digits is looked for this way; a shorter one, such as `cart`, is part of too many workload names and matches only whole.
 - A candidate found by sampling (see [What discovery sends](#what-discovery-sends)) gets its workload binding only (`--cluster-uid`, `--namespace`, `--workload`): a quieter candidate sharing its service name or ids could sit below the sample's floor. One with no workload gets no line, and a note says why. When spans or logs were sampled, a candidate read whole gets no `--service-name` either, since a candidate sharing the name could be the one below the other data object's floor.
 - When more than one candidate reports the same service name and one of them has no workload binding to stand in for it, the lines leave `--service-name` out and a note says so: the bindings of an entry are alternatives, and that name would select every such candidate's records. A candidate no other binding selects alone gets no line; when no candidate has one, discovery says nothing tells them apart and offers the `--service-name` line as selecting all of them.
-- It carries `--context` when discovery ran in a context other than the config's current one (`--context` or `DTCTL_CONTEXT`), and `--config` when discovery was given one, so it saves under the environment discovery asked.
+- It always carries the `--context` discovery ran in, however that was chosen (`--context`, `DTCTL_CONTEXT` or the config's current context), and `--config` when discovery was given one, so it saves under the environment discovery asked, also after `dtctl ctx` has moved on.
 
 ### Units
 
