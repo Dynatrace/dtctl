@@ -1315,23 +1315,28 @@ func TestLoginSafetyLevels(t *testing.T) {
 		{"dangerously-unrestricted is kept", withContext(config.SafetyLevelDangerouslyUnrestricted), config.DefaultSafetyLevel, false, config.SafetyLevelDangerouslyUnrestricted, config.SafetyLevelDangerouslyUnrestricted},
 		{"the flag replaces a stored level", withContext(config.SafetyLevelReadOnly), config.SafetyLevelReadWriteMine, true, config.SafetyLevelReadWriteMine, config.SafetyLevelReadWriteMine},
 		{"the flag set to the default still counts", withContext(config.SafetyLevelReadOnly), config.DefaultSafetyLevel, true, config.DefaultSafetyLevel, config.DefaultSafetyLevel},
-		{"a context with no level gets the default", withContext(""), config.DefaultSafetyLevel, false, config.DefaultSafetyLevel, config.DefaultSafetyLevel},
+		{"a context with no level is left without one", withContext(""), config.DefaultSafetyLevel, false, "", config.DefaultSafetyLevel},
+		{"the flag gives a context with no level one", withContext(""), config.SafetyLevelReadOnly, true, config.SafetyLevelReadOnly, config.SafetyLevelReadOnly},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			saved, requested, err := loginSafetyLevels(tt.cfg, "ctx", tt.flagLevel, tt.flagGiven)
+			got, err := loginSafetyLevels(tt.cfg, "ctx", "ctx-oauth", tt.flagLevel, tt.flagGiven)
 			if err != nil {
 				t.Fatalf("loginSafetyLevels: %v", err)
 			}
-			if saved != tt.wantSaved || requested != tt.wantRequested {
-				t.Errorf("saved %q, requested %q; want saved %q, requested %q", saved, requested, tt.wantSaved, tt.wantRequested)
+			if got.saved != tt.wantSaved || got.requested != tt.wantRequested {
+				t.Errorf("saved %q, requested %q; want saved %q, requested %q", got.saved, got.requested, tt.wantSaved, tt.wantRequested)
+			}
+			// Outside a project config nothing clamps the declared level.
+			if got.declared != tt.wantRequested {
+				t.Errorf("declared %q, want %q", got.declared, tt.wantRequested)
 			}
 		})
 	}
 
 	t.Run("an invalid stored level is refused", func(t *testing.T) {
 		cfg := withContext("read-only")
-		_, _, err := loginSafetyLevels(cfg, "ctx", config.DefaultSafetyLevel, false)
+		_, err := loginSafetyLevels(cfg, "ctx", "ctx-oauth", config.DefaultSafetyLevel, false)
 		if err == nil {
 			t.Fatal("want an error for the stored level \"read-only\"")
 		}
@@ -1341,9 +1346,9 @@ func TestLoginSafetyLevels(t *testing.T) {
 			}
 		}
 		// The flag is the way out, so it must still work.
-		saved, requested, err := loginSafetyLevels(cfg, "ctx", config.SafetyLevelReadOnly, true)
-		if err != nil || saved != config.SafetyLevelReadOnly || requested != config.SafetyLevelReadOnly {
-			t.Errorf("with the flag: saved %q, requested %q, err %v", saved, requested, err)
+		got, err := loginSafetyLevels(cfg, "ctx", "ctx-oauth", config.SafetyLevelReadOnly, true)
+		if err != nil || got.saved != config.SafetyLevelReadOnly || got.requested != config.SafetyLevelReadOnly {
+			t.Errorf("with the flag: saved %q, requested %q, err %v", got.saved, got.requested, err)
 		}
 	})
 }
@@ -1383,15 +1388,15 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 		t.Fatal("the project config was not picked up")
 	}
 
-	saved, requested, err := loginSafetyLevels(cfg, "project", config.DefaultSafetyLevel, false)
+	levels, err := loginSafetyLevels(cfg, "project", "prod-oauth", config.DefaultSafetyLevel, false)
 	if err != nil {
 		t.Fatalf("loginSafetyLevels: %v", err)
 	}
-	if saved != config.SafetyLevelDangerouslyUnrestricted {
-		t.Errorf("saved %q: the login must not rewrite what the file declares", saved)
+	if levels.saved != config.SafetyLevelDangerouslyUnrestricted {
+		t.Errorf("saved %q: the login must not rewrite what the file declares", levels.saved)
 	}
-	if requested != config.SafetyLevelReadOnly {
-		t.Errorf("requested %q, want readonly: the global config binds this token to readonly", requested)
+	if levels.requested != config.SafetyLevelReadOnly {
+		t.Errorf("requested %q, want readonly: the global config binds this token to readonly", levels.requested)
 	}
 
 	// Through the command: the login is configured with the enforced level,
@@ -1425,7 +1430,7 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Safety level: readonly",
-		"The context declares dangerously-unrestricted; the global config allows this token readonly, so the login requests readonly scopes.",
+		`The context declares dangerously-unrestricted; the global config allows token "prod-oauth" readonly, so the login requests readonly scopes.`,
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)
@@ -1776,5 +1781,210 @@ func TestAuthLogin_EmptySafetyLevelIsRejected(t *testing.T) {
 	}
 	if nc.Context.SafetyLevel != config.SafetyLevelReadOnly {
 		t.Errorf("safety level = %q, want readonly", nc.Context.SafetyLevel)
+	}
+}
+
+// loginTestContext is one context of a config file written by loginConfigYAML.
+type loginTestContext struct {
+	name, environment, tokenRef string
+	level                       config.SafetyLevel // "" writes no safety-level key
+}
+
+// loginConfigYAML renders a config file with the given contexts.
+func loginConfigYAML(current string, contexts ...loginTestContext) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "apiVersion: v1\nkind: Config\ncurrent-context: %s\ncontexts:\n", current)
+	for _, c := range contexts {
+		fmt.Fprintf(&b, "  - name: %s\n    context:\n      environment: %s\n      token-ref: %s\n", c.name, c.environment, c.tokenRef)
+		if c.level != "" {
+			fmt.Fprintf(&b, "      safety-level: %s\n", c.level)
+		}
+	}
+	return b.String()
+}
+
+// setupLoginProject puts the test in a project directory: global becomes the
+// global config and local the .dtctl.yaml that auto-discovery finds. It
+// returns the path of the .dtctl.yaml.
+func setupLoginProject(t *testing.T, global, local string) string {
+	t.Helper()
+	// Not parallel: the working directory and XDG_CONFIG_HOME are process-wide.
+	xdgDir := t.TempDir()
+	globalDir := filepath.Join(xdgDir, "dtctl")
+	if err := os.MkdirAll(globalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "config"), []byte(global), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setXDGHome(t, "XDG_CONFIG_HOME", xdgDir)
+	// A DTCTL_CONFIG in the developer's shell would short-circuit discovery.
+	t.Setenv(config.EnvConfig, "")
+
+	projectDir := t.TempDir()
+	localPath := filepath.Join(projectDir, ".dtctl.yaml")
+	if err := os.WriteFile(localPath, []byte(local), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(projectDir)
+	return localPath
+}
+
+// TestAuthLogin_ProjectConfigRequestsNoMoreThanTheTokensBinding: in a project
+// directory dtctl enforces no more than the global config binds to a token.
+// The login requests scopes for that level whichever way the level and the
+// token name reach it: from the context, from a flag or from the default.
+func TestAuthLogin_ProjectConfigRequestsNoMoreThanTheTokensBinding(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", config.SafetyLevelReadOnly})
+
+	tests := []struct {
+		name      string
+		project   loginTestContext
+		args      []string
+		wantLevel config.SafetyLevel
+		// wantNotice is the line that explains the lower level; "" = no such line.
+		wantNotice string
+	}{
+		{
+			name:       "the binding of the token the login writes, not of the one the context stores",
+			project:    loginTestContext{"project", envURL, "mine-oauth", config.SafetyLevelDangerouslyUnrestricted},
+			args:       []string{"--context", "project", "--token-name", "prod-oauth"},
+			wantLevel:  config.SafetyLevelReadOnly,
+			wantNotice: `The context declares dangerously-unrestricted; the global config allows token "prod-oauth" readonly, so the login requests readonly scopes.`,
+		},
+		{
+			name:       "a new context",
+			project:    loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly},
+			args:       []string{"--context", "fresh", "--environment", envURL, "--token-name", "prod-oauth"},
+			wantLevel:  config.SafetyLevelReadOnly,
+			wantNotice: `The default level is readwrite-all; the global config allows token "prod-oauth" readonly, so the login requests readonly scopes.`,
+		},
+		{
+			name:       "--safety-level",
+			project:    loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly},
+			args:       []string{"--context", "project", "--safety-level", "dangerously-unrestricted"},
+			wantLevel:  config.SafetyLevelReadOnly,
+			wantNotice: `--safety-level dangerously-unrestricted was given; the global config allows token "prod-oauth" readonly, so the login requests readonly scopes.`,
+		},
+		{
+			name:       "a context that stores no level",
+			project:    loginTestContext{"project", envURL, "prod-oauth", ""},
+			args:       []string{"--context", "project"},
+			wantLevel:  config.SafetyLevelReadOnly,
+			wantNotice: `The default level is readwrite-all; the global config allows token "prod-oauth" readonly, so the login requests readonly scopes.`,
+		},
+		{
+			name:       "a token the global config does not bind",
+			project:    loginTestContext{"project", envURL, "mine-oauth", config.SafetyLevelDangerouslyUnrestricted},
+			args:       []string{"--context", "project"},
+			wantLevel:  config.SafetyLevelReadWriteAll,
+			wantNotice: `The context declares dangerously-unrestricted; the global config binds no context to token "mine-oauth", which limits a project config to readwrite-all, so the login requests readwrite-all scopes.`,
+		},
+		{
+			name:      "a level within the binding needs no explanation",
+			project:   loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly},
+			args:      []string{"--context", "project"},
+			wantLevel: config.SafetyLevelReadOnly,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupLoginProject(t, global, loginConfigYAML("project", tt.project))
+
+			stderr, oauthConfig, runErr := runBrowserLogin(t, tt.args...)
+			if !errors.Is(runErr, errBrowserLoginStubbed) {
+				t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+			}
+			if want := "Safety level: " + string(tt.wantLevel) + "\n"; !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+			if want := auth.GetScopesForSafetyLevel(tt.wantLevel); !slices.Equal(oauthConfig.Scopes, want) {
+				t.Errorf("requested scopes:\n%v\nwant those of %s:\n%v", oauthConfig.Scopes, tt.wantLevel, want)
+			}
+			if got, want := slices.Contains(oauthConfig.Scopes, "document:documents:write"), tt.wantLevel != config.SafetyLevelReadOnly; got != want {
+				t.Errorf("document:documents:write requested = %v, want %v", got, want)
+			}
+			if tt.wantNotice == "" {
+				if strings.Contains(stderr, "so the login requests") {
+					t.Errorf("stderr explains a lower level that was not applied:\n%s", stderr)
+				}
+			} else if !strings.Contains(stderr, tt.wantNotice) {
+				t.Errorf("stderr lacks %q:\n%s", tt.wantNotice, stderr)
+			}
+		})
+	}
+}
+
+// TestAuthLogin_ContextWithoutALevelIsNotGivenOne: a login to a context that
+// stores no level must not write one. In a project directory the written
+// default would also claim a level dtctl does not enforce there.
+func TestAuthLogin_ContextWithoutALevelIsNotGivenOne(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", config.SafetyLevelReadOnly})
+	localPath := setupLoginProject(t, global, loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", ""}))
+
+	// Save the file once so that it is in the form dtctl writes.
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.SaveTo(localPath); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	before, err := os.ReadFile(localPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "project")
+	if runErr != nil || !granted {
+		t.Fatalf("login: err %v, granted %v\n%s", runErr, granted, stderr)
+	}
+	if want := "Safety level: readonly\n"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, stderr)
+	}
+	if strings.Contains(stderr, "The context declares") {
+		t.Errorf("stderr says the context declares a level; its file has none:\n%s", stderr)
+	}
+	after, err := os.ReadFile(localPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("the login changed the project file.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// TestAuthLogin_InvalidLevelInTheGlobalBindingIsRefused: a project context
+// clamped to a global level that is not a level would be shown that value as
+// its safety level while the scopes fell back to the default's.
+func TestAuthLogin_InvalidLevelInTheGlobalBindingIsRefused(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", "read-only"})
+	setupLoginProject(t, global, loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelDangerouslyUnrestricted}))
+
+	stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "project")
+	if granted {
+		t.Errorf("a token was requested\n%s", stderr)
+	}
+	var diagErr *diagnostic.Error
+	if !errors.As(runErr, &diagErr) {
+		t.Fatalf("err = %T %v, want a diagnostic.Error", runErr, runErr)
+	}
+	if want := `the global config binds token "prod-oauth" to the safety level "read-only", which is not a valid value (valid values: readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)`; diagErr.Message != want {
+		t.Errorf("message = %q\nwant      %q", diagErr.Message, want)
+	}
+	if diagErr.Operation != "auth login" {
+		t.Errorf("operation = %q, want %q", diagErr.Operation, "auth login")
+	}
+	wantSuggestions := []string{
+		"Give the global context a valid level: dtctl ctx set prod --global --safety-level <level>",
+	}
+	if !slices.Equal(diagErr.Suggestions, wantSuggestions) {
+		t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, wantSuggestions)
+	}
+	if strings.Contains(stderr, "Safety level: read-only") {
+		t.Errorf("the invalid value was printed as the login's level:\n%s", stderr)
 	}
 }
