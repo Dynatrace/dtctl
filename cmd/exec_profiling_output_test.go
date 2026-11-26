@@ -592,3 +592,47 @@ func TestExecProfiling_EmptyFormatIsTheTable(t *testing.T) {
 }
 `, stdout)
 }
+
+// -o folded is the stack view's layout. The per-function views have no folded
+// form and print their table for it, without the # lines a table ends with:
+// what 0.47.0 printed, with and without --plain.
+func TestExecProfiling_FoldedFormatOfAFunctionView(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"functions", []string{"hotspots", testProcess, "--view", "functions"},
+			"SELF   SELF%   TOTAL   TOTAL%   PATHS   FUNCTION          \n" +
+				"50     50      50      50       2       lib.Util.wrap     \n" +
+				"30     30      60      60       1       lib.Loader.load   \n" +
+				"10     10      100     100      1       app.Main.main     \n" +
+				"10     10      30      30       1       app.Main.handle   \n"},
+		{"functions, cut off", []string{"hotspots", testProcess, "--view", "functions", "--limit", "1"},
+			"SELF   SELF%   TOTAL   TOTAL%   PATHS   FUNCTION        \n" +
+				"50     50      50      50       2       lib.Util.wrap   \n"},
+		{"focus", []string{"hotspots", testProcess, "--focus", "wrap"},
+			"RELATION   SAMPLES   SHARE%   FUNCTION          \n" +
+				"total      50        100      lib.Util.wrap     \n" +
+				"self       50        100      lib.Util.wrap     \n" +
+				"caller     30        60       lib.Loader.load   \n" +
+				"caller     20        40       app.Main.handle   \n"},
+		{"focus, cut off", []string{"hotspots", testProcess, "--focus", "main", "--limit", "1"},
+			"RELATION   SAMPLES   SHARE%   FUNCTION          \n" +
+				"total      100       100      app.Main.main     \n" +
+				"self       10        10       app.Main.main     \n" +
+				"caller     100       100      (root)            \n" +
+				"callee     60        60       lib.Loader.load   \n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, tail := range [][]string{{"-o", "folded"}, {"-o", "folded", "--plain"}} {
+				code, stdout, stderr := runProfilingStreams(t, append(append([]string{}, tc.args...), tail...)...)
+				require.Zero(t, code, stderr)
+				require.Empty(t, stderr, tail)
+				require.Equal(t, tc.want, stdout, tail)
+			}
+		})
+	}
+}

@@ -594,7 +594,7 @@ func printProfilingStacks(ctx context.Context, run *profilingRun, o profilingSta
 		}
 		return p.PrintList(o.rows)
 	}
-	if isProfilingTableFormat(ctx) && jqFilter(ctx) == "" {
+	if isProfilingTextFormat(ctx) && jqFilter(ctx) == "" {
 		w := currentStdout(ctx)
 		if _, err := fmt.Fprint(w, o.folded()); err != nil {
 			return err
@@ -640,18 +640,22 @@ func newProfilingPrinter(ctx context.Context) output.Printer {
 	return shapeListOutput(ctx, p, format, output.IsTabularFormat(format, plain))
 }
 
-// isProfilingTableFormat reports whether the output is a table for a person to
-// read: the stack view then prints folded lines, and every view may add #
-// lines to stdout. --plain turns a table into JSON (output.NewPrinterWithOpts),
-// so with it the output is not one, and stdout carries the JSON alone.
+// isProfilingTextFormat reports whether the output is text for a person to
+// read, not a document for a program: a table, or the stack view's folded
+// layout named with -o folded. The stack view then prints folded lines, an
+// empty view prints its note on stdout, and --raw prints JSON. --plain turns a
+// table into JSON (output.NewPrinterWithOpts), so with it a table is not text,
+// and stdout carries the JSON alone.
+func isProfilingTextFormat(ctx context.Context) bool {
+	return isProfilingTableFormat(ctx) || profilingFormat(ctx) == "folded"
+}
+
+// isProfilingTableFormat reports whether the output is a table, which a
+// per-function view ends with # lines. -o folded is none: those views have no
+// folded form and print their rows for it as a table without the lines.
 func isProfilingTableFormat(ctx context.Context) bool {
-	switch format := profilingFormat(ctx); format {
-	case "table", "wide":
-		return output.IsTabularFormat(format, plainMode(ctx))
-	case "folded":
-		return true
-	}
-	return false
+	format := profilingFormat(ctx)
+	return (format == "table" || format == "wide") && output.IsTabularFormat(format, plainMode(ctx))
 }
 
 // renderProfilingRaw prints the API's whole (compacted) result: JSON unless
@@ -660,7 +664,7 @@ func renderProfilingRaw(ctx context.Context, run *profilingRun, raw map[string]i
 	p := newProfilingPrinter(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 		run.annotate(ap, "raw", "")
-	} else if isProfilingTableFormat(ctx) {
+	} else if isProfilingTextFormat(ctx) {
 		p = newPrinterOpts(ctx, output.PrinterOptions{Format: "json", PlainMode: plainMode(ctx), JQFilter: jqFilter(ctx)})
 	}
 	return p.Print(raw)
@@ -729,7 +733,7 @@ func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.H
 // printProfilingRows prints a per-function view's rows. A table gets the note,
 // warnings and hints as trailing # lines; the agent envelope carries the
 // warnings (truncation) as context.warnings and the hints as suggestions;
-// structured formats and --plain get the rows alone.
+// structured formats, -o folded and --plain get the rows alone.
 func printProfilingRows(ctx context.Context, run *profilingRun, view, state string, samples *int, rows interface{}, total int, note string, warnings, hints []string) error {
 	p := newProfilingPrinter(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
@@ -772,7 +776,7 @@ func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state str
 		}
 		return p.PrintList(empty)
 	}
-	if isProfilingTableFormat(ctx) && jqFilter(ctx) == "" {
+	if isProfilingTextFormat(ctx) && jqFilter(ctx) == "" {
 		_, err := fmt.Fprintf(currentStdout(ctx), "# %s\n", note)
 		return err
 	}
