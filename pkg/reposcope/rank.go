@@ -18,12 +18,21 @@ type Candidate struct {
 	// Name is the entry to save it as: the workload, else the service name,
 	// else the name an entity matched, else the unit.
 	Name string `json:"name" yaml:"name"`
-	// Namespace and Workload are the Kubernetes workload the records name,
-	// and ServiceName their service.name; a candidate has a workload, a
-	// service name or both.
+	// ClusterUID, Namespace and Workload are the Kubernetes workload the
+	// records name, and ServiceName their service.name; a candidate has a
+	// workload, a service name or both. ClusterUID is the records'
+	// k8s.cluster.uid, empty when they carry none or a value a scope file
+	// could not hold; ClusterName is the k8s.cluster.name beside it, for
+	// a reader and never for a binding.
+	ClusterUID  string `json:"clusterUid,omitempty" yaml:"clusterUid,omitempty"`
+	ClusterName string `json:"clusterName,omitempty" yaml:"clusterName,omitempty"`
 	Namespace   string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 	Workload    string `json:"workload,omitempty" yaml:"workload,omitempty"`
-	ServiceName string `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
+	// WorkloadShared reports that another candidate carries this namespace
+	// and workload under a different cluster, or under none. A binding
+	// without the cluster would select that candidate's records too.
+	WorkloadShared bool   `json:"workloadShared,omitempty" yaml:"workloadShared,omitempty"`
+	ServiceName    string `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
 	// ServiceNameShared reports that another candidate carries this service
 	// name under a different namespace and workload, either of which may be
 	// absent: a canary beside its main workload, the same service in another
@@ -78,6 +87,9 @@ type Candidate struct {
 
 	// Used while ranking; cleared once the candidates are final.
 	tier tier
+	// cluster is the records' k8s.cluster.uid as they carry it, which keeps
+	// two clusters' rows apart whether or not it can be a binding.
+	cluster string
 	// sources are the repository files whose names matched. A manifest
 	// that repeats a name on several lines is still one file: ranking
 	// weighs independent files, not repetition.
@@ -107,7 +119,7 @@ func (t tier) String() string {
 // recordKey is what rows of the record queries are merged on. Every such row
 // has a workload or a service name, because the query filters on them.
 type recordKey struct {
-	namespace, workload, serviceName string
+	cluster, namespace, workload, serviceName string
 }
 
 type matcher struct {
@@ -159,6 +171,7 @@ func newDiscovery(p *Plan) *discovery {
 // sampled is a row a sampled retry read.
 func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled bool) {
 	key := recordKey{
+		cluster:     stringField(rec, fieldClusterUID),
 		namespace:   stringField(rec, fieldNamespace),
 		workload:    stringField(rec, fieldWorkload),
 		serviceName: stringField(rec, fieldServiceName),
@@ -168,8 +181,14 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 	}
 	c := d.records[key]
 	if c == nil {
-		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName}
+		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName, cluster: key.cluster}
+		if clusterUIDRe.MatchString(key.cluster) {
+			c.ClusterUID = key.cluster
+		}
 		d.records[key] = c
+	}
+	if c.ClusterName == "" {
+		c.ClusterName = stringField(rec, fieldAnyClusterName)
 	}
 	for _, f := range []struct {
 		ids              *[]string
@@ -276,6 +295,12 @@ func containsSegment(name, v string) bool {
 // names, with the files that name it, and the record counts.
 func (d *discovery) explain(c *Candidate) {
 	c.sources = map[string]bool{}
+	switch {
+	case c.ClusterUID != "" && c.ClusterName != "":
+		c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q (%s %q)", fieldClusterUID, c.ClusterUID, fieldClusterName, c.ClusterName))
+	case c.ClusterUID != "":
+		c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q", fieldClusterUID, c.ClusterUID))
+	}
 	// The namespace leads its workload, as in namespace/name.
 	var named []token
 	for _, t := range d.namespaces {
@@ -313,7 +338,7 @@ func (d *discovery) ownsProcessGroups(c *Candidate) bool {
 		return false
 	}
 	for _, o := range d.records {
-		if o.Namespace == c.Namespace && o.Workload == c.Workload {
+		if o.cluster == c.cluster && o.Namespace == c.Namespace && o.Workload == c.Workload {
 			continue
 		}
 		if slices.ContainsFunc(o.ProcessGroups, func(id string) bool { return slices.Contains(c.ProcessGroups, id) }) {
@@ -490,9 +515,11 @@ func (d *discovery) finish(r *DiscoveryReport) {
 	}
 	sort.Slice(all, func(i, j int) bool { return before(all[i], all[j]) })
 	shared := sharedServiceNames(all)
+	inClusters := workloadClusters(all)
 	r.Candidates = make([]Candidate, len(all))
 	for i, c := range all {
 		c.ServiceNameShared = shared[c.ServiceName]
+		c.WorkloadShared = c.Workload != "" && inClusters[Workload{Namespace: c.Namespace, Name: c.Workload}] > 1
 		c.MatchedDir = d.dirSource != "" && c.sources[d.dirSource]
 		c.Rank, c.Tier = i+1, c.tier.String()
 		c.Name = entryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
@@ -501,7 +528,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		r.note(n)
 	}
 	for i, c := range all {
-		c.tier, c.sources, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, nil, "", 0, false, false
+		c.tier, c.cluster, c.sources, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, "", nil, "", 0, false, false
 		r.Candidates[i] = *c
 	}
 	r.Verdict, r.Verdicts = verdicts(r.Candidates, r.Partial)
@@ -524,6 +551,27 @@ func sharedServiceNames(cs []*Candidate) map[string]bool {
 	return shared
 }
 
+// workloadClusters counts, per namespace and workload name, the clusters
+// whose records carry it, no cluster counting as one.
+func workloadClusters(cs []*Candidate) map[Workload]int {
+	seen := map[Workload]map[string]bool{}
+	for _, c := range cs {
+		if c.Workload == "" {
+			continue
+		}
+		w := Workload{Namespace: c.Namespace, Name: c.Workload}
+		if seen[w] == nil {
+			seen[w] = map[string]bool{}
+		}
+		seen[w][c.cluster] = true
+	}
+	count := make(map[Workload]int, len(seen))
+	for w, clusters := range seen {
+		count[w] = len(clusters)
+	}
+	return count
+}
+
 // before orders candidates: better tier, more repository files naming them,
 // more records per hour, then by identity, so the order never depends on the
 // order rows arrived in. Records are compared per hour because a sampled
@@ -544,7 +592,7 @@ func before(c, o *Candidate) bool {
 }
 
 func identity(c *Candidate) string {
-	return strings.Join([]string{c.Workload, c.ServiceName, c.Namespace,
+	return strings.Join([]string{c.Workload, c.ServiceName, c.Namespace, c.cluster,
 		strings.Join(c.Services, ","), strings.Join(c.ProcessGroups, ",")}, "\x00")
 }
 
@@ -589,7 +637,7 @@ var verdictKinds = map[string]struct {
 		if c.Workload == "" {
 			return nil
 		}
-		return []string{Workload{Namespace: c.Namespace, Name: c.Workload}.String()}
+		return []string{Workload{ClusterUID: c.ClusterUID, Namespace: c.Namespace, Name: c.Workload}.String()}
 	}, nil},
 }
 

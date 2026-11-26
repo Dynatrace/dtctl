@@ -1,0 +1,21 @@
+Unit: .
+
+#  CLUSTER  WORKLOAD           SERVICE NAME  PROCESS GROUP                   SERVICE                   TIER
+1  prod-eu  payments/checkout  checkout      PROCESS_GROUP-FEDCBA9876543210  SERVICE-0123456789ABCDEF  exact
+   k8s.cluster.uid "11111111-2222-3333-4444-555555555555" (k8s.cluster.name "prod-eu")
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   12400 spans, 88000 logs in 24h
+2  prod-us  payments/checkout  checkout      PROCESS_GROUP-FEDCBA9876543210  SERVICE-0123456789ABCDEF  exact
+   k8s.cluster.uid "66666666-7777-8888-9999-000000000000" (k8s.cluster.name "prod-us")
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   12400 spans, 88000 logs in 24h
+
+Verdict: ambiguous (candidates: 2)
+2 of 11 queries ran in 0.6s. Nothing was written. Save the one that runs this code with its line:
+  1  dtctl repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout
+  2  dtctl repo-scope set checkout --cluster-uid 66666666-7777-8888-9999-000000000000 --namespace payments --workload checkout
+Note: --service-name checkout is left out of the set lines: more than one candidate reports it, so it would select each of them

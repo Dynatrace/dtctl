@@ -333,6 +333,14 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // is left out: it would select that candidate's records as well, and the
 // bindings are alternatives.
 //
+// The workload binding carries the cluster the candidate's records name, so
+// the same namespace and workload in another cluster stays out of the entry.
+// That holds for a sampled candidate too: the cluster is a key its rows were
+// grouped by, not an id list a sample or a cap can cut short, so the line
+// still saves exactly the candidate shown. A candidate whose records name no
+// cluster, while another candidate runs its namespace and workload in one
+// (WorkloadShared), gets no workload binding: it would select both.
+//
 // When any record query was sampled, a candidate gets its workload binding
 // only, whether its own records were sampled or read whole: another
 // candidate sharing its service name could sit below the sample's floor, so
@@ -346,7 +354,10 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 			bindings = append(bindings, name, exec.ShellQuote(v))
 		}
 	}
-	if c.Namespace != "" && c.Workload != "" {
+	if c.Namespace != "" && c.Workload != "" && (c.ClusterUID != "" || !c.WorkloadShared) {
+		if c.ClusterUID != "" {
+			flag("--cluster-uid", c.ClusterUID)
+		}
 		flag("--namespace", c.Namespace)
 		flag("--workload", c.Workload)
 	}
@@ -498,7 +509,7 @@ func repoScopeSelectAllLines(r *reposcope.DiscoveryReport, selectors []string) [
 			}
 		}
 		c.ServiceNameShared = false
-		c.Namespace, c.Workload, c.Services, c.ProcessGroups = "", "", nil, nil
+		c.ClusterUID, c.Namespace, c.Workload, c.Services, c.ProcessGroups = "", "", "", nil, nil
 		// A sampled candidate's service name is never proposed alone.
 		if line := repoScopeSetCommand(r, c, selectors); line != "" {
 			out = append(out, repoScopeSelectAll{serviceName: c.ServiceName, all: reporting == len(r.Candidates), line: line})
@@ -537,6 +548,9 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 	for _, c := range r.Candidates {
 		switch {
 		case c.SetCommand != "":
+		case c.WorkloadShared && c.ClusterUID == "":
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records name no cluster, and another candidate runs the same namespace and workload in one, so a binding without --cluster-uid would select both; to bind the workload in every cluster, leave --cluster-uid out of that candidate's line",
+				c.Rank))
 		case c.Sampled:
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it was found by sampling, which can miss another candidate sharing its service name or ids, so only --namespace with --workload is proposed, and its records name no workload",
 				c.Rank))

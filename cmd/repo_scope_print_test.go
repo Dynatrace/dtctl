@@ -169,8 +169,8 @@ func TestRepoScopeListsBindingsWorkloadFirst(t *testing.T) {
 			Services: []string{svc}, ServiceCount: 1, ProcessGroups: []string{pg}, ProcessGroupCount: 1, Tier: "exact", SetCommand: "x"}}}
 	var out bytes.Buffer
 	printRepoScopeDiscovery(&out, r, repoScopeProposal{}, 0)
-	require.Regexp(t, `#\s+WORKLOAD\s+SERVICE NAME\s+PROCESS GROUP\s+SERVICE\s+TIER\n`, out.String())
-	require.Regexp(t, `1\s+payments/checkout\s+checkout\s+`+pg+`\s+`+svc+`\s+exact\n`, out.String())
+	require.Regexp(t, `#\s+CLUSTER\s+WORKLOAD\s+SERVICE NAME\s+PROCESS GROUP\s+SERVICE\s+TIER\n`, out.String())
+	require.Regexp(t, `1\s+-\s+payments/checkout\s+checkout\s+`+pg+`\s+`+svc+`\s+exact\n`, out.String())
 	require.Contains(t, out.String(), "Verdict: match: workload, service name, process group, service\n")
 
 	ids := reposcope.Candidate{Name: "checkout", Services: []string{svc}, ServiceCount: 1, ProcessGroups: []string{pg}, ProcessGroupCount: 1}
@@ -182,4 +182,38 @@ func TestRepoScopeListsBindingsWorkloadFirst(t *testing.T) {
 	var table bytes.Buffer
 	require.NoError(t, output.NewPrinterWithOpts(output.PrinterOptions{Format: "table", Writer: &table}).PrintList(rows))
 	require.Regexp(t, `^NAME\s+PATH\s+WORKLOADS\s+SERVICE NAMES\s+PROCESS GROUPS\s+SERVICES\s*\n`, table.String())
+}
+
+// A set line saves exactly the candidate shown, so it binds the cluster the
+// candidate's records carry. One whose records carry none gets a workload
+// binding only when no cluster runs the same namespace and workload: without
+// the cluster the binding would select those too.
+func TestRepoScopeSetCommandBindsTheCluster(t *testing.T) {
+	const uid = "11111111-2222-3333-4444-555555555555"
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: "."}
+	c := reposcope.Candidate{Rank: 1, Name: "checkout", ClusterUID: uid, ClusterName: "prod-eu", Namespace: "payments", Workload: "checkout"}
+	require.Equal(t, "dtctl repo-scope set checkout --cluster-uid "+uid+" --namespace payments --workload checkout", repoScopeSetCommand(r, c, nil))
+
+	// The cluster is a key the candidate's rows were grouped by, not a list
+	// a sample can cut short, so a sampled candidate's line carries it too.
+	c.Sampled = true
+	require.Contains(t, repoScopeSetCommand(r, c, nil), "--cluster-uid "+uid)
+
+	none := reposcope.Candidate{Rank: 2, Name: "checkout", Namespace: "payments", Workload: "checkout", WorkloadShared: true}
+	require.Empty(t, repoScopeSetCommand(r, none, nil))
+	c.SetCommand = repoScopeSetCommand(r, c, nil)
+	r.Candidates = []reposcope.Candidate{c, none}
+	require.Equal(t, []string{"candidate 2 has no set line: its records name no cluster, and another candidate runs the same namespace and workload in one, so a binding without --cluster-uid would select both; to bind the workload in every cluster, leave --cluster-uid out of that candidate's line"},
+		repoScopeNoLineNotes(r))
+
+	var out bytes.Buffer
+	writeRepoScopeCandidates(&out, &reposcope.DiscoveryReport{Unit: ".", Candidates: []reposcope.Candidate{
+		{Rank: 1, ClusterUID: uid, ClusterName: "prod-eu", Namespace: "payments", Workload: "checkout", Tier: "exact"},
+		{Rank: 2, ClusterUID: uid, Namespace: "payments", Workload: "ledger", Tier: "exact"},
+		{Rank: 3, ServiceName: "checkout", Tier: "exact"},
+	}})
+	require.Regexp(t, `#\s+CLUSTER\s+WORKLOAD\s+SERVICE NAME`, out.String())
+	require.Regexp(t, `1\s+prod-eu\s+payments/checkout\s`, out.String())
+	require.Regexp(t, `2\s+`+uid+`\s+payments/ledger\s`, out.String(), "a cluster without a name shows its uid")
+	require.Regexp(t, `3\s+-\s+-\s+checkout\s`, out.String())
 }

@@ -112,13 +112,13 @@ func TestPlan(t *testing.T) {
 	list := `"checkout", "checkout-service", "checkout.service", "checkout_service", "checkoutservice"`
 	ids := "    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
 		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
-		"    by:{k8s.namespace.name, k8s.workload.name, service.name}\n"
+		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n"
 	assert.Equal(t, Query{
 		Purpose:    "spans by workload or service name",
 		DataObject: "spans",
 		DQL: "fetch spans, from:now()-24h, scanLimitGBytes:5\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize {records = count(),\n" + ids +
+			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[0])
@@ -129,11 +129,11 @@ func TestPlan(t *testing.T) {
 		SamplingRatio: 100000,
 		DQL: "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize {records = count(),\n" + ids +
+			"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" + ids +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[1])
-	assert.NotContains(t, p.Queries[0].DQL, "by:{k8s.namespace.name, k8s.workload.name, service.name, dt.entity",
+	assert.NotContains(t, p.Queries[0].DQL, "service.name, dt.entity",
 		"an id in by: would make one row per id")
 	assert.Equal(t, "logs", p.Queries[4].DataObject)
 	assert.Equal(t, strings.Replace(p.Queries[0].DQL, "fetch spans", "fetch logs", 1), p.Queries[4].DQL)
@@ -205,8 +205,8 @@ func TestPlan_IncludesSamplingRungs(t *testing.T) {
 // renaming a Grail field there renames it everywhere.
 func TestPlan_NamesOnlyGrailTableFields(t *testing.T) {
 	known := map[string]bool{
-		fieldService: true, fieldProcessGroup: true, fieldServiceName: true, fieldNamespace: true,
-		fieldWorkload: true, fieldEntityName: true, // the entity-table objects share the id fields' names
+		fieldService: true, fieldProcessGroup: true, fieldServiceName: true, fieldClusterUID: true, fieldClusterName: true,
+		fieldNamespace: true, fieldWorkload: true, fieldEntityName: true, // the entity-table objects share the id fields' names
 	}
 	dotted := regexp.MustCompile(`[a-z][a-z0-9_]*(\.[a-z0-9_]+)+`)
 	for _, q := range singleGo(t).Queries {
@@ -1190,4 +1190,59 @@ func TestDiscover_LogsLookupFailureIsNotPartial(t *testing.T) {
 	assert.Equal(t, VerdictMatch, r.Verdict)
 	assert.True(t, r.Queries[10].Truncated)
 	assert.Equal(t, int64(40), r.Candidates[0].LogsByProcessGroup, "a capped scan proves the logs it found")
+}
+
+// One namespace and workload name in two clusters is two workloads. Each is a
+// candidate of its own, never one merged row, and a row whose records name no
+// cluster is a third: a binding without a cluster would select all of them.
+func TestDiscover_SameWorkloadInSeveralClusters(t *testing.T) {
+	const other = "66666666-7777-8888-9999-000000000000"
+	row := func(uid, name string, records float64) map[string]interface{} {
+		r := map[string]interface{}{fieldNamespace: "payments", fieldWorkload: "checkout", fieldServiceName: "checkout",
+			fieldRecords: records, fieldProcessGroups: collected(pgID), fieldProcessGroupCount: float64(1)}
+		if uid != "" {
+			r[fieldClusterUID], r[fieldAnyClusterName] = uid, name
+		}
+		return r
+	}
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{row(clusterUID, "prod-eu", 300), row(other, "prod-us", 200), row("", "", 100)}}},
+		"logs":  {{records: []map[string]interface{}{row(clusterUID, "prod-eu", 50)}}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	require.Len(t, r.Candidates, 3)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["workload"], "two clusters are two workloads")
+	eu, us, none := r.Candidates[0], r.Candidates[1], r.Candidates[2]
+	assert.Equal(t, []string{clusterUID, "prod-eu"}, []string{eu.ClusterUID, eu.ClusterName})
+	assert.Equal(t, []int64{300, 50}, []int64{eu.Spans, eu.Logs}, "the logs row joins the spans row of its own cluster")
+	assert.Equal(t, []string{other, "prod-us"}, []string{us.ClusterUID, us.ClusterName})
+	assert.Empty(t, none.ClusterUID)
+	assert.True(t, eu.WorkloadShared && us.WorkloadShared && none.WorkloadShared)
+	assert.Equal(t, `k8s.cluster.uid "`+clusterUID+`" (k8s.cluster.name "prod-eu")`, eu.Evidence[0])
+	assert.NotContains(t, strings.Join(none.Evidence, "\n"), "k8s.cluster")
+	assert.True(t, eu.ServiceNameShared, "a service name is not a cluster's")
+
+	// The same process group under the other cluster's workload is another
+	// workload's, so neither candidate's logs are looked up by it.
+	assert.True(t, r.processGroupCheck().Skipped)
+}
+
+// A value that is not a cluster uid still keeps its records apart, but is not
+// offered as a binding the scope file would refuse.
+func TestDiscover_ClusterUIDTheFileWouldRefuse(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{
+			{fieldClusterUID: "PROD", fieldNamespace: "payments", fieldWorkload: "checkout", fieldRecords: float64(2)},
+			{fieldClusterUID: clusterUID, fieldNamespace: "payments", fieldWorkload: "checkout", fieldRecords: float64(1)},
+		}}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 2)
+	assert.Empty(t, r.Candidates[0].ClusterUID)
+	assert.True(t, r.Candidates[0].WorkloadShared)
+	assert.Equal(t, clusterUID, r.Candidates[1].ClusterUID)
 }

@@ -149,8 +149,8 @@ type Plan struct {
 // queries.
 //
 // The record queries aggregate 24 hours of spans and logs whose workload or
-// service.name is one of the values, one row per namespace, workload and
-// service name, counting and collecting the entity ids of each. Each is
+// service.name is one of the values, one row per cluster, namespace, workload
+// and service name, counting and collecting the entity ids of each. Each is
 // followed by its sampled retries, run only when the scan cap stops it. The
 // entity-table queries search entity names and run only when the record
 // queries find nothing. The last query looks for logs by the process groups a
@@ -247,6 +247,12 @@ func sampledRecordQuery(object, purpose string, values []string, rung samplingRu
 // as hundreds of service ids, and one row per id would fill the page with a
 // single candidate. Each id field is counted, which is the true total, and
 // collected up to discoveryIDLimit, which is what a binding can use.
+//
+// The cluster uid is part of the identity: the same namespace and workload
+// name in two clusters are two workloads, and one row for both would propose
+// a binding that selects whichever the user did not mean. Its name is taken
+// from any record of the group rather than grouped by, so a renamed cluster
+// stays one row.
 func recordDQL(fetch, records string, values []string) string {
 	list := quotedList(values)
 	ids := func(count, collected, field, end string) string {
@@ -257,10 +263,10 @@ func recordDQL(fetch, records string, values []string) string {
 		fmt.Sprintf("| filter in(%s, array(%s)) or in(%s, array(%s))", fieldWorkload, list, fieldServiceName, list),
 		// Several aggregations are grouped in braces; ungrouped, Grail
 		// answers with a PARAMETERS_SHOULD_BE_GROUPED notification.
-		fmt.Sprintf("| summarize {%s,", records),
+		fmt.Sprintf("| summarize {%s, %s = takeAny(%s),", records, fieldAnyClusterName, fieldClusterName),
 		ids(fieldServiceCount, fieldServices, fieldService, ","),
 		ids(fieldProcessGroupCount, fieldProcessGroups, fieldProcessGroup, "},"),
-		fmt.Sprintf("    by:{%s, %s, %s}", fieldNamespace, fieldWorkload, fieldServiceName),
+		fmt.Sprintf("    by:{%s, %s, %s, %s}", fieldClusterUID, fieldNamespace, fieldWorkload, fieldServiceName),
 		fmt.Sprintf("| sort %s desc", fieldRecords),
 		fmt.Sprintf("| limit %d", discoveryRowLimit),
 	}, "\n")

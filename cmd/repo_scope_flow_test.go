@@ -29,15 +29,22 @@ import (
 const (
 	flowService      = "SERVICE-0123456789ABCDEF"
 	flowProcessGroup = "PROCESS_GROUP-FEDCBA9876543210"
-	flowSetCommand   = "dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout"
+	flowSetCommand   = "dtctl repo-scope set checkout --cluster-uid " + flowClusterUID + " --namespace payments --workload checkout --service-name checkout"
 )
 
 // checkoutRows are the aggregates an environment running the checkout
 // workload returns: spans carry the service id, logs only the process group.
+// flowClusterUID is the cluster the checkout workload's records name, and
+// flowCluster the two columns a record query returns for it.
+const (
+	flowClusterUID = "11111111-2222-3333-4444-555555555555"
+	flowCluster    = `"k8s.cluster.uid":"` + flowClusterUID + `","clusterName":"prod-eu",`
+)
+
 var checkoutRows = map[string]string{
-	"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"12400",` +
+	"spans": `{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"12400",` +
 		`"serviceCount":"1","services":["` + flowService + `"],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`,
-	"logs": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"88000",` +
+	"logs": `{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"88000",` +
 		`"serviceCount":"0","services":[],"processGroupCount":"1","processGroups":[["` + flowProcessGroup + `"]]}`,
 }
 
@@ -167,10 +174,10 @@ func TestListingSeesChangedFiles(t *testing.T) {
 func recordQuery(object string) string {
 	return "fetch " + object + ", from:now()-24h, scanLimitGBytes:5\n" +
 		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))` + "\n" +
-		"| summarize {records = count(),\n" +
+		"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" +
 		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
 		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
-		"    by:{k8s.namespace.name, k8s.workload.name, service.name}\n" +
+		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n" +
 		"| sort records desc\n" +
 		"| limit 200"
 }
@@ -231,6 +238,9 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		{"discover-sampled-empty", cappedThenSampled(nil)},
 		{"discover-many-ids", rowsByObject(manyIDRows())},
 		{"discover-ambiguous", rowsByObject(map[string]string{"spans": checkoutRows["spans"] + "," + ledger})},
+		{"discover-two-clusters", rowsByObject(map[string]string{
+			"spans": checkoutRows["spans"] + "," + otherCluster(checkoutRows["spans"]),
+			"logs":  checkoutRows["logs"] + "," + otherCluster(checkoutRows["logs"])})},
 		{"discover-none", rowsByObject(nil)},
 		{"discover-entity-name", rowsByObject(map[string]string{
 			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"eu-checkout-frontend"}`})},
@@ -250,6 +260,13 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 			testutil.AssertGolden(t, "repo-scope/"+tc.golden, out.String())
 		})
 	}
+}
+
+// otherCluster is row as a second cluster reports it: the same namespace,
+// workload and service name under another cluster uid.
+func otherCluster(row string) string {
+	row = strings.Replace(row, flowClusterUID, "66666666-7777-8888-9999-000000000000", 1)
+	return strings.Replace(row, "prod-eu", "prod-us", 1)
 }
 
 // processGroupLogsQuery is the text discovery sends to find a candidate's

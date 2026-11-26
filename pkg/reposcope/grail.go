@@ -20,6 +20,7 @@ const (
 	fieldProcessGroup = "dt.entity.process_group"
 	fieldServiceName  = "service.name"
 	fieldClusterUID   = "k8s.cluster.uid"
+	fieldClusterName  = "k8s.cluster.name"
 	fieldNamespace    = "k8s.namespace.name"
 	fieldWorkload     = "k8s.workload.name"
 	fieldEntityID     = "id"
@@ -32,10 +33,12 @@ const (
 	fieldNameLength = "nameLength"
 
 	// The columns the record queries compute. records counts what the query
-	// matched, every record or a sample's hits. Each id field is counted and
-	// collected: the count says how many there are, the collection lists up
-	// to discoveryIDLimit of them.
+	// matched, every record or a sample's hits. clusterName is the name the
+	// records of one cluster uid carry, taken from any of them: it is shown,
+	// never compared. Each id field is counted and collected: the count says
+	// how many there are, the collection lists up to discoveryIDLimit of them.
 	fieldRecords           = "records"
+	fieldAnyClusterName    = "clusterName"
 	fieldServiceCount      = "serviceCount"
 	fieldServices          = "services"
 	fieldProcessGroupCount = "processGroupCount"

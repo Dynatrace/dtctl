@@ -4,6 +4,7 @@
     "path": "services/checkout",
     "workloads": [
       {
+        "clusterUid": "11111111-2222-3333-4444-555555555555",
         "namespace": "payments",
         "name": "checkout"
       }

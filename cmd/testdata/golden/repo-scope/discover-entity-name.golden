@@ -1,7 +1,7 @@
 Unit: .
 
-#  WORKLOAD  SERVICE NAME  PROCESS GROUP  SERVICE                   TIER
-1  -         -             -              SERVICE-0123456789ABCDEF  segment
+#  CLUSTER  WORKLOAD  SERVICE NAME  PROCESS GROUP  SERVICE                   TIER
+1  -        -         -             -              SERVICE-0123456789ABCDEF  segment
    entity.name "eu-checkout-frontend" contains workload "checkout" (deploy/k8s/deployment.yaml:4) (segment match)
 
 Verdict: ambiguous: one candidate, matched by a segment of its name rather than the whole of it

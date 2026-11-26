@@ -13,6 +13,7 @@ const (
 	repoScopeStgHost = "stg98765.apps.dynatrace.com"
 	repoScopeSvc     = "SERVICE-0123456789ABCDEF"
 	repoScopePG      = "PROCESS_GROUP-FEDCBA9876543210"
+	repoScopeCluster = "11111111-2222-3333-4444-555555555555"
 )
 
 func repoScopeEntries() []reposcope.Entry {
@@ -23,7 +24,7 @@ func repoScopeEntries() []reposcope.Entry {
 			Services:      []string{repoScopeSvc},
 			ProcessGroups: []string{repoScopePG},
 			ServiceNames:  []string{"checkout"},
-			Workloads:     []reposcope.Workload{{Namespace: "payments", Name: "checkout"}},
+			Workloads:     []reposcope.Workload{{ClusterUID: repoScopeCluster, Namespace: "payments", Name: "checkout"}},
 		},
 		{
 			Name:      "ledger",
@@ -86,17 +87,20 @@ func repoScopeDiscoveryMatch() reposcope.DiscoveryReport {
 			ProcessGroups:     []string{repoScopePG},
 			ProcessGroupCount: 1,
 			ServiceName:       "checkout",
+			ClusterUID:        repoScopeCluster,
+			ClusterName:       "prod-eu",
 			Namespace:         "payments",
 			Workload:          "checkout",
 			Tier:              "exact",
 			Spans:             12400,
 			Logs:              88000,
 			Evidence: []string{
+				`k8s.cluster.uid "` + repoScopeCluster + `" (k8s.cluster.name "prod-eu")`,
 				`k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
 				`service.name "checkout" from deploy/k8s/deployment.yaml:4, go.mod:1`,
 				"12400 spans, 88000 logs in 24h",
 			},
-			SetCommand: "dtctl repo-scope set checkout --service SERVICE-0123456789ABCDEF --process-group PROCESS_GROUP-FEDCBA9876543210 --namespace payments --workload checkout --service-name checkout",
+			SetCommand: "dtctl repo-scope set checkout --cluster-uid " + repoScopeCluster + " --namespace payments --workload checkout --service-name checkout",
 		}},
 		Queries: repoScopeQueries(repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped,
 			repoScopeRows(1), repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped, repoScopeSkipped),

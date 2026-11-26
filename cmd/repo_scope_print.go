@@ -205,22 +205,25 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 }
 
 // writeRepoScopeCandidates writes the unit and the candidate table, each row
-// followed by its evidence, indented to the second column.
+// followed by its evidence, indented to the second column. The cluster column
+// shows the cluster's name where the records carry one, since that is what a
+// reader knows it by; the uid a binding uses is in the evidence and the set
+// line.
 func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 	var buf bytes.Buffer
 	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tWORKLOAD\tSERVICE NAME\tPROCESS GROUP\tSERVICE\tTIER")
+	fmt.Fprintln(tw, "#\tCLUSTER\tWORKLOAD\tSERVICE NAME\tPROCESS GROUP\tSERVICE\tTIER")
 	for _, c := range r.Candidates {
 		workload := ""
 		if c.Workload != "" {
 			workload = reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}.String()
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", c.Rank, cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"),
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", c.Rank, cmp.Or(c.ClusterName, c.ClusterUID, "-"), cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"),
 			idsColumn(c.ProcessGroups, c.ProcessGroupCount, c.Sampled), idsColumn(c.Services, c.ServiceCount, c.Sampled), c.Tier)
 	}
 	_ = tw.Flush()
 	rows := strings.SplitAfter(buf.String(), "\n")
-	indent := strings.Repeat(" ", strings.Index(rows[0], "WORKLOAD"))
+	indent := strings.Repeat(" ", strings.Index(rows[0], "CLUSTER"))
 
 	fmt.Fprintf(w, "Unit: %s\n\n%s", r.Unit, rows[0])
 	for i, c := range r.Candidates {
