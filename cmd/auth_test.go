@@ -458,17 +458,17 @@ func TestFinalizeLoginConfig(t *testing.T) {
 // values are supplied as explicit CLI flags.
 func TestResolveLoginContext(t *testing.T) {
 	const (
-		prodURL = "https://irc65933.apps.dynatrace.com/"
-		hardURL = "https://eva38390.sprint.apps.dynatracelabs.com/"
-		prodTok = "prod1sfm-oauth"
-		hardTok = "hardsfm-oauth"
+		prodURL = "https://abc12345.apps.dynatrace.com/"
+		hardURL = "https://xyz67890.sprint.apps.dynatracelabs.com/"
+		prodTok = "prod-env-oauth"
+		hardTok = "sprint-env-oauth"
 	)
 
 	makeCfg := func() *config.Config {
 		cfg := config.NewConfig()
-		cfg.SetContext("prod1sfm", prodURL, prodTok)
-		cfg.SetContext("hardsfm", hardURL, hardTok)
-		cfg.CurrentContext = "prod1sfm"
+		cfg.SetContext("prod-env", prodURL, prodTok)
+		cfg.SetContext("sprint-env", hardURL, hardTok)
+		cfg.CurrentContext = "prod-env"
 		return cfg
 	}
 
@@ -477,7 +477,7 @@ func TestResolveLoginContext(t *testing.T) {
 		contextName string
 		environment string
 		tokenName   string
-		currentCtx  string // override CurrentContext ("" means use default "prod1sfm")
+		currentCtx  string // override CurrentContext ("" means use default "prod-env")
 		wantContext string
 		wantEnv     string
 		wantToken   string
@@ -485,32 +485,32 @@ func TestResolveLoginContext(t *testing.T) {
 	}{
 		{
 			name:        "no flags uses current context",
-			wantContext: "prod1sfm",
+			wantContext: "prod-env",
 			wantEnv:     prodURL,
 			wantToken:   prodTok,
 		},
 		{
 			// Regression: before the fix, this would return prodURL for environment.
 			name:        "explicit context uses named context URL not current context URL",
-			contextName: "hardsfm",
-			wantContext: "hardsfm",
+			contextName: "sprint-env",
+			wantContext: "sprint-env",
 			wantEnv:     hardURL,
 			wantToken:   hardTok,
 		},
 		{
 			name:        "explicit context and explicit environment uses provided values",
-			contextName: "hardsfm",
+			contextName: "sprint-env",
 			environment: "https://custom.example.invalid/",
-			wantContext: "hardsfm",
+			wantContext: "sprint-env",
 			wantEnv:     "https://custom.example.invalid/",
 			wantToken:   hardTok, // token still resolved from named context
 		},
 		{
 			name:        "all flags explicit skips lookup entirely",
-			contextName: "hardsfm",
+			contextName: "sprint-env",
 			environment: "https://custom.example.invalid/",
 			tokenName:   "my-explicit-token",
-			wantContext: "hardsfm",
+			wantContext: "sprint-env",
 			wantEnv:     "https://custom.example.invalid/",
 			wantToken:   "my-explicit-token",
 		},
@@ -563,9 +563,9 @@ func TestResolveLoginContext(t *testing.T) {
 // test for the bug where dtctl auth login --context <non-active-context> would
 // silently overwrite the target context's environment URL with the active context's URL.
 //
-// Config: prod1sfm (active, prod URL) + hardsfm (sprint URL)
-// Command: auth login --context hardsfm   (no --environment)
-// Expected: hardsfm's sprint URL is used, command fails at keyring gate (not URL resolution).
+// Config: prod-env (active, prod URL) + sprint-env (sprint URL)
+// Command: auth login --context sprint-env   (no --environment)
+// Expected: sprint-env's sprint URL is used, command fails at keyring gate (not URL resolution).
 func TestAuthLogin_ContextOnly_UsesNamedContextURL(t *testing.T) {
 	viper.Reset()
 	resetAuthLoginFlags(t)
@@ -575,9 +575,9 @@ func TestAuthLogin_ContextOnly_UsesNamedContextURL(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
 	cfg := config.NewConfig()
-	cfg.SetContext("prod1sfm", "https://irc65933.apps.dynatrace.com/", "prod1sfm-oauth")
-	cfg.SetContext("hardsfm", "https://eva38390.sprint.apps.dynatracelabs.com/", "hardsfm-oauth")
-	cfg.CurrentContext = "prod1sfm"
+	cfg.SetContext("prod-env", "https://abc12345.apps.dynatrace.com/", "prod-env-oauth")
+	cfg.SetContext("sprint-env", "https://xyz67890.sprint.apps.dynatracelabs.com/", "sprint-env-oauth")
+	cfg.CurrentContext = "prod-env"
 
 	if err := cfg.SaveTo(configPath); err != nil {
 		t.Fatalf("failed to save config: %v", err)
@@ -585,16 +585,16 @@ func TestAuthLogin_ContextOnly_UsesNamedContextURL(t *testing.T) {
 	gFlags.cfgFile = configPath
 	defer func() { gFlags.cfgFile = "" }()
 
-	rootCmd.SetArgs([]string{"auth", "login", "--context", "hardsfm"})
+	rootCmd.SetArgs([]string{"auth", "login", "--context", "sprint-env"})
 	err := rootCmd.Execute()
 
 	// The command must NOT fail with a context/environment validation error —
-	// that would indicate hardsfm's URL was not resolved from config.
+	// that would indicate sprint-env's URL was not resolved from config.
 	if err != nil && strings.Contains(err.Error(), "--context and --environment are required") {
-		t.Errorf("expected hardsfm's URL to be resolved from config, got: %v", err)
+		t.Errorf("expected sprint-env's URL to be resolved from config, got: %v", err)
 	}
 	if err != nil && strings.Contains(err.Error(), "not found in config") {
-		t.Errorf("expected hardsfm to be found in config, got: %v", err)
+		t.Errorf("expected sprint-env to be found in config, got: %v", err)
 	}
 	// The command should fail at the keyring gate (disabled in tests), not earlier.
 	if err != nil && !strings.Contains(err.Error(), "keyring") {
