@@ -85,6 +85,9 @@ func FuzzScan(f *testing.F) {
 	for _, tt := range insertFilterTests {
 		f.Add(tt.query)
 	}
+	for _, q := range []string{`"""a""""`, `""""a"""`, `""""""`, `"""""""`, `"""a"""" """"b"""`} {
+		f.Add(q)
+	}
 	f.Fuzz(func(t *testing.T, query string) {
 		m, ok := Scan(query)
 		if !ok {
@@ -121,6 +124,9 @@ func FuzzUngroupedCount(f *testing.F) {
 		"fetch logs\n| summarize c = count() // every record\n",
 		"fetch logs | summarize c = count(), by:{host}",
 		"fetch logs | summarize `my count` = count()",
+		"fetch logs | summarize total = count(), by /* note */ : {host}",
+		"fetch logs | summarize total = /* note */ count()",
+		`fetch logs | summarize total = count(), note = """a""""`,
 	} {
 		f.Add(q)
 	}
