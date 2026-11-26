@@ -162,7 +162,7 @@ dtctl repo-scope set checkout --namespace payments --workload checkout --service
 OK Repo scope "checkout" saved to .dtctl-repo-scope.yaml for abc12345.apps.dynatrace.com (commit the file to share it)
 ```
 
-The entry is filed under the current context's environment host. `set` always replaces the whole entry, so pass every binding it should keep. Every value is validated before anything is written, so a refused `set` leaves the file exactly as it was. The new file is written beside the old one and renamed over it, which on Linux and macOS is atomic; on Windows the rename can fail while another program holds the file open, and leaves the old file in place when it does.
+The entry is filed under the current context's environment host. `set` always replaces the whole entry, so pass every binding it should keep. Every value is validated before anything is written, so a refused `set` leaves the file exactly as it was. A workload or a segment given twice is refused rather than written twice. The new file is written beside the old one and renamed over it, which on Linux and macOS is atomic; on Windows the rename can fail while another program holds the file open, and leaves the old file in place when it does.
 
 | Flag | Binds | Format |
 |---|---|---|

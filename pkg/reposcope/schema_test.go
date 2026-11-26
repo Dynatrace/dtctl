@@ -190,6 +190,8 @@ func TestCheck(t *testing.T) {
 			msg: `workloads[0] cluster-uid "ABCDEF01-2222-3333-4444-555555555555" is not a Kubernetes cluster uid (a lowercase UUID, the value of k8s.cluster.uid)`},
 		{name: "cluster name for a uid", doc: entry("name: checkout", "workloads: [{cluster-uid: prod-eu, namespace: payments, name: checkout}]"),
 			msg: `workloads[0] cluster-uid "prod-eu" is not a Kubernetes cluster uid`},
+		{name: "workload listed twice", doc: entry("name: checkout", "workloads: [{namespace: payments, name: checkout}, {namespace: payments, name: checkout}]"),
+			msg: `workloads[1] payments/checkout is listed twice`},
 		{name: "segment named, not identified", doc: entry("name: checkout", "segments: [{id: Payments prod}]"),
 			msg: `segments[0] id "Payments prod" is not a filter segment id (letters, digits, - and _; a name is not accepted)`},
 		{name: "segment without an id", doc: entry("name: checkout", "segments: [{variables: {env: [prod]}}]"),

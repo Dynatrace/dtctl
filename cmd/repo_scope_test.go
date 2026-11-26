@@ -285,8 +285,16 @@ func TestRepoScopeSetClusterUID(t *testing.T) {
 	}}}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost))
 	before := readScopeFile(t, repo)
 
+	// A workload given twice is refused, as a segment given twice is.
+	code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "checkout", "--agent",
+		"--namespace", "payments", "--workload", "checkout", "--workload", "checkout"}, RunOptions{})
+	require.NotZero(t, code)
+	require.True(t, strings.HasSuffix(agentError(t, stdout).Message,
+		`.dtctl-repo-scope.yaml: environments[abc12345.apps.dynatrace.com] entry "checkout": workloads[1] payments/checkout is listed twice`), stdout)
+	require.Equal(t, before, readScopeFile(t, repo))
+
 	// A cluster narrows a workload, so alone it binds nothing.
-	code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "checkout", "--agent", "--service-name", "checkout", "--cluster-uid", uid}, RunOptions{})
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "set", "checkout", "--agent", "--service-name", "checkout", "--cluster-uid", uid}, RunOptions{})
 	require.NotZero(t, code)
 	detail := agentError(t, stdout)
 	require.Equal(t, "validation_error", detail.Code)

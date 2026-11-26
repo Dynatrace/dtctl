@@ -234,7 +234,12 @@ func (e *Entry) validate() *InvalidError {
 			return invalid(fmt.Sprintf("service-names[%d] %q %s", i, name, problem))
 		}
 	}
+	workloads := map[Workload]bool{}
 	for i, w := range e.Workloads {
+		if workloads[w] {
+			return invalid(fmt.Sprintf("workloads[%d] %s is listed twice", i, w))
+		}
+		workloads[w] = true
 		if w.ClusterUID != "" && !clusterUIDRe.MatchString(w.ClusterUID) {
 			return invalid(fmt.Sprintf("workloads[%d] cluster-uid %q is not a Kubernetes cluster uid (a lowercase UUID, the value of %s)", i, w.ClusterUID, fieldClusterUID))
 		}
