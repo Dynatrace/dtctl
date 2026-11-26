@@ -177,6 +177,61 @@ func TestQueryRepoScope_SegmentUnavailable(t *testing.T) {
 	}
 }
 
+// Only a segment that is not there, or not the caller's to read, drops the
+// scope. Any other failed read says nothing about the segment, and running
+// environment-wide on a failure that may pass a moment later would return
+// rows the caller takes for scoped ones: it is an error and nothing is sent.
+// The status here is one the client does not retry; a 500, a 429 and a
+// timeout take the same branch after its retries.
+func TestQueryRepoScope_SegmentReadFails(t *testing.T) {
+	const message = `repo scope checkout: filter segment Ab3dEf9hIjk could not be read (get segment: API error (400): 400 Bad Request); the query was not sent: retry, or pass --no-repo-scope to run it as typed`
+	for _, args := range [][]string{nil, {"--repo-scope", "checkout"}} {
+		srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+		srv.segments = map[string]int{"Ab3dEf9hIjk": http.StatusBadRequest, "plain-1": http.StatusOK}
+		chdirTestRepo(t, segmentScope)
+
+		code, stdout, stderr := runRepoScoped(append([]string{"query", repoScopeTypedQuery, "--agent"}, args...), RunOptions{})
+		require.NotZero(t, code)
+		require.Equal(t, message, agentError(t, stdout).Message)
+		require.Empty(t, srv.queries(), "nothing is sent")
+		require.NotContains(t, stderr, "applying repo scope")
+
+		code, stdout, _ = runRepoScoped(append([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"}, args...), RunOptions{})
+		require.NotZero(t, code)
+		require.Equal(t, message, agentError(t, stdout).Message)
+		require.Empty(t, srv.queries())
+	}
+}
+
+// The read asks for the segment and nothing more: it only needs to know the
+// segment is there.
+func TestQueryRepoScope_SegmentReadAsksForNoFields(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, segmentScope)
+	code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []string{segmentRequests + "Ab3dEf9hIjk ", segmentRequests + "plain-1 "}, srv.requests()[:2])
+}
+
+// wait query polls until its condition holds, so a wait whose scope was
+// dropped would poll the whole environment for minutes on one stderr line.
+// It fails before the first attempt instead.
+func TestWaitQuery_SegmentUnavailable(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+	srv.segments = map[string]int{"plain-1": http.StatusOK}
+	chdirTestRepo(t, segmentScope)
+
+	code, stdout, _ := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, "repo scope checkout cannot be applied: filter segment Ab3dEf9hIjk does not exist in this environment, or is not shared with you; "+
+		"wait query does not poll unscoped: correct the entry's segments in .dtctl-repo-scope.yaml, or pass --no-repo-scope", agentError(t, stdout).Message)
+	require.Empty(t, srv.queries(), "no attempt is made")
+
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--plain", "--no-repo-scope"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, repoScopeTypedQuery, srv.first(t))
+}
+
 // What is typed wins over what is committed: a segment the user also names
 // is sent once, with the user's variables. Together they cannot exceed what a
 // query takes, and that is an error rather than a silent choice.

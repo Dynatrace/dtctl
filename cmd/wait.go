@@ -130,6 +130,9 @@ Examples:
 			if err := scoped.checkSegments(c); err != nil {
 				return err
 			}
+			if err := scoped.requireSegments("wait query"); err != nil {
+				return err
+			}
 			segments, err := scoped.withSegments(nil)
 			if err != nil {
 				return err

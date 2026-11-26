@@ -19,6 +19,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/segment"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	sdksegment "github.com/Dynatrace/dtctl/sdk/api/segment"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Repo scoping is on by default inside a linked repository, so it has an
@@ -340,27 +341,41 @@ func (q *repoScopedQuery) segmentList() string {
 // checkSegments reads each filter segment the entry references, once, before
 // anything is sent. The platform fails a query that names a segment it
 // cannot find, so without the check one deleted segment would fail every
-// query run in the repository. When one cannot be read the scope is dropped
-// whole and the query runs as typed: with the filter and without the
+// query run in the repository.
+//
+// A segment that is not there, or that the caller may not read, drops the
+// scope whole and the query runs as typed: with the filter and without the
 // segment it would return rows that look scoped and are wider than the
 // entry. A named entry is what the caller asked for, so there it is the
-// error.
+// error. Any other failed read (a server error, a rate limit, a timeout) says
+// nothing about the segment and may pass on the next run, so it is an error
+// either way: an unscoped run on a passing fault would hand back
+// environment-wide rows for a query that is scoped a moment later.
 //
-// Whether a segment's variables are all bound is not checked: only the
-// platform knows which it requires, and wrapError explains that failure.
+// The read asks for no includes and no variables, and whether a segment's
+// variables are all bound is not checked: wrapError explains that failure
+// when the platform reports it. The reads run one after another. An entry
+// holds at most ten, in parallel they would arrive as a burst against the
+// same rate limit, and a rate-limited read is now an error.
 func (q *repoScopedQuery) checkSegments(c *client.Client) error {
 	if q.scope == nil || len(q.segments) == 0 {
 		return nil
 	}
 	handler := segment.NewHandler(c)
 	for _, seg := range q.segments {
-		_, err := handler.Get(seg.ID)
+		err := handler.Check(seg.ID)
 		if err == nil {
 			continue
 		}
-		reason := fmt.Sprintf("filter segment %s could not be read (%v)", seg.ID, err)
-		if errors.Is(err, sdksegment.ErrNotFound) {
+		var reason string
+		switch {
+		case errors.Is(err, sdksegment.ErrNotFound):
 			reason = fmt.Sprintf("filter segment %s does not exist in this environment, or is not shared with you", seg.ID)
+		case errors.Is(err, httpclient.ErrForbidden):
+			reason = fmt.Sprintf("filter segment %s could not be read (%v)", seg.ID, err)
+		default:
+			return fmt.Errorf("repo scope %s: filter segment %s could not be read (%w); the query was not sent: retry, or pass --%s to run it as typed",
+				q.scope.Name, seg.ID, err, noRepoScopeFlag)
 		}
 		if q.named != "" {
 			return &reposcope.InvalidError{
@@ -378,6 +393,17 @@ func (q *repoScopedQuery) checkSegments(c *client.Client) error {
 		return nil
 	}
 	return nil
+}
+
+// requireSegments is for a command that must not run unscoped on its own
+// decision: wait query polls until its condition holds, and a wait whose
+// scope was dropped would poll the whole environment behind one stderr line.
+func (q *repoScopedQuery) requireSegments(command string) error {
+	if q.scope == nil || q.unavailable == "" {
+		return nil
+	}
+	return fmt.Errorf("repo scope %s cannot be applied: %s; %s does not poll unscoped: correct the entry's segments in %s, or pass --%s",
+		q.scope.Name, q.unavailable, command, reposcope.FileName, noRepoScopeFlag)
 }
 
 // withSegments is the segments to send: the user's own, then the entry's. A

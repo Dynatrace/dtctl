@@ -118,6 +118,13 @@ func (h *Handler) Get(uid string) (*FilterSegment, error) {
 	return &seg, nil
 }
 
+// Check reads a filter segment by UID without its includes or variables, for
+// a caller that only needs to know the segment can be read.
+func (h *Handler) Check(uid string) error {
+	_, err := h.sdk.Get(context.Background(), uid)
+	return err
+}
+
 // Create creates a new filter segment from raw JSON/YAML bytes.
 func (h *Handler) Create(data []byte) (*FilterSegment, error) {
 	// Convert DQL filters to AST for the API
