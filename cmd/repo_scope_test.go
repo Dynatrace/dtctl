@@ -346,6 +346,48 @@ func TestRepoScopeSetPathIsADirectoryOfTheRepository(t *testing.T) {
 	require.Equal(t, "services/Billing", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[2].Path)
 }
 
+// A flag set refuses the moment it is parsed stops the parse, so a mode flag
+// after it on the line is never read. The refusal is an envelope wherever
+// --agent stands, and the same one.
+func TestRepoScopeSetRefusalIsAnEnvelopeWhereverAgentStands(t *testing.T) {
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, monorepoScope)
+	before := readScopeFile(t, repo)
+	refused := []string{"--namespace", "a", "--namespace", "b", "--workload", "w"}
+	var first string
+	for _, args := range [][]string{
+		append([]string{"--agent", "repo-scope", "set", "two"}, refused...),
+		append([]string{"repo-scope", "set", "two", "--agent"}, refused...),
+		append(append([]string{"repo-scope", "set", "two"}, refused...), "--agent"),
+		append(append([]string{"repo-scope", "set", "two"}, refused...), "-A"),
+	} {
+		code, stdout, stderr := runRepoScoped(args, RunOptions{})
+		require.Equal(t, client.ExitUsageError, code, "%q", args)
+		require.Empty(t, stderr, "%q", args)
+		detail := agentError(t, stdout)
+		require.Equal(t, "validation_error", detail.Code)
+		require.Equal(t, "repo-scope set: --namespace takes one value, for every --workload of the command", detail.Message)
+		if first == "" {
+			first = stdout
+		}
+		require.Equal(t, first, stdout, "%q", args)
+		require.Equal(t, before, readScopeFile(t, repo))
+	}
+	// Without a mode flag it is the line a terminal reads, as before.
+	code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "set", "two"}, refused...), RunOptions{})
+	require.Equal(t, client.ExitUsageError, code)
+	require.Empty(t, stdout)
+	require.Contains(t, stderr, "--namespace takes one value")
+
+	// A value pflag itself refuses is the general case, in every command
+	// and older than repo scope: the line is plain when --agent follows the
+	// flag. Pinned here so that a change to it is a decision.
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "list", "--chunk-size", "x", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Empty(t, stdout)
+	require.Contains(t, stderr, `invalid argument "x" for "--chunk-size" flag`)
+}
+
 // --namespace and --cluster-uid qualify every --workload of the command, so
 // a second one cannot mean the workloads after it: it is refused, where the
 // last one used to rebind the workloads named before it.
