@@ -170,7 +170,11 @@ Use -o json / -o yaml for structured output.`,
 						return
 					}
 					const query = "fetch application.snapshots | summarize count(), by:{breakpoint.id}"
-					hint = fmt.Sprintf("0 snapshots under the breakpoint's current ID (%s); earlier ones are under its previous IDs: dtctl query %s", rule.DisableReason, exec.ShellQuote(query))
+					// Whether there are earlier snapshots is not known: the
+					// hint keys on the disable reason, not on a re-version.
+					// The count is across the environment's breakpoints, so
+					// the suggested query must not run under the repo scope.
+					hint = fmt.Sprintf("0 snapshots under the breakpoint's current ID (%s); earlier snapshots, if any, are under its previous IDs: dtctl query %s --%s", rule.DisableReason, exec.ShellQuote(query), noRepoScopeFlag)
 					if defaultTimeframeStart != "" {
 						hint += " --default-timeframe-start " + exec.ShellQuote(defaultTimeframeStart)
 					}

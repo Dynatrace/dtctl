@@ -10,7 +10,7 @@ import (
 // where its earlier snapshots are, on stderr and in the agent envelope; one
 // that has not been hit yet has no earlier ID to point at.
 func TestGetSnapshots_ReversionedBreakpoint(t *testing.T) {
-	const hint = `0 snapshots under the breakpoint's current ID (HIT_LIMIT_REACHED); earlier ones are under its previous IDs: dtctl query 'fetch application.snapshots | summarize count(), by:{breakpoint.id}' --default-timeframe-start now-7d`
+	const hint = `0 snapshots under the breakpoint's current ID (HIT_LIMIT_REACHED); earlier snapshots, if any, are under its previous IDs: dtctl query 'fetch application.snapshots | summarize count(), by:{breakpoint.id}' --no-repo-scope --default-timeframe-start now-7d`
 	for _, tc := range []struct {
 		disableReason string
 		want          string
