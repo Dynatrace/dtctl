@@ -804,6 +804,35 @@ func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
 	require.Contains(t, agentError(t, stdout).Message, "--term: a term is looked up for one deployable")
 }
 
+// One workload found for two deployables of a run would be saved under one
+// name by both lines, and set replaces an entry of the same name: running the
+// second line would undo the first. The later line is named after its unit,
+// so running both leaves both entries.
+func TestRepoScopeDiscoverGradleDeployablesSharingAName(t *testing.T) {
+	fixture := gradleMultiRepo(t)
+	const row = `{"k8s.namespace.name":"edge","k8s.workload.name":"admin-webproxy","records":"40"}`
+	newDQLRecorder(t, "readonly", spansByName(map[string]string{"admin": row, "webproxy": row}))
+	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var reports []reposcope.DiscoveryReport
+	agentResult(t, stdout, &reports)
+	require.Len(t, reports, 2)
+	first, second := reports[0].Candidates[0], reports[1].Candidates[0]
+	require.Equal(t, "dtctl --context c repo-scope set admin-webproxy --namespace edge --workload admin-webproxy --path admin", first.SetCommand)
+	require.Equal(t, "dtctl --context c repo-scope set webproxy-admin-webproxy --namespace edge --workload admin-webproxy --path webproxy", second.SetCommand)
+	require.Equal(t, "webproxy-admin-webproxy", second.Name)
+	const renamed = `candidate 1 is saved as "webproxy-admin-webproxy": the line for admin saves an entry named "admin-webproxy", and a second set under that name would replace it`
+	require.NotContains(t, reports[0].Notes, renamed)
+	require.Contains(t, reports[1].Notes, renamed)
+
+	runSetCommand(t, first.SetCommand)
+	runSetCommand(t, second.SetCommand)
+	require.ElementsMatch(t, []string{"admin-webproxy", "webproxy-admin-webproxy"}, loadScopeFile(t, repo).Names(repoScopeTestHost))
+}
+
 // From a library two entries' deployables depend on, neither entry applies:
 // the envelope says the entries tie rather than that none covers it, and
 // the suggestion names them.

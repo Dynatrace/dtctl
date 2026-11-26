@@ -872,12 +872,12 @@ func TestDiscover_NoPlan(t *testing.T) {
 }
 
 func TestEntryName(t *testing.T) {
-	assert.Equal(t, "checkout", entryName("Checkout"))
-	assert.Equal(t, "payment-service", entryName("payment_service"))
-	assert.Equal(t, "ledger-close", entryName("Ledger Close"))
-	assert.Equal(t, "repo", entryName("___"))
-	assert.Equal(t, strings.Repeat("a", 63), entryName(strings.Repeat("a", 70)))
-	assert.Regexp(t, entryNameRe, entryName(strings.Repeat("a", 62)+"-b"))
+	assert.Equal(t, "checkout", EntryName("Checkout"))
+	assert.Equal(t, "payment-service", EntryName("payment_service"))
+	assert.Equal(t, "ledger-close", EntryName("Ledger Close"))
+	assert.Equal(t, "repo", EntryName("___"))
+	assert.Equal(t, strings.Repeat("a", 63), EntryName(strings.Repeat("a", 70)))
+	assert.Regexp(t, entryNameRe, EntryName(strings.Repeat("a", 62)+"-b"))
 }
 
 // A log written by several processes carries its process groups as an

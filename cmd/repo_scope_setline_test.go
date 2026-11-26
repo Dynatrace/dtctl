@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -170,4 +171,30 @@ func TestRepoScopeSetLine(t *testing.T) {
 			require.Equal(t, tc.notes, repoScopeNoLineNotes(&r))
 		})
 	}
+}
+
+// Lines for one unit are alternatives and may share a name; a line for
+// another unit of the run takes a name of its own, however many units want
+// the same one and however long the name is.
+func TestRepoScopeNamesClaim(t *testing.T) {
+	names := repoScopeNames{}
+	claim := func(name, unit string) string {
+		claimed, _ := names.claim(name, unit)
+		return claimed
+	}
+	require.Equal(t, "checkout", claim("checkout", "admin"))
+	require.Equal(t, "checkout", claim("checkout", "admin"), "the same unit's second candidate")
+	require.Equal(t, "web-checkout", claim("checkout", "web"))
+	require.Equal(t, "services-api-checkout", claim("checkout", "services/api"))
+	require.Equal(t, "web-checkout", claim("web-checkout", "web"), "its own name")
+	require.Equal(t, "2-web-checkout", claim("checkout", "web_"), "named after its unit it is another unit's name, so it is numbered")
+
+	long := strings.Repeat("a", 63)
+	require.Equal(t, long, claim(long, "admin"))
+	second, holder := names.claim(long, "web")
+	require.Equal(t, "admin", holder)
+	require.NotEqual(t, long, second)
+	require.LessOrEqual(t, len(second), 63)
+	third := claim(long, "api")
+	require.NotContains(t, []string{long, second}, third)
 }

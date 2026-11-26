@@ -219,6 +219,7 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	defer cancel()
 	runner := scopeCheckedRunner{&inventoryRunner{executor: newDQLExecutorFromConfig(ctx, cfg, c), scanLimitGB: reposcope.ScanLimitGB}}
 	selectors := repoScopeSelectors(ctx, cfg)
+	names := repoScopeNames{}
 	// Each plan is a run of its own with its own time bound. After a Ctrl-C
 	// the rest still report, every query marked as never run, so in table
 	// output no deployable drops out of the answer unsaid. The only error is
@@ -236,8 +237,17 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		defer cancelTimeout()
 		began := time.Now()
 		report, err := reposcope.Discover(runCtx, runner, plan, host)
-		for i, c := range report.Candidates {
-			report.Candidates[i].SetCommand = repoScopeSetCommand(report, c, selectors)
+		for i := range report.Candidates {
+			c := &report.Candidates[i]
+			if c.SetCommand = repoScopeSetCommand(report, *c, selectors); c.SetCommand == "" {
+				continue
+			}
+			if name, holder := names.claim(c.Name, plan.Unit); name != c.Name {
+				report.Notes = append(report.Notes, fmt.Sprintf("candidate %d is saved as %q: the line for %s saves an entry named %q, and a second set under that name would replace it",
+					c.Rank, name, holder, c.Name))
+				c.Name = name
+				c.SetCommand = repoScopeSetCommand(report, *c, selectors)
+			}
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			// The report marks the query that ran out of time and says the
@@ -288,6 +298,36 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		return perr
 	}
 	return err
+}
+
+// repoScopeNames are the entry names the lines of one run save under, each
+// with the unit whose line took it. A run for a directory several Gradle
+// deployables share proposes lines for each of them, and set replaces an
+// entry of the same name, so two units' lines under one name would leave
+// only the entry of the line run last.
+type repoScopeNames map[string]string
+
+// claim is the name a line for unit saves under: name, unless a line for
+// another unit has taken it, and then name after the unit. holder is the
+// unit that has name. Lines for one unit may share a name: they are
+// alternatives for one directory, of which one is saved.
+func (n repoScopeNames) claim(name, unit string) (claimed, holder string) {
+	free := func(s string) bool {
+		u, taken := n[s]
+		return !taken || u == unit
+	}
+	holder, claimed = n[name], name
+	for i := 1; !free(claimed); i++ {
+		// A name is at most 63 characters, so the number that tells a third
+		// taker apart goes in front, where it is never cut off.
+		prefix := unit
+		if i > 1 {
+			prefix = fmt.Sprintf("%d-%s", i, unit)
+		}
+		claimed = reposcope.EntryName(prefix + "-" + name)
+	}
+	n[claimed] = unit
+	return claimed, holder
 }
 
 // scopeCheckedRunner refuses a query the token provably cannot read with the

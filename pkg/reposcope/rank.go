@@ -752,7 +752,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.WorkloadShared = c.Workload != "" && inClusters[Workload{Namespace: c.Namespace, Name: c.Workload}] > 1
 		c.MatchedDir = d.dirSource != "" && c.sources[d.dirSource]
 		c.Rank, c.Tier = i+1, c.tier.String()
-		c.Name = entryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
+		c.Name = EntryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
 	}
 	for _, n := range logsNotes(all) {
 		r.note(n)
@@ -841,9 +841,9 @@ func firstOf(values ...string) string {
 
 var entryNameInvalid = regexp.MustCompile(`[^a-z0-9]+`)
 
-// entryName turns a name found in Dynatrace or the repository into a valid
+// EntryName turns a name found in Dynatrace or the repository into a valid
 // Entry.Name.
-func entryName(raw string) string {
+func EntryName(raw string) string {
 	name := strings.Trim(entryNameInvalid.ReplaceAllString(strings.ToLower(raw), "-"), "-")
 	if len(name) > 63 {
 		name = strings.TrimRight(name[:63], "-")
