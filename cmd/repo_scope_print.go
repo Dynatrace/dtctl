@@ -1,14 +1,16 @@
 package cmd
 
 import (
-	"bytes"
 	"cmp"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
@@ -246,14 +248,8 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 			}
 		}
 	}
-	for _, n := range p.sharedNotes {
-		fmt.Fprintf(w, "Note: %s\n", n)
-	}
-	for _, n := range p.lineNotes {
-		fmt.Fprintf(w, "Note: %s\n", n)
-	}
-	for _, n := range r.Notes {
-		fmt.Fprintf(w, "Note: %s\n", n)
+	for _, n := range slices.Concat(p.sharedNotes, p.lineNotes, r.Notes) {
+		fmt.Fprintf(w, "Note: %s\n", repoScopeText(n))
 	}
 }
 
@@ -285,10 +281,12 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 // shows the cluster's name where the records carry one, since that is what a
 // reader knows it by; the uid a binding uses is in the evidence and the set
 // line.
+//
+// The columns are laid out here rather than by a tabwriter: each row is
+// followed by lines that are not part of the table, and a cell is text an
+// environment sent.
 func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
-	var buf bytes.Buffer
-	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tCLUSTER\tWORKLOAD\tSERVICE NAME\tPROCESS GROUP\tSERVICE\tTIER")
+	rows := [][]string{{"#", "CLUSTER", "WORKLOAD", "SERVICE NAME", "PROCESS GROUP", "SERVICE", "TIER"}}
 	for _, c := range r.Candidates {
 		workload := ""
 		switch {
@@ -299,21 +297,51 @@ func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 		case c.Workload != "":
 			workload = reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}.String()
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", c.Rank, cmp.Or(c.ClusterName, c.ClusterUID, "-"), cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"),
-			idsColumn(c.ProcessGroups, c.ProcessGroupCount, c.Sampled), idsColumn(c.Services, c.ServiceCount, c.Sampled), c.Tier)
+		row := []string{strconv.Itoa(c.Rank), cmp.Or(c.ClusterName, c.ClusterUID, "-"), cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"),
+			idsColumn(c.ProcessGroups, c.ProcessGroupCount, c.Sampled), idsColumn(c.Services, c.ServiceCount, c.Sampled), c.Tier}
+		for i := range row {
+			row[i] = repoScopeText(row[i])
+		}
+		rows = append(rows, row)
 	}
-	_ = tw.Flush()
-	rows := strings.SplitAfter(buf.String(), "\n")
-	indent := strings.Repeat(" ", strings.Index(rows[0], "CLUSTER"))
+	const gap = 2
+	widths := make([]int, len(rows[0]))
+	for _, row := range rows {
+		for i, cell := range row {
+			widths[i] = max(widths[i], utf8.RuneCountInString(cell))
+		}
+	}
+	line := func(row []string) string {
+		var b strings.Builder
+		for i, cell := range row[:len(row)-1] {
+			b.WriteString(cell)
+			b.WriteString(strings.Repeat(" ", widths[i]-utf8.RuneCountInString(cell)+gap))
+		}
+		return b.String() + row[len(row)-1]
+	}
 
-	fmt.Fprintf(w, "Unit: %s\n\n%s", r.Unit, rows[0])
+	fmt.Fprintf(w, "Unit: %s\n\n%s\n", r.Unit, line(rows[0]))
 	for i, c := range r.Candidates {
-		fmt.Fprint(w, rows[i+1])
+		fmt.Fprintln(w, line(rows[i+1]))
 		for _, e := range c.Evidence {
-			fmt.Fprintf(w, "%s%s\n", indent, e)
+			fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", widths[0]+gap), repoScopeText(e))
 		}
 	}
 	fmt.Fprintln(w)
+}
+
+// repoScopeText is s as the terminal output shows text an environment sent:
+// a cluster, workload or service name is whatever the telemetry carries. A
+// control character in it (a newline, a tab, an escape sequence) would break
+// the table or act on the terminal beside a line meant to be pasted, so each
+// is shown as U+FFFD.
+func repoScopeText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if !unicode.IsPrint(r) {
+			return unicode.ReplacementChar
+		}
+		return r
+	}, s)
 }
 
 // idsColumn is a candidate's ids of one kind in the table: the first few,

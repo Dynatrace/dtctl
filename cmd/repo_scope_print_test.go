@@ -221,3 +221,29 @@ func TestRepoScopeSetCommandBindsTheCluster(t *testing.T) {
 	require.Regexp(t, `2\s+`+uid+`\s+payments/ledger\s`, out.String(), "a cluster without a name shows its uid")
 	require.Regexp(t, `3\s+-\s+-\s+checkout\s`, out.String())
 }
+
+// A cluster or service name is text an environment's telemetry carries. A
+// newline or tab in one used to shift every later row against its evidence
+// and drop the last candidate, and an escape sequence reached the terminal
+// beside a line meant to be pasted. Such characters are shown as U+FFFD.
+func TestRepoScopeDiscoveryTableHoldsControlCharacters(t *testing.T) {
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Verdict: reposcope.VerdictAmbiguous,
+		Notes: []string{"a note with \x1b[2J in it"},
+		Candidates: []reposcope.Candidate{
+			{Rank: 1, Name: "checkout", ClusterName: "prod\n\teu", Namespace: "payments", Workload: "checkout", ServiceName: "check\x1b[31mout", Tier: "exact",
+				Evidence: []string{"first\revidence"}},
+			{Rank: 2, Name: "ledger", ClusterName: "prod-us", Namespace: "payments", Workload: "ledger", Tier: "exact", Evidence: []string{"second evidence"}},
+		}}
+	var out bytes.Buffer
+	printRepoScopeDiscovery(&out, r, repoScopeProposal{}, 0)
+	require.NotContains(t, out.String(), "\x1b")
+	require.NotContains(t, out.String(), "\t")
+	require.NotContains(t, out.String(), "\r")
+	require.Contains(t, out.String(), ""+
+		"#  CLUSTER   WORKLOAD           SERVICE NAME   PROCESS GROUP  SERVICE  TIER\n"+
+		"1  prod��eu  payments/checkout  check�[31mout  -              -        exact\n"+
+		"   first�evidence\n"+
+		"2  prod-us   payments/ledger    -              -              -        exact\n"+
+		"   second evidence\n")
+	require.Contains(t, out.String(), "Note: a note with �[2J in it\n")
+}
