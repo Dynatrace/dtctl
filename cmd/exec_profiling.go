@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -333,11 +332,10 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return err
 	}
 
-	apiKind := profilingAPIKinds[kind]
 	progress := output.NewProgressReporterTo(true, agentMode(ctx), currentStderr(ctx))
 	progress.Update(output.ProgressState{Label: fmt.Sprintf("running %s analysis", kind)})
-	resp, err := profiling.NewHandler(c).Run(cmd.Context(), profiling.Payload{
-		Kind:          apiKind,
+	analysis, err := profiling.NewHandler(c).Analyze(cmd.Context(), profiling.Payload{
+		Kind:          profilingAPIKinds[kind],
 		EntityID:      entityID,
 		From:          window.From,
 		To:            window.To,
@@ -350,35 +348,24 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return profilingAPIError(err)
 	}
 
-	// Round-trip through JSON so the renderers and --raw see the plain envelope
-	// shape: {"status":..., "kind":..., "entityId":..., "result":{...}}.
-	b, err := json.Marshal(resp)
-	if err != nil {
-		return err
-	}
-	var result interface{}
-	if err := json.Unmarshal(b, &result); err != nil {
-		return err
-	}
-	result = compactProfilingResult(result)
 	run := &profilingRun{
 		kind:          kind,
 		entity:        entityID,
 		leafType:      f.leafType,
-		status:        resp.Status,
+		status:        analysis.Status,
 		from:          window.From,
 		to:            window.To,
 		defaultWindow: window.Default,
 	}
 	switch {
 	case f.raw:
-		return renderProfilingRaw(ctx, run, result)
+		return renderProfilingRaw(ctx, run, analysis)
 	case f.focus != "":
-		return renderProfilingFocus(ctx, run, result, f)
+		return renderProfilingFocus(ctx, run, analysis, f)
 	case f.view == "functions":
-		return renderProfilingFunctions(ctx, run, result, f)
+		return renderProfilingFunctions(ctx, run, analysis, f)
 	}
-	return renderProfilingStacks(ctx, run, apiKind, result, f)
+	return renderProfilingStacks(ctx, run, analysis, f)
 }
 
 // validateProfilingView checks the hotspots view flags. A flag that only one
@@ -428,14 +415,15 @@ func profilingLimit(ctx context.Context, f *profilingFlags, def int) int {
 // table (the default outside agent mode) prints the rows as folded lines; every
 // structured format, --jq and the agent envelope get the same rows as fields.
 // --limit caps every one of them the same way.
-func renderProfilingStacks(ctx context.Context, run *profilingRun, apiKind string, result interface{}, f *profilingFlags) error {
+func renderProfilingStacks(ctx context.Context, run *profilingRun, a *profiling.Analysis, f *profilingFlags) error {
 	var rows interface{}
 	var n int
 	var folded func() string
 	unit := "stacks, by running samples"
 	var profile func(p *output.ProfileContext)
 	if run.kind == "allocations" {
-		all := profiling.AllocationStacks(result, f.appOnly, f.survivorsOnly)
+		view := a.Allocations(f.appOnly, f.survivorsOnly)
+		all := view.Rows
 		n = len(all)
 		key := "allocated"
 		if f.survivorsOnly {
@@ -446,32 +434,25 @@ func renderProfilingStacks(ctx context.Context, run *profilingRun, apiKind strin
 		rows = limited
 		folded = func() string { return profiling.FoldAllocations(limited, f.survivorsOnly) }
 		profile = func(p *output.ProfileContext) {
-			var alloc, surv int64
-			for _, r := range all {
-				alloc += int64(r.AllocBytes)
-				surv += int64(r.SurvivedBytes)
-			}
-			p.AllocatedBytes, p.SurvivedBytes = &alloc, &surv
+			p.AllocatedBytes, p.SurvivedBytes = &view.AllocatedBytes, &view.SurvivedBytes
 		}
 	} else {
-		all := profiling.HotspotStacks(result, f.appOnly)
+		view := a.Stacks(f.appOnly)
+		all := view.Rows
 		n = len(all)
 		limited := capProfilingRows(all, profilingLimit(ctx, f, profilingStacksDefaultLimit))
 		rows = limited
 		folded = func() string { return profiling.FoldStacks(limited) }
 		profile = func(p *output.ProfileContext) {
-			samples := 0
-			for _, r := range all {
-				samples += r.Running
-			}
-			p.Samples = &samples
+			p.Samples = &view.Samples
 			p.State = "running"
 		}
 	}
 	shown := profilingRowCount(rows)
 
 	if n == 0 {
-		return printProfilingEmpty(ctx, run, "stacks", "", rows, noProfilingStacksNote(apiKind, result, f.appOnly))
+		_, note := a.WhyEmpty(f.appOnly, "")
+		return printProfilingEmpty(ctx, run, "stacks", "", rows, note)
 	}
 	truncated := ""
 	if shown < n {
@@ -541,22 +522,23 @@ func isProfilingTableFormat(ctx context.Context) bool {
 
 // renderProfilingRaw prints the API's whole (compacted) result: JSON unless
 // another structured format was asked for.
-func renderProfilingRaw(ctx context.Context, run *profilingRun, result interface{}) error {
+func renderProfilingRaw(ctx context.Context, run *profilingRun, a *profiling.Analysis) error {
 	p := newPrinterCtx(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 		run.annotate(ap, "raw", "")
 	} else if isProfilingTableFormat(ctx) {
 		p = newPrinterOpts(ctx, output.PrinterOptions{Format: "json", PlainMode: plainMode(ctx), JQFilter: jqFilter(ctx)})
 	}
-	return p.Print(result)
+	return p.Print(a.Raw())
 }
 
 // renderProfilingFunctions prints the functions view: rows through the standard
 // printer, so a table, -o json/csv/yaml, --jq and the agent envelope all work.
-func renderProfilingFunctions(ctx context.Context, run *profilingRun, result interface{}, f *profilingFlags) error {
-	t := profiling.HotspotFunctions(result, f.appOnly, f.state, f.sortBy)
+func renderProfilingFunctions(ctx context.Context, run *profilingRun, a *profiling.Analysis, f *profilingFlags) error {
+	t := a.Functions(f.appOnly, f.state, f.sortBy)
 	if t == nil {
-		return printProfilingEmpty(ctx, run, "functions", f.state, []profiling.FunctionRow{}, noProfilingFunctionsNote(result, f))
+		_, note := a.WhyEmpty(f.appOnly, f.state)
+		return printProfilingEmpty(ctx, run, "functions", f.state, []profiling.FunctionRow{}, note)
 	}
 	limit := profilingLimit(ctx, f, profilingFunctionsDefaultLimit)
 	rows := capProfilingRows(t.Rows, limit)
@@ -578,12 +560,13 @@ func renderProfilingFunctions(ctx context.Context, run *profilingRun, result int
 }
 
 // renderProfilingFocus prints one function's callers and callees.
-func renderProfilingFocus(ctx context.Context, run *profilingRun, result interface{}, f *profilingFlags) error {
+func renderProfilingFocus(ctx context.Context, run *profilingRun, a *profiling.Analysis, f *profilingFlags) error {
 	limit := profilingLimit(ctx, f, profilingFocusDefaultLimit)
-	rows, fn, nCallers, nCallees, err := profiling.HotspotFocus(result, f.appOnly, f.state, f.focus, limit)
+	rows, fn, nCallers, nCallees, err := a.Focus(f.appOnly, f.state, f.focus, limit)
 	if err != nil {
-		if profiling.HotspotFunctions(result, f.appOnly, f.state, "self") == nil {
-			return printProfilingEmpty(ctx, run, "focus", f.state, []profiling.FocusRow{}, noProfilingFunctionsNote(result, f))
+		if a.Functions(f.appOnly, f.state, "self") == nil {
+			_, note := a.WhyEmpty(f.appOnly, f.state)
+			return printProfilingEmpty(ctx, run, "focus", f.state, []profiling.FocusRow{}, note)
 		}
 		return err
 	}
@@ -640,7 +623,6 @@ func printProfilingRows(ctx context.Context, run *profilingRun, view, state stri
 // context.warnings; structured formats get the empty list on stdout and the
 // note on stderr.
 func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state string, empty interface{}, note string) error {
-	note = strings.TrimPrefix(note, "# ")
 	if agentMode(ctx) {
 		p := newPrinterCtx(ctx)
 		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
@@ -656,20 +638,6 @@ func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state str
 	}
 	fmt.Fprintf(currentStderr(ctx), "# %s\n", note)
 	return newPrinterCtx(ctx).PrintList(empty)
-}
-
-// noProfilingFunctionsNote explains an empty per-function view. Running samples
-// absent means what an empty stack view means; another --state may simply have
-// none in the window.
-func noProfilingFunctionsNote(result interface{}, f *profilingFlags) string {
-	if f.state == "" || f.state == "running" {
-		return noProfilingStacksNote("methodHotspots", result, f.appOnly)
-	}
-	entity := ""
-	if m, ok := result.(map[string]interface{}); ok {
-		entity, _ = m["entityId"].(string)
-	}
-	return fmt.Sprintf("# no %s samples for %s in the window — the stack view (without --view/--focus) shows every thread state; waiting states may need --show-waiting", f.state, entity)
 }
 
 // profilingAPIError adds profiling-specific advice to the API failures a
@@ -689,20 +657,6 @@ func profilingAPIError(err error) error {
 	}
 }
 
-// noProfilingStacksNote explains an empty stack view: either the window holds
-// no samples for the entity at all, or --app-only removed every frame.
-func noProfilingStacksNote(apiKind string, result interface{}, appOnly bool) string {
-	entity, status := "", ""
-	if m, ok := result.(map[string]interface{}); ok {
-		entity, _ = m["entityId"].(string)
-		status, _ = m["status"].(string)
-	}
-	if appOnly && profiling.ToCollapsed(apiKind, result, 1, false) != "" {
-		return fmt.Sprintf("# no stacks for %s: --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only", entity)
-	}
-	return fmt.Sprintf("# no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result", entity, status)
-}
-
 // isEligibleProfilingEntity reports whether id is a process-level entity the
 // code-level analysis API accepts (PROCESS_GROUP, PROCESS_GROUP_INSTANCE, or the
 // 3rd-gen PROCESS rename). "PROCESS-" does not prefix-match "PROCESS_GROUP-" (the
@@ -712,52 +666,4 @@ func isEligibleProfilingEntity(id string) bool {
 	return strings.HasPrefix(id, "PROCESS-") ||
 		strings.HasPrefix(id, "PROCESS_GROUP-") ||
 		strings.HasPrefix(id, "PROCESS_GROUP_INSTANCE-")
-}
-
-// profilingVisualOnlyKeys are fields that carry UI rendering metadata with no
-// analytical value.
-var profilingVisualOnlyKeys = map[string]bool{
-	"color": true, // hex colour for charts
-	"uuid":  true, // internal render ID
-}
-
-// profilingEmptyOnlyKeys are dropped only when they carry nothing.
-// fileName/filePath are null on Java frames, but on Node.js they are the only
-// place a frame's file lives (its className is empty), and the folded renderer
-// labels frames from them.
-var profilingEmptyOnlyKeys = map[string]bool{
-	"fileName": true,
-	"filePath": true,
-}
-
-// compactProfilingResult strips timeseries dataPoints and visual-only fields
-// from an analysis result, so --raw carries signal without chart/render noise.
-func compactProfilingResult(v interface{}) interface{} {
-	switch val := v.(type) {
-	case map[string]interface{}:
-		out := make(map[string]interface{}, len(val))
-		for k, child := range val {
-			if profilingVisualOnlyKeys[k] {
-				continue
-			}
-			if profilingEmptyOnlyKeys[k] && (child == nil || child == "") {
-				continue
-			}
-			if k == "dataPoints" {
-				if arr, ok := child.([]interface{}); ok {
-					out["dataPointsCount"] = len(arr)
-					continue
-				}
-			}
-			out[k] = compactProfilingResult(child)
-		}
-		return out
-	case []interface{}:
-		out := make([]interface{}, len(val))
-		for i, item := range val {
-			out[i] = compactProfilingResult(item)
-		}
-		return out
-	}
-	return v
 }
