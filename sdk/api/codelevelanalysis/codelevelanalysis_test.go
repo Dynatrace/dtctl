@@ -501,3 +501,98 @@ func TestKindsBuildTheirPaths(t *testing.T) {
 		}
 	}
 }
+
+// phaseServer answers the submit with submitStatus and every poll with
+// pollStatus.
+func phaseServer(t *testing.T, submitStatus, pollStatus int) *Handler {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		status := submitStatus
+		if strings.Contains(r.URL.Path, "/result") {
+			status = pollStatus
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		switch {
+		case status == http.StatusAccepted:
+			_, _ = w.Write([]byte(`{"token":"tok-phase"}`))
+		case status >= 400:
+			_, _ = w.Write([]byte(`{"error":{"code":` + strconv.Itoa(status) + `,"message":"refused"}}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, 0, 0))
+	if err != nil {
+		t.Fatalf("httpclient.New: %v", err)
+	}
+	return NewHandler(c)
+}
+
+// Run says in which phase an analysis failed. The same status means different
+// things in each: a 404 on the submit is an unknown entity, on a poll an
+// expired or unknown task.
+func TestRunErrorNamesThePhase(t *testing.T) {
+	old := pollInterval
+	pollInterval = time.Millisecond
+	t.Cleanup(func() { pollInterval = old })
+
+	ok := Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2}
+	service := ok
+	service.EntityID = "SERVICE-ABC"
+	cases := []struct {
+		name                     string
+		payload                  Payload
+		submitStatus, pollStatus int
+		phase                    Phase
+		apiStatus                int // 0: not an API error
+		notCompleted             bool
+		text                     string
+	}{
+		{name: "payload refused", payload: service, phase: PhaseValidate,
+			text: `codelevelanalysis: entityId must be a PROCESS, PROCESS_GROUP, or PROCESS_GROUP_INSTANCE — services are not eligible; got "SERVICE-ABC"`},
+		{name: "submit refused", payload: ok, submitStatus: 404, phase: PhaseSubmit, apiStatus: 404},
+		{name: "poll refused", payload: ok, submitStatus: 202, pollStatus: 404, phase: PhasePoll, apiStatus: 404},
+		{name: "never completes", payload: ok, submitStatus: 202, pollStatus: 202, phase: PhasePoll, notCompleted: true,
+			text: "codelevelanalysis: analysis did not complete within 0s (token tok-phase)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := phaseServer(t, tc.submitStatus, tc.pollStatus).Run(context.Background(), tc.payload)
+			var runErr *Error
+			if !errors.As(err, &runErr) {
+				t.Fatalf("err = %v (%T), want an *Error", err, err)
+			}
+			if runErr.Phase != tc.phase {
+				t.Errorf("Phase = %q, want %q", runErr.Phase, tc.phase)
+			}
+			var apiErr *httpclient.APIError
+			if errors.As(err, &apiErr) != (tc.apiStatus != 0) || (apiErr != nil && apiErr.StatusCode != tc.apiStatus) {
+				t.Errorf("API error = %v, want status %d", apiErr, tc.apiStatus)
+			}
+			if got := errors.Is(err, ErrNotCompleted); got != tc.notCompleted {
+				t.Errorf("errors.Is(err, ErrNotCompleted) = %v, want %v", got, tc.notCompleted)
+			}
+			if tc.text != "" && err.Error() != tc.text {
+				t.Errorf("err = %q, want %q", err, tc.text)
+			}
+		})
+	}
+}
+
+func TestEligibleEntity(t *testing.T) {
+	cases := map[string]bool{
+		"PROCESS-ABC":                true,
+		"PROCESS_GROUP-ABC":          true,
+		"PROCESS_GROUP_INSTANCE-ABC": true,
+		"SERVICE-ABC":                false,
+		"HOST-ABC":                   false,
+		"PROCESS":                    false,
+		"process-abc":                false,
+		"":                           false,
+	}
+	for id, want := range cases {
+		if got := EligibleEntity(id); got != want {
+			t.Errorf("EligibleEntity(%q) = %v, want %v", id, got, want)
+		}
+	}
+}

@@ -42,6 +42,12 @@ const (
 // through.
 func APIEntityID(entityID string) string { return sdkcla.NormalizeEntityID(entityID) }
 
+// EligibleEntity reports whether entityID names something an analysis can run
+// on: a process (PROCESS-xxx), or by its classic ids a process group instance
+// or a whole process group. A service is not eligible. An analysis on any
+// other id fails before a request is sent.
+func EligibleEntity(entityID string) bool { return sdkcla.EligibleEntity(entityID) }
+
 // Payload is the analysis request; re-exported from the SDK for CLI use.
 type Payload = sdkcla.Payload
 

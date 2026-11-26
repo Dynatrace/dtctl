@@ -3,6 +3,7 @@ package codelevelanalysis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,7 +18,6 @@ import (
 
 const (
 	basePath        = "/platform-reserved/codelevelanalysis/v0.1"
-	pollInterval    = 1500 * time.Millisecond
 	maxPollAttempts = 40
 	// maxPollTransportErrors bounds consecutive transport errors (no HTTP
 	// response at all) while polling. See poll.
@@ -34,6 +34,49 @@ const (
 // throttleBaseWait is the first wait after a throttled submit that carries no
 // Retry-After; it doubles with every attempt. A variable so tests can shorten it.
 var throttleBaseWait = 5 * time.Second
+
+// pollInterval is the wait before each poll. A variable so tests can shorten it.
+var pollInterval = 1500 * time.Millisecond
+
+// Phase names the step of Run in which an analysis failed.
+type Phase string
+
+const (
+	// PhaseValidate: the payload was refused before any request was sent.
+	PhaseValidate Phase = "validate"
+	// PhaseSubmit: the request that starts the analysis failed.
+	PhaseSubmit Phase = "submit"
+	// PhasePoll: the analysis was started, and waiting for its result failed.
+	PhasePoll Phase = "poll"
+)
+
+// Error is the error Run returns. It says in which phase the analysis failed,
+// because one status means different things in each: a 404 on the submit is
+// an entity the environment does not know, a 404 on a poll an expired or
+// unknown task. errors.As finds the *httpclient.APIError underneath when the
+// API answered with a failure status, and errors.Is finds ErrNotCompleted and
+// the context's error.
+type Error struct {
+	Phase Phase
+	// Err is the failure; its text is the Error's.
+	Err error
+}
+
+func (e *Error) Error() string { return e.Err.Error() }
+
+func (e *Error) Unwrap() error { return e.Err }
+
+// ErrNotCompleted is in the chain of the error Run returns when the analysis
+// was still running after the last poll.
+var ErrNotCompleted = errors.New("codelevelanalysis: analysis did not complete")
+
+// notCompletedError carries the text of the poll that gave up, and matches
+// ErrNotCompleted.
+type notCompletedError struct{ text string }
+
+func (e *notCompletedError) Error() string { return e.text }
+
+func (e *notCompletedError) Is(target error) bool { return target == ErrNotCompleted }
 
 // Kind names an analysis by its API name, which is also the kind a Response
 // reports.
@@ -90,13 +133,14 @@ func encodeLeafType(leafType string) (string, error) {
 	}
 }
 
-// isProcessGroupEntity reports whether id is a process-level entity the
-// code-level analysis API accepts: a PROCESS_GROUP, a PROCESS_GROUP_INSTANCE,
-// or a PROCESS (the 3rd-gen rename of PROCESS_GROUP_INSTANCE). The allowlist
-// exists to reject SERVICE (and other) entities, which are NOT eligible.
+// EligibleEntity reports whether id is a process-level entity the code-level
+// analysis API accepts: a PROCESS_GROUP, a PROCESS_GROUP_INSTANCE, or a PROCESS
+// (the 3rd-gen rename of PROCESS_GROUP_INSTANCE). The allowlist exists to
+// reject SERVICE (and other) entities, which are NOT eligible. Run refuses
+// every other id; a caller checks first to refuse one with its own wording.
 // Note: "PROCESS-" does not prefix-match "PROCESS_GROUP-" (the 8th byte is
 // '_' vs '-'), so each type is matched distinctly.
-func isProcessGroupEntity(id string) bool {
+func EligibleEntity(id string) bool {
 	return strings.HasPrefix(id, "PROCESS_GROUP-") ||
 		strings.HasPrefix(id, "PROCESS_GROUP_INSTANCE-") ||
 		strings.HasPrefix(id, "PROCESS-")
@@ -165,28 +209,38 @@ func NewHandler(c *httpclient.Client) *Handler {
 	return &Handler{client: c}
 }
 
+// Run runs one analysis and waits for its result. Every error it returns is an
+// *Error naming the phase that failed.
 func (h *Handler) Run(ctx context.Context, p Payload) (*Response, error) {
 	if err := validate(p); err != nil {
-		return nil, err
+		return nil, &Error{Phase: PhaseValidate, Err: err}
 	}
 
 	resp, err := h.submit(ctx, buildSubmitPath(p))
 	if err != nil {
-		return nil, err
+		return nil, &Error{Phase: PhaseSubmit, Err: err}
 	}
 
 	if resp.StatusCode() == 200 {
-		return parseResult(p, 0, resp.Body())
+		result, err := parseResult(p, 0, resp.Body())
+		if err != nil {
+			return nil, &Error{Phase: PhaseSubmit, Err: err}
+		}
+		return result, nil
 	}
 
 	// 202: async task started — extract token and poll
 	var pt progressToken
 	if err := json.Unmarshal(resp.Body(), &pt); err != nil || pt.Token == "" {
-		return nil, fmt.Errorf("codelevelanalysis: submit returned 202 without a progress token")
+		return nil, &Error{Phase: PhaseSubmit, Err: fmt.Errorf("codelevelanalysis: submit returned 202 without a progress token")}
 	}
 	// The submit lands on one cluster node, which owns the async task; the
 	// serverId header names that node so polls can be routed back to it.
-	return h.poll(ctx, p, pt.Token, readServerID(resp))
+	result, err := h.poll(ctx, p, pt.Token, readServerID(resp))
+	if err != nil {
+		return nil, &Error{Phase: PhasePoll, Err: err}
+	}
+	return result, nil
 }
 
 // submit starts the analysis. An environment limits how many analyses run at
@@ -299,8 +353,8 @@ func (h *Handler) poll(ctx context.Context, p Payload, token string, serverID in
 		}
 	}
 
-	return nil, fmt.Errorf("codelevelanalysis: analysis did not complete within %ds (token %s)",
-		int(maxPollAttempts*pollInterval/time.Second), token)
+	return nil, &notCompletedError{text: fmt.Sprintf("codelevelanalysis: analysis did not complete within %ds (token %s)",
+		int(maxPollAttempts*pollInterval/time.Second), token)}
 }
 
 func parseResult(p Payload, pollCount int, body []byte) (*Response, error) {
@@ -321,7 +375,7 @@ func validate(p Payload) error {
 	if p.EntityID == "" {
 		return fmt.Errorf("codelevelanalysis: entityId is required")
 	}
-	if !isProcessGroupEntity(p.EntityID) {
+	if !EligibleEntity(p.EntityID) {
 		return fmt.Errorf("codelevelanalysis: entityId must be a PROCESS, PROCESS_GROUP, or PROCESS_GROUP_INSTANCE — services are not eligible; got %q", p.EntityID)
 	}
 	if _, err := encodeLeafType(p.LeafType); err != nil {

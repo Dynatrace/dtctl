@@ -301,7 +301,7 @@ func (r *profilingRun) annotate(ap *output.AgentPrinter, view, state string) *ou
 func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) error {
 	ctx := cmdContext(cmd)
 
-	if !isEligibleProfilingEntity(entityID) {
+	if !profiling.EligibleEntity(entityID) {
 		return fmt.Errorf("invalid entity %q: profiling takes a process id, PROCESS-xxx (classic PROCESS_GROUP-xxx and PROCESS_GROUP_INSTANCE-xxx ids work too; SERVICE ids do not).\nFind a process id:\n  %s", entityID, profilingFindIDsHint)
 	}
 	switch f.leafType {
@@ -655,15 +655,4 @@ func profilingAPIError(err error) error {
 		Suggestions: f.Advice,
 		Err:         err,
 	}
-}
-
-// isEligibleProfilingEntity reports whether id is a process-level entity the
-// code-level analysis API accepts (PROCESS_GROUP, PROCESS_GROUP_INSTANCE, or the
-// 3rd-gen PROCESS rename). "PROCESS-" does not prefix-match "PROCESS_GROUP-" (the
-// 8th byte is '-' vs '_'), so each type is matched distinctly. The SDK enforces
-// the same allowlist; this CLI check exists to fail fast with a next step.
-func isEligibleProfilingEntity(id string) bool {
-	return strings.HasPrefix(id, "PROCESS-") ||
-		strings.HasPrefix(id, "PROCESS_GROUP-") ||
-		strings.HasPrefix(id, "PROCESS_GROUP_INSTANCE-")
 }
