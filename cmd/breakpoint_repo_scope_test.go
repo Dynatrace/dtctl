@@ -373,6 +373,7 @@ func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
 	})
 	for name, seed := range map[string][]string{
 		"the entry's filters":         {checkoutSetJSON},
+		"an empty set beside them":    {checkoutSetJSON, `{"filters":[],"labels":[]}`},
 		"every set of the entry":      nil, // seeded below, in the split directory
 		"the hint turned off":         {webSetJSON},
 		"a floor that hides the flag": {webSetJSON},
@@ -768,4 +769,11 @@ func TestWorkspaceHolds(t *testing.T) {
 	two := []map[string][]string{{"service.name": {"a"}}, {"k8s.namespace.name": {"web"}}}
 	require.True(t, workspaceHolds([]livedebugger.FilterSet{label("k8s.namespace.name", "web"), label("service.name", "a")}, two))
 	require.False(t, workspaceHolds([]livedebugger.FilterSet{label("service.name", "a"), label("service.name", "a")}, two))
+
+	// A set that selects by nothing is not a filter: the summary a hint
+	// prints leaves it out, so the comparison does too, or the hint would
+	// name the same filters on both sides.
+	empty := livedebugger.FilterSet{Labels: []livedebugger.FilterField{{Field: "service.name"}}}
+	require.True(t, workspaceHolds([]livedebugger.FilterSet{label("service.name", "a"), {}, empty}, want))
+	require.False(t, workspaceHolds([]livedebugger.FilterSet{{}}, want))
 }

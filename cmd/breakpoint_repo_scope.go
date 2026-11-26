@@ -156,24 +156,23 @@ func filterSetsSummary(sets []map[string][]string) string {
 
 // workspaceHolds reports whether the workspace's filters are exactly want:
 // one filter set per map, in any order, each carrying that map's labels and
-// nothing else.
+// nothing else. A set without a value selects by nothing and is skipped, as
+// workspaceFilterSummary skips it, so the two never disagree about what the
+// workspace holds.
 func workspaceHolds(sets []livedebugger.FilterSet, want []map[string][]string) bool {
-	if len(sets) != len(want) {
-		return false
-	}
 	left := slices.Clone(want)
 	for _, set := range sets {
-		if len(fieldValues(set.Filters)) > 0 {
-			return false
+		labels, filters := fieldValues(set.Labels), fieldValues(set.Filters)
+		if len(labels) == 0 && len(filters) == 0 {
+			continue
 		}
-		labels := fieldValues(set.Labels)
 		i := slices.IndexFunc(left, func(w map[string][]string) bool { return maps.EqualFunc(labels, w, slices.Equal) })
-		if i < 0 {
+		if len(filters) > 0 || i < 0 {
 			return false
 		}
 		left = slices.Delete(left, i, i+1)
 	}
-	return true
+	return len(left) == 0
 }
 
 // workspaceFilterSummary renders the workspace's filter sets the way
