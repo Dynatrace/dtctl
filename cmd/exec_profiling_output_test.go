@@ -533,3 +533,62 @@ func TestExecProfiling_NoURLHintsForWhatTheMessageQuotes(t *testing.T) {
 		require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{Code: "validation_error", Message: want}}, decodeProfilingError(t, stdout), args)
 	}
 }
+
+// An empty output format (-o "$FORMAT" with the variable unset) is the default
+// one, a table: every view prints what it prints without -o, and --plain turns
+// that table into JSON as it does for -o table. 0.47.0 printed JSON for
+// --raw --plain --output= as well.
+func TestExecProfiling_EmptyFormatIsTheTable(t *testing.T) {
+	cases := []struct {
+		name, body string
+		args       []string
+	}{
+		{"stacks", profilingTree, []string{"hotspots", testProcess}},
+		{"stacks, truncated", profilingTree, []string{"hotspots", testProcess, "--limit", "1"}},
+		{"functions", profilingTree, []string{"hotspots", testProcess, "--view", "functions", "--limit", "1"}},
+		{"focus", profilingTree, []string{"hotspots", testProcess, "--focus", "main", "--limit", "1"}},
+		{"raw", profilingTree, []string{"hotspots", testProcess, "--raw"}},
+		{"allocations", profilingAllocTree, []string{"allocations", testProcess}},
+		{"allocations, raw", profilingAllocTree, []string{"allocations", testProcess, "--raw"}},
+		{"no stacks", `{"dataRootNodeId":"0","dataNodes":[]}`, []string{"hotspots", testProcess}},
+		{"no functions", `{"dataRootNodeId":"0","dataNodes":[]}`, []string{"hotspots", testProcess, "--view", "functions"}},
+		{"no samples, raw", `{"dataRootNodeId":"0","dataNodes":[]}`, []string{"hotspots", testProcess, "--raw"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			newProfilingAPI(t, http.StatusOK, tc.body)
+			for _, plain := range [][]string{nil, {"--plain"}, {"--no-agent", "--plain"}} {
+				args := append(append([]string{}, tc.args...), plain...)
+				code, wantOut, wantErr := runProfilingStreams(t, args...)
+				require.Zero(t, code, wantErr)
+
+				code, stdout, stderr := runProfilingStreams(t, append(args, "--output=")...)
+				require.Zero(t, code, stderr)
+				require.Equal(t, wantOut, stdout, plain)
+				require.Equal(t, wantErr, stderr, plain)
+				if plain != nil {
+					var doc interface{}
+					require.NoError(t, json.Unmarshal([]byte(stdout), &doc), "stdout is not one JSON document:\n%s", stdout)
+				}
+			}
+		})
+	}
+
+	// The whole document of --raw, as 0.47.0 printed it for an empty format
+	// beside --plain.
+	newProfilingAPI(t, http.StatusOK, `{"dataRootNodeId":"0","dataNodes":[]}`)
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--no-agent", "--raw", "--plain", "--output=")
+	require.Zero(t, code, stderr)
+	require.Empty(t, stderr)
+	require.Equal(t, `{
+  "entityId": "`+testProcess+`",
+  "kind": "methodHotspots",
+  "pollCount": 0,
+  "result": {
+    "dataNodes": [],
+    "dataRootNodeId": "0"
+  },
+  "status": "completed"
+}
+`, stdout)
+}

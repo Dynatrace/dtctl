@@ -582,7 +582,7 @@ func printProfilingStacks(ctx context.Context, run *profilingRun, o profilingSta
 	}
 
 	if agentMode(ctx) {
-		p := newPrinterCtx(ctx)
+		p := newProfilingPrinter(ctx)
 		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 			o.profile(run.annotate(ap, "stacks", ""))
 			ap.SetTotal(o.total)
@@ -604,7 +604,7 @@ func printProfilingStacks(ctx context.Context, run *profilingRun, o profilingSta
 		}
 		return nil
 	}
-	return newPrinterCtx(ctx).PrintList(o.rows)
+	return newProfilingPrinter(ctx).PrintList(o.rows)
 }
 
 func capProfilingRows[T any](rows []T, limit int) []T {
@@ -617,13 +617,36 @@ func capProfilingRows[T any](rows []T, limit int) []T {
 	return rows
 }
 
+// profilingFormat is the output format the command prints in. An empty one
+// (-o "$FORMAT" with the variable unset) is the default, a table. The command
+// settles that here, once, because the shared code does not agree with itself
+// about an empty format beside --plain: output.IsTabularFormat reads it as a
+// table --plain turns into JSON, and the printer turns only a format named
+// table or wide into JSON.
+func profilingFormat(ctx context.Context) string {
+	if format := outputFormat(ctx); format != "" {
+		return format
+	}
+	return "table"
+}
+
+// newProfilingPrinter is newPrinterCtx for profilingFormat.
+func newProfilingPrinter(ctx context.Context) output.Printer {
+	if agentMode(ctx) || outputFormat(ctx) != "" {
+		return newPrinterCtx(ctx)
+	}
+	format, plain := profilingFormat(ctx), plainMode(ctx)
+	p := newPrinterOpts(ctx, output.PrinterOptions{Format: format, PlainMode: plain, JQFilter: jqFilter(ctx)})
+	return shapeListOutput(ctx, p, format, output.IsTabularFormat(format, plain))
+}
+
 // isProfilingTableFormat reports whether the output is a table for a person to
 // read: the stack view then prints folded lines, and every view may add #
 // lines to stdout. --plain turns a table into JSON (output.NewPrinterWithOpts),
 // so with it the output is not one, and stdout carries the JSON alone.
 func isProfilingTableFormat(ctx context.Context) bool {
-	switch format := outputFormat(ctx); format {
-	case "", "table", "wide":
+	switch format := profilingFormat(ctx); format {
+	case "table", "wide":
 		return output.IsTabularFormat(format, plainMode(ctx))
 	case "folded":
 		return true
@@ -634,7 +657,7 @@ func isProfilingTableFormat(ctx context.Context) bool {
 // renderProfilingRaw prints the API's whole (compacted) result: JSON unless
 // another structured format was asked for.
 func renderProfilingRaw(ctx context.Context, run *profilingRun, raw map[string]interface{}) error {
-	p := newPrinterCtx(ctx)
+	p := newProfilingPrinter(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 		run.annotate(ap, "raw", "")
 	} else if isProfilingTableFormat(ctx) {
@@ -708,7 +731,7 @@ func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.H
 // warnings (truncation) as context.warnings and the hints as suggestions;
 // structured formats and --plain get the rows alone.
 func printProfilingRows(ctx context.Context, run *profilingRun, view, state string, samples *int, rows interface{}, total int, note string, warnings, hints []string) error {
-	p := newPrinterCtx(ctx)
+	p := newProfilingPrinter(ctx)
 	if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 		run.annotate(ap, view, state).Samples = samples
 		ap.SetTotal(total)
@@ -741,7 +764,7 @@ func printProfilingRows(ctx context.Context, run *profilingRun, view, state stri
 func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state string, empty interface{}, reason profiling.EmptyReason) error {
 	note := profilingEmptyNote(reason, run, state)
 	if agentMode(ctx) {
-		p := newPrinterCtx(ctx)
+		p := newProfilingPrinter(ctx)
 		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 			run.annotate(ap, view, state)
 			ap.SetTotal(0)
@@ -754,7 +777,7 @@ func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state str
 		return err
 	}
 	fmt.Fprintf(currentStderr(ctx), "# %s\n", note)
-	return newPrinterCtx(ctx).PrintList(empty)
+	return newProfilingPrinter(ctx).PrintList(empty)
 }
 
 // profilingEmptyNote says why a view has no rows and what to try, in one line.
