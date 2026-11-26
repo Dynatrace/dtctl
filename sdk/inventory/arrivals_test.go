@@ -1077,6 +1077,31 @@ func TestThinSampleSurvivesACappedNextRung(t *testing.T) {
 	}
 }
 
+// TestThickestHitSuppliesTheCount: the walk descends to thicken the sample,
+// so a later rung that matched fewer records than one already held is not an
+// improvement. Ending on it would extrapolate the volume from the thinner
+// sample and state the wider bias.
+func TestThickestHitSuppliesTheCount(t *testing.T) {
+	runner := windowRunner()
+	capped := sampledRung(1000, 0, 0, "")
+	capped.truncated, capped.cause = true, TruncationScanLimit
+	runner.responses = append([]mockResponse{
+		cappedLogs(),
+		sampledRung(100000, 20, 2000000, at(6, 0)),
+		sampledRung(10000, 2, 20000, at(7, 0)),
+		capped,
+	}, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.RecordsSampled != 20 || logs.SamplingRatio != 100000 || logs.Records != 2000000 {
+		t.Errorf("sampled/ratio/records = %d/%d/%d, want 20/100000/2000000: the first rung held the thicker sample",
+			logs.RecordsSampled, logs.SamplingRatio, logs.Records)
+	}
+	if got := len(sampledCalls(runner)); got != 3 {
+		t.Errorf("ran %d sampled probes, want 3", got)
+	}
+}
+
 // TestSampledZeroIsNeverEmpty is the guard on the failure this package exists
 // to prevent. A sampled miss is a bound, not an absence — reporting it as
 // "empty" would blame a source for a question that was only partly asked.

@@ -395,11 +395,16 @@ walk:
 			break walk
 		}
 		if p.matched > 0 {
-			hit = &p
+			// The thickest sample supplies the count. A later rung that
+			// matched fewer records than one already held is not an
+			// improvement, and its timestamp has been read above either way.
+			if hit == nil || p.matched >= hit.matched {
+				hit = &p
+			}
 			// A hit is conclusive about arrival at any ratio, but a thin one
 			// cannot be trusted about *age* — so keep descending to thicken
-			// the sample, holding this rung as the fallback if the next is
-			// refused or capped.
+			// the sample, holding the best rung so far as the fallback if the
+			// next is refused or capped.
 			if p.matched >= minSampledRecords {
 				break walk
 			}
