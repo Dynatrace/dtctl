@@ -329,10 +329,15 @@ records do not carry looks exactly like a quiet service. One suggestion says
 when nothing bounds an applied scope's scan, or, for a scan the limit
 stopped, points at the executor's scan-limit advice.
 
-`applied: false` means the query was sent exactly as typed; `code` and
-`reason` say why:
+`applied: true` means everything the entry holds went out: its filter, and
+its filter segments when it references any. `applied: false` means the scope
+was not applied in full, and `code` and `reason` say why. The query text was
+then sent exactly as typed, and it ran unscoped unless `segments` is there:
+an entry whose filter was refused still sends its filter segments, which
+`segments` lists and `reason` says, and it is not reported as applied because
+the rows are wider than the entry says.
 
-| Code | The query ran unscoped because |
+| Code | The scope was not applied because |
 |---|---|
 | `not_fetch` | it does not start with `fetch <data object>` |
 | `unsupported_object` | repo scopes do not filter the fetched data object (they filter `logs` and `spans`) |

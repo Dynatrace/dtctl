@@ -217,8 +217,11 @@ type RepoScope struct {
 	Name        string `json:"name,omitempty"`
 	File        string `json:"file"`
 	Environment string `json:"environment"`
-	// Applied says the query sent was narrowed, by an inserted filter, by
-	// filter segments or both; when false it ran as typed.
+	// Applied says everything the entry holds went out: its filter, and its
+	// filter segments when it references any. When false the query ran as
+	// typed, unless Segments lists segments: an entry whose filter was
+	// refused still sends those, and is not applied because the rows are
+	// then wider than the entry says.
 	Applied    bool   `json:"applied"`
 	DataObject string `json:"data_object,omitempty"`
 	// Filter is the expression inserted after the fetch stage; empty when

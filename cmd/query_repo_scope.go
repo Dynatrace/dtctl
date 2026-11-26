@@ -216,8 +216,8 @@ type repoScopedQuery struct {
 	// a stability floor hides is not advice. asTyped and without word
 	// the way back to the typed query by it and by named.
 	optOut bool
-	// filtered says the entry's filter was inserted. scope.Applied also holds
-	// for an entry without bindings whose segments are sent.
+	// filtered says the entry's filter was inserted. scope.Applied holds
+	// then, and for an entry without bindings whose segments are sent.
 	filtered bool
 	// bound says the entry has bindings, so a filter was attempted; an entry
 	// without them references segments and nothing else.
@@ -307,8 +307,9 @@ func (q *repoScopedQuery) setReason(reason string) {
 // or when the entry has none to insert.
 //
 // The entry's filter and its segments fail apart. A filter that cannot be
-// inserted leaves the segments to be sent, so the scope still narrows the
-// query and reports applied, with the reason for the missing half.
+// inserted leaves the segments to be sent, so the query is still narrowed,
+// but by less than the entry says: the scope reports not applied, with the
+// refusal's code and the segments that went out (see settle).
 func (q *repoScopedQuery) rewrite(res *reposcope.Status) (refused string) {
 	e := res.Entry
 	q.segments, q.bound = e.Segments, e.HasBindings()

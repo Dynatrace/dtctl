@@ -2,6 +2,8 @@
 
 Generated reference of every dtctl verb and the resources it operates on, with required token scopes.
 
+`mutating` and `read-only` say whether a verb changes anything in the environment. A read-only verb can still write files on this machine: `alias`, `config` and `ctx` write dtctl's configuration, and `repo-scope set` and `repo-scope delete` write the repository's `.dtctl-repo-scope.yaml`.
+
 ## alias
 
 Manage command aliases
