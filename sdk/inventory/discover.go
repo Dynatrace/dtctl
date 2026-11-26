@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -752,6 +753,11 @@ func stringSet(items []string) map[string]bool {
 	return set
 }
 
+// asInt64 reads a count from a result field. The shapes are the ones a Runner
+// can hand over: Grail sends a long as a string, encoding/json decodes a bare
+// number as float64, and a decoder set to UseNumber keeps it as json.Number.
+// That last case is listed because a count read as zero is not an error
+// anywhere downstream: it is a probe that "matched nothing".
 func asInt64(v interface{}) int64 {
 	switch n := v.(type) {
 	case float64:
@@ -760,6 +766,12 @@ func asInt64(v interface{}) int64 {
 		return n
 	case int:
 		return int64(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i
+		}
+		f, _ := n.Float64()
+		return int64(f)
 	case string:
 		i, _ := strconv.ParseInt(n, 10, 64)
 		return i

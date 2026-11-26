@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1769,6 +1770,51 @@ func TestOnlyTheScanCapIsWorthSampling(t *testing.T) {
 				t.Errorf("sampled a %q truncation, which sampling cannot fix: %v", cause, got)
 			}
 		})
+	}
+}
+
+// TestCountsDecodedAsJSONNumbersAreRead: a Runner that decodes its responses
+// with json.Decoder.UseNumber hands every count over as a json.Number. Reading
+// those as zero turned five rungs of 96 matches each into "1-in-10 matched
+// nothing" and a bound of under 30 records.
+func TestCountsDecodedAsJSONNumbersAreRead(t *testing.T) {
+	runner := windowRunner()
+	rungs := []mockResponse{cappedLogs()}
+	for _, ratio := range decades {
+		rungs = append(rungs, mockResponse{match: rungMatch(ratio), sampled: true, records: []map[string]interface{}{
+			rec("matched", json.Number("96"), "population", json.Number(fmt.Sprint(96*ratio)), "last_seen", at(0, 30)),
+		}})
+	}
+	runner.responses = append(rungs, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State != SignalLive || logs.RecordsSampled != 96 || logs.SamplingRatio != 100000 || logs.Records != 9600000 {
+		t.Errorf("state/sampled/ratio/records = %q/%d/%d/%d, want live/96/100000/9600000 (evidence: %s)",
+			logs.State, logs.RecordsSampled, logs.SamplingRatio, logs.Records, logs.Evidence)
+	}
+	if got := len(sampledCalls(runner)); got != 1 {
+		t.Errorf("ran %d sampled probes, want 1: 96 matches on the first rung end the walk", got)
+	}
+}
+
+// TestAsInt64 covers the shapes a count arrives in. Grail sends long values as
+// strings, encoding/json decodes a bare number as float64, and a decoder set
+// to UseNumber keeps it as json.Number.
+func TestAsInt64(t *testing.T) {
+	for _, tc := range []struct {
+		in   interface{}
+		want int64
+	}{
+		{float64(96), 96}, {int64(96), 96}, {96, 96}, {"96", 96},
+		{json.Number("96"), 96}, {json.Number("9600000"), 9600000},
+		// A count written in float notation is still a count.
+		{json.Number("96.0"), 96}, {json.Number("1e3"), 1000},
+		// Nothing readable is zero, as for every other shape.
+		{json.Number(""), 0}, {json.Number("many"), 0}, {"many", 0}, {nil, 0}, {true, 0},
+	} {
+		if got := asInt64(tc.in); got != tc.want {
+			t.Errorf("asInt64(%#v) = %d, want %d", tc.in, got, tc.want)
+		}
 	}
 }
 
