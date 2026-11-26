@@ -171,11 +171,16 @@ func segments(code string, depth []int) []Segment {
 	return out
 }
 
-// Quote renders v as a DQL double-quoted string, backslash-escaping backslash
-// and double quote. It does not make arbitrary text safe: callers hold v to a
-// character set first.
+// quoteReplacer escapes what would end a "…" string or break its line.
+var quoteReplacer = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
+
+// Quote renders v as a DQL double-quoted string on one line: backslash and
+// double quote are backslash-escaped, and a line feed, a carriage return and
+// a tab are written as \n, \r and \t, so no value can end the literal or
+// the line it is on. Other control characters pass through: a caller that
+// takes v from outside still holds it to a character set first.
 func Quote(v string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
+	return `"` + quoteReplacer.Replace(v) + `"`
 }
 
 var (

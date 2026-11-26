@@ -181,10 +181,17 @@ func TestQuote(t *testing.T) {
 		`\"`:             `"\\\""`,
 		"":               `""`,
 		"unicode ✓ name": `"unicode ✓ name"`,
+		// A literal never spans lines: a line break or a tab in the value
+		// is written as its escape.
+		"line\nbreak":      `"line\nbreak"`,
+		"carriage\rreturn": `"carriage\rreturn"`,
+		"a\ttab":           `"a\ttab"`,
+		"\\n is not \n":    `"\\n is not \n"`,
 	}
 	for in, want := range tests {
 		got := Quote(in)
 		assert.Equal(t, want, got, in)
+		assert.NotContains(t, got, "\n", in)
 		// What it produces scans as one complete literal.
 		s, ok := Scan(got)
 		require.True(t, ok, got)
