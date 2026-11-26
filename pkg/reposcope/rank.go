@@ -26,8 +26,16 @@ type Candidate struct {
 	// a reader and never for a binding.
 	ClusterUID  string `json:"clusterUid,omitempty" yaml:"clusterUid,omitempty"`
 	ClusterName string `json:"clusterName,omitempty" yaml:"clusterName,omitempty"`
-	Namespace   string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Workload    string `json:"workload,omitempty" yaml:"workload,omitempty"`
+	// ClusterRefused is the records' k8s.cluster.uid when it is not a UUID,
+	// the only form a scope file holds: it keeps the candidate apart from
+	// the other clusters' and is never proposed.
+	ClusterRefused string `json:"clusterRefused,omitempty" yaml:"clusterRefused,omitempty"`
+	// WithoutCluster are the data objects (spans, logs) whose records of
+	// this candidate carry no k8s.cluster.uid while its other records name
+	// ClusterUID. A workload binding with the cluster selects none of them.
+	WithoutCluster []string `json:"withoutCluster,omitempty" yaml:"withoutCluster,omitempty"`
+	Namespace      string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Workload       string   `json:"workload,omitempty" yaml:"workload,omitempty"`
 	// WorkloadShared reports that another candidate carries this namespace
 	// and workload under a different cluster, or under none. A binding
 	// without the cluster would select that candidate's records too.
@@ -185,6 +193,8 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 		c = &Candidate{Namespace: key.namespace, Workload: key.workload, ServiceName: key.serviceName, cluster: key.cluster, tier: d.recordTier(key)}
 		if clusterUIDRe.MatchString(key.cluster) {
 			c.ClusterUID = key.cluster
+		} else {
+			c.ClusterRefused = key.cluster
 		}
 		d.records[key] = c
 	}
@@ -221,6 +231,53 @@ func (d *discovery) addRecord(object string, rec map[string]interface{}, sampled
 		*spans += n
 	} else {
 		*logs += n
+	}
+}
+
+// foldClusterless joins a candidate whose records name no cluster into the
+// candidate that is the same workload in one. Records of one workload need
+// not all carry k8s.cluster.uid: spans may, while the logs of the same
+// namespace and workload carry none, and the two rows would otherwise be two
+// candidates, one of them with spans and no logs.
+//
+// It joins only what is plainly one workload: the namespace and workload
+// have exactly one candidate in a cluster, and the row without one carries
+// that candidate's service name or none. Beside two clusters, or under
+// another service name, the row stays a candidate of its own. The candidate
+// keeps its cluster and lists in WithoutCluster the data objects that do not
+// carry it, since a binding with the cluster would select none of those.
+func (d *discovery) foldClusterless() {
+	for key, c := range d.records {
+		if key.cluster != "" || key.workload == "" {
+			continue
+		}
+		var in []*Candidate
+		for k, o := range d.records {
+			if k.cluster != "" && k.namespace == key.namespace && k.workload == key.workload {
+				in = append(in, o)
+			}
+		}
+		if len(in) != 1 || (key.serviceName != "" && key.serviceName != in[0].ServiceName) {
+			continue
+		}
+		into := in[0]
+		for _, n := range c.recordCounts() {
+			into.WithoutCluster = addSorted(into.WithoutCluster, n.object)
+		}
+		into.Spans, into.Logs = into.Spans+c.Spans, into.Logs+c.Logs
+		into.SpansSampled, into.LogsSampled = into.SpansSampled+c.SpansSampled, into.LogsSampled+c.LogsSampled
+		into.Sampled = into.Sampled || c.Sampled
+		for _, id := range c.Services {
+			into.Services = addSorted(into.Services, id)
+		}
+		for _, id := range c.ProcessGroups {
+			into.ProcessGroups = addSorted(into.ProcessGroups, id)
+		}
+		into.ServiceCount = max(into.ServiceCount, c.ServiceCount, int64(len(into.Services)))
+		into.ProcessGroupCount = max(into.ProcessGroupCount, c.ProcessGroupCount, int64(len(into.ProcessGroups)))
+		into.ServicesCapped = into.ServicesCapped || c.ServicesCapped
+		into.ProcessGroupsCapped = into.ProcessGroupsCapped || c.ProcessGroupsCapped
+		delete(d.records, key)
 	}
 }
 
@@ -325,11 +382,20 @@ func containsSegment(name, v string) bool {
 // names, with the files that name it, and the record counts.
 func (d *discovery) explain(c *Candidate) {
 	c.sources = map[string]bool{}
+	cluster := ""
 	switch {
+	case c.ClusterRefused != "":
+		cluster = fmt.Sprintf("%s %q is not a cluster uid a scope file can hold", fieldClusterUID, c.ClusterRefused)
 	case c.ClusterUID != "" && c.ClusterName != "":
-		c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q (%s %q)", fieldClusterUID, c.ClusterUID, fieldClusterName, c.ClusterName))
+		cluster = fmt.Sprintf("%s %q (%s %q)", fieldClusterUID, c.ClusterUID, fieldClusterName, c.ClusterName)
 	case c.ClusterUID != "":
-		c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q", fieldClusterUID, c.ClusterUID))
+		cluster = fmt.Sprintf("%s %q", fieldClusterUID, c.ClusterUID)
+	}
+	if cluster != "" && len(c.WithoutCluster) > 0 {
+		cluster += fmt.Sprintf("; its %s carry none", strings.Join(c.WithoutCluster, " and "))
+	}
+	if cluster != "" {
+		c.Evidence = append(c.Evidence, cluster)
 	}
 	// The namespace leads its workload, as in namespace/name.
 	var named []token

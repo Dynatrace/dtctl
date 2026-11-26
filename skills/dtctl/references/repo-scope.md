@@ -26,7 +26,7 @@ dtctl repo-scope current -A
 
    A candidate is a workload first: `clusterUid` and `clusterName`, `namespace`, `workload`, then `serviceName`, then the entity ids. The same namespace and workload in two clusters are two candidates (`workloadShared: true`); ask which cluster the user means, by `clusterName`. `tier: "segment"` means the repository's name is only part of the workload's name (`acme-prod-checkout` for `checkout`): such a candidate is never a `match`, so confirm it is the user's deployment before saving.
 
-3. On the user's confirmation, run the candidate's `setCommand` exactly as given. It already carries the `--cluster-uid` of the cluster the candidate runs in, the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone; the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
+3. On the user's confirmation, run the candidate's `setCommand` exactly as given. It already carries the `--cluster-uid` of the cluster the candidate runs in (left out, with a suggestion saying so, when some of its records name no cluster: `withoutCluster`), the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone; the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
 
 On `none`: retry with a name the user knows (`--term <name>`) or another directory of a monorepo (`--path services/<dir>`), or ask for the namespace and workload, or the OpenTelemetry `service.name`, and set it by hand:
 

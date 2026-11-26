@@ -342,7 +342,11 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // grouped by, not an id list a sample or a cap can cut short, so the line
 // still saves exactly the candidate shown. A candidate whose records name no
 // cluster, while another candidate runs its namespace and workload in one
-// (WorkloadShared), gets no workload binding: it would select both.
+// (WorkloadShared), gets no workload binding: it would select both. A
+// candidate some of whose records name the cluster and some none
+// (WithoutCluster) is bound without it: with the cluster the entry would
+// return its spans and none of its logs, or the reverse, and no other
+// candidate runs that workload for the wider binding to select.
 //
 // When any record query was sampled, a candidate gets its workload binding
 // only, whether its own records were sampled or read whole: another
@@ -358,7 +362,7 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 		}
 	}
 	if c.Namespace != "" && c.Workload != "" && (c.ClusterUID != "" || !c.WorkloadShared) {
-		if c.ClusterUID != "" {
+		if c.ClusterUID != "" && len(c.WithoutCluster) == 0 {
 			flag("--cluster-uid", c.ClusterUID)
 		}
 		flag("--namespace", c.Namespace)
@@ -448,7 +452,8 @@ type repoScopeProposal struct {
 	// sharedNotes explain each service name the candidates' lines leave out.
 	sharedNotes []string
 	// lineNotes explain each candidate that has no line because it was
-	// sampled or lists only some of its ids.
+	// sampled or lists only some of its ids, and each line that leaves the
+	// candidate's cluster out.
 	lineNotes []string
 }
 
@@ -545,12 +550,19 @@ func repoScopeSharedNameNotes(r *reposcope.DiscoveryReport) []string {
 }
 
 // repoScopeNoLineNotes explains, in rank order, each candidate that has no
-// line because of how it was found rather than because nothing describes it.
+// line because of how it was found rather than because nothing describes it,
+// and each line that binds less than the candidate's records name.
 func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 	var notes []string
 	for _, c := range r.Candidates {
 		switch {
+		case c.SetCommand != "" && c.ClusterUID != "" && len(c.WithoutCluster) > 0:
+			notes = append(notes, fmt.Sprintf("candidate %d's line leaves --cluster-uid out: its %s carry no k8s.cluster.uid, so a binding with it would return none of them; without it the entry selects %s/%s in any cluster",
+				c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
 		case c.SetCommand != "":
+		case c.WorkloadShared && c.ClusterRefused != "":
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records carry k8s.cluster.uid %q, which is not a cluster uid a scope file can hold (a lowercase UUID), and another candidate runs the same namespace and workload, so a binding without --cluster-uid would select both",
+				c.Rank, c.ClusterRefused))
 		case c.WorkloadShared && c.ClusterUID == "":
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records name no cluster, and another candidate runs the same namespace and workload in one, so a binding without --cluster-uid would select both; to bind the workload in every cluster, leave --cluster-uid out of that candidate's line",
 				c.Rank))

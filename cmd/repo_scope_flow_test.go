@@ -246,6 +246,8 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		{"discover-two-clusters", rowsByObject(map[string]string{
 			"spans": checkoutRows["spans"] + "," + otherCluster(checkoutRows["spans"]),
 			"logs":  checkoutRows["logs"] + "," + otherCluster(checkoutRows["logs"])})},
+		{"discover-cluster-on-spans-only", rowsByObject(map[string]string{
+			"spans": checkoutRows["spans"], "logs": strings.Replace(checkoutRows["logs"], flowCluster, "", 1)})},
 		{"discover-none", rowsByObject(nil)},
 		{"discover-entity-name", rowsByObject(map[string]string{
 			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"eu-checkout-frontend"}`})},
@@ -317,6 +319,54 @@ func TestRepoScopeDiscoverBindsTheProcessGroupLogsCarry(t *testing.T) {
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Contains(t, stdout, `fetch logs   | filter (in(dt.entity.process_group, array("`+flowProcessGroup+`")) or `)
+}
+
+// Spans that name a cluster beside logs that name none are one candidate.
+// Its line leaves --cluster-uid out and says why: with it the entry would
+// return every span and no log, and the saved entry has to reach both.
+func TestRepoScopeDiscoverClusterOnSpansOnly(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": checkoutRows["spans"], "logs": strings.Replace(checkoutRows["logs"], flowCluster, "", 1)}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Len(t, report.Candidates, 1)
+	const line = "dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout"
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	require.Empty(t, report.Notes)
+	require.Contains(t, suggestions, "candidate 1's line leaves --cluster-uid out: its logs carry no k8s.cluster.uid, so a binding with it would return none of them; "+
+		"without it the entry selects payments/checkout in any cluster")
+
+	runSetCommand(t, line)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, `fetch logs   | filter (service.name == "checkout" or (k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))`)
+}
+
+// A cluster value a scope file cannot hold is said to be that, not to be
+// missing.
+func TestRepoScopeDiscoverClusterValueTheFileRefuses(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": `{"k8s.cluster.uid":"PROD","k8s.namespace.name":"payments","k8s.workload.name":"checkout","records":"900"},` +
+			`{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"checkout","records":"500"}`}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Len(t, report.Candidates, 2)
+	var refused reposcope.Candidate
+	for _, c := range report.Candidates {
+		if c.ClusterRefused != "" {
+			refused = c
+		}
+	}
+	require.Equal(t, "PROD", refused.ClusterRefused)
+	require.Empty(t, refused.SetCommand)
+	require.Contains(t, suggestions, fmt.Sprintf(`candidate %d has no set line: its records carry k8s.cluster.uid "PROD", which is not a cluster uid a scope file can hold (a lowercase UUID), `+
+		"and another candidate runs the same namespace and workload, so a binding without --cluster-uid would select both", refused.Rank))
+	for _, s := range suggestions {
+		require.NotContains(t, s, "its records name no cluster")
+	}
 }
 
 // A sampled match is complete at its floor, but a quieter candidate sharing

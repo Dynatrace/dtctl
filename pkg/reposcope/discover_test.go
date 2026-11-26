@@ -1237,6 +1237,67 @@ func TestDiscover_SameWorkloadInSeveralClusters(t *testing.T) {
 	assert.True(t, r.processGroupCheck().Skipped)
 }
 
+// Spans may carry k8s.cluster.uid while the logs of the same namespace and
+// workload do not. The two rows are one workload: the row without a cluster
+// joins the only candidate that has one, which says which of its records
+// name no cluster, and nothing claims its logs are missing.
+func TestDiscover_ClusterOnOneSignalOnly(t *testing.T) {
+	row := func(uid, serviceName string, records float64) map[string]interface{} {
+		r := map[string]interface{}{fieldNamespace: "payments", fieldWorkload: "checkout", fieldRecords: records,
+			fieldProcessGroups: collected(pgID), fieldProcessGroupCount: float64(1)}
+		if uid != "" {
+			r[fieldClusterUID], r[fieldAnyClusterName] = uid, "prod-eu"
+		}
+		if serviceName != "" {
+			r[fieldServiceName] = serviceName
+		}
+		return r
+	}
+	for name, logsServiceName := range map[string]string{"the same service name": "checkout", "no service name": ""} {
+		t.Run(name, func(t *testing.T) {
+			runner := &fakeRunner{answers: map[string][]answer{
+				"spans": {{records: []map[string]interface{}{row(clusterUID, "checkout", 300)}}},
+				"logs":  {{records: []map[string]interface{}{row("", logsServiceName, 50)}}},
+			}}
+			r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+			require.NoError(t, err)
+
+			require.Len(t, r.Candidates, 1)
+			c := r.Candidates[0]
+			assert.Equal(t, VerdictMatch, r.Verdict)
+			assert.Equal(t, []string{clusterUID, "prod-eu", "checkout"}, []string{c.ClusterUID, c.ClusterName, c.ServiceName})
+			assert.Equal(t, []int64{300, 50}, []int64{c.Spans, c.Logs})
+			assert.Equal(t, []string{"logs"}, c.WithoutCluster)
+			assert.False(t, c.WorkloadShared)
+			assert.Equal(t, `k8s.cluster.uid "`+clusterUID+`" (k8s.cluster.name "prod-eu"); its logs carry none`, c.Evidence[0])
+			assert.Empty(t, r.Notes, "its logs were found")
+			assert.True(t, r.processGroupCheck().Skipped)
+		})
+	}
+}
+
+// A row without a cluster joins a candidate only when it is plainly the same
+// workload. Beside one cluster under another service name it stays a
+// candidate of its own, and both are marked: a binding without the cluster
+// would select the two.
+func TestDiscover_ClusterlessRowBesideOneCluster(t *testing.T) {
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{
+			{fieldClusterUID: clusterUID, fieldNamespace: "payments", fieldWorkload: "checkout", fieldServiceName: "checkout", fieldRecords: float64(300)},
+			{fieldNamespace: "payments", fieldWorkload: "checkout", fieldServiceName: "checkout-canary", fieldRecords: float64(100)},
+		}}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+
+	require.Len(t, r.Candidates, 2)
+	in, without := r.Candidates[0], r.Candidates[1]
+	assert.Equal(t, []string{clusterUID, ""}, []string{in.ClusterUID, without.ClusterUID})
+	assert.Equal(t, []bool{true, true}, []bool{in.WorkloadShared, without.WorkloadShared})
+	assert.Empty(t, in.WithoutCluster)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+}
+
 // A value that is not a cluster uid still keeps its records apart, but is not
 // offered as a binding the scope file would refuse.
 func TestDiscover_ClusterUIDTheFileWouldRefuse(t *testing.T) {
@@ -1250,8 +1311,11 @@ func TestDiscover_ClusterUIDTheFileWouldRefuse(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 2)
 	assert.Empty(t, r.Candidates[0].ClusterUID)
+	assert.Equal(t, "PROD", r.Candidates[0].ClusterRefused)
+	assert.Equal(t, `k8s.cluster.uid "PROD" is not a cluster uid a scope file can hold`, r.Candidates[0].Evidence[0])
 	assert.True(t, r.Candidates[0].WorkloadShared)
 	assert.Equal(t, clusterUID, r.Candidates[1].ClusterUID)
+	assert.Empty(t, r.Candidates[1].ClusterRefused)
 }
 
 // A workload is often deployed under a longer name than the repository
