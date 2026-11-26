@@ -433,6 +433,16 @@ func TestExtract_TheCapBoundsWhatIsRead(t *testing.T) {
 		assert.Contains(t, tokenLines(s.tokens), "module ledger-writer zz/go.mod:1")
 		assert.Equal(t, maxFiles, sources(fsys))
 	})
+	t.Run("a build file the walk reached is read once", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+100, "a/f%04d.yaml", "a: b\n")
+		fsys.MapFS["Dockerfile"] = &fstest.MapFile{Data: []byte("FROM scratch\nENTRYPOINT [\"/app/order-api\"]\n")}
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.True(t, s.capped)
+		assert.Equal(t, []string{"entrypoint order-api Dockerfile:2"}, tokenLines(s.tokens))
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
 	t.Run("more build files above than discovery reads", func(t *testing.T) {
 		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
 		many(fsys.MapFS, maxFiles+25, "p%04d.csproj", "<Project/>\n")
