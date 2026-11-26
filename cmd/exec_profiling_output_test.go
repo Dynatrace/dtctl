@@ -504,3 +504,32 @@ func TestExecProfiling_AgentCodeIgnoresWhatTheMessageQuotes(t *testing.T) {
 	}
 	require.Len(t, api.paths, 10, "only the --focus cases reach the API, once with and once without --agent")
 }
+
+// The hints about a wrong environment URL and an expired login are for a
+// failure that could come from one. A failure the command words itself is
+// none, whatever it quotes: an id that holds 403 used to get the URL hints
+// when the context's URL looked wrong.
+func TestExecProfiling_NoURLHintsForWhatTheMessageQuotes(t *testing.T) {
+	// The classic domain, which the hints are about. Nothing is sent to it:
+	// both inputs are refused before any request.
+	writeIsolatedConfig(t, safetyLevelConfig("https://abc12345.live.dynatrace.com", "readonly"))
+	for _, args := range [][]string{
+		{"hotspots", "SERVICE-403"},
+		{"hotspots", testProcess, "--view", "forbidden"},
+		{"allocations", testProcess, "--default-timeframe-start", "unauthorized"},
+		// The words the hint to log in again is chosen by.
+		{"hotspots", testProcess, "--leaf-type", "failed to refresh token"},
+	} {
+		code, stdout, stderr := runProfilingStreams(t, args...)
+		require.Equal(t, 1, code, args)
+		require.Empty(t, stdout, args)
+		require.NotContains(t, stderr, "Hint:", args)
+		want := strings.TrimSuffix(strings.TrimPrefix(stderr, "Error: "), "\n")
+
+		code, stdout, stderr = runProfilingStreams(t, append(args, "--agent")...)
+		require.Equal(t, 1, code, args)
+		require.Empty(t, stderr, args)
+		// Decoding refuses a suggestions key.
+		require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{Code: "validation_error", Message: want}}, decodeProfilingError(t, stdout), args)
+	}
+}

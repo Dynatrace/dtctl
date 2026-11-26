@@ -1250,6 +1250,10 @@ func isTokenRefreshError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "failed to refresh token") ||
 		strings.Contains(msg, "token expired and refresh failed")
@@ -1285,6 +1289,13 @@ func isURLRelatedError(err error) bool {
 	var apiErr *httpclient.APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == 401 || apiErr.StatusCode == 403
+	}
+
+	// A failure `exec profiling` worded itself is no answer of an environment,
+	// and its text quotes the caller's input.
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return false
 	}
 
 	// Check untyped error messages (since resource handlers use fmt.Errorf)
