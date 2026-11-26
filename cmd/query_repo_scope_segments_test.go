@@ -401,6 +401,41 @@ func TestQueryRepoScope_SegmentVariableErrorNamesTheEntry(t *testing.T) {
 	require.Contains(t, detail.Message, `-S "other-2?region=your-value-here"`)
 }
 
+// The entry's segments travel with every attempt of a wait, not only the
+// first, and are read once however often it polls: an attempt without them
+// would be judged on environment-wide rows.
+func TestWaitQuery_SendsTheSegmentsOnEveryPoll(t *testing.T) {
+	polls := 0
+	srv := segmentRecorder(t, func(*http.Request, string) (int, string) {
+		polls++
+		if polls == 1 {
+			return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`
+		}
+		return http.StatusOK, oneRecord
+	})
+	chdirTestRepo(t, segmentScope)
+
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout",
+		"--min-interval", "10ms", "--max-interval", "20ms"}, RunOptions{})
+	require.Zero(t, code, stderr)
+
+	var attempts, reads []string
+	for _, r := range srv.requests() {
+		switch {
+		case strings.Contains(r, "/query:execute"):
+			attempts = append(attempts, r)
+		case strings.HasPrefix(r, segmentRequests):
+			reads = append(reads, r)
+		}
+	}
+	require.Len(t, attempts, 2)
+	require.Len(t, reads, 2, "each of the two segments is read once")
+	for _, body := range attempts {
+		require.Contains(t, body, segmentsSent)
+	}
+	require.Equal(t, []string{repoScopeScopedQuery, repoScopeScopedQuery}, srv.queries())
+}
+
 // A wait under a scope ends on the first attempt the platform refuses for
 // good, and says what the scope had to do with it: a segment of the entry
 // that requires a variable is the entry's to correct, and any other refusal
