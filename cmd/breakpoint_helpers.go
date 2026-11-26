@@ -97,6 +97,14 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
+	// The workspace is resolved first: what is wrong with a name is said
+	// before what is wrong with a token.
+	ws, err := resolveBreakpointWorkspace(cmd, cfg)
+	if err != nil {
+		return err
+	}
+	workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
+
 	c, err := deps.newClient(cmdContext(cmd), cfg)
 	if err != nil {
 		return err
@@ -107,11 +115,6 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
-	ws, err := resolveBreakpointWorkspace(cmd, cfg)
-	if err != nil {
-		return err
-	}
-	workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
 	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, workspace)
 	if err != nil {
 		if verbose {

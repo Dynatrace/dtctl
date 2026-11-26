@@ -59,26 +59,32 @@ Use -o json / -o yaml for structured output.`,
 			if listShapeFields(cmdContext(cmd)) != "" {
 				return fmt.Errorf("--fields is not supported by get snapshots; project fields in DQL instead: dtctl query 'fetch application.snapshots | fields ...'")
 			}
-			cfg, c, err := setupClient(cmdContext(cmd))
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+			ctx, err := cfg.CurrentContextObj()
 			if err != nil {
 				return err
 			}
 
-			ctx, ctxErr := cfg.CurrentContextObj()
-			if ctxErr != nil {
-				return ctxErr
-			}
-
-			handler, err := livedebugger.NewHandler(c, ctx.Environment)
-			if err != nil {
-				return err
-			}
-
+			// The workspace is resolved first: what is wrong with a name is
+			// said before what is wrong with a token.
 			ws, err := resolveBreakpointWorkspace(cmd, cfg)
 			if err != nil {
 				return err
 			}
 			workspace, warnings := ws.name, ws.readWarnings(cmdContext(cmd))
+
+			c, err := newClientFromConfig(cmdContext(cmd), cfg)
+			if err != nil {
+				return err
+			}
+			handler, err := livedebugger.NewHandler(c, ctx.Environment)
+			if err != nil {
+				return err
+			}
+
 			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if isDebugVerbose(cmdContext(cmd)) {

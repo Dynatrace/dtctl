@@ -67,11 +67,6 @@ Examples:
 				return err
 			}
 
-			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
-			if err != nil {
-				return err
-			}
-
 			ws, err := resolveBreakpointWorkspace(cmd, cfg)
 			if err != nil {
 				return err
@@ -80,6 +75,12 @@ Examples:
 				return err
 			}
 			workspace := ws.name
+
+			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
+			if err != nil {
+				return err
+			}
+
 			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(workspace)
 			if err != nil {
 				if verbose {
