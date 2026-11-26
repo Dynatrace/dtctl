@@ -954,10 +954,11 @@ func TestWalkAsksTheFiveDecadesInOrder(t *testing.T) {
 	}
 }
 
-// TestWalkEndsAtThirtyMatchesAndNotBefore pins the floor from both sides.
-// Thirty matches are enough to date the arrival, so the walk ends there; one
-// fewer is not, so it runs every remaining rung to thicken the sample and, as
-// none does, ends on the last hit it made.
+// TestWalkEndsAtThirtyMatchesAndNotBefore pins the floor from both sides, on
+// a hit whose newest record is past the stale threshold. Thirty matches are
+// enough to date it, so the walk ends there and says stale; one fewer is not,
+// so it runs every remaining rung to thicken the sample and, as none does,
+// ends on that hit without a verdict.
 func TestWalkEndsAtThirtyMatchesAndNotBefore(t *testing.T) {
 	below := []mockResponse{
 		sampledRung(10000, 0, 0, ""), sampledRung(1000, 0, 0, ""),
@@ -966,22 +967,23 @@ func TestWalkEndsAtThirtyMatchesAndNotBefore(t *testing.T) {
 	for _, tc := range []struct {
 		matched int64
 		calls   int
+		state   SignalState
 	}{
-		{30, 1},
-		{29, 5},
+		{30, 1, SignalStale},
+		{29, 5, SignalUnknown},
 	} {
 		t.Run(fmt.Sprintf("%d matches", tc.matched), func(t *testing.T) {
 			runner := windowRunner()
-			rungs := append([]mockResponse{cappedLogs(), sampledRung(100000, tc.matched, tc.matched*100000, at(0, 30))}, below...)
+			rungs := append([]mockResponse{cappedLogs(), sampledRung(100000, tc.matched, tc.matched*100000, at(9, 0))}, below...)
 			runner.responses = append(rungs, runner.responses...)
 
 			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
 			if got := len(sampledCalls(runner)); got != tc.calls {
 				t.Errorf("ran %d sampled probes, want %d", got, tc.calls)
 			}
-			if logs.State != SignalLive || logs.RecordsSampled != tc.matched || logs.SamplingRatio != 100000 {
-				t.Errorf("state/sampled/ratio = %q/%d/%d, want live/%d/100000 (evidence: %s)",
-					logs.State, logs.RecordsSampled, logs.SamplingRatio, tc.matched, logs.Evidence)
+			if logs.State != tc.state || logs.RecordsSampled != tc.matched || logs.SamplingRatio != 100000 {
+				t.Errorf("state/sampled/ratio = %q/%d/%d, want %q/%d/100000 (evidence: %s)",
+					logs.State, logs.RecordsSampled, logs.SamplingRatio, tc.state, tc.matched, logs.Evidence)
 			}
 		})
 	}
@@ -1036,23 +1038,86 @@ func TestSampledProbeStopsAtFirstConclusiveRung(t *testing.T) {
 
 // TestThinSampleDescendsForATrustworthyAge is the "reduce until it is good
 // enough" half, and it is about freshness rather than about the count: a
-// handful of sampled records puts takeMax far behind the truth, which is what
-// would flip a live signal to stale.
+// handful of sampled records whose newest is past the stale threshold cannot
+// say whether the source stopped, so the walk asks a finer rung.
 func TestThinSampleDescendsForATrustworthyAge(t *testing.T) {
 	runner := windowRunner()
 	runner.responses = append([]mockResponse{
 		cappedLogs(),
-		// Two records is a hit, but 15m/2 of freshness bias is useless.
-		sampledRung(100000, 2, 200000, fixedNow.Add(-time.Minute).Format(time.RFC3339)),
-		sampledRung(10000, 40, 400000, fixedNow.Add(-10*time.Second).Format(time.RFC3339)),
+		// Two records are a hit, but six minutes against a five minute
+		// threshold is not a verdict a sample this thin can give.
+		sampledRung(100000, 2, 200000, at(6, 0)),
+		sampledRung(10000, 40, 400000, at(0, 10)),
 	}, runner.responses...)
 
 	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
-	if logs.RecordsSampled != 40 || logs.SamplingRatio != 10000 {
-		t.Errorf("settled on %d records at 1-in-%d, want the thicker 40 at 1-in-10000", logs.RecordsSampled, logs.SamplingRatio)
+	if logs.State != SignalLive || logs.RecordsSampled != 40 || logs.SamplingRatio != 10000 {
+		t.Errorf("settled on %q with %d records at 1-in-%d, want live with the thicker 40 at 1-in-10000", logs.State, logs.RecordsSampled, logs.SamplingRatio)
 	}
 	if got := len(sampledCalls(runner)); got != 2 {
 		t.Errorf("ran %d sampled probes, want 2: one to find the signal, one to make its age trustworthy", got)
+	}
+}
+
+// TestThinSampleInsideTheThresholdEndsTheWalk: a sample is a subset, so its
+// newest record can only be older than the newest in the window. Once a hit is
+// held and a record inside the stale threshold has been seen, the verdict is
+// live and no finer rung can change it. Each of those rungs reads ten times
+// more than the last, so the walk does not ask them. The floor withholds only
+// the stale verdict: the count stays the thin estimate it is labelled as.
+func TestThinSampleInsideTheThresholdEndsTheWalk(t *testing.T) {
+	capped := cappedLogs()
+	capped.records = []map[string]interface{}{rec("matched", int64(700), "last_seen", at(0, 3))}
+	for _, tc := range []struct {
+		name     string
+		capped   mockResponse
+		rungs    []mockResponse
+		calls    int
+		lastSeen string
+	}{
+		{
+			name:   "the thin hit is fresh itself",
+			capped: cappedLogs(),
+			rungs: []mockResponse{
+				sampledRung(100000, 2, 200000, at(1, 0)),
+				sampledRung(10000, 40, 400000, at(0, 10)),
+			},
+			calls: 1, lastSeen: at(1, 0),
+		},
+		{
+			name:   "the threshold itself is still inside",
+			capped: cappedLogs(),
+			rungs: []mockResponse{
+				sampledRung(100000, 2, 200000, at(5, 0)),
+				sampledRung(10000, 40, 400000, at(0, 10)),
+			},
+			calls: 1, lastSeen: at(5, 0),
+		},
+		{
+			// No hit yet when the fresh record is seen, so the walk goes on
+			// until a rung supplies a count, and ends there.
+			name:   "the capped probe matched the fresh record",
+			capped: capped,
+			rungs: []mockResponse{
+				sampledRung(100000, 0, 0, ""),
+				sampledRung(10000, 2, 20000, at(9, 0)),
+				sampledRung(1000, 40, 40000, at(0, 10)),
+			},
+			calls: 2, lastSeen: at(0, 3),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append(append([]mockResponse{tc.capped}, tc.rungs...), runner.responses...)
+
+			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+			if got := len(sampledCalls(runner)); got != tc.calls {
+				t.Errorf("ran %d sampled probes, want %d: the signal was live and a finer rung could not change that", got, tc.calls)
+			}
+			if logs.State != SignalLive || logs.RecordsSampled != 2 || logs.LastSeen != tc.lastSeen {
+				t.Errorf("state/sampled/lastSeen = %q/%d/%q, want live/2/%q (evidence: %s)", logs.State, logs.RecordsSampled, logs.LastSeen, tc.lastSeen, logs.Evidence)
+			}
+		})
 	}
 }
 
@@ -1060,15 +1125,18 @@ func TestThinSampleDescendsForATrustworthyAge(t *testing.T) {
 // able to lose an answer that was already conclusive.
 func TestThinSampleSurvivesACappedNextRung(t *testing.T) {
 	runner := windowRunner()
-	thin := sampledRung(100000, 2, 200000, fixedNow.Format(time.RFC3339))
+	thin := sampledRung(100000, 2, 200000, at(6, 0))
 	capped := sampledRung(10000, 0, 0, "")
 	capped.truncated = true
 	capped.cause = TruncationScanLimit
 	runner.responses = append([]mockResponse{cappedLogs(), thin, capped}, runner.responses...)
 
+	// Six minutes old is past the threshold, so the hit cannot be dated and
+	// the state is unknown. What must survive is the arrival it proved.
 	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
-	if logs.State != SignalLive || logs.RecordsSampled != 2 {
-		t.Errorf("state/sampled = %q/%d, want live/2: the thin rung had already proven arrival (evidence: %s)", logs.State, logs.RecordsSampled, logs.Evidence)
+	if logs.State != SignalUnknown || logs.RecordsSampled != 2 || logs.Records != 200000 || logs.Truncation != "" {
+		t.Errorf("state/sampled/records/truncation = %q/%d/%d/%q, want unknown/2/200000 and no truncation: the thin rung had already proven arrival (evidence: %s)",
+			logs.State, logs.RecordsSampled, logs.Records, logs.Truncation, logs.Evidence)
 	}
 	// Every rung below a capped one reads ten times more, so the walk ends on
 	// it instead of asking them.
@@ -1336,13 +1404,16 @@ func TestThinSampleSurvivesARefusedNextRung(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			runner := windowRunner()
-			rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, fixedNow.Format(time.RFC3339))}
+			// Six minutes old is past the threshold, so the walk descends, and
+			// the hit it falls back on is too thin to date: unknown, with the
+			// arrival it proved kept.
+			rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, at(6, 0))}
 			rungs = append(rungs, after...)
 			runner.responses = append(rungs, runner.responses...)
 
 			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
-			if logs.State != SignalLive || logs.RecordsSampled != 2 || logs.SamplingRatio != 100000 || logs.Records != 200000 {
-				t.Errorf("state/sampled/ratio/records = %q/%d/%d/%d, want live/2/100000/200000: the thin rung had already proven arrival (evidence: %s)",
+			if logs.State != SignalUnknown || logs.RecordsSampled != 2 || logs.SamplingRatio != 100000 || logs.Records != 200000 {
+				t.Errorf("state/sampled/ratio/records = %q/%d/%d/%d, want unknown/2/100000/200000: the thin rung had already proven arrival (evidence: %s)",
 					logs.State, logs.RecordsSampled, logs.SamplingRatio, logs.Records, logs.Evidence)
 			}
 			if logs.Truncation != "" || strings.Contains(logs.Evidence, "does not support sampling") {
@@ -1387,13 +1458,12 @@ func TestNewestMatchOfTheWalkDatesTheHit(t *testing.T) {
 			lastSeen: at(0, 10), age: 10, lastSeenRatio: "1-in-10k",
 		},
 		{
-			name: "a thin hit before a thicker, older one",
+			name: "a thinner hit that the thicker one replaces",
 			rungs: []mockResponse{
-				unflaggedEmptyRung(100000, true),
-				sampledRung(10000, 2, 20000, at(0, 20)),
-				sampledRung(1000, 40, 40000, at(9, 0)),
+				sampledRung(100000, 2, 200000, at(14, 0)),
+				sampledRung(10000, 1, 10000, at(0, 20)),
 			},
-			sampled: 40, ratio: 1000, records: 40000,
+			sampled: 2, ratio: 100000, records: 200000,
 			lastSeen: at(0, 20), age: 20, lastSeenRatio: "1-in-10k",
 		},
 		{
@@ -1462,24 +1532,50 @@ func TestCappedProbesOwnMatchDatesTheHit(t *testing.T) {
 	}
 }
 
-// TestTiedTimestampStaysWithTheSample: the hit's own timestamp is the one
-// reported unless another rung saw a strictly newer record, so the evidence
-// keeps describing the sample's bias instead of crediting a rung that added
-// nothing.
-func TestTiedTimestampStaysWithTheSample(t *testing.T) {
+// TestOlderRungStillDatesAThickerHit: the newest record of the walk may sit
+// in a thinner, earlier rung and still be past the threshold. The thicker hit
+// the walk ends on then supplies the count and the bias, and the verdict is
+// stale from the newer of the two timestamps, not from the hit's own.
+func TestOlderRungStillDatesAThickerHit(t *testing.T) {
 	runner := windowRunner()
-	refused := sampledRung(10000, 500, 500, at(0, 30))
-	refused.sampled = false
 	runner.responses = append([]mockResponse{
-		cappedLogs(), sampledRung(100000, 2, 200000, at(0, 30)), refused,
+		cappedLogs(),
+		sampledRung(100000, 2, 200000, at(6, 0)),
+		sampledRung(10000, 40, 400000, at(9, 0)),
 	}, runner.responses...)
 
 	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
-	if logs.State != SignalLive || logs.LastSeen != at(0, 30) {
-		t.Fatalf("state/lastSeen = %q/%q, want live/%q", logs.State, logs.LastSeen, at(0, 30))
+	if logs.State != SignalStale || logs.LastSeen != at(6, 0) || logs.AgeSeconds != 360 || logs.RecordsSampled != 40 {
+		t.Errorf("state/lastSeen/age/sampled = %q/%q/%d/%d, want stale/%q/360/40 (evidence: %s)",
+			logs.State, logs.LastSeen, logs.AgeSeconds, logs.RecordsSampled, at(6, 0), logs.Evidence)
 	}
-	if strings.Contains(logs.Evidence, "was read from") || !strings.Contains(logs.Evidence, "unlikely to be in the sample") {
-		t.Errorf("evidence %q should describe the sample's own timestamp", logs.Evidence)
+	for _, want := range []string{"last-seen was read from the 1-in-100k probe", "stopped 6m0s ago"} {
+		if !strings.Contains(logs.Evidence, want) {
+			t.Errorf("evidence %q missing %q", logs.Evidence, want)
+		}
+	}
+}
+
+// TestTiedTimestampStaysWithTheSample: the hit's own timestamp is the one
+// reported unless another rung saw a strictly newer record, so the evidence
+// keeps describing the sample's bias instead of crediting a rung that added
+// nothing. The verdict is asked directly, because the walk hands over a tie
+// only in the order that already favours the hit.
+func TestTiedTimestampStaysWithTheSample(t *testing.T) {
+	seen, err := parseGrailTime(at(0, 30))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hit := sampledProbe{asked: 1000, askedAt: fixedNow, ratio: 1000, matched: 40, records: 40000, lastSeen: at(0, 30)}
+	tie := &sighting{lastSeen: at(0, 30), at: seen, askedAt: fixedNow.Add(time.Minute), asked: 10000}
+
+	b := &budgetRunner{}
+	sig := b.sampledVerdict(Signal{Name: "logs"}, &CapabilityDef{DataObject: "logs"}, windowOpts(), DefaultTimeField, hit, tie)
+	if sig.State != SignalLive || sig.LastSeen != at(0, 30) || sig.AgeSeconds != 30 {
+		t.Fatalf("state/lastSeen/age = %q/%q/%d, want live/%q/30: the tie is dated against the hit's own reading", sig.State, sig.LastSeen, sig.AgeSeconds, at(0, 30))
+	}
+	if strings.Contains(sig.Evidence, "was read from") || !strings.Contains(sig.Evidence, "unlikely to be in the sample") {
+		t.Errorf("evidence %q should describe the sample's own timestamp", sig.Evidence)
 	}
 }
 
@@ -1561,9 +1657,9 @@ func TestNewestMatchKeepsTheReadingOfItsOwnRung(t *testing.T) {
 	mock := windowRunner()
 	mock.responses = append([]mockResponse{
 		cappedLogs(),
-		// Asked one minute into the run, about a record 30s older than the
-		// start: 90s old at this rung.
-		sampledRung(100000, 2, 200000, at(0, 30)),
+		// Asked one minute into the run, about a record five minutes older
+		// than the start: six minutes old at this rung, so the walk descends.
+		sampledRung(100000, 2, 200000, at(5, 0)),
 		// Asked two minutes in, and thick enough to end the walk.
 		sampledRung(10000, 40, 400000, at(9, 0)),
 	}, mock.responses...)
@@ -1578,8 +1674,8 @@ func TestNewestMatchKeepsTheReadingOfItsOwnRung(t *testing.T) {
 	}
 	assertEveryRungListed(t, mock)
 	logs := signalByName(t, inv, "logs")
-	if logs.State != SignalLive || logs.LastSeen != at(0, 30) || logs.AgeSeconds != 90 {
-		t.Errorf("state/lastSeen/age = %q/%q/%ds, want live/%q/90s", logs.State, logs.LastSeen, logs.AgeSeconds, at(0, 30))
+	if logs.State != SignalStale || logs.LastSeen != at(5, 0) || logs.AgeSeconds != 360 || logs.RecordsSampled != 40 {
+		t.Errorf("state/lastSeen/age/sampled = %q/%q/%ds/%d, want stale/%q/360s/40", logs.State, logs.LastSeen, logs.AgeSeconds, logs.RecordsSampled, at(5, 0))
 	}
 }
 
@@ -1686,22 +1782,6 @@ func TestThinSampleNeverSaysStale(t *testing.T) {
 				t.Errorf("gate exit = %d, want %d", got, ExitRequiredSignalUnknown)
 			}
 		})
-	}
-}
-
-// TestThinSampleStillSaysLive: the floor withholds only the stale verdict. A
-// record inside the threshold is fresh however few others the sample holds.
-func TestThinSampleStillSaysLive(t *testing.T) {
-	runner := windowRunner()
-	rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, at(1, 0))}
-	for _, ratio := range []int64{10000, 1000, 100, 10} {
-		rungs = append(rungs, sampledRung(ratio, 0, 0, ""))
-	}
-	runner.responses = append(rungs, runner.responses...)
-
-	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
-	if logs.State != SignalLive || logs.RecordsSampled != 2 || logs.AgeSeconds != 60 {
-		t.Errorf("state/sampled/age = %q/%d/%d, want live/2/60 (evidence: %s)", logs.State, logs.RecordsSampled, logs.AgeSeconds, logs.Evidence)
 	}
 }
 

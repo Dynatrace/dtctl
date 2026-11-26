@@ -601,8 +601,12 @@ telemetry is not implicated.
     matches 30 records or more** — it does not converge on a precise count, which would cost
     ~10x per extra rung for no change in verdict (`TestSampledProbeStopsAtFirstConclusiveRung`).
     A thinner hit proves arrival but cannot date it, so the walk keeps descending, and ends
-    on the last hit it made when no rung reaches 30
-    (`TestThinSampleDescendsForATrustworthyAge`). The walk also continues past a rung that
+    on the thickest hit it made when no rung reaches 30
+    (`TestThinSampleDescendsForATrustworthyAge`, `TestThickestHitSuppliesTheCount`). It
+    descends only while the age is still in question. A sample is a subset, so the newest
+    record in the window is no older than the newest one seen; once a hit is held and that
+    record is inside the stale threshold the signal is `live`, no finer rung can change it,
+    and the walk ends on the thin estimate (`TestThinSampleInsideTheThresholdEndsTheWalk`). The walk also continues past a rung that
     matched nothing, and ends at the first rung that is cut short. While every rung is
     sampled, that bounds the total scan at a little over one cap. The bound says nothing
     about a rung the environment answered without sampling: such a rung ends the walk when

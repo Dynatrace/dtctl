@@ -42,10 +42,12 @@ import (
 // evidence would claim.
 //
 // Descending is what makes the walk affordable. A rung that matches
-// minSampledRecords or more ends it, so the common case costs one near-free
-// query. A thinner hit does not: it proves arrival but cannot date it, so the
-// walk keeps descending to thicken the sample, and it also continues past a
-// rung that matched nothing, flagged as sampled or not. Each further rung reads
+// minSampledRecords or more ends it, and so does any hit once a record inside
+// the stale threshold has been seen, so the common case costs one near-free
+// query. A thinner hit whose newest record is older than that does not: it
+// proves arrival but cannot date it, so the walk keeps descending to thicken
+// the sample, and it also continues past a rung that matched nothing, flagged
+// as sampled or not. Each further rung reads
 // roughly ten times the last, and the walk ends at the first rung that is cut
 // short, so while every rung is sampled the total is bounded at a little over
 // one cap's worth of scan, not one per rung.
@@ -69,7 +71,9 @@ var samplingLadder = []int64{100000, 10000, 1000, 100, 10}
 // so a live signal cannot be flipped to stale by the sampling alone.
 //
 // The floor does two things. The walk keeps descending until a rung reaches
-// it, and a hit that never does may not say stale (see sampledVerdict). The
+// it, unless a record inside the stale threshold has already settled the
+// verdict as live, and a hit that never reaches it may not say stale (see
+// sampledVerdict). The
 // sampling interval is the gap to expect for a source that emits evenly, not a
 // bound: a burst early in the window followed by a trickle leaves a thin
 // sample with only old timestamps while the source is alive. Subtracting the
@@ -127,6 +131,13 @@ func newerSighting(seen *sighting, p sampledProbe) *sighting {
 		return seen
 	}
 	return &sighting{lastSeen: p.lastSeen, at: at, askedAt: p.askedAt, asked: p.asked}
+}
+
+// insideThreshold reports whether the newest record seen is fresh by the rule
+// applyFreshness uses, so that a walk which ends on it is certain of the
+// verdict it ends with.
+func (s *sighting) insideThreshold(staleAfter time.Duration) bool {
+	return s != nil && (staleAfter <= 0 || s.askedAt.Sub(s.at) <= staleAfter)
 }
 
 // sampledProbeDQL builds a rung's probe.
@@ -406,6 +417,14 @@ walk:
 			// the sample, holding the best rung so far as the fallback if the
 			// next is refused or capped.
 			if p.matched >= minSampledRecords {
+				break walk
+			}
+			// Unless the age no longer matters. A sample is a subset, so the
+			// newest record in the window is no older than the newest one
+			// seen: once that is inside the stale threshold the signal is
+			// live, and a finer rung could only repeat it at ten times the
+			// scan.
+			if newest.insideThreshold(opts.StaleAfter) {
 				break walk
 			}
 		} else {
