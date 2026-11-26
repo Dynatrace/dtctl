@@ -180,6 +180,21 @@ func TestSuggest_HabitRewrites(t *testing.T) {
 			want:  "fetch logs | fieldsAdd x = 1 | limit 1",
 			match: "command-synonym",
 		},
+		{
+			// A blank stage has no command word to rewrite; the others are.
+			name: "head before a blank last stage",
+			err: Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+				Query: "fetch logs | head 1 | ", Span: span(14, 17)},
+			want:  "fetch logs | limit 1 | ",
+			match: "command-synonym",
+		},
+		{
+			name: "head between a triple-quoted string and a blank last stage",
+			err: Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+				Query: `fetch logs | fieldsAdd note = """a"b""" | head 1 |  `, Span: span(43, 46)},
+			want:  `fetch logs | fieldsAdd note = """a"b""" | limit 1 |  `,
+			match: "command-synonym",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

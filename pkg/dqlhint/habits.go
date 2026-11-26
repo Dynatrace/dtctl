@@ -153,6 +153,9 @@ func commandSynonym(c *queryContext) (hint, bool) {
 	}
 	var edits []edit
 	for _, seg := range c.segs {
+		if seg.Command == "" {
+			continue // a blank stage (a trailing pipe) has no word to rewrite
+		}
 		text := c.q[seg.Start:seg.End]
 		lead := len(text) - len(strings.TrimLeft(text, " \t\r\n"))
 		tail := trailingSpace.FindString(text)
