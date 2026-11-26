@@ -324,14 +324,10 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		ap.SetSuggestions(suggestions)
 		ap.SetTotal(len(reports))
 	}
-	var perr error
-	if len(reports) == 1 {
-		perr = printer.Print(reports[0])
-	} else {
-		perr = printer.PrintList(reports)
-	}
-	if perr != nil {
-		return perr
+	// Always a list, one report per unit: a reader need not know beforehand
+	// whether the directory is one several deployables share.
+	if err := printer.PrintList(reports); err != nil {
+		return err
 	}
 	return err
 }
@@ -388,8 +384,8 @@ func (r *scopeCheckedRunner) RunQuery(ctx context.Context, dql string) (*invento
 
 // printRepoScopeDiscoveryPlans is `discover --dry-run`: every query exactly
 // as it would be sent and every value in it. The agent envelope carries the
-// queries as its payload, or for several units the plans, each with its own
-// sent and dropped values: the details are one flat map.
+// plans as its payload, one per unit and each with its own sent and dropped
+// values, in a list also when there is one; the details are one flat map.
 func printRepoScopeDiscoveryPlans(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	report := newDryRunReport(cmd).As("discover", "repo-scope")
 	units := make([]string, len(plans))
@@ -400,20 +396,18 @@ func printRepoScopeDiscoveryPlans(cmd *cobra.Command, plans []*reposcope.Plan) e
 		writeDiscoveryPlan(report, plan)
 		units[i] = plan.Unit
 	}
-	var payload []byte
 	if plan := plans[0]; len(plans) == 1 {
 		report.Detail("unit", "%s", plan.Unit)
 		if len(plan.Queries) > 0 {
 			report.Detail("sent", "%s", strings.Join(plan.Sent, ", "))
-			payload, _ = json.Marshal(plan.Queries)
 		}
 		if len(plan.Dropped) > 0 {
 			report.Detail("dropped", "%s", strings.Join(plan.Dropped, ", "))
 		}
 	} else {
 		report.Detail("units", "%s", strings.Join(units, ", "))
-		payload, _ = json.Marshal(plans)
 	}
+	payload, _ := json.Marshal(plans)
 	return report.Payload(payload).Print()
 }
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/Dynatrace/dtctl/cmd/testutil"
 	"github.com/Dynatrace/dtctl/pkg/client"
@@ -199,9 +200,39 @@ func discoverReport(t *testing.T, args ...string) (*reposcope.DiscoveryReport, [
 	t.Helper()
 	code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "discover", "--agent"}, args...), RunOptions{})
 	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-	var report reposcope.DiscoveryReport
-	resp := agentResult(t, stdout, &report)
-	return &report, resp.Context.Suggestions
+	// The result is a list of reports also when one unit was discovered.
+	var reports []reposcope.DiscoveryReport
+	resp := agentResult(t, stdout, &reports)
+	require.Len(t, reports, 1)
+	return &reports[0], resp.Context.Suggestions
+}
+
+// Structured output has one shape: a list of reports, one per unit, also
+// when the run discovered a single unit, and a dry run's payload is a list
+// of plans in the same way. A reader that handles the list handles both.
+func TestRepoScopeDiscoverStructuredOutputIsAlwaysAList(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	chdirCheckoutRepo(t)
+	for _, format := range []string{"json", "yaml"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", format}, RunOptions{})
+		require.Zero(t, code, stderr)
+		var reports []reposcope.DiscoveryReport
+		if format == "json" {
+			require.NoError(t, json.Unmarshal([]byte(stdout), &reports), stdout)
+		} else {
+			require.NoError(t, yaml.Unmarshal([]byte(stdout), &reports), stdout)
+		}
+		require.Len(t, reports, 1, format)
+		require.Equal(t, ".", reports[0].Unit)
+	}
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plans := agentEnvelope(t, stdout).Result.(map[string]interface{})["payload"].([]interface{})
+	require.Len(t, plans, 1)
+	plan := plans[0].(map[string]interface{})
+	require.Equal(t, ".", plan["unit"])
+	require.Len(t, plan["queries"], 11)
 }
 
 // TestRepoScopeFlow is the first-use path, in a readonly context: discover
@@ -752,7 +783,8 @@ func TestRepoScopeDiscoverDryRunNeedsNoToken(t *testing.T) {
 	require.Zero(t, code, stderr)
 	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
 	require.Equal(t, true, plan["dry_run"])
-	payload := plan["payload"].([]interface{})
+	require.Len(t, plan["payload"], 1, "one plan, in a list")
+	payload := plan["payload"].([]interface{})[0].(map[string]interface{})["queries"].([]interface{})
 	require.Len(t, payload, 11)
 	require.Equal(t, recordQuery("spans"), payload[0].(map[string]interface{})["dql"])
 
@@ -781,7 +813,7 @@ func TestRepoScopeDiscoverDryRunNamesHeldBackNames(t *testing.T) {
 	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
 	details := plan["details"].(map[string]interface{})
 	require.Equal(t, "test-platform-service-smoke, test-runner", details["dropped"])
-	for _, q := range plan["payload"].([]interface{}) {
+	for _, q := range plan["payload"].([]interface{})[0].(map[string]interface{})["queries"].([]interface{}) {
 		require.NotContains(t, q.(map[string]interface{})["dql"], "test-platform-service-smoke", "a held-back name is in no query")
 	}
 
@@ -1014,8 +1046,10 @@ func TestRepoScopeDiscoverTimeout(t *testing.T) {
 		Context: context.WithValue(context.Background(), repoScopeDiscoverTimeoutKey{}, 200*time.Millisecond),
 	})
 	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-	var report reposcope.DiscoveryReport
-	agentResult(t, stdout, &report)
+	var reports []reposcope.DiscoveryReport
+	agentResult(t, stdout, &reports)
+	require.Len(t, reports, 1)
+	report := reports[0]
 	require.Equal(t, "timeout", report.Queries[0].Cause)
 	require.True(t, report.Queries[4].Skipped, "the logs query")
 	require.True(t, report.Partial)

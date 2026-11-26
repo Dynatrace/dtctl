@@ -389,9 +389,11 @@ entry's and `--segment`'s together) is an error in every case. A scoped query th
 position, which points into the text that was sent; `suggestions` shows that
 text and the `--no-repo-scope` retry.
 
-`dtctl repo-scope discover` returns its report as `result`, or, from a
-directory several Gradle deployables share, a list of reports, one per
-deployable; `context.total` counts the reports. A report's `verdict` is
+`dtctl repo-scope discover` returns a list of reports as `result`, one per
+unit: one report in most repositories, and one per deployable from a
+directory several Gradle deployables share. `context.total` counts the
+reports, and a dry run's `result.payload` is the list of plans in the same
+way. A report's `verdict` is
 the overall answer and `verdicts` has one per kind of binding (`workload`,
 `serviceName`, `processGroup`, `service`). A per-kind verdict can be
 `ambiguous` while the overall one is `match`: a single candidate whose logs

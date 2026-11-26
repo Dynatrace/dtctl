@@ -238,7 +238,7 @@ Test content is not a source of names: a `kind: Deployment` under `test/fixtures
 
 ### Never writes
 
-`discover` has no prompt, no state store and no `--save`. It prints, per candidate, the `dtctl repo-scope set …` line that saves it, and the agent envelope carries the same line as `result.candidates[].setCommand`, and for a `match` also as the first of `context.suggestions`, prefixed "confirm with the user"; for anything less the suggestion is to show the candidates and ask. Running `set` is the confirmation. This keeps the one decision that changes what every later query returns with a person, and it means the command an agent proposes is the command a human can read, check and run.
+`discover` has no prompt, no state store and no `--save`. It prints, per candidate, the `dtctl repo-scope set …` line that saves it, and the agent envelope carries the same line as `result[].candidates[].setCommand` (the result is a list of reports, one per unit, also when there is one, so a reader has one shape to handle), and for a `match` also as the first of `context.suggestions`, prefixed "confirm with the user"; for anything less the suggestion is to show the candidates and ask. Running `set` is the confirmation. This keeps the one decision that changes what every later query returns with a person, and it means the command an agent proposes is the command a human can read, check and run.
 
 Because the line is the whole hand-off, it has to save exactly the candidate shown, with nothing carried over but the line:
 
