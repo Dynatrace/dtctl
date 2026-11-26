@@ -194,10 +194,12 @@ func Quote(v string) string {
 }
 
 var (
-	byParamRe = regexp.MustCompile(`\bby\s*:`)
+	// Both read masked text, in which a comment is a run of the mask byte:
+	// it stands wherever white space may.
+	byParamRe = regexp.MustCompile(`\bby[\s#]*:`)
 	// countAllRe is one whole aggregation that counts every record, with or
 	// without a name.
-	countAllRe = regexp.MustCompile(`^(?:([A-Za-z_][\w.]*)\s*=\s*)?count\(\s*\)$`)
+	countAllRe = regexp.MustCompile(`^(?:([A-Za-z_][\w.]*)[\s#]*=[\s#]*)?count\([\s#]*\)$`)
 )
 
 // UngroupedCount reports the column in which query's last stage counts the

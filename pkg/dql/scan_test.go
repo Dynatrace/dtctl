@@ -226,6 +226,11 @@ func TestUngroupedCount(t *testing.T) {
 		{"fetch logs | summarize avg(duration), log.count = count( )", "log.count"},
 		{"fetch logs\n| summarize c = count() // every record\n", "c"},
 		{"fetch logs | SUMMARIZE c = count()", "c"},
+		// A comment is white space wherever it stands.
+		{"fetch logs | summarize total = /* note */ count()", "total"},
+		{"fetch logs | summarize total /* note */ = count( /* all */ )", "total"},
+		{"fetch logs | summarize total = count(), by /* note */ : {host}", ""},
+		{"fetch logs | summarize total = count(), by // note\n: {host}", ""},
 
 		// A grouped summarize has no row for nothing, and anything after the
 		// summarize may have changed the column.
