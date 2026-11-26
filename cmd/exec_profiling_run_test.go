@@ -761,7 +761,7 @@ func TestExecProfiling_LimitZeroListsAll(t *testing.T) {
 		{"focus", []string{"hotspots", testProcess, "--focus", "app.P.run"}, 2 + 1 + n},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := append(tc.args, "--limit", "0")
+			args := append(append([]string{}, tc.args...), "--limit", "0")
 			code, stdout, stderr := runProfilingStreams(t, append(args, "-o", "json")...)
 			require.Zero(t, code, stderr)
 			var rows []map[string]interface{}
