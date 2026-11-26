@@ -1563,7 +1563,7 @@ func TestJoinQuotedNames(t *testing.T) {
 func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 	const envURL = "https://abc12345.apps.dynatrace.com"
 
-	run := func(t *testing.T, stored config.SafetyLevel) (stderr string, runErr error, granted bool, saved config.SafetyLevel) {
+	run := func(t *testing.T, stored config.SafetyLevel) (stderr string, granted bool, saved config.SafetyLevel, runErr error) {
 		t.Helper()
 		viper.Reset()
 		resetAuthLoginFlags(t)
@@ -1613,11 +1613,11 @@ func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("context missing: %v", err)
 		}
-		return stderr, runErr, granted, nc.Context.SafetyLevel
+		return stderr, granted, nc.Context.SafetyLevel, runErr
 	}
 
 	t.Run("a shared token is named before it is replaced", func(t *testing.T) {
-		stderr, err, granted, saved := run(t, config.SafetyLevelReadOnly)
+		stderr, granted, saved, err := run(t, config.SafetyLevelReadOnly)
 		if err != nil || !granted {
 			t.Fatalf("login: err %v, granted %v", err, granted)
 		}
@@ -1642,7 +1642,7 @@ func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 	})
 
 	t.Run("an invalid stored level stops the login before a token is requested", func(t *testing.T) {
-		_, err, granted, saved := run(t, "read-only")
+		_, granted, saved, err := run(t, "read-only")
 		if err == nil || !strings.Contains(err.Error(), `context "viewer" stores the safety level "read-only", which is not a valid value`) {
 			t.Errorf("err = %v, want the invalid-level error", err)
 		}
