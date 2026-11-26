@@ -241,6 +241,30 @@ func TestRepoScopeSet(t *testing.T) {
 	}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost), "set replaces the named entry whole and keeps the others")
 }
 
+// --cluster-uid qualifies the --workload names, as --namespace does.
+func TestRepoScopeSetClusterUID(t *testing.T) {
+	const uid = "11111111-2222-3333-4444-555555555555"
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, "")
+
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "checkout",
+		"--cluster-uid", uid, "--namespace", "payments", "--workload", "checkout", "--workload", "checkout-worker"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []reposcope.Entry{{Name: "checkout", Workloads: []reposcope.Workload{
+		{ClusterUID: uid, Namespace: "payments", Name: "checkout"},
+		{ClusterUID: uid, Namespace: "payments", Name: "checkout-worker"},
+	}}}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost))
+	before := readScopeFile(t, repo)
+
+	// A cluster narrows a workload, so alone it binds nothing.
+	code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "checkout", "--agent", "--service-name", "checkout", "--cluster-uid", uid}, RunOptions{})
+	require.NotZero(t, code)
+	detail := agentError(t, stdout)
+	require.Equal(t, "validation_error", detail.Code)
+	require.Equal(t, "repo-scope set: --cluster-uid narrows the --workload names; pass --namespace and --workload with it", detail.Message)
+	require.Equal(t, before, readScopeFile(t, repo))
+}
+
 // A refused set must leave a committed file exactly as it was.
 func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 	localRepoScopeConfig(t)
@@ -256,6 +280,7 @@ func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 		{"process group id", []string{"--process-group", "PG-1"}, reposcope.FileName},
 		{"service name", []string{"--service-name", `a"b`}, reposcope.FileName},
 		{"namespace", []string{"--namespace", "Payments", "--workload", "checkout"}, reposcope.FileName},
+		{"cluster name", []string{"--cluster-uid", "prod-eu", "--namespace", "payments", "--workload", "checkout"}, reposcope.FileName},
 		{"path outside", []string{"--service-name", "checkout", "--path", "../elsewhere"}, reposcope.FileName},
 		{"path taken", []string{"--service-name", "checkout", "--path", "services/ledger"}, reposcope.FileName},
 		{"two paths", []string{"--service-name", "checkout", "--path", "services/checkout", "--path", "libs/cart"}, "repo-scope set"},
@@ -285,7 +310,7 @@ func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 func TestRepoScopeSetFlagsRejectEmptyValues(t *testing.T) {
 	localRepoScopeConfig(t)
 	chdirTestRepo(t, "")
-	for _, flag := range []string{"service", "process-group", "service-name", "namespace", "workload", "path"} {
+	for _, flag := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "path"} {
 		code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "checkout", "--service-name", "checkout", "--" + flag, " "}, RunOptions{})
 		require.Equal(t, client.ExitUsageError, code, "--%s: %s", flag, stderr)
 	}

@@ -77,6 +77,7 @@ func newRepoScopeSetCmd() *cobra.Command {
 		services      []string
 		processGroups []string
 		serviceNames  []string
+		clusterUID    string
 		namespace     string
 		workloads     []string
 		entryPaths    []string
@@ -95,6 +96,10 @@ half of it. Nothing is sent to Dynatrace.
 Examples:
   # Bind a Kubernetes workload and its OpenTelemetry service name
   dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout
+
+  # Bind the workload in one cluster, where several run that namespace and name
+  dtctl repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 \
+    --namespace payments --workload checkout
 
   # Bind entity ids, for one directory of a monorepo
   dtctl repo-scope set ledger --path services/ledger \
@@ -116,8 +121,14 @@ Examples:
 			if len(entryPaths) == 1 {
 				entry.Path = path.Clean(filepath.ToSlash(entryPaths[0]))
 			}
+			if clusterUID != "" && len(workloads) == 0 {
+				return &reposcope.InvalidError{
+					Source: "repo-scope set",
+					Msg:    "--cluster-uid narrows the --workload names; pass --namespace and --workload with it",
+				}
+			}
 			for _, w := range workloads {
-				entry.Workloads = append(entry.Workloads, reposcope.Workload{Namespace: namespace, Name: w})
+				entry.Workloads = append(entry.Workloads, reposcope.Workload{ClusterUID: clusterUID, Namespace: namespace, Name: w})
 			}
 			return setRepoScope(cmd, entry)
 		},
@@ -125,10 +136,11 @@ Examples:
 	c.Flags().StringArrayVar(&services, "service", nil, "service id, SERVICE-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&processGroups, "process-group", nil, "process group id, PROCESS_GROUP-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&serviceNames, "service-name", nil, "OpenTelemetry service.name (repeatable)")
+	c.Flags().StringVar(&clusterUID, "cluster-uid", "", "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
 	c.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
 	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
-	for _, name := range []string{"service", "process-group", "service-name", "namespace", "workload", "path"} {
+	for _, name := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "path"} {
 		rejectEmptyFlag(c, name)
 	}
 	c.MarkFlagsRequiredTogether("namespace", "workload")
