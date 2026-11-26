@@ -520,6 +520,21 @@ func TestRepoScopeDiscoverPathAndTerm(t *testing.T) {
 	require.Equal(t, "validation_error", agentError(t, stdout).Code)
 }
 
+// A repository with more source files than discovery reads: the dry run says
+// so with the values, since those are then not all the repository's names.
+func TestRepoScopeDiscoverDryRunSaysWhatWasNotRead(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	repo := chdirCheckoutRepo(t)
+	files := map[string]string{}
+	for i := 0; i <= 2000; i++ {
+		files[fmt.Sprintf("conf/f%04d.yaml", i)] = "a: b\n"
+	}
+	writeRepoFiles(t, repo, files)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "\nThe repository holds more than 2000 build files, Dockerfiles and manifests, and discovery reads that many, so names in the rest were not sent; add one with --term\n")
+}
+
 // --dry-run is the disclosure: it prints every query and value and sends
 // nothing, so it works before there is a token, and without a context at all.
 func TestRepoScopeDiscoverDryRunNeedsNoToken(t *testing.T) {

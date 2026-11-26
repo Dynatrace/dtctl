@@ -275,17 +275,23 @@ func (b *gradleBuild) owners(m string) []string {
 
 // gradleBuildAt is the Gradle build holding dir, read the way discovery
 // reads it, or nil. With no settings file at or above dir it is nil without
-// a walk. Nothing is deployed in it: the caller says what is.
+// a walk, and the walk it does starts at the build's own directory, never at
+// the repository root: resolving an entry calls this on every scoped query.
+// Nothing is deployed in it: the caller says what is.
 func gradleBuildAt(fsys fs.FS, dir string) *gradleBuild {
-	for d := dir; !slices.ContainsFunc(gradleSettingsFiles, func(f string) bool {
-		_, err := fs.Stat(fsys, path.Join(d, f))
+	root := dir
+	for ; !slices.ContainsFunc(gradleSettingsFiles, func(f string) bool {
+		_, err := fs.Stat(fsys, path.Join(root, f))
 		return err == nil
-	}); d = path.Dir(d) {
-		if topDir(d) {
+	}); root = path.Dir(root) {
+		if topDir(root) {
 			return nil
 		}
 	}
-	files, err := listSources(fsys, dir, func(f string) bool { return isGradleFile(path.Base(f)) })
+	if inSkippedDir(root) {
+		return nil
+	}
+	files, _, err := listSources(fsys, root, dir, func(f string) bool { return isGradleFile(path.Base(f)) })
 	if err != nil {
 		return nil
 	}

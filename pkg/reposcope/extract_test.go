@@ -284,27 +284,89 @@ func TestExtract_TokensCarryTheirVariants(t *testing.T) {
 }
 
 func TestExtract_Limits(t *testing.T) {
-	t.Run("too many files", func(t *testing.T) {
-		fsys := fstest.MapFS{"go.mod": {Data: []byte("module example.invalid/after-the-cap\n")}}
+	// conf/ fills the cap before anything after it is reached.
+	overTheCap := func(files map[string]string) fstest.MapFS {
+		fsys := fstest.MapFS{}
 		for i := 0; i <= maxFiles; i++ {
 			fsys[fmt.Sprintf("conf/f%04d.yaml", i)] = &fstest.MapFile{Data: []byte("a: b\n")}
 		}
+		for name, data := range files {
+			fsys[name] = &fstest.MapFile{Data: []byte(data)}
+		}
+		return fsys
+	}
+	t.Run("too many files", func(t *testing.T) {
+		s, err := extract(overTheCap(map[string]string{
+			"deploy/zz.yaml": "kind: Deployment\nmetadata:\n  name: after-the-cap\n",
+		}), ".")
+		require.NoError(t, err)
+		assert.Empty(t, s.tokens)
+		assert.True(t, s.capped, "stopping at the cap is reported")
+	})
+	t.Run("a repository under the cap is read whole", func(t *testing.T) {
+		fsys := overTheCap(nil)
+		delete(fsys, "conf/f0000.yaml")
 		s, err := extract(fsys, ".")
 		require.NoError(t, err)
-		assert.Empty(t, s.tokens, "conf/ fills the cap before go.mod is reached")
+		assert.False(t, s.capped)
+	})
+	t.Run("the cap never loses the unit", func(t *testing.T) {
+		// The unit of the directory discovery was asked about is found by
+		// looking at that directory and the ones above it, whatever the
+		// walk reached. Without it the whole repository was the unit, and a
+		// line for it would have covered every service in it.
+		fsys := overTheCap(map[string]string{
+			"go.mod":               "module example.invalid/platform\n",
+			"zz/go.mod":            "module example.invalid/ledger-writer\n",
+			"zz/internal/store.go": "package store\n",
+			"zy/go.mod":            "module example.invalid/another-unit\n",
+		})
+		for _, dir := range []string{"zz", "zz/internal"} {
+			s, err := extract(fsys, dir)
+			require.NoError(t, err)
+			assert.Equal(t, "zz", s.unit, dir)
+			assert.Equal(t, []string{"module ledger-writer zz/go.mod:1"}, tokenLines(s.tokens), dir)
+			assert.True(t, s.capped, dir)
+		}
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.Equal(t, ".", s.unit)
+		assert.Equal(t, []string{"module platform go.mod:1"}, tokenLines(s.tokens))
+	})
+	t.Run("the cap does not lead into a dependency tree", func(t *testing.T) {
+		s, err := extract(overTheCap(map[string]string{"vendor/thing/go.mod": "module example.invalid/vendored-thing\n"}), "vendor/thing")
+		require.NoError(t, err)
+		assert.Equal(t, ".", s.unit)
+		assert.Equal(t, []string{"dir thing vendor/thing/"}, tokenLines(s.tokens))
 	})
 	t.Run("too deep", func(t *testing.T) {
 		fsys := fstest.MapFS{
 			"a/b/c/d/e/leaf/go.mod":        {Data: []byte("module example.invalid/shallow-enough\n")},
 			"a/b/c/d/e/leaf/deeper/go.mod": {Data: []byte("module example.invalid/too-deep\n")},
 		}
-		s, err := extract(fsys, "a/b/c/d/e/leaf/deeper")
+		s, err := extract(fsys, "a/b/c/d/e/leaf")
 		require.NoError(t, err)
 		assert.Equal(t, "a/b/c/d/e/leaf", s.unit)
 		assert.Equal(t, []string{
 			"dir leaf a/b/c/d/e/leaf/",
 			"module shallow-enough a/b/c/d/e/leaf/go.mod:1",
 		}, tokenLines(s.tokens))
+	})
+	t.Run("the directory asked about is read however deep", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"a/b/c/d/e/f/g/go.mod":                 {Data: []byte("module example.invalid/ledger-writer\n")},
+			"a/b/c/d/e/f/g/deployment.yaml":        {Data: []byte("kind: Deployment\nmetadata:\n  name: ledger-writer-v2\n")},
+			"a/b/c/d/e/f/g/deeper/deployment.yaml": {Data: []byte("kind: Deployment\nmetadata:\n  name: below-the-asked-directory\n")},
+			"a/b/c/d/e/f/other/go.mod":             {Data: []byte("module example.invalid/beside-it\n")},
+		}
+		s, err := extract(fsys, "a/b/c/d/e/f/g")
+		require.NoError(t, err)
+		assert.Equal(t, "a/b/c/d/e/f/g", s.unit)
+		assert.Equal(t, []string{
+			"workload ledger-writer-v2 a/b/c/d/e/f/g/deployment.yaml:3",
+			"module ledger-writer a/b/c/d/e/f/g/go.mod:1",
+		}, tokenLines(s.tokens))
+		assert.False(t, s.capped)
 	})
 	t.Run("too large", func(t *testing.T) {
 		big := "module example.invalid/huge\n" + strings.Repeat("// padding\n", maxFileBytes/10)
@@ -612,6 +674,46 @@ func TestExtract_Gradle(t *testing.T) {
 			assert.Equal(t, tt.sharedBy, s.sharedBy)
 		})
 	}
+}
+
+// listedFS records the directories that are listed.
+type listedFS struct {
+	fstest.MapFS
+	listed *[]string
+}
+
+func (f listedFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	*f.listed = append(*f.listed, name)
+	return f.MapFS.ReadDir(name)
+}
+
+// Resolving an entry with a path reads the Gradle build around the working
+// directory on every scoped query. Only that build's directory is walked, not
+// the repository from its root.
+func TestGradleBuildAtWalksOnlyTheBuild(t *testing.T) {
+	var listed []string
+	fsys := listedFS{fstest.MapFS{
+		"docs/guide/index.md":              {Data: []byte("x\n")},
+		"services/other/go.mod":            {Data: []byte("module example.invalid/other\n")},
+		"apps/shop/settings.gradle.kts":    {Data: []byte("include(\":web\", \":core\")\n")},
+		"apps/shop/web/build.gradle.kts":   {Data: []byte("dependencies { implementation(project(\":core\")) }\n")},
+		"apps/shop/core/build.gradle.kts":  {Data: []byte("plugins { java }\n")},
+		"apps/shop/build/build.gradle.kts": {Data: []byte("plugins { java }\n")},
+	}, &listed}
+	b := gradleBuildAt(fsys, "apps/shop/web")
+	require.NotNil(t, b)
+	assert.Equal(t, "apps/shop", b.dir)
+	assert.Equal(t, map[string][]string{"apps/shop/web": {"apps/shop/core"}, "apps/shop/core": nil}, b.modules)
+	assert.ElementsMatch(t, []string{"apps/shop", "apps/shop/web", "apps/shop/core"}, listed)
+
+	// A build inside a directory discovery never enters is none, as before.
+	require.Nil(t, gradleBuildAt(fstest.MapFS{
+		"vendor/lib/settings.gradle":   {Data: []byte("include ':a'\n")},
+		"vendor/lib/a/build.gradle":    {Data: []byte("\n")},
+		"build/gen/settings.gradle":    {Data: []byte("include ':a'\n")},
+		"node_modules/x/build.gradle":  {Data: []byte("\n")},
+		"node_modules/settings.gradle": {Data: []byte("\n")},
+	}, "vendor/lib/a"))
 }
 
 // noWalkFS fails the test when a directory is listed.

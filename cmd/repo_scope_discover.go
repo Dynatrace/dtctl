@@ -290,6 +290,9 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 		if len(plan.Dropped) > 0 {
 			report.Linef("Names that look like test fixtures are not sent: %s; use --term to send one", quotedValues(plan.Dropped))
 		}
+		if note := plan.TruncationNote(); note != "" {
+			report.Linef("%s", capitalize(note))
+		}
 	}
 	if len(plan.Queries) == 0 {
 		report.Linef("Dry run: no usable name found for unit %q; %s", plan.Unit, repoScopeNarrowHint)

@@ -100,6 +100,9 @@ type signals struct {
 	// sharedBy are the Gradle deployables that share the library module
 	// discovery ran for; nothing is sent for the module itself.
 	sharedBy []string
+	// capped reports that the walk stopped at maxFiles, so names of the
+	// unit, and other units that would have claimed some, may be missing.
+	capped bool
 }
 
 // extract reads the names the repository at fsys gives the unit holding dir,
@@ -117,9 +120,19 @@ type signals struct {
 // module is part of what its build deploys.
 func extract(fsys fs.FS, dir string) (*signals, error) {
 	dir = path.Clean(dir)
-	files, err := listSources(fsys, dir, func(f string) bool { return sourceFor(f) != nil })
+	files, capped, err := listSources(fsys, ".", dir, func(f string) bool { return sourceFor(f) != nil })
 	if err != nil {
 		return nil, err
+	}
+	if capped {
+		// What the walk did not reach must not move the unit: a build file
+		// it missed would make the whole repository the unit of a directory
+		// that has one of its own.
+		for _, f := range unitSourcesAbove(fsys, dir) {
+			if !slices.Contains(files, f) {
+				files = append(files, f)
+			}
+		}
 	}
 	var found []sourceNames
 	gradle := map[string]string{}
@@ -156,13 +169,13 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 		if nameDir == "." {
 			nameDir = dir
 		}
-		return newSignals(unit, unitTokens(units, found, unit, nameDir)), nil
+		return newSignals(unit, unitTokens(units, found, unit, nameDir), capped), nil
 	}
 	unit, sharedBy := build.unitOf(dir, unit)
 	if len(sharedBy) > 0 {
-		return &signals{unit: unit, sharedBy: sharedBy}, nil
+		return &signals{unit: unit, sharedBy: sharedBy, capped: capped}, nil
 	}
-	return newSignals(unit, unitTokens(units, found, unit, unit)), nil
+	return newSignals(unit, unitTokens(units, found, unit, unit), capped), nil
 }
 
 // unitTokens collects the names of unit: nameDir's own name unless it is the
@@ -186,8 +199,8 @@ func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string
 // newSignals holds the unit's test names back from its tokens. They are held
 // back here rather than where they are read, so that what is reported as held
 // back is this unit's, not every unit's.
-func newSignals(unit string, tokens []token) *signals {
-	s := &signals{unit: unit}
+func newSignals(unit string, tokens []token, capped bool) *signals {
+	s := &signals{unit: unit, capped: capped}
 	dropped := map[string]bool{}
 	for _, t := range tokens {
 		// A namespace is never sent, only matched, so holding one back
@@ -218,35 +231,66 @@ func dirSource(dir string) string {
 	return dir + "/"
 }
 
-// listSources lists the files keep accepts, for discovery from dir. Only
-// those count toward maxFiles.
-func listSources(fsys fs.FS, dir string, keep func(string) bool) ([]string, error) {
-	var files []string
-	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
+// listSources lists the files keep accepts under root, for discovery from
+// dir, and reports whether it stopped at maxFiles; only kept files count
+// toward that. The directories on the way to dir are entered whatever their
+// depth or name, short of skippedDirs: discovery asked about a directory
+// reads it.
+func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []string, capped bool, err error) {
+	err = fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, walkErr error) error {
 		switch {
 		case walkErr != nil:
-			if p == "." {
+			if p == root {
 				return walkErr
 			}
 			return nil
 		case d.IsDir():
-			if p != "." && (skippedDirs[d.Name()] || strings.Count(p, "/")+1 > maxDepth ||
-				(excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))] && !onPath(p, dir))) {
+			if p != root && (skippedDirs[d.Name()] || (!onPath(p, dir) &&
+				(strings.Count(p, "/")+1 > maxDepth || excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))]))) {
 				return fs.SkipDir
 			}
 			return nil
 		case !d.Type().IsRegular() || !keep(p) || testFile(d.Name()):
 			return nil
 		case len(files) == maxFiles:
+			capped = true
 			return fs.SkipAll
 		}
 		files = append(files, p)
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read repository: %w", err)
+		return nil, false, fmt.Errorf("read repository: %w", err)
 	}
-	return files, nil
+	return files, capped, nil
+}
+
+// unitSourcesAbove lists the files that make a unit (build files and
+// Dockerfiles) in dir and in each directory above it, by reading those
+// directories rather than walking the repository. Like the walk it reads no
+// test file and nothing at or below one of skippedDirs.
+func unitSourcesAbove(fsys fs.FS, dir string) []string {
+	var files []string
+	for d := dir; ; d = path.Dir(d) {
+		if !inSkippedDir(d) {
+			entries, _ := fs.ReadDir(fsys, d)
+			for _, e := range entries {
+				f := path.Join(d, e.Name())
+				if src := sourceFor(f); src != nil && src.makesUnit && e.Type().IsRegular() && !testFile(e.Name()) {
+					files = append(files, f)
+				}
+			}
+		}
+		if topDir(d) {
+			return files
+		}
+	}
+}
+
+// inSkippedDir reports whether dir is one of skippedDirs or below one, where
+// the walk never goes.
+func inSkippedDir(dir string) bool {
+	return slices.ContainsFunc(strings.Split(dir, "/"), func(name string) bool { return skippedDirs[name] })
 }
 
 // onPath reports whether p is dir or one of its ancestors. Discovery asked

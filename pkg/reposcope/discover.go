@@ -146,8 +146,22 @@ type Plan struct {
 	// Dropped are the unit's names held back because they look like test
 	// fixtures; a --term sends one anyway.
 	Dropped []string `json:"dropped,omitempty" yaml:"dropped,omitempty"`
-	Queries []Query  `json:"queries" yaml:"queries"`
-	tokens  []token
+	// Truncated reports that the repository holds more source files than
+	// discovery reads. The unit is still the right one, but names in the
+	// files left unread are missing from Sent, so a report from this plan
+	// is partial. See TruncationNote.
+	Truncated bool    `json:"truncated,omitempty" yaml:"truncated,omitempty"`
+	Queries   []Query `json:"queries" yaml:"queries"`
+	tokens    []token
+}
+
+// TruncationNote says what a Truncated plan leaves out, for whoever shows the
+// plan or its report; "" for a plan that read the repository whole.
+func (p *Plan) TruncationNote() string {
+	if !p.Truncated {
+		return ""
+	}
+	return fmt.Sprintf("the repository holds more than %d build files, Dockerfiles and manifests, and discovery reads that many, so names in the rest were not sent; add one with --term", maxFiles)
 }
 
 // PlanDiscovery reads the names repo gives the unit holding dir and plans the
@@ -184,7 +198,7 @@ func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Dir: dir, Unit: s.unit, SharedBy: s.sharedBy,
+	p := &Plan{Dir: dir, Unit: s.unit, SharedBy: s.sharedBy, Truncated: s.capped,
 		Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens}
 	p.Dropped = heldBack(s.dropped, p.Sent)
 	switch n := len(p.Sent); {
@@ -482,8 +496,9 @@ type DiscoveryReport struct {
 	Sent  []string `json:"sent" yaml:"sent"`
 	Notes []string `json:"notes,omitempty" yaml:"notes,omitempty"`
 	// Partial is a query that failed, timed out, was truncated or never ran
-	// because the run was cancelled, or a sample that matched nothing, so a
-	// "none" is not evidence that nothing runs this code. A sample that
+	// because the run was cancelled, a sample that matched nothing, or a
+	// repository too large to read whole (Plan.Truncated), so a "none" is
+	// not evidence that nothing runs this code. A sample that
 	// matched is complete at the floor its note states.
 	Partial bool `json:"partial,omitempty" yaml:"partial,omitempty"`
 }
@@ -500,6 +515,11 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 	}
 	if len(p.Dropped) > 0 {
 		r.note(fmt.Sprintf("names that look like test fixtures are not sent: %s; use --term to send one", strings.Join(p.Dropped, ", ")))
+	}
+	if p.Truncated {
+		// A name that was not sent could have found a second candidate.
+		r.Partial = true
+		r.note(p.TruncationNote())
 	}
 	for i := range r.Queries {
 		q := &r.Queries[i]

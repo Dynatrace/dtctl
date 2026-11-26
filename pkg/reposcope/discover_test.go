@@ -381,6 +381,37 @@ func TestPlan_AnOverlongNameIsNotAName(t *testing.T) {
 	require.ErrorContains(t, err, "is longer than the 253 characters a workload or service name has")
 }
 
+// A repository with more source files than discovery reads still gets a plan
+// for the right unit, but names in the files it did not reach were not sent,
+// and what they would have found could be a second candidate. The plan says
+// so, and a report from it is partial, so never a match.
+func TestDiscover_FileCapMakesTheReportPartial(t *testing.T) {
+	fsys := fstest.MapFS{"zz/go.mod": {Data: []byte("module example.invalid/ledger-writer\n")}}
+	for i := 0; i <= maxFiles; i++ {
+		fsys[fmt.Sprintf("conf/f%04d.yaml", i)] = &fstest.MapFile{Data: []byte("a: b\n")}
+	}
+	p, err := PlanDiscovery(fsys, "zz", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "zz", p.Unit)
+	assert.Equal(t, []string{"ledger-writer", "ledger.writer", "ledger_writer", "ledgerwriter"}, p.Sent)
+	assert.True(t, p.Truncated)
+	const note = "the repository holds more than 2000 build files, Dockerfiles and manifests, and discovery reads that many, so names in the rest were not sent; add one with --term"
+	assert.Equal(t, note, p.TruncationNote())
+
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: []map[string]interface{}{{fieldNamespace: "prod", fieldWorkload: "ledger-writer", fieldRecords: float64(10)}}}},
+	}}, p, prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.True(t, r.Partial)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	assert.Contains(t, r.Notes, note)
+
+	whole := singleGo(t)
+	assert.False(t, whole.Truncated)
+	assert.Empty(t, whole.TruncationNote())
+}
+
 // A name that looks like a test fixture is held back, but a --term never
 // passes through that rule: a user who means it can send it.
 func TestPlan_TermsBypassTestNames(t *testing.T) {
