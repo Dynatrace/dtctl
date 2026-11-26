@@ -1,6 +1,7 @@
 package reposcope
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 )
@@ -10,37 +11,54 @@ import (
 // filtered by labels its processes carry, under the same names as the record
 // fields a query is filtered by:
 //
-//	one set per namespace: k8s.namespace.name, k8s.workload.name
+//	one set per namespace: k8s.namespace.name, k8s.workload.name,
+//	                       and k8s.cluster.uid where a workload binds one
 //	service names:         service.name
 //	process group ids:     dt.entity.process_group
 //
 // Within a set every label must match and any of its values may, so a
 // namespace with its workloads is one set: the pair a workload binding is.
-// The sets are alternatives, as the clauses Render OR-es are, and come in a
-// fixed order: the workload sets first, by namespace, then the service names
-// and the process group ids. Both rules are Live Debugger's and verified
-// against an environment, as are the namespace, workload and process group
-// labels; service.name is not yet. Service ids are left out: a workspace does
-// not honour dt.entity.service as a label, so a set of them selects nothing.
+// Workloads bound to a cluster are a set of their own per cluster, carrying
+// its uid as a third label, so the set selects what the binding does. The
+// sets are alternatives, as the clauses Render OR-es are, and come in a
+// fixed order: the workload sets first, by namespace and then cluster, then
+// the service names and the process group ids. Both rules are Live
+// Debugger's and verified against an environment, as are the namespace,
+// workload and process group labels; service.name and k8s.cluster.uid are
+// not yet. Service ids are left out: a workspace does not honour
+// dt.entity.service as a label, so a set of them selects nothing.
+//
+// The cluster label is sent unverified because the alternative is worse: a
+// set without it would place breakpoints in the same workload of a cluster
+// the entry leaves out. If a workspace turns out not to carry the label, a
+// set with it selects nothing, which shows.
 //
 // Values are sorted copies, never quoted: a filter set is a GraphQL variable,
 // not DQL. ok is false, with a reason, when e binds nothing a label can
 // carry: only service ids, or a binding kind added later.
 func LiveDebuggerFilters(e *Entry) (sets []map[string][]string, ok bool, reason string) {
-	byNamespace := map[string][]string{}
+	type scope struct{ namespace, cluster string }
+	names := map[scope][]string{}
 	for _, w := range e.Workloads {
-		byNamespace[w.Namespace] = append(byNamespace[w.Namespace], w.Name)
+		in := scope{w.Namespace, w.ClusterUID}
+		names[in] = append(names[in], w.Name)
 	}
-	namespaces := make([]string, 0, len(byNamespace))
-	for ns := range byNamespace {
-		namespaces = append(namespaces, ns)
+	scopes := make([]scope, 0, len(names))
+	for in := range names {
+		scopes = append(scopes, in)
 	}
-	slices.Sort(namespaces)
-	for _, ns := range namespaces {
-		sets = append(sets, map[string][]string{
-			fieldNamespace: {ns},
-			fieldWorkload:  sortedCopy(byNamespace[ns]),
-		})
+	slices.SortFunc(scopes, func(a, b scope) int {
+		return cmp.Or(cmp.Compare(a.namespace, b.namespace), cmp.Compare(a.cluster, b.cluster))
+	})
+	for _, in := range scopes {
+		set := map[string][]string{
+			fieldNamespace: {in.namespace},
+			fieldWorkload:  sortedCopy(names[in]),
+		}
+		if in.cluster != "" {
+			set[fieldClusterUID] = []string{in.cluster}
+		}
+		sets = append(sets, set)
 	}
 	for _, label := range []struct {
 		field  string
@@ -67,7 +85,7 @@ func LiveDebuggerFilters(e *Entry) (sets []map[string][]string, ok bool, reason 
 // rendering of LiveDebuggerFilters: the set a workspace can take from an
 // entry without the caller asking for the rest. ok is false when sets holds
 // no such set, because the entry binds no workload, or several, because its
-// workloads run in more than one namespace.
+// workloads run in more than one namespace or cluster.
 func WorkloadFilterSet(sets []map[string][]string) (set map[string][]string, ok bool) {
 	var found []map[string][]string
 	for _, s := range sets {

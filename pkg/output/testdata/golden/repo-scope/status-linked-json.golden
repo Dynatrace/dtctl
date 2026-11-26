@@ -29,6 +29,9 @@
   },
   "liveDebuggerFilters": [
     {
+      "k8s.cluster.uid": [
+        "11111111-2222-3333-4444-555555555555"
+      ],
       "k8s.namespace.name": [
         "payments"
       ],
