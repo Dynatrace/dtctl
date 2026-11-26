@@ -562,8 +562,15 @@ func loginSafetyLevels(cfg *config.Config, contextName, tokenName string, flagLe
 	} else if nc, err := cfg.GetContext(contextName); err == nil {
 		stored := nc.Context.SafetyLevel
 		if !stored.IsValid() {
-			return loginLevels{}, fmt.Errorf("context %q has an invalid safety level %q (valid values: %v): pass --safety-level to set it",
-				contextName, stored, config.ValidSafetyLevels())
+			return loginLevels{}, &diagnostic.Error{
+				Operation: "auth login",
+				Message: fmt.Sprintf("context %q stores the safety level %q, which is not a valid value (valid values: %s)",
+					contextName, stored, validSafetyLevelList()),
+				Suggestions: []string{
+					fmt.Sprintf("Give the context a valid level, then log in again: dtctl ctx set %s --safety-level <level>", contextName),
+					fmt.Sprintf("Or set it with the login: dtctl auth login --context %s --safety-level <level>", contextName),
+				},
+			}
 		}
 		levels.saved = stored
 		if stored != "" {

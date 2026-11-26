@@ -1337,13 +1337,22 @@ func TestLoginSafetyLevels(t *testing.T) {
 	t.Run("an invalid stored level is refused", func(t *testing.T) {
 		cfg := withContext("read-only")
 		_, err := loginSafetyLevels(cfg, "ctx", "ctx-oauth", config.DefaultSafetyLevel, false)
-		if err == nil {
-			t.Fatal("want an error for the stored level \"read-only\"")
+		var diagErr *diagnostic.Error
+		if !errors.As(err, &diagErr) {
+			t.Fatalf("err = %T %v, want a diagnostic.Error", err, err)
 		}
-		for _, want := range []string{`"ctx"`, `"read-only"`, "--safety-level"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error %q does not name %s", err, want)
-			}
+		if diagErr.Operation != "auth login" {
+			t.Errorf("operation = %q, want %q", diagErr.Operation, "auth login")
+		}
+		if want := `context "ctx" stores the safety level "read-only", which is not a valid value (valid values: readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)`; diagErr.Message != want {
+			t.Errorf("message = %q\nwant      %q", diagErr.Message, want)
+		}
+		wantSuggestions := []string{
+			"Give the context a valid level, then log in again: dtctl ctx set ctx --safety-level <level>",
+			"Or set it with the login: dtctl auth login --context ctx --safety-level <level>",
+		}
+		if !slices.Equal(diagErr.Suggestions, wantSuggestions) {
+			t.Errorf("suggestions = %q, want %q", diagErr.Suggestions, wantSuggestions)
 		}
 		// The flag is the way out, so it must still work.
 		got, err := loginSafetyLevels(cfg, "ctx", "ctx-oauth", config.SafetyLevelReadOnly, true)
@@ -1351,6 +1360,27 @@ func TestLoginSafetyLevels(t *testing.T) {
 			t.Errorf("with the flag: saved %q, requested %q, err %v", got.saved, got.requested, err)
 		}
 	})
+}
+
+// TestLoginSafetyLevels_RefusalHasOneAgentCode: the agent-mode code of the
+// refusal must not depend on what the context is called. As a plain error it
+// was classified by its text, and the text quotes the context's name.
+func TestLoginSafetyLevels_RefusalHasOneAgentCode(t *testing.T) {
+	for _, name := range []string{"viewer", "timeout-env", "my-config", "no context here"} {
+		cfg := config.NewConfig()
+		cfg.SetContextWithOptions(name, "https://abc12345.apps.dynatrace.com", "t-oauth", &config.ContextOptions{SafetyLevel: "read-only"})
+		_, err := loginSafetyLevels(cfg, name, "t-oauth", config.DefaultSafetyLevel, false)
+		if err == nil {
+			t.Fatalf("context %q: no error", name)
+		}
+		detail := errorToDetail(context.Background(), err)
+		if detail.Code != "error" {
+			t.Errorf("context %q: code %q, want %q", name, detail.Code, "error")
+		}
+		if len(detail.Suggestions) != 2 {
+			t.Errorf("context %q: %d suggestions, want 2: %q", name, len(detail.Suggestions), detail.Suggestions)
+		}
+	}
 }
 
 // TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes: a .dtctl.yaml found
@@ -1561,7 +1591,7 @@ func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 
 	t.Run("an invalid stored level stops the login before a token is requested", func(t *testing.T) {
 		_, err, granted, saved := run(t, "read-only")
-		if err == nil || !strings.Contains(err.Error(), `invalid safety level "read-only"`) {
+		if err == nil || !strings.Contains(err.Error(), `context "viewer" stores the safety level "read-only", which is not a valid value`) {
 			t.Errorf("err = %v, want the invalid-level error", err)
 		}
 		if granted {
