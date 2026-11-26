@@ -244,6 +244,36 @@ func TestInventoryRunnerByteCutIsTruncated(t *testing.T) {
 	}
 }
 
+// A probe's Sampled flag is the response's metadata.sampled and nothing else.
+// The sampled recovery of a scan-capped signal extrapolates a count only from
+// a result that carries it, so a runner that set it from the query text would
+// multiply the full count of an object Grail declined to sample, and one that
+// dropped it would leave every capped signal unknown.
+func TestInventoryRunnerCopiesSampledFromTheResponse(t *testing.T) {
+	const dql = `fetch logs, from:now()-15m, samplingRatio:1000 | filter true | summarize matched = count()`
+	for _, tc := range []struct {
+		name     string
+		metadata string
+		want     bool
+	}{
+		{"flagged", `{"grail":{"queryId":"q","sampled":true}}`, true},
+		{"flagged false", `{"grail":{"queryId":"q","sampled":false}}`, false},
+		{"flag absent", `{"grail":{"queryId":"q"}}`, false},
+		{"no metadata", `null`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"state":"SUCCEEDED","result":{"records":[{"matched":"3"}],"metadata":` + tc.metadata + `}}`
+			res, err := newGrailRecorder(t, body).runner(t, 0).RunQuery(context.Background(), dql)
+			if err != nil {
+				t.Fatalf("RunQuery: %v", err)
+			}
+			if res.Sampled != tc.want {
+				t.Errorf("Sampled = %v, want %v: the query asked for sampling either way", res.Sampled, tc.want)
+			}
+		})
+	}
+}
+
 // Both discovery commands take the flag, and a negative value is refused:
 // dtctl sends only a positive limit, so -1 would silently mean "no limit".
 func TestInventoryMaxResultBytesFlag(t *testing.T) {
