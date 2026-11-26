@@ -239,6 +239,10 @@ func TestSuggest_HabitsConservative(t *testing.T) {
 			Query: "fetch logs | count by log.source", Span: span(14, 18)}},
 		{"an unknown command with no DQL synonym", Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"groupby"},
 			Query: "fetch logs | groupby log.source", Span: span(14, 20)}},
+		// The scan reads a # as masked text, so the command it reports for
+		// the last stage does not start where the stage's text does.
+		{"a # typed before a later command word", Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+			Query: "fetch logs | head 1 | #where x == 1", Span: span(14, 17)}},
 		{"unterminated single quote", Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
 			Query: "fetch logs | filter a == 'x", Span: span(26, 27)}},
 	}
