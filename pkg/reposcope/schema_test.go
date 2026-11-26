@@ -56,7 +56,7 @@ func TestDecode_Example(t *testing.T) {
 }
 
 func TestDecode_EmptyIsAnEmptyFile(t *testing.T) {
-	for _, in := range []string{"", "\n", "# only a comment\n"} {
+	for _, in := range []string{"", "\n", "\f\n", "# only a comment\n"} {
 		f, err := decode([]byte(in))
 		require.Nil(t, err, "%q", in)
 		assert.True(t, f.Empty())
@@ -132,7 +132,7 @@ func TestCheck(t *testing.T) {
 		{name: "a trailing explicit null", doc: entry("name: checkout", "service-names: [checkout]") + "---\n~\n"},
 
 		{name: "apiVersion v2", doc: "apiVersion: v2\n" + entry("name: checkout", "service-names: [checkout]"),
-			msg: `apiVersion "v2" is not supported (this dtctl reads "v1")`},
+			msg: `apiVersion "v2" on line 1 is not supported (this dtctl reads "v1")`},
 		{name: "uppercase host", doc: "environments:\n  ABC12345.apps.dynatrace.com:\n    - name: checkout\n      service-names: [checkout]\n",
 			msg: `environment "ABC12345.apps.dynatrace.com" must be written as the bare host "abc12345.apps.dynatrace.com"`},
 		{name: "host with a scheme", doc: "environments:\n  https://abc12345.apps.dynatrace.com:\n    - name: checkout\n      service-names: [checkout]\n",
