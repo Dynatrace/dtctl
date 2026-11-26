@@ -127,12 +127,15 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 	if capped {
 		// What the walk did not reach must not move the unit: a build file
 		// it missed would make the whole repository the unit of a directory
-		// that has one of its own.
-		for _, f := range unitSourcesAbove(fsys, dir) {
-			if !slices.Contains(files, f) {
-				files = append(files, f)
-			}
+		// that has one of its own. Those files take the place of the last
+		// ones walked, so that no more than maxFiles are read either way.
+		above := unitSourcesAbove(fsys, dir)
+		recovered := make(map[string]bool, len(above))
+		for _, f := range above {
+			recovered[f] = true
 		}
+		files = slices.DeleteFunc(files, func(f string) bool { return recovered[f] })
+		files = append(files[:min(len(files), maxFiles-len(above))], above...)
 	}
 	var found []sourceNames
 	gradle := map[string]string{}
@@ -340,7 +343,9 @@ func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []
 // unitSourcesAbove lists the files that make a unit (build files and
 // Dockerfiles) in dir and in each directory above it, by reading those
 // directories rather than walking the repository. Like the walk it reads no
-// test file and nothing at or below one of skippedDirs.
+// test file and nothing at or below one of skippedDirs, and lists no more than
+// maxFiles: dir's own come first, so it is the directories furthest above it
+// that a repository with that many build files in one place loses.
 func unitSourcesAbove(fsys fs.FS, dir string) []string {
 	var files []string
 	for d := dir; ; d = path.Dir(d) {
@@ -349,6 +354,9 @@ func unitSourcesAbove(fsys fs.FS, dir string) []string {
 			for _, e := range entries {
 				f := path.Join(d, e.Name())
 				if src := sourceFor(f); src != nil && src.makesUnit && e.Type().IsRegular() && !testFile(e.Name()) {
+					if len(files) == maxFiles {
+						return files
+					}
 					files = append(files, f)
 				}
 			}

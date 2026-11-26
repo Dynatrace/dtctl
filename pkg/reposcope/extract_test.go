@@ -385,6 +385,65 @@ func TestExtract_Limits(t *testing.T) {
 	})
 }
 
+// openedFS records the files that are opened.
+type openedFS struct {
+	fstest.MapFS
+	opened map[string]bool
+}
+
+func (f openedFS) Open(name string) (fs.File, error) {
+	f.opened[name] = true
+	return f.MapFS.Open(name)
+}
+
+// The files read in place of the ones the walk did not reach count toward
+// the same bound: a directory that itself holds more build files than
+// discovery reads must not be read past it, and the unit is still found.
+func TestExtract_TheCapBoundsWhatIsRead(t *testing.T) {
+	sources := func(f openedFS) (n int) {
+		for name := range f.opened {
+			if sourceFor(name) != nil {
+				n++
+			}
+		}
+		return n
+	}
+	many := func(fsys fstest.MapFS, n int, name string, data string) {
+		for i := range n {
+			fsys[fmt.Sprintf(name, i)] = &fstest.MapFile{Data: []byte(data)}
+		}
+	}
+	t.Run("build files in the directory itself", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+25, "p%04d.csproj", "<Project/>\n")
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.True(t, s.capped)
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
+	t.Run("build files of the unit after the cap", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+100, "a/f%04d.yaml", "a: b\n")
+		many(fsys.MapFS, 500, "zz/p%04d.csproj", "<Project/>\n")
+		fsys.MapFS["zz/go.mod"] = &fstest.MapFile{Data: []byte("module example.invalid/ledger-writer\n")}
+		s, err := extract(fsys, "zz")
+		require.NoError(t, err)
+		assert.True(t, s.capped)
+		assert.Equal(t, "zz", s.unit)
+		assert.Contains(t, tokenLines(s.tokens), "module ledger-writer zz/go.mod:1")
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
+	t.Run("more build files above than discovery reads", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+25, "p%04d.csproj", "<Project/>\n")
+		fsys.MapFS["zz/go.mod"] = &fstest.MapFile{Data: []byte("module example.invalid/ledger-writer\n")}
+		s, err := extract(fsys, "zz")
+		require.NoError(t, err)
+		assert.Equal(t, "zz", s.unit, "the directory's own files are read before those above it")
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
+}
+
 func TestExtract_TestContentIsNotRead(t *testing.T) {
 	dirs := []string{"Tests", "src/test/resources"}
 	for dir := range excludedDirs {
