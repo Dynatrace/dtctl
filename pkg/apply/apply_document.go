@@ -32,7 +32,7 @@ func (a *Applier) applyDocument(data []byte, docType string, opts ApplyOptions) 
 	}
 
 	// Extract and validate content - handle round-trippable format from 'get' command
-	contentData, name, description, validationWarnings := extractDocumentContent(doc, docType)
+	contentData, name, description, validationWarnings := extractDocumentContent(data, doc, docType)
 
 	// Labels come from --label flags (opts.Labels) when supplied; otherwise they
 	// ride along in the exported document ('get document -o yaml') so a round-trip
@@ -275,9 +275,12 @@ func extractDocumentLabels(doc map[string]interface{}) []string {
 	return labels
 }
 
-// extractDocumentContent extracts the content from a document, handling various input formats
+// extractDocumentContent extracts the content from a document, handling various input formats.
+// doc is the parsed form of data and is only used for inspection; the returned
+// content is taken from data as written, so object key order is preserved
+// (apps such as Notebooks derive e.g. table column order from it).
 // Returns: contentData, name, description, warnings
-func extractDocumentContent(doc map[string]interface{}, docType string) ([]byte, string, string, []string) {
+func extractDocumentContent(data []byte, doc map[string]interface{}, docType string) ([]byte, string, string, []string) {
 	var warnings []string
 	name, _ := doc["name"].(string)
 	description, _ := doc["description"].(string)
@@ -286,11 +289,13 @@ func extractDocumentContent(doc map[string]interface{}, docType string) ([]byte,
 	if content, hasContent := doc["content"]; hasContent {
 		contentMap, isMap := content.(map[string]interface{})
 		if isMap {
+			rawContent := rawJSONField(data, "content")
 			// Check for double-nested content (common mistake)
 			if innerContent, hasInner := contentMap["content"]; hasInner {
 				if inner, ok := innerContent.(map[string]interface{}); ok {
 					warnings = append(warnings, "detected double-nested content (.content.content) - using inner content")
 					contentMap = inner
+					rawContent = rawJSONField(rawContent, "content")
 				}
 			}
 
@@ -308,8 +313,7 @@ func extractDocumentContent(doc map[string]interface{}, docType string) ([]byte,
 				}
 			}
 
-			contentData, _ := json.Marshal(contentMap)
-			return contentData, name, description, warnings
+			return compactJSON(rawContent), name, description, warnings
 		}
 	}
 
@@ -318,22 +322,41 @@ func extractDocumentContent(doc map[string]interface{}, docType string) ([]byte,
 	if docType == "dashboard" {
 		if _, hasTiles := doc["tiles"]; hasTiles {
 			// This is direct content format
-			contentData, _ := json.Marshal(doc)
-			return contentData, name, description, warnings
+			return compactJSON(data), name, description, warnings
 		}
 		warnings = append(warnings, "document has no 'content' or 'tiles' field - structure may be incorrect")
 	} else if docType == "notebook" {
 		if _, hasSections := doc["sections"]; hasSections {
 			// This is direct content format
-			contentData, _ := json.Marshal(doc)
-			return contentData, name, description, warnings
+			return compactJSON(data), name, description, warnings
 		}
 		warnings = append(warnings, "document has no 'content' or 'sections' field - structure may be incorrect")
 	}
 
 	// Fall back to using the whole document as content
-	contentData, _ := json.Marshal(doc)
-	return contentData, name, description, warnings
+	return compactJSON(data), name, description, warnings
+}
+
+// rawJSONField returns the raw bytes of a field of a JSON object, or nil if
+// data is not an object or lacks the field. Unlike decoding into
+// map[string]interface{} and re-marshalling, this keeps the field's nested
+// key order intact.
+func rawJSONField(data []byte, key string) []byte {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil
+	}
+	return fields[key]
+}
+
+// compactJSON strips insignificant whitespace from JSON without reordering
+// keys. data is returned unchanged if it is not valid JSON.
+func compactJSON(data []byte) []byte {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, data); err != nil {
+		return data
+	}
+	return buf.Bytes()
 }
 
 // countDocumentItems counts tiles (for dashboards) or sections (for notebooks)
@@ -427,11 +450,11 @@ func (a *Applier) documentURL(docType, id string) string {
 
 // dryRunDocument performs dry-run validation for a document of any type
 // (dashboard, notebook, or a custom type).
-func (a *Applier) dryRunDocument(docType string, doc map[string]interface{}) (ApplyResult, error) {
+func (a *Applier) dryRunDocument(docType string, data []byte, doc map[string]interface{}) (ApplyResult, error) {
 	id, _ := doc["id"].(string)
 
 	// Use the same extraction/validation logic as apply
-	contentData, name, _, warnings := extractDocumentContent(doc, docType)
+	contentData, name, _, warnings := extractDocumentContent(data, doc, docType)
 	if name == "" {
 		name = fmt.Sprintf("Untitled %s", docType)
 	}
