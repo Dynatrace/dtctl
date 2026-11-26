@@ -135,6 +135,8 @@ For one invocation: the entry named by `--repo-scope`, regardless of its path; o
 
 Naming an entry turns each of these into an error before anything is sent, because the caller asked for that entry's rows: a file that does not load is a `validation_error`, an unknown name `not_found`, and every refusal of the rewrite (`not_fetch`, `unsupported_object`, `no_binding`, `subquery`, `unscannable`) a `validation_error` naming the code. `user_filter` is the exception: the user's own filter on a bound field is the answer they asked for, so it runs as typed with the warning.
 
+Resolving a scope sends nothing, and `query` keeps the order of work it had before scopes existed: the storage-scope precheck, the query limits, the flag checks and the resolution of `--segment` come first, each where it always was, and only then does the scope read its entry's segments and print its line. A command line that is refused therefore sends, and prints, what it does without a scope, and with scoping off `query` makes the requests it always made, in the same order (`TestQuery_ScopingOffSendsWhatMainSends` records them).
+
 The stability check exists because scoping is experimental, but only its two flags carry the mark, on commands that are themselves stable; a floor that hides the flags would otherwise leave the rewrite running while refusing its opt-out. So without a name, the policy the floor applied must admit both `--repo-scope` and `--no-repo-scope` on the command, or the query is sent as typed and nothing is printed. A `stability-exceptions` entry for each admits it; one for `--repo-scope` alone admits naming an entry. `DTCTL_NO_REPO_SCOPE` works under any floor.
 
 ## The rewrite
@@ -298,7 +300,7 @@ Candidates are keyed by cluster, namespace, workload and service name, so the re
 
 - `pkg/dql` and `pkg/reposcope`: the scanner and the insertion table, with both invariants on every row, and the fuzz targets `FuzzInsertFilter`, `FuzzScan`, `FuzzUngroupedCount` and `FuzzQuote` (`go test ./pkg/dql/ -run '^$' -fuzz '^FuzzInsertFilter$' -fuzztime 30s`); schema, store, resolution, rendering, extraction over fixture repositories, and discovery over a fixture runner
 - `pkg/output/testdata/golden/repo-scope/` and `cmd/testdata/golden/repo-scope/`: the structured printers and the terminal output of every subcommand
-- Guards: `TestQueryRepoScope_UnlinkedIsByteIdentical` (outside a linked repository nothing changes; each disabling factor is paired with a positive control), `TestQueryRepoScope_StableFloor`, `TestRepoScopeCodesAreDocumented`, `TestQueryRepoScope_SegmentUnavailable` (a deleted segment never fails a default-scoped query), `TestRepoScopeDiscoverKeepsNoState` (by each file's mode and sha256), and `cmd/main_test.go`, which fails the run if the checkout's own scope file changed
+- Guards: `TestQueryRepoScope_UnlinkedIsByteIdentical` (outside a linked repository nothing changes; each disabling factor is paired with a positive control), `TestQuery_ScopingOffSendsWhatMainSends` (with scoping off, the same requests in the same order as before the feature, and the same refusals), `TestQueryRepoScope_StableFloor`, `TestRepoScopeCodesAreDocumented`, `TestQueryRepoScope_SegmentUnavailable` (a deleted segment never fails a default-scoped query), `TestRepoScopeDiscoverKeepsNoState` (by each file's mode and sha256), and `cmd/main_test.go`, which fails the run if the checkout's own scope file changed
 
 ## Follow-ups
 

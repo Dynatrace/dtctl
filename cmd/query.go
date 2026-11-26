@@ -294,42 +294,17 @@ Examples:
 				query = rendered
 			}
 
+			// Resolving the repo scope reads the disk and sends nothing. What
+			// it sends, and what it says, comes after the checks below.
 			scoped, err := applyRepoScope(cmd, cfg, query)
 			if err != nil {
 				return err
 			}
-			// The command line's segments come first: one the entry also
-			// references is the user's, so the entry's copy is neither read
-			// nor reported, and a flag that cannot be used fails before the
-			// scope says anything.
-			if err := scoped.refuseSegmentVars(cmd); err != nil {
-				return err
-			}
-			segments, err := querySegments(cmd, c)
-			if err != nil {
-				return err
-			}
-			if err := scoped.yieldTo(segments); err != nil {
-				return err
-			}
-			if err := scoped.checkSegments(c); err != nil {
-				return err
-			}
-			segments = scoped.withSegments(segments)
-			query = scoped.Query
-
-			// Query limits resolve flag -> context config -> global config -> server
-			// default, so a context-level ceiling also covers invocations that never
-			// passed the flags. See resolveQueryLimits.
-			queryLimits, err := resolveQueryLimits(cmd, cfg)
-			if err != nil {
-				return err
-			}
-			scoped.announce(&queryLimits)
 
 			// Fail fast, before any request, when the query provably needs a
 			// storage scope the token lacks — instead of one NOT_AUTHORIZED_FOR_TABLE
-			// per query an agent fans out.
+			// per query an agent fans out. The typed text is checked: the
+			// filter a scope inserts fetches nothing new.
 			if err := dqlScopePrecheck(cmdContext(cmd), query); err != nil {
 				return err
 			}
@@ -340,6 +315,14 @@ Examples:
 			width, _ := cmd.Flags().GetInt("width")
 			height, _ := cmd.Flags().GetInt("height")
 			fullscreen, _ := cmd.Flags().GetBool("fullscreen")
+
+			// Query limits resolve flag -> context config -> global config -> server
+			// default, so a context-level ceiling also covers invocations that never
+			// passed the flags. See resolveQueryLimits.
+			queryLimits, err := resolveQueryLimits(cmd, cfg)
+			if err != nil {
+				return err
+			}
 
 			// Get query execution options
 			fetchTimeoutSeconds, _ := cmd.Flags().GetInt32("fetch-timeout-seconds")
@@ -397,6 +380,17 @@ Examples:
 				}
 			}
 
+			// The command line's segments. A --segment-var aimed at a segment
+			// only the entry references is refused first, with the spelling
+			// that works.
+			if err := scoped.refuseSegmentVars(cmd); err != nil {
+				return err
+			}
+			segments, err := querySegments(cmd, c)
+			if err != nil {
+				return err
+			}
+
 			clientContext, _ := cmd.Flags().GetString("client-context")
 
 			// Resolved against the effective format, so the agent-mode -o auto
@@ -426,6 +420,21 @@ Examples:
 			for _, w := range bounds.Warnings {
 				output.FprintWarning(currentStderr(cmdContext(cmd)), "%s", w)
 			}
+			// Every local check has passed. The scope now reads the entry's
+			// segments, which is its first request, and says what it applied;
+			// so a command line refused above sends and prints exactly what
+			// it does without a scope. A segment the user also named is
+			// theirs: the entry's copy is neither read nor reported.
+			if err := scoped.yieldTo(segments); err != nil {
+				return err
+			}
+			if err := scoped.checkSegments(c); err != nil {
+				return err
+			}
+			segments = scoped.withSegments(segments)
+			query = scoped.Query
+			scoped.announce(&queryLimits)
+
 			spillTenantID, spillContextName := spillProvenance(cfg)
 			// A Parquet spill derives its columnar schema from DQL types, so request
 			// them even when the displayed output format does not — same reasoning as
