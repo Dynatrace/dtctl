@@ -22,24 +22,51 @@ import (
 // for what decode refuses on purpose.
 func legacyDecode(data []byte) (*File, *InvalidError) {
 	unknownFieldRe := regexp.MustCompile(`^line (\d+): field (.+) not found in type reposcope\.(\w+)$`)
-	narrowingTypes := map[string]string{"Entry": "an entry", "Workload": "a workload", "Segment": "a segment"}
+	narrowingTypes := map[string]string{"fileEntry": "an entry", "fileWorkload": "a workload", "Segment": "a segment"}
 
 	f := &File{}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return f, nil
 	}
-	if err := yaml.Unmarshal(data, f); err != nil {
+	// It filled the structs that carry the file's spelling in their tags.
+	var doc fileDoc
+	fill := func() {
+		f.APIVersion = doc.APIVersion
+		if doc.Environments != nil {
+			f.Environments = map[string][]Entry{}
+		}
+		for host, entries := range doc.Environments {
+			var out []Entry
+			if entries != nil {
+				out = []Entry{}
+			}
+			for _, e := range entries {
+				entry := Entry{Name: e.Name, Path: e.Path, ServiceNames: e.ServiceNames, ProcessGroups: e.ProcessGroups,
+					Services: e.Services, Segments: e.Segments, Annotations: e.Annotations}
+				if e.Workloads != nil {
+					entry.Workloads = []Workload{}
+				}
+				for _, w := range e.Workloads {
+					entry.Workloads = append(entry.Workloads, Workload(w))
+				}
+				out = append(out, entry)
+			}
+			f.Environments[host] = out
+		}
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
 		var typeErr *yaml.TypeError
 		if errors.As(err, &typeErr) {
 			return nil, invalid("does not match the repo scope schema: " + err.Error())
 		}
 		return nil, invalid("not valid YAML: " + err.Error())
 	}
+	fill()
 	strict := yaml.NewDecoder(bytes.NewReader(data))
 	strict.KnownFields(true)
 	var typeErr *yaml.TypeError
 	var narrowing []string
-	if err := strict.Decode(&File{}); errors.As(err, &typeErr) {
+	if err := strict.Decode(&fileDoc{}); errors.As(err, &typeErr) {
 		for _, msg := range typeErr.Errors {
 			m := unknownFieldRe.FindStringSubmatch(msg)
 			if m == nil {

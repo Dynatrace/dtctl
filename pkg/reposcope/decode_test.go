@@ -2,6 +2,7 @@ package reposcope
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -195,4 +196,46 @@ func BenchmarkDecode_Hostile(b *testing.B) {
 			}
 		})
 	}
+}
+
+// The file is written through types of its own, which spell its keys. A
+// field added to an entry or a workload and not to them would be read, shown
+// and then dropped by the next save, so the two are held field for field,
+// and an entry with every field set is written and read back whole.
+func TestFileTypesCarryEveryField(t *testing.T) {
+	for _, pair := range [][2]reflect.Type{
+		{reflect.TypeFor[Entry](), reflect.TypeFor[fileEntry]()},
+		{reflect.TypeFor[Workload](), reflect.TypeFor[fileWorkload]()},
+	} {
+		model, file := pair[0], pair[1]
+		require.Equal(t, model.NumField(), file.NumField(), "%s and %s", model, file)
+		for i := range model.NumField() {
+			assert.Equal(t, model.Field(i).Name, file.Field(i).Name, "%s field %d", file, i)
+		}
+	}
+
+	full := Entry{
+		Name: "checkout", Path: "services/checkout",
+		Workloads:     []Workload{{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"}},
+		ServiceNames:  []string{"checkout"},
+		ProcessGroups: []string{pgID},
+		Services:      []string{svcID},
+		Segments:      []Segment{{ID: "Ab3dEf9hIjk", Variables: map[string][]string{"environment": {"production"}}}},
+		Annotations:   map[string]string{"owner": "team-payments"},
+	}
+	for _, v := range []reflect.Value{reflect.ValueOf(full), reflect.ValueOf(full.Workloads[0]), reflect.ValueOf(full.Segments[0])} {
+		for i := range v.NumField() {
+			require.False(t, v.Field(i).IsZero(), "%s.%s is not set, so the test does not cover it", v.Type(), v.Type().Field(i).Name)
+		}
+	}
+	f := &File{APIVersion: apiVersion, Environments: map[string][]Entry{prodHost: {full}}}
+	data, err := encode(f)
+	require.NoError(t, err)
+	back, invalidErr := decode(data)
+	require.Nil(t, invalidErr)
+	assert.Equal(t, f, back)
+	assert.Contains(t, string(data), "cluster-uid: ")
+	assert.Contains(t, string(data), "service-names:")
+	assert.Contains(t, string(data), "process-groups:")
+	assert.NotRegexp(t, `(?m)^[ -]*[A-Za-z-]*[a-z][A-Z][A-Za-z]*:`, strings.SplitN(string(data), "apiVersion: v1\n", 2)[1], "a camelCase key in the file")
 }

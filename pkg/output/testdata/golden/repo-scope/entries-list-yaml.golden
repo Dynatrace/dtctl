@@ -1,12 +1,12 @@
 - name: checkout
   path: services/checkout
   workloads:
-    - cluster-uid: 11111111-2222-3333-4444-555555555555
+    - clusterUid: 11111111-2222-3333-4444-555555555555
       namespace: payments
       name: checkout
-  service-names:
+  serviceNames:
     - checkout
-  process-groups:
+  processGroups:
     - PROCESS_GROUP-FEDCBA9876543210
   services:
     - SERVICE-0123456789ABCDEF

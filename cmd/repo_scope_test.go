@@ -711,7 +711,7 @@ func TestRepoScopeHumanOutput(t *testing.T) {
 }
 
 // The structured views carry the same Status in every format the printers
-// offer, and list keeps the file's own spelling in YAML.
+// offer, with its keys spelt the same way in each.
 func TestRepoScopeStructuredOutput(t *testing.T) {
 	localRepoScopeConfig(t)
 	chdirTestRepo(t, monorepoScope)
@@ -753,7 +753,13 @@ func TestRepoScopeStructuredOutput(t *testing.T) {
 
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "-o", "yaml"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, "service-names:")
+	// One spelling in every structured format: camelCase, in YAML too, and
+	// the same through --jq, which reads the JSON. Kebab-case is the file's.
+	_, viaJQ, _ := runRepoScoped([]string{"repo-scope", "list", "-o", "yaml", "--jq", "."}, RunOptions{})
+	for _, out := range []string{stdout, viaJQ} {
+		require.Contains(t, out, "serviceNames:")
+		require.NotContains(t, out, "service-names:")
+	}
 	code, stdout, _ = runRepoScoped([]string{"repo-scope", "ls", "--agent"}, RunOptions{})
 	require.Zero(t, code)
 	require.Equal(t, 2, *agentEnvelope(t, stdout).Context.Total)

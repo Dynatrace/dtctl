@@ -27,8 +27,8 @@ const apiVersion = "v1"
 // machine, hosts are not, which is the same reasoning the config contract
 // applies to token bindings.
 type File struct {
-	APIVersion   string             `yaml:"apiVersion,omitempty"`
-	Environments map[string][]Entry `yaml:"environments"`
+	APIVersion   string
+	Environments map[string][]Entry
 
 	// unknown is every key the document holds that File does not model, as
 	// "name" on line N. Save refuses while it is set: writing would drop them.
@@ -38,39 +38,42 @@ type File struct {
 // Entry is one named binding set. A query run from Path (or any directory
 // under it) is scoped to these bindings; an Entry without Path covers the
 // whole repository. A Path that is a Gradle deployable's module also covers
-// the modules it depends on (see Resolve). The file spells its keys in
-// kebab-case, results in camelCase.
+// the modules it depends on (see Resolve).
+//
+// The tags are the spelling of a result, camelCase in every format a command
+// prints. The file spells its keys in kebab-case, and is read and written
+// through its own types (see fileEntry).
 //
 // The bindings are listed, here and wherever they are shown, in the order
 // they are preferred in: the Kubernetes workload, the service name, then the
 // two entity ids, whose fields are deprecated, the process group before the
 // service.
 type Entry struct {
-	Name          string     `yaml:"name" json:"name"`
-	Path          string     `yaml:"path,omitempty" json:"path,omitempty"`
-	Workloads     []Workload `yaml:"workloads,omitempty" json:"workloads,omitempty"`
-	ServiceNames  []string   `yaml:"service-names,omitempty" json:"serviceNames,omitempty"`
-	ProcessGroups []string   `yaml:"process-groups,omitempty" json:"processGroups,omitempty"`
-	Services      []string   `yaml:"services,omitempty" json:"services,omitempty"`
+	Name          string     `json:"name" yaml:"name"`
+	Path          string     `json:"path,omitempty" yaml:"path,omitempty"`
+	Workloads     []Workload `json:"workloads,omitempty" yaml:"workloads,omitempty"`
+	ServiceNames  []string   `json:"serviceNames,omitempty" yaml:"serviceNames,omitempty"`
+	ProcessGroups []string   `json:"processGroups,omitempty" yaml:"processGroups,omitempty"`
+	Services      []string   `json:"services,omitempty" yaml:"services,omitempty"`
 	// Segments are existing filter segments a query under the entry sends
 	// beside its text. Unlike the bindings they are not alternatives: every
 	// one must hold, together with the filter the bindings render. An entry
 	// may hold nothing else.
-	Segments []Segment `yaml:"segments,omitempty" json:"segments,omitempty"`
+	Segments []Segment `json:"segments,omitempty" yaml:"segments,omitempty"`
 	// Annotations are notes on the entry, for people and for other tools.
 	// dtctl checks their form, keeps them when it rewrites the file and
 	// never reads them: no annotation changes what an entry covers or
 	// selects, in this dtctl or a later one. It is the one place in an
 	// entry where a key this dtctl does not know may be written.
-	Annotations map[string]string `yaml:"annotations,omitempty" json:"annotations,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 }
 
 // Segment references one filter segment of the environment by its id, with
 // the values of the variables it declares. A name is never accepted: it can
 // be changed, or given to a second segment, under a committed file.
 type Segment struct {
-	ID        string              `yaml:"id" json:"id"`
-	Variables map[string][]string `yaml:"variables,omitempty" json:"variables,omitempty"`
+	ID        string              `json:"id" yaml:"id"`
+	Variables map[string][]string `json:"variables,omitempty" yaml:"variables,omitempty"`
 }
 
 // VariableNames is the names of the segment's variables, sorted.
@@ -105,9 +108,9 @@ func (s Segment) String() string {
 // cluster at all. It is the cluster's k8s.cluster.uid, never its name, which
 // is a label somebody chose and can change.
 type Workload struct {
-	ClusterUID string `yaml:"cluster-uid,omitempty" json:"clusterUid,omitempty"`
-	Namespace  string `yaml:"namespace" json:"namespace"`
-	Name       string `yaml:"name" json:"name"`
+	ClusterUID string `json:"clusterUid,omitempty" yaml:"clusterUid,omitempty"`
+	Namespace  string `json:"namespace" yaml:"namespace"`
+	Name       string `json:"name" yaml:"name"`
 }
 
 // String renders the workload as namespace/name, the way kubectl users read

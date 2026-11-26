@@ -376,6 +376,53 @@ func unknownKeys(keys []string) string {
 	return fmt.Sprintf("unknown %s %s (a typo, or written by a newer dtctl)", noun, strings.Join(keys, ", "))
 }
 
+// The file's own spelling: kebab-case keys, where Entry and Workload carry
+// the camelCase a result is printed in. encode writes through these types,
+// and the reader's key names are the same ones. A field added to Entry or
+// Workload is added here too, or it is not written; a test compares the
+// fields.
+type (
+	fileDoc struct {
+		APIVersion   string                 `yaml:"apiVersion"`
+		Environments map[string][]fileEntry `yaml:"environments"`
+	}
+	fileEntry struct {
+		Name          string            `yaml:"name"`
+		Path          string            `yaml:"path,omitempty"`
+		Workloads     []fileWorkload    `yaml:"workloads,omitempty"`
+		ServiceNames  []string          `yaml:"service-names,omitempty"`
+		ProcessGroups []string          `yaml:"process-groups,omitempty"`
+		Services      []string          `yaml:"services,omitempty"`
+		Segments      []Segment         `yaml:"segments,omitempty"`
+		Annotations   map[string]string `yaml:"annotations,omitempty"`
+	}
+	fileWorkload struct {
+		ClusterUID string `yaml:"cluster-uid,omitempty"`
+		Namespace  string `yaml:"namespace"`
+		Name       string `yaml:"name"`
+	}
+)
+
+// newFileDoc is f as Save writes it: at this dtctl's version, whether or not
+// the file it was read from stated one.
+func newFileDoc(f *File) fileDoc {
+	doc := fileDoc{APIVersion: apiVersion, Environments: make(map[string][]fileEntry, len(f.Environments))}
+	for host, entries := range f.Environments {
+		out := make([]fileEntry, len(entries))
+		for i, e := range entries {
+			out[i] = fileEntry{
+				Name: e.Name, Path: e.Path, ServiceNames: e.ServiceNames, ProcessGroups: e.ProcessGroups,
+				Services: e.Services, Segments: e.Segments, Annotations: e.Annotations,
+			}
+			for _, w := range e.Workloads {
+				out[i].Workloads = append(out[i].Workloads, fileWorkload(w))
+			}
+		}
+		doc.Environments[host] = out
+	}
+	return doc
+}
+
 // encode renders f the way Save writes it: the header, then the document
 // with two-space indentation. Map keys come out sorted, so the same File
 // always produces the same bytes. A written file states its version, whether
@@ -385,7 +432,7 @@ func encode(f *File) ([]byte, error) {
 	buf.WriteString(fileHeader)
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(File{APIVersion: apiVersion, Environments: f.Environments}); err != nil {
+	if err := enc.Encode(newFileDoc(f)); err != nil {
 		return nil, fmt.Errorf("encode %s: %w", FileName, err)
 	}
 	if err := enc.Close(); err != nil {

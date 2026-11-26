@@ -100,7 +100,7 @@ A namespace and a workload name identify a workload only within one cluster, so 
 
 `set` always replaces the named entry. There is no merge, no `--replace`, and no `--environment`: the root `--context` decides the host.
 
-The file's keys are kebab-case, like the config file. Results printed as JSON or YAML use camelCase like `sdk/inventory`, and the agent envelope's `context.repo_scope` uses snake_case like every other `context` key.
+The file's keys are kebab-case, like the config file. Results printed as JSON, YAML or TOON use camelCase like `sdk/inventory`, an entry inside a result included: a result is not the file, and one spelling per format would give `-o yaml` and `-o yaml --jq .` different keys for the same value. The file is therefore written through types of its own, and the entry type's tags are the result's. And the agent envelope's `context.repo_scope` uses snake_case like every other `context` key.
 
 ### Evolving the schema
 
