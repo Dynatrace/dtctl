@@ -228,6 +228,11 @@ func TestInsertFilter_ScanBounded(t *testing.T) {
 		{"fetch logs, scanLimitGBytes: $limit", true, false},
 		{"fetch logs, samplingRatio: toLong(100)", true, false},
 		{"fetch logs, samplingRatio: 1e5", true, false},
+		{"fetch logs, scanLimitGBytes:-1 + 2", true, false},
+		{"fetch logs, scanLimitGBytes: -1 /* x */ * -1 | limit 5", true, false},
+		{"fetch logs, scanLimitGBytes: 0 + 1", true, false},
+		{"fetch logs, scanLimitGBytes: -1 /* x */ , from:now()-1h", false, true},
+		{"fetch logs, scanLimitGBytes: -1 // x\n", false, true},
 		// Each parameter is judged by itself.
 		{"fetch logs, scanLimitGBytes: -1, samplingRatio: 100", true, true},
 		{"fetch logs, myscanLimitGBytes: 10", false, false},

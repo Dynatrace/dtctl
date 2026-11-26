@@ -322,8 +322,12 @@ func scanParameter(stage, param string, neutral float64) scanEffect {
 		value := stage[skipSpaceAndComments(stage, colon+1):]
 		number := numberRe.FindString(value)
 		n, err := strconv.ParseFloat(number, 64)
-		switch rest := value[len(number):]; {
-		case err != nil || (rest != "" && isNameByte(rest[0])):
+		// The number is the whole value only when the parameter ends after
+		// it: anything else before the next comma is an expression (-1 + 2).
+		rest := value[len(number):]
+		rest = rest[skipSpaceAndComments(rest, 0):]
+		switch {
+		case err != nil || (rest != "" && rest[0] != ','):
 			return scanBound
 		case n < 0:
 			return scanLifted
