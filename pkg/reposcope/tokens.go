@@ -73,18 +73,25 @@ var layoutWords = keySet("internal", "src", "source", "sources", "cmd", "pkg", "
 var testWords = keySet("test", "tests", "mock", "mocks", "fixture", "fixtures")
 
 // minTokenRunes is the shortest name worth sending: two letters match far too
-// much to be evidence of anything.
-const minTokenRunes = 3
+// much to be evidence of anything. maxTokenRunes is the longest: a Kubernetes
+// name has at most 253 characters, so a longer string a file holds where a
+// name belongs is not one, and would only make the queries longer.
+const (
+	minTokenRunes = 3
+	maxTokenRunes = 253
+)
 
 // variants are the spellings a name is matched under: its words (lowercased,
 // camelCase split, registry and image tag stripped) joined with "-", "_", "."
 // and nothing. Matching on record fields is exact, so "payment_service" in a
 // pom.xml has to reach Dynatrace as "payment-service" too. Names in stopWords
-// and names shorter than minTokenRunes have none.
+// and names shorter than minTokenRunes or longer than maxTokenRunes have none.
 func variants(raw string) []string {
-	words := splitWords(baseName(raw))
+	base := baseName(raw)
+	words := splitWords(base)
 	joined := strings.Join(words, "")
-	if len(words) == 0 || stopWords[strings.Join(words, "-")] || stopWords[joined] || utf8.RuneCountInString(joined) < minTokenRunes {
+	if len(words) == 0 || stopWords[strings.Join(words, "-")] || stopWords[joined] ||
+		utf8.RuneCountInString(joined) < minTokenRunes || utf8.RuneCountInString(base) > maxTokenRunes {
 		return nil
 	}
 	var out []string

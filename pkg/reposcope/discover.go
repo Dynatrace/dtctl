@@ -8,6 +8,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Dynatrace/dtctl/pkg/dql"
 	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
@@ -27,6 +28,13 @@ const (
 	// sampling ladder predicts a rung's scan against.
 	scanLimitBytes = ScanLimitGB * 1_000_000_000
 )
+
+// maxSentValues is the most values one discovery sends. Each is a clause of
+// every query and a word of the disclosure the user is asked to read, and a
+// unit one service is built from names a few dozen at most. A unit that names
+// more is refused rather than cut down: which names to leave out is not
+// discovery's to choose.
+const maxSentValues = 200
 
 // Why a query did not give a whole answer.
 const (
@@ -173,16 +181,27 @@ func PlanDiscovery(repo fs.FS, dir string, terms []string) (*Plan, error) {
 	p := &Plan{Dir: path.Clean(dir), Unit: s.unit, SharedBy: s.sharedBy,
 		Sent: sendValues(s.tokens, terms), Queries: []Query{}, tokens: s.tokens}
 	p.Dropped = heldBack(s.dropped, p.Sent)
-	if len(p.Sent) == 0 {
+	switch n := len(p.Sent); {
+	case n == 0:
 		return p, nil
+	case n > maxSentValues:
+		return nil, &InvalidError{Source: fmt.Sprintf("unit %q", p.Unit),
+			Msg: fmt.Sprintf("its files name %d values to look for, more than the %d one discovery sends", n, maxSentValues),
+			Suggestions: []string{
+				"run discover for one service: --path <a directory with its own build file or Dockerfile>",
+				"or link by hand: dtctl repo-scope set <name> --namespace <namespace> --workload <workload>",
+			}}
 	}
+	// The stages after the fetch line are the same in all eight record
+	// queries, so they are built once.
+	stages := recordStages(p.Sent)
 	for _, o := range []struct{ object, purpose string }{
 		{objectSpans, "spans by workload or service name"},
 		{objectLogs, "logs by workload or service name"},
 	} {
-		p.Queries = append(p.Queries, recordQuery(o.object, o.purpose, p.Sent))
+		p.Queries = append(p.Queries, recordQuery(o.object, o.purpose, stages))
 		for _, rung := range recordSamplingRungs {
-			p.Queries = append(p.Queries, sampledRecordQuery(o.object, o.purpose, p.Sent, rung))
+			p.Queries = append(p.Queries, sampledRecordQuery(o.object, o.purpose, stages, rung))
 		}
 	}
 	p.Queries = append(p.Queries,
@@ -218,6 +237,9 @@ func checkTerms(terms []string) ([]string, error) {
 			continue
 		case !PlainName(term):
 			return nil, &InvalidError{Source: "--term", Msg: fmt.Sprintf("%q may hold only letters, digits, '-', '_' and '.'", term)}
+		case utf8.RuneCountInString(term) > maxTokenRunes:
+			return nil, &InvalidError{Source: "--term",
+				Msg: fmt.Sprintf("%q is longer than the %d characters a workload or service name has", term, maxTokenRunes)}
 		case len(variants(term)) == 0:
 			return nil, &InvalidError{Source: "--term",
 				Msg: fmt.Sprintf("%q is not looked for: a name needs at least %d letters or digits and must not be a generic word such as api, server or web, which every environment holds many of",
@@ -251,31 +273,27 @@ func sendValues(tokens []token, terms []string) []string {
 	return sortedKeys(set)
 }
 
-func recordQuery(object, purpose string, values []string) Query {
-	return Query{Purpose: purpose, DataObject: object, DQL: recordDQL(
-		fmt.Sprintf("fetch %s, from:now()-%s, scanLimitGBytes:%d", object, discoveryWindow, ScanLimitGB),
-		fmt.Sprintf("%s = count()", fieldRecords),
-		values)}
+func recordQuery(object, purpose, stages string) Query {
+	return Query{Purpose: purpose, DataObject: object,
+		DQL: fmt.Sprintf("fetch %s, from:now()-%s, scanLimitGBytes:%d\n", object, discoveryWindow, ScanLimitGB) + stages}
 }
 
 // sampledRecordQuery is a record query's retry at one rung. Its records
 // column counts what the sample matched, the hits discovery reports, never
 // the population Grail would extrapolate them to.
-func sampledRecordQuery(object, purpose string, values []string, rung samplingRung) Query {
+func sampledRecordQuery(object, purpose, stages string, rung samplingRung) Query {
 	return Query{
 		Purpose:       fmt.Sprintf("%s (sampled 1-in-%d over %s)", purpose, rung.ratio, rung.window),
 		DataObject:    object,
 		Window:        rung.window,
 		SamplingRatio: rung.ratio,
 		step:          rung.step,
-		DQL: recordDQL(
-			fmt.Sprintf("fetch %s, from:now()-%s, scanLimitGBytes:%d, samplingRatio:%d", object, rung.window, ScanLimitGB, rung.ratio),
-			fmt.Sprintf("%s = count()", fieldRecords),
-			values),
+		DQL: fmt.Sprintf("fetch %s, from:now()-%s, scanLimitGBytes:%d, samplingRatio:%d\n", object, rung.window, ScanLimitGB, rung.ratio) +
+			stages,
 	}
 }
 
-// recordDQL groups by identity rather than by entity id: one workload can run
+// recordStages is a record query after its fetch line. It groups by identity rather than by entity id: one workload can run
 // as hundreds of service ids, and one row per id would fill the page with a
 // single candidate. Each id field is counted, which is the true total, and
 // collected up to discoveryIDLimit, which is what a binding can use.
@@ -297,7 +315,7 @@ func sampledRecordQuery(object, purpose string, values []string, rung samplingRu
 // row limit cuts the end of the page, and a busy environment can hold more
 // workloads that merely contain a name than the page has rows: sorted by
 // records alone, they would push the workload that is named exactly off it.
-func recordDQL(fetch, records string, values []string) string {
+func recordStages(values []string) string {
 	list := quotedList(values)
 	exact := fmt.Sprintf("in(%s, array(%s)) or in(%s, array(%s))", fieldWorkload, list, fieldServiceName, list)
 	inside := ""
@@ -329,11 +347,10 @@ func recordDQL(fetch, records string, values []string) string {
 		return fmt.Sprintf("    %s = countDistinct(%s), %s = collectDistinct(%s, maxLength:%d)%s", count, field, collected, field, discoveryIDLimit, end)
 	}
 	lines := []string{
-		fetch,
 		"| filter " + exact + inside,
 		// Several aggregations are grouped in braces; ungrouped, Grail
 		// answers with a PARAMETERS_SHOULD_BE_GROUPED notification.
-		fmt.Sprintf("| summarize {%s, %s = takeAny(%s),", records, fieldAnyClusterName, fieldClusterName),
+		fmt.Sprintf("| summarize {%s = count(), %s = takeAny(%s),", fieldRecords, fieldAnyClusterName, fieldClusterName),
 		ids(fieldServiceCount, fieldServices, fieldService, ","),
 		ids(fieldProcessGroupCount, fieldProcessGroups, fieldProcessGroup, "},"),
 		fmt.Sprintf("    by:{%s, %s, %s, %s}", fieldClusterUID, fieldNamespace, fieldWorkload, fieldServiceName),
@@ -377,8 +394,10 @@ func segmentPatterns(values []string) []string {
 			all = append(all, v)
 		}
 	}
+	// Both are in the spelling segmentable accepts, so one holds the other
+	// as a run of segments exactly when "-other-" is in "-one-".
 	return slices.DeleteFunc(slices.Clone(all), func(p string) bool {
-		return slices.ContainsFunc(all, func(o string) bool { return o != p && containsSegment(p, o) })
+		return slices.ContainsFunc(all, func(o string) bool { return o != p && strings.Contains("-"+p+"-", "-"+o+"-") })
 	})
 }
 

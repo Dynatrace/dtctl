@@ -310,6 +310,77 @@ func TestPlan_SentIsEveryValueInTheQueries(t *testing.T) {
 	}
 }
 
+// manifests is a repository of n workload manifests at its root, named by
+// name(i), which all belong to the root unit.
+func manifests(n int, name func(i int) string) fstest.MapFS {
+	fsys := fstest.MapFS{}
+	for i := 0; i < n; i++ {
+		fsys[fmt.Sprintf("deploy/w%04d.yaml", i)] = &fstest.MapFile{
+			Data: []byte("kind: Deployment\nmetadata:\n  name: " + name(i) + "\n")}
+	}
+	return fsys
+}
+
+// One run sends a bounded number of values: each is a clause of every query
+// and a word of the disclosure. A unit that names more is refused with the
+// count, never cut down to some of its names, and the refusal is quick: the
+// planner used to spend seconds comparing every name with every other first.
+func TestPlan_RefusesMoreValuesThanARunSends(t *testing.T) {
+	oneSpelling := func(i int) string { return fmt.Sprintf("ledger%04d", i) }
+	p, err := PlanDiscovery(manifests(maxSentValues, oneSpelling), ".", nil)
+	require.NoError(t, err)
+	require.Len(t, p.Sent, maxSentValues)
+	require.Len(t, p.Queries, 11)
+
+	began := time.Now()
+	p, err = PlanDiscovery(manifests(maxSentValues+1, oneSpelling), ".", nil)
+	var invalid *InvalidError
+	require.ErrorAs(t, err, &invalid)
+	assert.Nil(t, p)
+	assert.Equal(t, `unit ".": its files name 201 values to look for, more than the 200 one discovery sends`, err.Error())
+	assert.Equal(t, []string{
+		"run discover for one service: --path <a directory with its own build file or Dockerfile>",
+		"or link by hand: dtctl repo-scope set <name> --namespace <namespace> --workload <workload>",
+	}, invalid.Suggestions)
+
+	_, err = PlanDiscovery(manifests(1000, func(i int) string { return fmt.Sprintf("billing-engine-%04d", i) }), ".", nil)
+	require.ErrorContains(t, err, "its files name 4000 values to look for")
+	assert.Less(t, time.Since(began), 5*time.Second, "planning must not grow with the square of the names")
+
+	// A term counts like any other name.
+	_, err = PlanDiscovery(manifests(maxSentValues, oneSpelling), ".", []string{"one-more"})
+	require.ErrorContains(t, err, "more than the 200 one discovery sends")
+}
+
+// The text after the fetch line is the same in a record query and its
+// sampled retries, for both data objects.
+func TestPlan_RecordQueriesShareOneFilter(t *testing.T) {
+	p, err := PlanDiscovery(manifests(40, func(i int) string { return fmt.Sprintf("billing-engine-%04d", i) }), ".", nil)
+	require.NoError(t, err)
+	_, want, _ := strings.Cut(p.Queries[0].DQL, "\n")
+	for _, q := range p.Queries {
+		if !q.fallback() && !q.ProcessGroupCheck() {
+			_, body, _ := strings.Cut(q.DQL, "\n")
+			assert.Equal(t, want, body, q.Purpose)
+		}
+	}
+}
+
+// No workload or service is named in more characters than a Kubernetes name
+// may have, so a longer string in a manifest is not a name, and a longer
+// term is refused.
+func TestPlan_AnOverlongNameIsNotAName(t *testing.T) {
+	long := strings.Repeat("a", maxTokenRunes+1)
+	fsys := manifests(1, func(int) string { return long })
+	fsys["go.mod"] = &fstest.MapFile{Data: []byte("module example.invalid/" + long[1:] + "\n")}
+	p, err := PlanDiscovery(fsys, ".", nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{long[1:]}, p.Sent, "a name of exactly the limit is sent")
+
+	_, err = PlanDiscovery(fstest.MapFS{}, ".", []string{long})
+	require.ErrorContains(t, err, "is longer than the 253 characters a workload or service name has")
+}
+
 // A name that looks like a test fixture is held back, but a --term never
 // passes through that rule: a user who means it can send it.
 func TestPlan_TermsBypassTestNames(t *testing.T) {

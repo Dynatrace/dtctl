@@ -379,5 +379,6 @@ In agent mode `discover` returns its report as the envelope `result`, with each 
 
 - Only `fetch logs` and `fetch spans` are filtered by bindings. Metrics (`timeseries`), events and business events are not; their queries run unscoped with a warning, unless the entry references filter segments, which apply to them too.
 - Discovery looks at the last 24 hours, or the last hour when it has to sample, and says so in its notes. A service that has been quiet longer, quieter than a sample's floor, or that runs under a name the repository does not spell out, needs `--term` or a `set` by hand. So does a workload that only holds a name shorter than five letters and digits (`shop-cart` for `cart`), and a `service.name` that is longer than the repository's name: service names are compared whole.
+- One discovery sends at most 200 values. A unit whose files name more, such as a repository root that holds the manifests of many services, is refused with the count rather than cut down to some of them: run `discover` for one service with `--path`, or link by hand. A string longer than 253 characters is not read as a name.
 - Entity ids per candidate are counted exactly and listed up to 50; `-o json` has the list and the count (`serviceCount`, `servicesCapped`).
 - `inventory arrivals --scope` does not use the repo scope.
