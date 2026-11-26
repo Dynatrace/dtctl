@@ -8,8 +8,8 @@ A repo scope links the git repository you are working in to the Dynatrace entiti
 dtctl repo-scope current -A
 ```
 
-- `result.code: "linked"` — queries from here are already scoped to `result.entry`; `result.filters` shows the exact filter per data object. Query without naming the service.
-- any other `result.code` — no entry applies, and the code says why: `not_a_repository`, `no_file`, `no_entry_for_environment`, `no_entry` (none covers this directory; `result.others` lists the entries, select one with `--repo-scope <name>`), `ambiguous_entry` (`result.tied` lists the entries that cover it equally; select one the same way), or `invalid_file` (the file does not load; `result.reason` names the line, the user corrects it, and discovering again is not the fix).
+- `result.code: "linked"`: queries from here are already scoped to `result.entry`; `result.filters` shows the exact filter per data object. Query without naming the service.
+- any other `result.code`: no entry applies, and the code says why: `not_a_repository`, `no_file`, `no_entry_for_environment`, `no_entry` (none covers this directory; `result.others` lists the entries, select one with `--repo-scope <name>`), `ambiguous_entry` (`result.tied` lists the entries that cover it equally; select one the same way), or `invalid_file` (the file does not load; `result.reason` names the line, the user corrects it, and discovering again is not the fix).
 - `result.warning` — the file holds document keys this dtctl does not know (a typo, or a newer dtctl's). The entries apply without them; tell the user. An unknown key inside an entry is different: the file is not applied (`reason` names the key), because it could be a constraint.
 
 ## Link a repository
