@@ -1148,6 +1148,129 @@ func TestThinSampleSurvivesARefusedNextRung(t *testing.T) {
 	}
 }
 
+// TestNewestMatchOfTheWalkDatesTheHit: every rung asks the same scoped question
+// of the same window, so a record any of them matched is a record of this
+// scope, whether or not that response was sampled or ran to completion. The
+// hit the walk ends on supplies the count; the newest record the walk saw
+// supplies the age. Dating the hit by its own rung alone reported a signal
+// with a ten second old record as stale.
+func TestNewestMatchOfTheWalkDatesTheHit(t *testing.T) {
+	unflagged := func(r mockResponse) mockResponse { r.sampled = false; return r }
+	cut := func(r mockResponse) mockResponse {
+		r.truncated, r.cause = true, TruncationScanLimit
+		return r
+	}
+	for _, tc := range []struct {
+		name          string
+		rungs         []mockResponse
+		sampled       int64
+		ratio         int64
+		records       int64
+		lastSeen      string
+		age           int64
+		lastSeenRatio string
+	}{
+		{
+			name: "an unsampled response after a thin hit",
+			rungs: []mockResponse{
+				sampledRung(100000, 2, 200000, at(14, 0)),
+				unflagged(sampledRung(10000, 500, 500, at(0, 10))),
+			},
+			sampled: 2, ratio: 100000, records: 200000,
+			lastSeen: at(0, 10), age: 10, lastSeenRatio: "1-in-10k",
+		},
+		{
+			name: "a thin hit before a thicker, older one",
+			rungs: []mockResponse{
+				unflaggedEmptyRung(100000, true),
+				sampledRung(10000, 2, 20000, at(0, 20)),
+				sampledRung(1000, 40, 40000, at(9, 0)),
+			},
+			sampled: 40, ratio: 1000, records: 40000,
+			lastSeen: at(0, 20), age: 20, lastSeenRatio: "1-in-10k",
+		},
+		{
+			name: "a sampled response that was cut short",
+			rungs: []mockResponse{
+				sampledRung(100000, 2, 200000, at(14, 0)),
+				cut(sampledRung(10000, 7, 70000, at(0, 5))),
+			},
+			sampled: 2, ratio: 100000, records: 200000,
+			lastSeen: at(0, 5), age: 5, lastSeenRatio: "1-in-10k",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append(append([]mockResponse{cappedLogs()}, tc.rungs...), runner.responses...)
+
+			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+			if logs.State != SignalLive {
+				t.Fatalf("state = %q, want live: a rung of this walk matched a record %ds old (evidence: %s)", logs.State, tc.age, logs.Evidence)
+			}
+			if logs.LastSeen != tc.lastSeen || logs.AgeSeconds != tc.age {
+				t.Errorf("lastSeen/age = %q/%d, want %q/%d", logs.LastSeen, logs.AgeSeconds, tc.lastSeen, tc.age)
+			}
+			// The newer timestamp dates the hit and nothing else: the volume is
+			// still the sample's.
+			if logs.RecordsSampled != tc.sampled || logs.SamplingRatio != tc.ratio || logs.Records != tc.records {
+				t.Errorf("sampled/ratio/records = %d/%d/%d, want %d/%d/%d",
+					logs.RecordsSampled, logs.SamplingRatio, logs.Records, tc.sampled, tc.ratio, tc.records)
+			}
+			if got, want := len(sampledCalls(runner)), len(tc.rungs); got != want {
+				t.Errorf("ran %d sampled probes, want %d", got, want)
+			}
+			if want := "last-seen was read from the " + tc.lastSeenRatio + " probe"; !strings.Contains(logs.Evidence, want) {
+				t.Errorf("evidence %q should say %q: the age does not come from the sample the count does", logs.Evidence, want)
+			}
+			if strings.Contains(logs.Evidence, "unlikely to be in the sample") {
+				t.Errorf("evidence %q describes the bias of a timestamp it did not use", logs.Evidence)
+			}
+		})
+	}
+}
+
+// TestTiedTimestampStaysWithTheSample: the hit's own timestamp is the one
+// reported unless another rung saw a strictly newer record, so the evidence
+// keeps describing the sample's bias instead of crediting a rung that added
+// nothing.
+func TestTiedTimestampStaysWithTheSample(t *testing.T) {
+	runner := windowRunner()
+	refused := sampledRung(10000, 500, 500, at(0, 30))
+	refused.sampled = false
+	runner.responses = append([]mockResponse{
+		cappedLogs(), sampledRung(100000, 2, 200000, at(0, 30)), refused,
+	}, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State != SignalLive || logs.LastSeen != at(0, 30) {
+		t.Fatalf("state/lastSeen = %q/%q, want live/%q", logs.State, logs.LastSeen, at(0, 30))
+	}
+	if strings.Contains(logs.Evidence, "was read from") || !strings.Contains(logs.Evidence, "unlikely to be in the sample") {
+		t.Errorf("evidence %q should describe the sample's own timestamp", logs.Evidence)
+	}
+}
+
+// TestRungWithoutAMatchDatesNothing: a timestamp is evidence of arrival only
+// next to a match. A response that matched nothing may not make a signal
+// fresh, whatever its last_seen column holds.
+func TestRungWithoutAMatchDatesNothing(t *testing.T) {
+	runner := windowRunner()
+	rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, at(14, 0))}
+	for _, ratio := range []int64{10000, 1000, 100, 10} {
+		rungs = append(rungs, sampledRung(ratio, 0, 0, at(0, 5)))
+	}
+	runner.responses = append(rungs, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State == SignalLive || logs.LastSeen != at(14, 0) {
+		t.Errorf("state/lastSeen = %q/%q, want a signal that is not live and was last seen at %q: only the first rung matched a record",
+			logs.State, logs.LastSeen, at(14, 0))
+	}
+	if got := len(sampledCalls(runner)); got != 5 {
+		t.Errorf("ran %d sampled probes, want 5", got)
+	}
+}
+
 // TestCancellationEndsTheWalk: a run cancelled mid-walk surfaces the
 // cancellation from the walk itself and issues no further rung, also when the
 // rung before it was an empty one that the walk continues past. The walk is

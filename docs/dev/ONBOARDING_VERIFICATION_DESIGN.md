@@ -615,6 +615,12 @@ telemetry is not implicated.
     for 11 records over 15m, and under a second for 676. A `stale` verdict the bias alone could
     explain is therefore withheld as `unknown`, because inventing an ingest outage is the most
     expensive wrong answer this command can give (`TestSampledStaleInsideTheBiasIsUnknown`).
+    The age is therefore not taken from the hit alone. Every rung filters the same window by
+    the same scope, so a record any of them matched is a record of this scope, whether or not
+    that response was sampled or ran to completion. The hit the walk ends on supplies the
+    count and the ratio; the newest record the walk matched supplies last-seen, and the
+    evidence names the rung it came from when that is not the hit's own
+    (`TestNewestMatchOfTheWalkDatesTheHit`).
 
   The error sampling introduces shrinks with volume, and the cap only binds on high volume, so
   the two failure modes barely overlap: the signals sampling is imprecise about are the ones

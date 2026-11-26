@@ -61,12 +61,44 @@ const minSampledRecords = 30
 
 // sampledProbe is one rung's outcome.
 type sampledProbe struct {
+	// asked is the ratio the rung requested. It names the rung; it is never a
+	// multiplier.
+	asked int64
 	// ratio is the *effective* ratio, divided out of the data rather than
 	// copied from the request — see readSampledProbe.
 	ratio    int64
 	matched  int64 // records the sample actually matched
 	records  int64 // extrapolated population
 	lastSeen string
+}
+
+// sighting is the newest record a walk has matched so far, and the rung that
+// matched it.
+//
+// It is kept apart from the hit because the two answer different questions.
+// The hit is the sample the count is extrapolated from, so it has to be a
+// response that confirmed it sampled and ran to completion. A timestamp needs
+// neither: every rung filters the same window by the same scope, so a record
+// any of them matched is a record of this scope, and the newest of those is
+// the best lower bound on freshness the walk has.
+type sighting struct {
+	lastSeen string
+	at       time.Time
+	asked    int64
+}
+
+// newerSighting returns the later of seen and the newest record p matched. A
+// response that matched nothing dates nothing, whatever its last_seen column
+// holds, and neither does a timestamp that does not parse.
+func newerSighting(seen *sighting, p sampledProbe) *sighting {
+	if p.matched <= 0 {
+		return seen
+	}
+	at, err := parseGrailTime(p.lastSeen)
+	if err != nil || (seen != nil && at.Before(seen.at)) {
+		return seen
+	}
+	return &sighting{lastSeen: p.lastSeen, at: at, asked: p.asked}
 }
 
 // sampledProbeDQL builds a rung's probe.
@@ -82,9 +114,9 @@ func sampledProbeDQL(object string, opts DiscoverOptions, timeField string, rati
 		object, opts.Since, ratio, opts.Scope, timeField)
 }
 
-// readSampledProbe reads a rung's result.
-func readSampledProbe(res *RunResult) sampledProbe {
-	var p sampledProbe
+// readSampledProbe reads the result of the rung that asked for the given ratio.
+func readSampledProbe(res *RunResult, asked int64) sampledProbe {
+	p := sampledProbe{asked: asked}
 	if len(res.Records) == 0 {
 		return p
 	}
@@ -145,11 +177,18 @@ func sampledZeroBound(ratio int64) int64 { return ratio * 3 }
 // signal carries evidence, including a plain live one: its volume is an
 // estimate and its age is biased, and a reader comparing two runs needs to know
 // that before treating a difference as a change in the data.
-func sampledHitEvidence(object string, p sampledProbe, bias time.Duration, scanLimitGB float64) string {
+//
+// newest is the record the age was computed from. When another rung of the
+// walk matched it, the sentence about the sample's bias would describe a
+// timestamp the verdict did not use, so the evidence names the rung instead.
+func sampledHitEvidence(object string, p sampledProbe, newest *sighting, bias time.Duration, scanLimitGB float64) string {
 	s := fmt.Sprintf("%s scans more than %s in this window, so it was probed with 1-in-%s sampling: %s sampled %s extrapolate to about %s",
 		object, scanCapLabel(scanLimitGB), formatCount(p.ratio),
 		formatCount(p.matched), plural64(p.matched, "record"), formatCount(p.records))
-	if bias > 0 {
+	switch {
+	case newest != nil && newest.asked != p.asked:
+		s += fmt.Sprintf(", and last-seen was read from the 1-in-%s probe of the same walk, which matched a newer record than this sample did", formatCount(newest.asked))
+	case bias > 0:
 		s += fmt.Sprintf(", and last-seen is biased up to ~%s old because the newest record is unlikely to be in the sample", roundDuration(bias))
 	}
 	return s
@@ -170,7 +209,7 @@ func sampledZeroEvidence(object string, ratio int64, since string, scanLimitGB f
 // stale here would raise a false alarm during onboarding, which is worse than
 // admitting the probe cannot tell.
 func sampledAmbiguousEvidence(object string, age, bias, staleAfter time.Duration, ratio int64) string {
-	return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and its newest sampled record is %s old against a %s stale threshold — within the ~%s the sampling itself can shift last-seen, so live and stale cannot be told apart here; raise --scan-limit-gbytes for an exact answer",
+	return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and the newest record it matched is %s old against a %s stale threshold — within the ~%s the sampling itself can shift last-seen, so live and stale cannot be told apart here; raise --scan-limit-gbytes for an exact answer",
 		object, formatCount(ratio), roundDuration(age), roundDuration(staleAfter), roundDuration(bias))
 }
 
@@ -237,6 +276,10 @@ func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *C
 	}
 
 	var hit *sampledProbe
+	// newest is read from every response, before the rung is classified: a
+	// refused or cut-short rung supplies no count, but a record it matched is
+	// still the newest this scope is known to have.
+	var newest *sighting
 	// zeroAt remembers the least aggressive sampled rung that came back empty,
 	// since that is the rung whose bound is tightest and therefore worth
 	// reporting.
@@ -255,7 +298,8 @@ walk:
 			// did not run.
 			break walk
 		}
-		p := readSampledProbe(res)
+		p := readSampledProbe(res, ratio)
+		newest = newerSighting(newest, p)
 		if !res.Sampled {
 			if p.matched == 0 && !res.Truncated {
 				// Nothing matched and nothing was cut short, so this response
@@ -308,21 +352,38 @@ walk:
 		sig.Evidence = sampledZeroEvidence(def.DataObject, zeroAt, opts.Since, opts.ScanLimitGBytes)
 		return sig, nil
 	}
-	return b.sampledVerdict(sig, def, opts, timeField, now, *hit), nil
+	return b.sampledVerdict(sig, def, opts, timeField, now, *hit, newest), nil
 }
 
 // sampledVerdict turns a sampled hit into live, stale, or — in the one band the
 // sampling cannot resolve — unknown.
-func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, now time.Time, p sampledProbe) Signal {
+//
+// The count, the ratio and the bias are those of the hit. The age is that of
+// newest, the newest record any rung of the walk matched, which is the hit's
+// own unless another rung saw a later one. newest is nil when no rung returned
+// a timestamp that parses, and the hit's raw value is then all there is to
+// report.
+func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts DiscoverOptions, timeField string, now time.Time, p sampledProbe, newest *sighting) Signal {
 	sig.Records = p.records
 	sig.SamplingRatio = p.ratio
 	sig.RecordsSampled = p.matched
 
+	// The hit's own timestamp stands unless another rung saw a strictly newer
+	// record, so the evidence never credits another rung with a tie.
+	if own := newerSighting(nil, p); own != nil && (newest == nil || !newest.at.After(own.at)) {
+		newest = own
+	}
+	lastSeen := p.lastSeen
+	if newest != nil {
+		lastSeen = newest.lastSeen
+	}
 	bias := samplingBias(windowDuration(opts.Since), p.matched)
-	applyFreshness(&sig, p.lastSeen, timeField, now, opts.StaleAfter)
+	applyFreshness(&sig, lastSeen, timeField, now, opts.StaleAfter)
 
 	// A sampled last-seen is biased old, so a stale verdict has to survive that
-	// bias to be worth making. Inside the bias the two states are
+	// bias to be worth making. The sample's bias bounds the gap also when the
+	// timestamp came from another rung: that record is no older than the
+	// sample's own newest. Inside the bias the two states are
 	// indistinguishable and the honest answer is that the probe cannot tell —
 	// reporting stale there would invent an ingest outage out of the sampling,
 	// which during onboarding verification is the most expensive kind of wrong.
@@ -336,7 +397,7 @@ func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts Disco
 	// Freshness sets evidence only when it has something to flag; a sampled
 	// signal always does, so its provenance leads and anything freshness added
 	// follows.
-	sig.Evidence = joinEvidence(sampledHitEvidence(def.DataObject, p, bias, opts.ScanLimitGBytes), sig.Evidence)
+	sig.Evidence = joinEvidence(sampledHitEvidence(def.DataObject, p, newest, bias, opts.ScanLimitGBytes), sig.Evidence)
 	return sig
 }
 
