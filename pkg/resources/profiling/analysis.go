@@ -142,7 +142,7 @@ type StackView struct {
 // Stacks reads the analysis as one row per unique call stack. appOnly keeps
 // only application frames in each stack.
 func (h *Hotspots) Stacks(appOnly bool) StackView {
-	v := StackView{Rows: HotspotStacks(h.envelope, appOnly)}
+	v := StackView{Rows: hotspotStacks(h.envelope, appOnly)}
 	for _, r := range v.Rows {
 		v.Samples += r.Running
 	}
@@ -164,7 +164,7 @@ type AllocationView struct {
 // keeps only application frames in each path; bySurvivors ranks the rows by
 // survived bytes.
 func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
-	v := AllocationView{Rows: AllocationStacks(a.envelope, appOnly, bySurvivors)}
+	v := AllocationView{Rows: allocationStacks(a.envelope, appOnly, bySurvivors)}
 	for _, r := range v.Rows {
 		v.AllocatedBytes += int64(r.AllocBytes)
 		v.SurvivedBytes += int64(r.SurvivedBytes)
@@ -172,16 +172,20 @@ func (a *Allocations) Stacks(appOnly, bySurvivors bool) AllocationView {
 	return v
 }
 
-// Functions reads the analysis as one row per function; see HotspotFunctions.
-// It returns nil when there are no samples of that state.
+// Functions reads the analysis as one row per function, counting the samples
+// of state (one of States). sortBy is "self" (default) or "total". It returns
+// nil when there are no samples of that state.
 func (h *Hotspots) Functions(appOnly bool, state, sortBy string) *FunctionTable {
-	return HotspotFunctions(h.envelope, appOnly, state, sortBy)
+	return hotspotFunctions(h.envelope, appOnly, state, sortBy)
 }
 
-// Focus reads the analysis as one function's callers and callees; see
-// HotspotFocus.
+// Focus reads the analysis as one function's callers and callees. pattern
+// names the function: an exact frame label, or a substring of exactly one.
+// limit caps the callers and the callees separately (0 = all). It also returns
+// the matched label, and how many callers and callees there were before the
+// limit.
 func (h *Hotspots) Focus(appOnly bool, state, pattern string, limit int) (rows []FocusRow, function string, nCallers, nCallees int, err error) {
-	return HotspotFocus(h.envelope, appOnly, state, pattern, limit)
+	return hotspotFocus(h.envelope, appOnly, state, pattern, limit)
 }
 
 // EmptyReason names why a view of an analysis has no rows. The values are
@@ -208,13 +212,13 @@ func (h *Hotspots) WhyEmpty(appOnly bool, state string) (EmptyReason, string) {
 	}
 	// Running samples absent from a per-function view means what an empty
 	// stack view means.
-	return whyNoStacks(h.Entity, h.Status, appOnly && len(HotspotStacks(h.envelope, false)) > 0)
+	return whyNoStacks(h.Entity, h.Status, appOnly && len(hotspotStacks(h.envelope, false)) > 0)
 }
 
 // WhyEmpty explains a stack view that came back without rows, as
 // Hotspots.WhyEmpty does.
 func (a *Allocations) WhyEmpty(appOnly bool) (EmptyReason, string) {
-	return whyNoStacks(a.Entity, a.Status, appOnly && len(AllocationStacks(a.envelope, false, false)) > 0)
+	return whyNoStacks(a.Entity, a.Status, appOnly && len(allocationStacks(a.envelope, false, false)) > 0)
 }
 
 func whyNoStacks(entity, status string, removedByAppOnly bool) (EmptyReason, string) {

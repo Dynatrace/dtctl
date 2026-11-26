@@ -19,7 +19,7 @@ func cyclicHotspots() map[string]interface{} {
 }
 
 func TestToCollapsed_CyclicTreeTerminates(t *testing.T) {
-	out := ToCollapsed("methodHotspots", cyclicHotspots(), 0, false)
+	out := toCollapsed("methodHotspots", cyclicHotspots(), 0, false)
 	if !strings.Contains(out, "app.main") {
 		t.Errorf("want the reachable stacks, got %q", out)
 	}
@@ -31,10 +31,10 @@ func TestToCollapsed_CyclicTreeTerminates(t *testing.T) {
 }
 
 func TestHotspotViews_CyclicTreeTerminates(t *testing.T) {
-	if HotspotFunctions(cyclicHotspots(), false, "running", "self") == nil {
+	if hotspotFunctions(cyclicHotspots(), false, "running", "self") == nil {
 		t.Fatal("functions view: want rows for the reachable nodes")
 	}
-	if _, _, _, _, err := HotspotFocus(cyclicHotspots(), false, "running", "main", 10); err != nil {
+	if _, _, _, _, err := hotspotFocus(cyclicHotspots(), false, "running", "main", 10); err != nil {
 		t.Fatalf("focus view: %v", err)
 	}
 }
@@ -55,7 +55,7 @@ func TestMemoryCollapsed_CyclicTreeTerminates(t *testing.T) {
 			mnode(3, "Other.run"),
 		},
 	}}}
-	if out := ToCollapsed("memoryAllocation", raw, 0, false); !strings.Contains(out, "Site.alloc;Other.run") {
+	if out := toCollapsed("memoryAllocation", raw, 0, false); !strings.Contains(out, "Site.alloc;Other.run") {
 		t.Errorf("want the acyclic path, got %q", out)
 	}
 }

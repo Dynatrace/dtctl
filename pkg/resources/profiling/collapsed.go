@@ -34,33 +34,11 @@ type AllocationRow struct {
 	Stack         string `json:"stack" table:"STACK"`
 }
 
-// ToCollapsed renders collapsed (folded) stacks: one line per unique stack,
-// `frame1;frame2;...;frameN running=.. lock=.. net_io=.. disk_io=.. wait=..`,
-// sorted by RUNNING descending. Unlike single-metric folded output it keeps all
-// five thread-state counts on each line, so one read shows whether a stack is
-// CPU-bound or blocked without emitting a separate flamegraph per state.
-// top > 0 caps the number of rows; it does not change the shape. appOnly strips
-// frames the profiler did not classify as application code (apiInfo.systemApi)
-// from each path — see nodeIsApp. Returns empty string for unsupported kinds or
-// missing data.
-func ToCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
-	switch kind {
-	case "memoryAllocation", "memoryAllocationDetails":
-		return FoldAllocations(capRows(AllocationStacks(raw, appOnly, false), top), false)
-	case "methodHotspots", "threadAnalysis":
-		return FoldStacks(capRows(HotspotStacks(raw, appOnly), top))
-	}
-	return ""
-}
-
-func capRows[T any](rows []T, top int) []T {
-	if top > 0 && len(rows) > top {
-		return rows[:top]
-	}
-	return rows
-}
-
-// FoldStacks renders stack rows as folded lines carrying all five counters.
+// FoldStacks renders stack rows as collapsed (folded) stacks, one line per row:
+// `frame1;frame2;...;frameN running=.. lock=.. net_io=.. disk_io=.. wait=..`.
+// Unlike single-metric folded output a line keeps all five thread-state
+// counts, so one read shows whether a stack is CPU-bound or blocked without a
+// separate flamegraph per state.
 func FoldStacks(rows []StackRow) string {
 	var sb strings.Builder
 	for _, r := range rows {
@@ -89,9 +67,11 @@ func FoldAllocations(rows []AllocationRow, bySurvivors bool) string {
 	return sb.String()
 }
 
-// HotspotStacks folds a hotspots result into one row per unique stack, sorted
-// by running samples, descending. Returns nil for missing data.
-func HotspotStacks(raw interface{}, appOnly bool) []StackRow {
+// hotspotStacks folds a hotspots result into one row per unique stack, sorted
+// by running samples, descending. appOnly strips frames the profiler did not
+// classify as application code (apiInfo.systemApi) from each path; see
+// nodeIsApp. Returns nil for missing data.
+func hotspotStacks(raw interface{}, appOnly bool) []StackRow {
 	nodeMap, rootID := hotspotTree(raw)
 	if nodeMap == nil {
 		return nil
@@ -184,7 +164,7 @@ func sampleTotal(s map[string]int) int {
 	return t
 }
 
-// AllocationStacks folds a memory allocation result into one row per unique
+// allocationStacks folds a memory allocation result into one row per unique
 // allocation path, weighted by bytes and sorted by allocated bytes (by survived
 // bytes when bySurvivors), descending.
 //
@@ -199,7 +179,7 @@ func sampleTotal(s map[string]int) int {
 // alloc/surv are allocation pressure and GC-survivors within the window, not live
 // retained heap. appOnly keeps only profiler-classified application frames
 // (apiInfo.systemApi; see nodeIsApp) in each path. Returns nil for missing data.
-func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRow {
+func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRow {
 	envelope, ok := raw.(map[string]interface{})
 	if !ok {
 		return nil
@@ -268,7 +248,7 @@ func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 	dfs = func(id string, stack []string) {
 		n := nodeMap[id]
 		if n == nil || visited[id] {
-			return // a node reached twice: malformed result, see ToCollapsed
+			return // a node reached twice: malformed result, see hotspotStacks
 		}
 		visited[id] = true
 		path := stack

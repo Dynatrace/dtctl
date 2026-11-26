@@ -28,7 +28,7 @@ func fnTree() map[string]interface{} {
 }
 
 func TestHotspotFunctions_SelfAndTotal(t *testing.T) {
-	got := HotspotFunctions(fnTree(), false, "running", "self")
+	got := hotspotFunctions(fnTree(), false, "running", "self")
 	if got == nil || got.Samples != 100 {
 		t.Fatalf("table = %+v", got)
 	}
@@ -44,7 +44,7 @@ func TestHotspotFunctions_SelfAndTotal(t *testing.T) {
 }
 
 func TestHotspotFunctions_SortByTotal(t *testing.T) {
-	got := HotspotFunctions(fnTree(), false, "running", "total")
+	got := hotspotFunctions(fnTree(), false, "running", "total")
 	var order []string
 	for _, r := range got.Rows {
 		order = append(order, r.Function)
@@ -59,12 +59,12 @@ func TestHotspotFunctions_SortByTotal(t *testing.T) {
 // their last frame gives each function's self time.
 func TestHotspotFunctions_SelfMatchesStackView(t *testing.T) {
 	bySelf := map[string]int{}
-	for _, l := range strings.Split(strings.TrimSpace(ToCollapsed("methodHotspots", fnTree(), 0, false)), "\n") {
+	for _, l := range strings.Split(strings.TrimSpace(toCollapsed("methodHotspots", fnTree(), 0, false)), "\n") {
 		stack := strings.Fields(l)[0]
 		frames := strings.Split(stack, ";")
 		bySelf[frames[len(frames)-1]] += runOf(t, l)
 	}
-	for _, r := range HotspotFunctions(fnTree(), false, "running", "self").Rows {
+	for _, r := range hotspotFunctions(fnTree(), false, "running", "self").Rows {
 		if bySelf[r.Function] != r.Self {
 			t.Errorf("%s: stack view self %d, function view self %d", r.Function, bySelf[r.Function], r.Self)
 		}
@@ -79,7 +79,7 @@ func TestHotspotFunctions_RecursionCountsOnce(t *testing.T) {
 		hnode("A", "x", "f", true, 10, 0, "B"),
 		hnode("B", "x", "f", true, 6, 0),
 	)
-	got := HotspotFunctions(raw, false, "running", "self").Rows
+	got := hotspotFunctions(raw, false, "running", "self").Rows
 	want := []FunctionRow{{Self: 10, SelfPct: 100, Total: 10, TotalPct: 100, Paths: 2, Function: "x.f"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
@@ -89,7 +89,7 @@ func TestHotspotFunctions_RecursionCountsOnce(t *testing.T) {
 // With --app-only, hidden frames' self time goes to the nearest kept frame
 // above them, as in the stack view.
 func TestHotspotFunctions_AppOnly(t *testing.T) {
-	got := HotspotFunctions(fnTree(), true, "running", "self").Rows
+	got := hotspotFunctions(fnTree(), true, "running", "self").Rows
 	want := []FunctionRow{
 		{Self: 70, SelfPct: 70, Total: 100, TotalPct: 100, Paths: 1, Function: "app.main"},
 		{Self: 30, SelfPct: 30, Total: 30, TotalPct: 30, Paths: 1, Function: "app.handle"},
@@ -100,24 +100,24 @@ func TestHotspotFunctions_AppOnly(t *testing.T) {
 }
 
 func TestHotspotFunctions_State(t *testing.T) {
-	lock := HotspotFunctions(fnTree(), false, "lock", "self")
+	lock := hotspotFunctions(fnTree(), false, "lock", "self")
 	if lock == nil || lock.Samples != 5 || len(lock.Rows) != 3 {
 		t.Fatalf("lock table = %+v", lock)
 	}
 	if r := lock.Rows[0]; r.Function != "lib.wrap" || r.Self != 5 || r.Total != 5 {
 		t.Errorf("top lock row = %+v", r)
 	}
-	all := HotspotFunctions(fnTree(), false, "all", "self")
+	all := hotspotFunctions(fnTree(), false, "all", "self")
 	if all.Samples != 105 {
 		t.Errorf("all samples = %d, want 105", all.Samples)
 	}
-	if HotspotFunctions(fnTree(), false, "disk_io", "self") != nil {
+	if hotspotFunctions(fnTree(), false, "disk_io", "self") != nil {
 		t.Error("no disk_io samples: want nil")
 	}
 }
 
 func TestHotspotFocus_CallersAndCallees(t *testing.T) {
-	rows, fn, nCallers, nCallees, err := HotspotFocus(fnTree(), false, "running", "wrap", 0)
+	rows, fn, nCallers, nCallees, err := hotspotFocus(fnTree(), false, "running", "wrap", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestHotspotFocus_CallersAndCallees(t *testing.T) {
 		t.Fatalf("rows:\n got %+v\nwant %+v", rows, want)
 	}
 
-	rows, _, _, _, err = HotspotFocus(fnTree(), false, "running", "app.main", 1)
+	rows, _, _, _, err = hotspotFocus(fnTree(), false, "running", "app.main", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestHotspotFocus_Recursion(t *testing.T) {
 		hnode("B", "x", "g", true, 8, 0, "C"),
 		hnode("C", "x", "f", true, 6, 0),
 	)
-	rows, _, _, _, err := HotspotFocus(raw, false, "running", "x.f", 0)
+	rows, _, _, _, err := hotspotFocus(raw, false, "running", "x.f", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,17 +174,17 @@ func TestHotspotFocus_Recursion(t *testing.T) {
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("rows:\n got %+v\nwant %+v", rows, want)
 	}
-	if self := HotspotFunctions(raw, false, "running", "self").Rows[0]; self.Function != "x.f" || self.Self != 8 {
+	if self := hotspotFunctions(raw, false, "running", "self").Rows[0]; self.Function != "x.f" || self.Self != 8 {
 		t.Errorf("functions view self = %+v, want x.f self 8", self)
 	}
 }
 
 func TestHotspotFocus_Matching(t *testing.T) {
-	if _, _, _, _, err := HotspotFocus(fnTree(), false, "running", "lib.", 0); err == nil ||
+	if _, _, _, _, err := hotspotFocus(fnTree(), false, "running", "lib.", 0); err == nil ||
 		!strings.Contains(err.Error(), "matches 2 functions") || !strings.Contains(err.Error(), "lib.wrap") {
 		t.Errorf("ambiguous pattern: err = %v", err)
 	}
-	if _, _, _, _, err := HotspotFocus(fnTree(), false, "running", "nope", 0); err == nil ||
+	if _, _, _, _, err := hotspotFocus(fnTree(), false, "running", "nope", 0); err == nil ||
 		!strings.Contains(err.Error(), "--view functions") {
 		t.Errorf("no match: err = %v", err)
 	}
@@ -194,7 +194,7 @@ func TestHotspotFocus_Matching(t *testing.T) {
 		hnode("A", "x", "f", true, 10, 0, "B"),
 		hnode("B", "x", "fg", true, 4, 0),
 	)
-	if _, fn, _, _, err := HotspotFocus(raw, false, "running", "x.f", 0); err != nil || fn != "x.f" {
+	if _, fn, _, _, err := hotspotFocus(raw, false, "running", "x.f", 0); err != nil || fn != "x.f" {
 		t.Errorf("exact match: fn=%q err=%v", fn, err)
 	}
 }

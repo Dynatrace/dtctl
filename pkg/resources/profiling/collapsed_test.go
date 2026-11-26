@@ -36,6 +36,25 @@ func envelope(rootID string, nodes ...map[string]interface{}) map[string]interfa
 	}
 }
 
+// toCollapsed is the stack view of a result as folded lines, capped at top
+// rows (0 = all): what `dtctl exec profiling` prints as a table.
+func toCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
+	switch kind {
+	case "memoryAllocation":
+		return FoldAllocations(capRows(allocationStacks(raw, appOnly, false), top), false)
+	case "methodHotspots":
+		return FoldStacks(capRows(hotspotStacks(raw, appOnly), top))
+	}
+	return ""
+}
+
+func capRows[T any](rows []T, top int) []T {
+	if top > 0 && len(rows) > top {
+		return rows[:top]
+	}
+	return rows
+}
+
 func runOf(t *testing.T, line string) int {
 	t.Helper()
 	i := strings.Index(line, "running=")
@@ -64,7 +83,7 @@ func TestToCollapsed_EmitsInteriorSelfSamples(t *testing.T) {
 		hnode("A", "com.ex.Foo", "a", true, 10, 0, "B"),
 		hnode("B", "com.ex.Foo", "b", true, 3, 0),
 	)
-	out := ToCollapsed("methodHotspots", raw, 0, false)
+	out := toCollapsed("methodHotspots", raw, 0, false)
 
 	var total int
 	var sawInterior bool
@@ -99,7 +118,7 @@ func TestToCollapsed_AppOnlyMergesCollidingStacks(t *testing.T) {
 		hnode("L1", "jdk.internal", "x", false, 5, 0),
 		hnode("L2", "jdk.internal", "y", false, 7, 0),
 	)
-	out := strings.TrimSpace(ToCollapsed("methodHotspots", raw, 0, true))
+	out := strings.TrimSpace(toCollapsed("methodHotspots", raw, 0, true))
 	lines := strings.Split(out, "\n")
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 merged line, got %d:\n%s", len(lines), out)
@@ -127,7 +146,7 @@ func TestToCollapsed_SelfIsPerStateAndSkipsPassThrough(t *testing.T) {
 		hnode("Q", "com.ex.T", "q", true, 4, 0, "Z"),
 		hnode("Z", "com.ex.T", "z", true, 4, 0),
 	)
-	out := strings.TrimSpace(ToCollapsed("methodHotspots", raw, 0, false))
+	out := strings.TrimSpace(toCollapsed("methodHotspots", raw, 0, false))
 
 	var total int
 	byLine := map[string]bool{}
@@ -158,7 +177,7 @@ func TestToCollapsed_ClampsNegativeSelf(t *testing.T) {
 		hnode("A", "com.ex.C", "a", true, 3, 0, "B"),
 		hnode("B", "com.ex.C", "b", true, 1, 5),
 	)
-	out := strings.TrimSpace(ToCollapsed("methodHotspots", raw, 0, false))
+	out := strings.TrimSpace(toCollapsed("methodHotspots", raw, 0, false))
 	if !strings.Contains(out, "com.ex.C.a running=2 lock=0 net_io=0 disk_io=0 wait=0") {
 		t.Fatalf("A self must clamp negative lock to 0 (run=2, lock=0):\n%s", out)
 	}
@@ -176,7 +195,7 @@ func TestToCollapsed_TopCapsRowsNoSections(t *testing.T) {
 		hnode("B", "com.ex.C", "b", true, 5, 1),
 		hnode("C", "com.ex.C", "c", true, 1, 0),
 	)
-	out := strings.TrimSpace(ToCollapsed("methodHotspots", raw, 2, false))
+	out := strings.TrimSpace(toCollapsed("methodHotspots", raw, 2, false))
 	lines := strings.Split(out, "\n")
 	if len(lines) != 2 {
 		t.Fatalf("top=2 should emit 2 rows, got %d:\n%s", len(lines), out)
@@ -221,7 +240,7 @@ func TestToCollapsed_NodeJSFramesRender(t *testing.T) {
 		jsnode("1", "onconnection", "", "node:net", "default-rule-id-nodejs", 10, "2"),
 		jsnode("2", "Socket", "", "node:net", "default-rule-id-nodejs", 10),
 	)
-	out := ToCollapsed("methodHotspots", raw, 0, false)
+	out := toCollapsed("methodHotspots", raw, 0, false)
 	want := "node:net:onconnection;node:net:Socket running=10 lock=0 net_io=0 disk_io=0 wait=0\n"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
@@ -260,7 +279,7 @@ func TestToCollapsed_AppOnlyDropsAgentFrames(t *testing.T) {
 		agent("B", "com.dynatrace.agent.shaded.uem.impl", "AgentInjectingResponseWrapper", 4),
 		agent("C", "jakarta.servlet.http", "DynatraceJakartaUemIntrospection", 3),
 	)
-	out := ToCollapsed("methodHotspots", raw, 0, true)
+	out := toCollapsed("methodHotspots", raw, 0, true)
 	if strings.Contains(out, "agent") || strings.Contains(out, "Introspection") {
 		t.Fatalf("--app-only kept OneAgent frames:\n%s", out)
 	}
@@ -280,7 +299,7 @@ func TestToCollapsed_AppOnlyNodeJSKeepsOwnFiles(t *testing.T) {
 		jsnode("2", "handler", "/app/build", "server.js", "default-rule-id-nodejs", 10, "3"),
 		jsnode("3", "execute", "/app/node_modules/graphql/execution", "execute.js", "FilePathBasedApiRuleId-graphql", 6),
 	)
-	out := ToCollapsed("methodHotspots", raw, 0, true)
+	out := toCollapsed("methodHotspots", raw, 0, true)
 	want := "/app/build/server.js:handler running=10 lock=0 net_io=0 disk_io=0 wait=0\n"
 	if out != want {
 		t.Fatalf("got %q, want %q", out, want)
@@ -314,7 +333,7 @@ func TestMemoryCollapsed_ValuesOnRootsAndDescendants(t *testing.T) {
 		memnode(3, "Job.run", true, 300, 3),
 		memnode(4, "Thread.run", false, 600, 6),
 	)
-	out := ToCollapsed("memoryAllocation", raw, 0, false)
+	out := toCollapsed("memoryAllocation", raw, 0, false)
 	for _, want := range []string{
 		"Site.alloc;Svc.get;Thread.run alloc=600 ",
 		"Site.alloc;Job.run alloc=300 ",
@@ -346,7 +365,7 @@ func TestMemoryCollapsed_AppOnlyMergesCollidingPaths(t *testing.T) {
 		memnode(3, "Job.run", true, 300, 3),
 		memnode(4, "Thread.run", false, 600, 6),
 	)
-	out := ToCollapsed("memoryAllocation", raw, 0, true)
+	out := toCollapsed("memoryAllocation", raw, 0, true)
 	if n := strings.Count(out, "Site.alloc;Svc.get "); n != 1 {
 		t.Errorf("Site.alloc;Svc.get printed %d times, want once:\n%s", n, out)
 	}
@@ -363,10 +382,10 @@ func TestAllocationStacks_BySurvivors(t *testing.T) {
 	keep["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(90)
 	raw := memEnvelope([]interface{}{float64(1), float64(2)}, churn, keep)
 
-	if rows := AllocationStacks(raw, false, false); rows[0].Stack != "Churn.alloc" {
+	if rows := allocationStacks(raw, false, false); rows[0].Stack != "Churn.alloc" {
 		t.Errorf("by allocated bytes, Churn.alloc first: %+v", rows)
 	}
-	rows := AllocationStacks(raw, false, true)
+	rows := allocationStacks(raw, false, true)
 	if rows[0].Stack != "Keep.alloc" || rows[0].SurvivedBytes != 90 {
 		t.Errorf("by survived bytes, Keep.alloc first: %+v", rows)
 	}
@@ -383,7 +402,7 @@ func TestAllocationStacks_SurvivedExceedsAllocated(t *testing.T) {
 	cache["allocationInfo"].(map[string]interface{})["survivorSize"] = float64(500)
 	raw := memEnvelope([]interface{}{float64(1)}, cache)
 
-	rows := AllocationStacks(raw, false, true)
+	rows := allocationStacks(raw, false, true)
 	if len(rows) != 1 || rows[0].AllocBytes != 100 || rows[0].SurvivedBytes != 500 {
 		t.Fatalf("want alloc 100, survived 500 as the API gives them: %+v", rows)
 	}

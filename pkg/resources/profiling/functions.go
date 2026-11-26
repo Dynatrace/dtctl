@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Per-function views of a hotspots tree. The stack view (ToCollapsed) prints one
+// Per-function views of a hotspots tree. The stack view (Hotspots.Stacks) prints one
 // row per unique call stack, so a function reached through many paths is split
 // over many rows: on a Node.js service, a module-loader function carried 5% of
 // all CPU spread over 378 rows of about 12 samples each, the first at row 46.
@@ -23,7 +23,7 @@ import (
 //     stack, callees and own time at its innermost, so recursion adds up.
 //
 // Both walk the same tree as the stack view, once, in time linear in the node
-// count. Self samples follow ToCollapsed exactly (self = node − Σ children, per
+// count. Self samples follow the stack view exactly (self = node − Σ children, per
 // thread state, clamped at zero), and with --app-only a hidden frame's self time
 // goes to the nearest kept frame above it, so the numbers match the stack view.
 
@@ -221,10 +221,10 @@ func newFuncWalk(raw interface{}, appOnly bool, state, focus string) (*funcWalk,
 	}, root
 }
 
-// HotspotFunctions builds the functions view of a hotspots result, counting the
+// hotspotFunctions builds the functions view of a hotspots result, counting the
 // samples of the given state. sortBy is "self" (default) or "total". It returns
 // nil when the result has no samples to show.
-func HotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) *FunctionTable {
+func hotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) *FunctionTable {
 	w, root := newFuncWalk(raw, appOnly, state, "")
 	if w == nil {
 		return nil
@@ -268,12 +268,12 @@ func HotspotFunctions(raw interface{}, appOnly bool, state, sortBy string) *Func
 	return t
 }
 
-// HotspotFocus builds the callers/callees view of one function. pattern names the
+// hotspotFocus builds the callers/callees view of one function. pattern names the
 // function: an exact frame label, or a substring of exactly one label. limit caps
 // the callers and the callees separately (0 = all). It also returns the matched
 // label, and how many callers and callees there were before the limit.
-func HotspotFocus(raw interface{}, appOnly bool, state, pattern string, limit int) (rows []FocusRow, function string, nCallers, nCallees int, err error) {
-	t := HotspotFunctions(raw, appOnly, state, "total")
+func hotspotFocus(raw interface{}, appOnly bool, state, pattern string, limit int) (rows []FocusRow, function string, nCallers, nCallees int, err error) {
+	t := hotspotFunctions(raw, appOnly, state, "total")
 	if t == nil {
 		return nil, "", 0, 0, fmt.Errorf("no %s samples in the window to focus on", state)
 	}
