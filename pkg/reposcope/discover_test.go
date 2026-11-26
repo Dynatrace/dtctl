@@ -337,9 +337,9 @@ func TestDiscover_Match(t *testing.T) {
 		Spans:             12400,
 		Logs:              88000,
 		Evidence: []string{
+			`k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5`,
 			`k8s.workload.name "checkout" from Dockerfile:4, deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:12, deploy/k8s/deployment.yaml:15, go.mod:1`,
 			`service.name "checkout" from Dockerfile:4, deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:12, deploy/k8s/deployment.yaml:15, go.mod:1`,
-			`k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5`,
 			"12400 spans, 88000 logs in 24h",
 		},
 	}, r.Candidates[0])

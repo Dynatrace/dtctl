@@ -212,7 +212,7 @@ func TestCheck_NoBindingSuggestsWhatToAdd(t *testing.T) {
 	f := &File{Environments: map[string][]Entry{prodHost: {{Name: "checkout"}}}}
 	invalidErr := f.check()
 	require.NotNil(t, invalidErr)
-	assert.Equal(t, []string{"add at least one of services, process-groups, service-names or workloads"}, invalidErr.Suggestions)
+	assert.Equal(t, []string{"add at least one of workloads, service-names, process-groups or services"}, invalidErr.Suggestions)
 }
 
 // A cluster is part of a workload binding, so one entry can bind the same

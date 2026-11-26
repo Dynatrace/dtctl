@@ -18,30 +18,33 @@ type Candidate struct {
 	// Name is the entry to save it as: the workload, else the service name,
 	// else the name an entity matched, else the unit.
 	Name string `json:"name" yaml:"name"`
-	// Services and ProcessGroups are the ids the records carried, up to
-	// discoveryIDLimit of each per row. ServiceCount and ProcessGroupCount
+	// Namespace and Workload are the Kubernetes workload the records name,
+	// and ServiceName their service.name; a candidate has a workload, a
+	// service name or both.
+	Namespace   string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Workload    string `json:"workload,omitempty" yaml:"workload,omitempty"`
+	ServiceName string `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
+	// ServiceNameShared reports that another candidate carries this service
+	// name under a different namespace and workload, either of which may be
+	// absent: a canary beside its main workload, the same service in another
+	// namespace, or one whose records name no workload at all. A
+	// service-name binding would select that candidate's records too.
+	ServiceNameShared bool `json:"serviceNameShared,omitempty" yaml:"serviceNameShared,omitempty"`
+	// ProcessGroups and Services are the ids the records carried, up to
+	// discoveryIDLimit of each per row. ProcessGroupCount and ServiceCount
 	// are how many there are: the largest distinct count any one row
 	// reported, since the spans and logs rows of one candidate report
 	// overlapping sets and a sum would count an id twice. That makes it a
 	// lower bound on the union, never below the ids listed. A Capped flag
 	// says a row had more ids than it listed, so the list is not all of
 	// them.
-	Services            []string `json:"services,omitempty" yaml:"services,omitempty"`
-	ServiceCount        int64    `json:"serviceCount,omitempty" yaml:"serviceCount,omitempty"`
-	ServicesCapped      bool     `json:"servicesCapped,omitempty" yaml:"servicesCapped,omitempty"`
 	ProcessGroups       []string `json:"processGroups,omitempty" yaml:"processGroups,omitempty"`
 	ProcessGroupCount   int64    `json:"processGroupCount,omitempty" yaml:"processGroupCount,omitempty"`
 	ProcessGroupsCapped bool     `json:"processGroupsCapped,omitempty" yaml:"processGroupsCapped,omitempty"`
-	ServiceName         string   `json:"serviceName,omitempty" yaml:"serviceName,omitempty"`
-	// ServiceNameShared reports that another candidate carries this service
-	// name under a different namespace and workload, either of which may be
-	// absent: a canary beside its main workload, the same service in another
-	// namespace, or one whose records name no workload at all. A
-	// service-name binding would select that candidate's records too.
-	ServiceNameShared bool   `json:"serviceNameShared,omitempty" yaml:"serviceNameShared,omitempty"`
-	Namespace         string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Workload          string `json:"workload,omitempty" yaml:"workload,omitempty"`
-	Tier              string `json:"tier" yaml:"tier"`
+	Services            []string `json:"services,omitempty" yaml:"services,omitempty"`
+	ServiceCount        int64    `json:"serviceCount,omitempty" yaml:"serviceCount,omitempty"`
+	ServicesCapped      bool     `json:"servicesCapped,omitempty" yaml:"servicesCapped,omitempty"`
+	Tier                string   `json:"tier" yaml:"tier"`
 	// Spans and Logs count the records of a data object read whole, over the
 	// discovery window. SpansSampled and LogsSampled are, for an object a
 	// sampled retry read instead, the records the sample matched over that
@@ -273,6 +276,14 @@ func containsSegment(name, v string) bool {
 // names, with the files that name it, and the record counts.
 func (d *discovery) explain(c *Candidate) {
 	c.sources = map[string]bool{}
+	// The namespace leads its workload, as in namespace/name.
+	var named []token
+	for _, t := range d.namespaces {
+		if c.Namespace != "" && sameName(t.value, c.Namespace) {
+			named = append(named, t)
+		}
+	}
+	c.cite(fieldNamespace, c.Namespace, named)
 	for _, field := range []struct{ name, value string }{
 		{fieldWorkload, c.Workload},
 		{fieldServiceName, c.ServiceName},
@@ -285,13 +296,6 @@ func (d *discovery) explain(c *Candidate) {
 		}
 		c.cite(field.name, field.value, from)
 	}
-	var from []token
-	for _, t := range d.namespaces {
-		if c.Namespace != "" && sameName(t.value, c.Namespace) {
-			from = append(from, t)
-		}
-	}
-	c.cite(fieldNamespace, c.Namespace, from)
 	if counts := d.counts(c); counts != "" {
 		c.Evidence = append(c.Evidence, counts)
 	}
@@ -594,6 +598,12 @@ func nonEmpty(v string) []string {
 		return nil
 	}
 	return []string{v}
+}
+
+// VerdictKinds lists the verdict kinds in the order bindings are shown in:
+// the workload, the service name, the process group, the service.
+func VerdictKinds() []string {
+	return []string{"workload", "serviceName", "processGroup", "service"}
 }
 
 // VerdictLabel names a verdict kind in human output: "processGroup" is

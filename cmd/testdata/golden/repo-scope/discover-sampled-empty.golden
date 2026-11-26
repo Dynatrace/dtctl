@@ -15,7 +15,7 @@ Values sent: "checkout"
 You can add a name you know with --term <name>, or discover for another directory with --path <dir>; or link by hand:
   dtctl repo-scope set <name> --namespace <namespace> --workload <workload>
   dtctl repo-scope set <name> --service-name <service.name>
-  dtctl repo-scope set <name> --service SERVICE-… --process-group PROCESS_GROUP-…
+  dtctl repo-scope set <name> --process-group PROCESS_GROUP-… --service SERVICE-…
 Note: spans stopped at the 5 GB scan cap, so the verdict is capped at ambiguous
 Note: logs stopped at the 5 GB scan cap, so the verdict is capped at ambiguous
 Note: spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 24h and matched nothing; a service with fewer than about 300000 spans over 24h may be missing, so the result is partial

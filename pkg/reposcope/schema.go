@@ -36,13 +36,18 @@ type File struct {
 // whole repository. A Path that is a Gradle deployable's module also covers
 // the modules it depends on (see Resolve). The file spells its keys in
 // kebab-case, results in camelCase.
+//
+// The bindings are listed, here and wherever they are shown, in the order
+// they are preferred in: the Kubernetes workload, the service name, then the
+// two entity ids, whose fields are deprecated, the process group before the
+// service.
 type Entry struct {
 	Name          string     `yaml:"name" json:"name" table:"NAME"`
 	Path          string     `yaml:"path,omitempty" json:"path,omitempty" table:"PATH"`
-	Services      []string   `yaml:"services,omitempty" json:"services,omitempty" table:"SERVICES"`
-	ProcessGroups []string   `yaml:"process-groups,omitempty" json:"processGroups,omitempty" table:"PROCESS-GROUPS"`
-	ServiceNames  []string   `yaml:"service-names,omitempty" json:"serviceNames,omitempty" table:"SERVICE-NAMES"`
 	Workloads     []Workload `yaml:"workloads,omitempty" json:"workloads,omitempty" table:"WORKLOADS"`
+	ServiceNames  []string   `yaml:"service-names,omitempty" json:"serviceNames,omitempty" table:"SERVICE-NAMES"`
+	ProcessGroups []string   `yaml:"process-groups,omitempty" json:"processGroups,omitempty" table:"PROCESS-GROUPS"`
+	Services      []string   `yaml:"services,omitempty" json:"services,omitempty" table:"SERVICES"`
 }
 
 // Workload binds one Kubernetes workload. Namespace is required: a workload
@@ -194,7 +199,7 @@ func (e *Entry) validate() *InvalidError {
 	}
 	if !e.hasBinding() {
 		return invalid("binds nothing",
-			"add at least one of services, process-groups, service-names or workloads")
+			"add at least one of workloads, service-names, process-groups or services")
 	}
 	return nil
 }

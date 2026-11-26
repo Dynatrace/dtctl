@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
@@ -154,4 +155,31 @@ func TestRepoScopeDiscoveryOneAmbiguousCandidate(t *testing.T) {
 			require.Contains(t, out.String(), "If it is what runs this code, save it with:\n  dtctl repo-scope set checkout --service "+flowService+"\n")
 		})
 	}
+}
+
+// Identifiers are listed in one order everywhere: the Kubernetes workload,
+// then the service name, then the process group and the service, the two
+// names before the two deprecated ids.
+func TestRepoScopeListsBindingsWorkloadFirst(t *testing.T) {
+	const svc, pg = "SERVICE-0000000000000001", "PROCESS_GROUP-0000000000000001"
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Verdict: reposcope.VerdictMatch,
+		Verdicts: map[string]reposcope.Verdict{"service": reposcope.VerdictMatch, "processGroup": reposcope.VerdictMatch,
+			"workload": reposcope.VerdictMatch, "serviceName": reposcope.VerdictMatch},
+		Candidates: []reposcope.Candidate{{Rank: 1, Name: "checkout", Namespace: "payments", Workload: "checkout", ServiceName: "checkout",
+			Services: []string{svc}, ServiceCount: 1, ProcessGroups: []string{pg}, ProcessGroupCount: 1, Tier: "exact", SetCommand: "x"}}}
+	var out bytes.Buffer
+	printRepoScopeDiscovery(&out, r, repoScopeProposal{}, 0)
+	require.Regexp(t, `#\s+WORKLOAD\s+SERVICE NAME\s+PROCESS GROUP\s+SERVICE\s+TIER\n`, out.String())
+	require.Regexp(t, `1\s+payments/checkout\s+checkout\s+`+pg+`\s+`+svc+`\s+exact\n`, out.String())
+	require.Contains(t, out.String(), "Verdict: match: workload, service name, process group, service\n")
+
+	ids := reposcope.Candidate{Name: "checkout", Services: []string{svc}, ServiceCount: 1, ProcessGroups: []string{pg}, ProcessGroupCount: 1}
+	require.Equal(t, "dtctl repo-scope set checkout --process-group "+pg+" --service "+svc, repoScopeSetCommand(r, ids, nil))
+	links, _ := repoScopeHandLinks(r, nil)
+	require.Equal(t, "dtctl repo-scope set <name> --process-group PROCESS_GROUP-… --service SERVICE-…", links[2])
+
+	rows := repoScopeRows([]reposcope.Entry{{Name: "checkout", Services: []string{svc}}})
+	var table bytes.Buffer
+	require.NoError(t, output.NewPrinterWithOpts(output.PrinterOptions{Format: "table", Writer: &table}).PrintList(rows))
+	require.Regexp(t, `^NAME\s+PATH\s+WORKLOADS\s+SERVICE NAMES\s+PROCESS GROUPS\s+SERVICES\s*\n`, table.String())
 }

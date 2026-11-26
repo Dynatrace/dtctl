@@ -376,7 +376,7 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 	if len(entry.Services)+len(entry.ProcessGroups)+len(entry.ServiceNames)+len(entry.Workloads) == 0 {
 		return &reposcope.InvalidError{
 			Source:      "repo-scope set",
-			Msg:         "an entry needs at least one of --service, --process-group, --service-name, or --namespace with --workload",
+			Msg:         "an entry needs at least one of --namespace with --workload, --service-name, --process-group or --service",
 			Suggestions: []string{repoScopeDiscoverHint},
 		}
 	}

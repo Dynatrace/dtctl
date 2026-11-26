@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -65,10 +64,10 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	kv("File:", s.File)
 	kv("Note:", s.Reason)
 	kv("Warning:", s.Warning)
-	kv("Services:", e.Services...)
-	kv("Process groups:", e.ProcessGroups...)
-	kv("Service names:", e.ServiceNames...)
 	kv("Workloads:", workloadNames(e.Workloads)...)
+	kv("Service names:", e.ServiceNames...)
+	kv("Process groups:", e.ProcessGroups...)
+	kv("Services:", e.Services...)
 	output.FprintDescribeSection(w, "Filters:")
 	for _, object := range reposcope.DataObjects() {
 		if filter, ok, reason := reposcope.Render(e, object); ok {
@@ -106,10 +105,10 @@ func workloadNames(workloads []reposcope.Workload) []string {
 type repoScopeRow struct {
 	Name          string `table:"NAME"`
 	Path          string `table:"PATH"`
-	Services      string `table:"SERVICES"`
-	ProcessGroups string `table:"PROCESS GROUPS"`
-	ServiceNames  string `table:"SERVICE NAMES"`
 	Workloads     string `table:"WORKLOADS"`
+	ServiceNames  string `table:"SERVICE NAMES"`
+	ProcessGroups string `table:"PROCESS GROUPS"`
+	Services      string `table:"SERVICES"`
 }
 
 func repoScopeRows(entries []reposcope.Entry) []repoScopeRow {
@@ -118,10 +117,10 @@ func repoScopeRows(entries []reposcope.Entry) []repoScopeRow {
 		rows = append(rows, repoScopeRow{
 			Name:          e.Name,
 			Path:          repoScopeCoverage(&e),
-			Services:      strings.Join(e.Services, ", "),
-			ProcessGroups: strings.Join(e.ProcessGroups, ", "),
-			ServiceNames:  strings.Join(e.ServiceNames, ", "),
 			Workloads:     strings.Join(workloadNames(e.Workloads), ", "),
+			ServiceNames:  strings.Join(e.ServiceNames, ", "),
+			ProcessGroups: strings.Join(e.ProcessGroups, ", "),
+			Services:      strings.Join(e.Services, ", "),
 		})
 	}
 	return rows
@@ -143,12 +142,11 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 	case r.Verdict == reposcope.VerdictMatch:
 		writeRepoScopeCandidates(w, r)
 		var matched []string
-		for kind, v := range r.Verdicts {
-			if v == reposcope.VerdictMatch {
+		for _, kind := range reposcope.VerdictKinds() {
+			if r.Verdicts[kind] == reposcope.VerdictMatch {
 				matched = append(matched, reposcope.VerdictLabel(kind))
 			}
 		}
-		slices.Sort(matched)
 		fmt.Fprintf(w, "Verdict: match: %s\n", strings.Join(matched, ", "))
 		if len(p.handLinks) > 0 {
 			fmt.Fprintf(w, "%s No binding selects this candidate alone.\n", took)
@@ -211,18 +209,18 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 	var buf bytes.Buffer
 	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tSERVICE\tPROCESS GROUP\tWORKLOAD\tSERVICE NAME\tTIER")
+	fmt.Fprintln(tw, "#\tWORKLOAD\tSERVICE NAME\tPROCESS GROUP\tSERVICE\tTIER")
 	for _, c := range r.Candidates {
 		workload := ""
 		if c.Workload != "" {
 			workload = reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}.String()
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", c.Rank, idsColumn(c.Services, c.ServiceCount, c.Sampled),
-			idsColumn(c.ProcessGroups, c.ProcessGroupCount, c.Sampled), cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"), c.Tier)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", c.Rank, cmp.Or(workload, "-"), cmp.Or(c.ServiceName, "-"),
+			idsColumn(c.ProcessGroups, c.ProcessGroupCount, c.Sampled), idsColumn(c.Services, c.ServiceCount, c.Sampled), c.Tier)
 	}
 	_ = tw.Flush()
 	rows := strings.SplitAfter(buf.String(), "\n")
-	indent := strings.Repeat(" ", strings.Index(rows[0], "SERVICE"))
+	indent := strings.Repeat(" ", strings.Index(rows[0], "WORKLOAD"))
 
 	fmt.Fprintf(w, "Unit: %s\n\n%s", r.Unit, rows[0])
 	for i, c := range r.Candidates {

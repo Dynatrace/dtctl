@@ -13,19 +13,19 @@
     {
       "rank": 1,
       "name": "checkout",
+      "namespace": "payments",
+      "workload": "checkout",
+      "serviceName": "checkout",
+      "processGroups": [
+        "PROCESS_GROUP-FEDCBA9876543210"
+      ],
+      "processGroupCount": 1,
       "services": [
         "SERVICE-0123456789ABCDEF",
         "SERVICE-0123456789ABCDF0"
       ],
       "serviceCount": 212,
       "servicesCapped": true,
-      "processGroups": [
-        "PROCESS_GROUP-FEDCBA9876543210"
-      ],
-      "processGroupCount": 1,
-      "serviceName": "checkout",
-      "namespace": "payments",
-      "workload": "checkout",
       "tier": "exact",
       "spansSampled": 17,
       "logsSampled": 4,

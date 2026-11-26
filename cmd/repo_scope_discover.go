@@ -324,9 +324,10 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // asked about.
 //
 // The workload and the service name lead because they are what the records
-// carry by design; the entity ids are deprecated fields and are proposed only
-// for a candidate the other two cannot select, or whose logs they cannot
-// reach: discovery found those logs by the candidate's process groups
+// carry by design; the entity ids are deprecated fields, listed process group
+// first, and are proposed only for a candidate the other two cannot select,
+// or whose logs they cannot reach: discovery found those logs by the
+// candidate's process groups
 // (LogsByProcessGroup), and without that binding the entry would return its
 // spans and none of its logs. A service name another candidate also reports
 // is left out: it would select that candidate's records as well, and the
@@ -356,8 +357,8 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 		if c.Sampled || c.ServicesCapped || c.ProcessGroupsCapped {
 			return ""
 		}
-		flag("--service", c.Services...)
 		flag("--process-group", c.ProcessGroups...)
+		flag("--service", c.Services...)
 		if len(bindings) == 0 {
 			return ""
 		}
@@ -473,7 +474,7 @@ func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]str
 	links := []string{
 		repoScopeSetLine("<name>", []string{"--namespace", "<namespace>", "--workload", "<workload>"}, dir, selectors),
 		repoScopeSetLine("<name>", []string{"--service-name", "<service.name>"}, dir, selectors),
-		repoScopeSetLine("<name>", []string{"--service", "SERVICE-…", "--process-group", "PROCESS_GROUP-…"}, dir, selectors),
+		repoScopeSetLine("<name>", []string{"--process-group", "PROCESS_GROUP-…", "--service", "SERVICE-…"}, dir, selectors),
 	}
 	hint := ""
 	if r.Unit == "." && r.Dir != "." {
