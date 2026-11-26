@@ -498,7 +498,7 @@ Examples:
 					scoped.decorate(ctx, result)
 				},
 				OnResult:   scoped.onResult,
-				TypedQuery: scoped.typed,
+				TypedQuery: scoped.typedIfScoped(),
 				// The progress bar is a user-facing affordance of the `query`
 				// command only; opt in here (subject to --no-progress) so internal
 				// query callers stay silent by default.

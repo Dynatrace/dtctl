@@ -466,6 +466,42 @@ func TestQueryRepoScope_SegmentVariableErrorNamesTheEntry(t *testing.T) {
 		`remove the segment from the entry in .dtctl-repo-scope.yaml or from the command line, or pass --no-repo-scope to send only the command line's`, detail.Message)
 }
 
+// The empty-result diagnosis samples the data object to tell a mistyped field
+// from a quiet service. Under a scope the sample is taken where the query
+// ran: with the inserted filter and the segments sent. Without one, a field
+// the scoped records carry could be reported missing from records the query
+// could never have returned.
+func TestQueryRepoScope_EmptyResultSampleStaysInScope(t *testing.T) {
+	const typed = `fetch logs | filter loglevl == "ERROR"`
+	const filter = `filter (service.name == \"checkout\" or (k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\"))`
+	const sentSegments = `"filterSegments":[{"id":"Ab3dEf9hIjk","variables":[{"name":"environment","values":["production"]}]},{"id":"plain-1"}]`
+	srv := segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
+	chdirTestRepo(t, segmentScope)
+
+	code, _, stderr := runRepoScoped([]string{"query", typed, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var posts []string
+	for _, r := range srv.requests() {
+		if strings.Contains(r, "/query:execute") {
+			posts = append(posts, r)
+		}
+	}
+	require.Len(t, posts, 2, "the query and its sample")
+	for _, post := range posts {
+		require.Contains(t, post, filter)
+		require.Contains(t, post, sentSegments)
+	}
+	require.Contains(t, posts[1], filter+` | limit 100"`)
+
+	// Unscoped, the sample is main's: the fetch stage alone, and no segment
+	// the query was given.
+	srv = segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
+	code, _, stderr = runRepoScoped([]string{"query", typed, "--agent", "--no-repo-scope", "--segment", "plain-1"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	log := srv.requestLog()
+	require.Equal(t, "POST /platform/storage/query/v1/query:execute query=fetch logs | limit 100", log[len(log)-1])
+}
+
 // slowSegmentReads makes every segment read of srv hang until its request is
 // abandoned, or for two seconds when nothing abandons it. started is closed
 // by the first read.

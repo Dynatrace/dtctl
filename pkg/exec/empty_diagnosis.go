@@ -75,6 +75,7 @@ func (e *DQLExecutor) emptyResultAdvice(query string, result *DQLQueryResponse, 
 	if !isEmptyResult(records) {
 		return nil, nil
 	}
+	sent := query
 	if opts.TypedQuery != "" {
 		query = opts.TypedQuery
 	}
@@ -86,7 +87,7 @@ func (e *DQLExecutor) emptyResultAdvice(query string, result *DQLQueryResponse, 
 		if keys := queriedMetricKeys(result); len(keys) > 0 {
 			reason, suggestions = diagnoseMetricKeys(ctx, probe, keys, result, opts)
 		} else if obj, fields := referencedFields(query); obj != "" && len(fields) > 0 {
-			reason, suggestions = diagnoseFields(ctx, probe, query, obj, fields, opts)
+			reason, suggestions = diagnoseFields(ctx, probe, query, sent, obj, fields, opts)
 		}
 	}
 	if reason == nil {
@@ -121,8 +122,15 @@ func probeIsPartial(r *DQLQueryResponse) bool {
 
 // diagnoseFields samples the user's fetch stage and reports referenced fields
 // that occur in none of the sampled records.
-func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, fields []string, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
+//
+// For a caller that sent a rewritten text (opts.TypedQuery), the sample is
+// taken where the query ran: under the stages the caller inserted after
+// fetch, and with the filter segments it sent. A field absent from the whole
+// data object may be present on every record the query could return, and the
+// other way round.
+func diagnoseFields(ctx context.Context, probe probeFunc, query, sent, object string, fields []string, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
 	stages := splitStages(query)
+	head, sampled := stages[0], "the query's fetch stage"
 	probeOpts := baseProbeOptions(opts)
 	probeOpts.MaxResultRecords = emptyProbeSampleRecords
 	// The sample covers the same window as the user's query: the fetch stage is
@@ -130,7 +138,14 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	// timeframe flags are passed through.
 	probeOpts.DefaultTimeframeStart = opts.DefaultTimeframeStart
 	probeOpts.DefaultTimeframeEnd = opts.DefaultTimeframeEnd
-	resp, err := probe(ctx, fmt.Sprintf("%s | limit %d", stages[0], emptyProbeSampleRecords), probeOpts)
+	if opts.TypedQuery != "" {
+		probeOpts.Segments = opts.Segments
+		if sentStages := splitStages(sent); len(sentStages) > len(stages) {
+			head = strings.Join(sentStages[:1+len(sentStages)-len(stages)], " | ")
+			sampled += " and the stage inserted after it"
+		}
+	}
+	resp, err := probe(ctx, fmt.Sprintf("%s | limit %d", head, emptyProbeSampleRecords), probeOpts)
 	// A sample cut short by a limit is skewed toward whatever was read first,
 	// so it is not used as evidence.
 	if err != nil || resp == nil || probeIsPartial(resp) {
@@ -171,7 +186,7 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 				DataObject: object,
 				DidYouMean: near,
 				SampleSize: n,
-				Evidence:   fmt.Sprintf("`%s` is absent from all %d sampled `%s` records (the query's fetch stage with `| limit %d`); the near match is present in the sample", f, n, object, emptyProbeSampleRecords),
+				Evidence:   fmt.Sprintf("`%s` is absent from all %d sampled `%s` records (%s with `| limit %d`); the near match is present in the sample", f, n, object, sampled, emptyProbeSampleRecords),
 			}
 		}
 	}

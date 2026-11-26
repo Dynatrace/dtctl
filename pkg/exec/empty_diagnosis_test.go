@@ -116,29 +116,51 @@ func TestEmptyResultAdvice_FieldTypo(t *testing.T) {
 }
 
 // A caller that rewrote the query (a repo scope inserts a filter) passes the
-// text as typed: the diagnosis must judge only the fields the user wrote, and
-// sample the user's own fetch stage.
+// text as typed: the diagnosis must judge only the fields the user wrote. The
+// sample is taken where the query ran, under the stage the caller inserted
+// after fetch and with the segments it sent, so that it does not blame a
+// field on records the query could never have returned.
 func TestEmptyResultAdvice_DiagnosesTheTypedQuery(t *testing.T) {
 	const typed = `fetch logs | filter servce.name == "x"`
 	const sent = "fetch logs | filter (k8s.workload.name == \"checkout\")\n| filter servce.name == \"x\""
+	segments := []FilterSegmentRef{{ID: "plain-1"}}
 
 	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return logSample(), nil }}
 	e := &DQLExecutor{probe: p.run}
-	reason, sugg := e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{TypedQuery: typed})
+	reason, sugg := e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{TypedQuery: typed, Segments: segments})
 	if reason == nil || reason.Field != "servce.name" {
 		t.Fatalf("reason = %+v, want the typed field servce.name", reason)
 	}
 	if hasSuggestion(sugg, "k8s.workload.name") {
 		t.Errorf("the inserted filter's field must not be diagnosed: %v", sugg)
 	}
-	if len(p.calls) != 1 || p.calls[0] != "fetch logs | limit 100" {
-		t.Errorf("probe calls = %q", p.calls)
+	if len(p.calls) != 1 || p.calls[0] != `fetch logs | filter (k8s.workload.name == "checkout") | limit 100` {
+		t.Errorf("probe calls = %q, want the sample under the inserted stage", p.calls)
+	}
+	if len(p.opts) != 1 || !reflect.DeepEqual(p.opts[0].Segments, segments) {
+		t.Errorf("the sample must carry the segments the query was sent with: %+v", p.opts)
+	}
+	if !strings.Contains(reason.Evidence, "the stage inserted after it") {
+		t.Errorf("the evidence must say what was sampled: %s", reason.Evidence)
 	}
 
-	// Positive control: without the typed text the inserted field is judged.
-	_, sugg = e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{})
+	// A caller that sent the text as typed, with segments, samples the fetch
+	// stage under them.
+	p.calls, p.opts = nil, nil
+	e.emptyResultAdvice(typed, recordsResponse(), nil, DQLExecuteOptions{TypedQuery: typed, Segments: segments})
+	if len(p.calls) != 1 || p.calls[0] != "fetch logs | limit 100" || !reflect.DeepEqual(p.opts[0].Segments, segments) {
+		t.Errorf("probe calls = %q with %+v", p.calls, p.opts)
+	}
+
+	// Positive control: without the typed text the inserted field is judged,
+	// and the sample is the fetch stage alone, without segments.
+	p.calls, p.opts = nil, nil
+	_, sugg = e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{Segments: segments})
 	if !hasSuggestion(sugg, "k8s.workload.name") {
 		t.Errorf("control: the sent query's fields should be diagnosed: %v", sugg)
+	}
+	if len(p.calls) != 1 || p.calls[0] != "fetch logs | limit 100" || p.opts[0].Segments != nil {
+		t.Errorf("control: probe calls = %q with %+v", p.calls, p.opts)
 	}
 }
 

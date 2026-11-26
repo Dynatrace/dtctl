@@ -419,6 +419,17 @@ func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) e
 	return nil
 }
 
+// typedIfScoped is the query as typed when the scope changed what was sent,
+// in text or in segments, and "" otherwise. The executor's empty-result
+// diagnosis takes it to mean the request is not the user's own, so an
+// unscoped query must not carry it.
+func (q *repoScopedQuery) typedIfScoped() string {
+	if q.scope == nil || (!q.filtered && len(q.segments) == 0) {
+		return ""
+	}
+	return q.typed
+}
+
 // asTyped is what to change on this command line to run the query as typed.
 // Under a name that is not "add --no-repo-scope", which the name excludes,
 // and not "drop the name", which applies whichever entry covers the

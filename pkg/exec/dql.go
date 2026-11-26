@@ -291,8 +291,10 @@ type DQLExecuteOptions struct {
 	OnResult func(n int, result *DQLQueryResponse)
 
 	// TypedQuery is the query as the user wrote it, when the caller sends a
-	// rewritten one. Empty-result diagnosis reads the fields it checks from
-	// it, so it never blames a field the caller inserted.
+	// rewritten one, or sends it with filter segments the user did not give.
+	// Empty-result diagnosis reads the fields it checks from it, so it never
+	// blames a field the caller inserted, and samples under what the caller
+	// added: the stages inserted after fetch, and Segments.
 	TypedQuery string
 }
 
