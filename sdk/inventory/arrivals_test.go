@@ -983,6 +983,14 @@ func unflaggedEmptyRung(ratio int64, withRow bool) mockResponse {
 	return r
 }
 
+// refusedRung is a rung the environment answered without sampling: the full
+// result, with matches, and no sampled flag.
+func refusedRung(ratio, matched int64) mockResponse {
+	r := sampledRung(ratio, matched, matched, "")
+	r.sampled = false
+	return r
+}
+
 // TestUnflaggedEmptyRungDoesNotEndTheWalk: the coarsest rung of a capped
 // signal often reads no record at all, and its response then lacks the sampled
 // flag. That is an empty rung, not a refusal. Ending the walk there left the
@@ -1089,6 +1097,54 @@ func TestTruncatedUnflaggedRungIsARefusal(t *testing.T) {
 	}
 	if !strings.Contains(logs.Evidence, "does not support sampling") {
 		t.Errorf("evidence %q should say why the fallback did not apply", logs.Evidence)
+	}
+}
+
+// TestSampledMissDoesNotOutrankARefusal: a rung that came back unsampled with
+// matches contradicts the bound an earlier miss would report, so the refusal
+// is what the signal says.
+func TestSampledMissDoesNotOutrankARefusal(t *testing.T) {
+	runner := windowRunner()
+	runner.responses = append([]mockResponse{
+		cappedLogs(), sampledRung(100000, 0, 0, ""), refusedRung(10000, 500),
+	}, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State != SignalUnknown || !strings.Contains(logs.Evidence, "does not support sampling") {
+		t.Errorf("state = %q, evidence = %q, want unknown with the refusal named", logs.State, logs.Evidence)
+	}
+	if got := len(sampledCalls(runner)); got != 2 {
+		t.Errorf("ran %d sampled probes, want 2", got)
+	}
+}
+
+// TestThinSampleSurvivesARefusedNextRung: a refusal met while descending for
+// precision must not lose an answer that was already conclusive, any more
+// than a capped rung may.
+func TestThinSampleSurvivesARefusedNextRung(t *testing.T) {
+	for name, between := range map[string][]mockResponse{
+		"refused on the next rung":   nil,
+		"refused after an empty one": {unflaggedEmptyRung(10000, true)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := windowRunner()
+			rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, fixedNow.Format(time.RFC3339))}
+			rungs = append(rungs, between...)
+			rungs = append(rungs, refusedRung(samplingLadder[len(rungs)-1], 500))
+			runner.responses = append(rungs, runner.responses...)
+
+			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+			if logs.State != SignalLive || logs.RecordsSampled != 2 || logs.SamplingRatio != 100000 || logs.Records != 200000 {
+				t.Errorf("state/sampled/ratio/records = %q/%d/%d/%d, want live/2/100000/200000: the thin rung had already proven arrival (evidence: %s)",
+					logs.State, logs.RecordsSampled, logs.SamplingRatio, logs.Records, logs.Evidence)
+			}
+			if logs.Truncation != "" || strings.Contains(logs.Evidence, "does not support sampling") {
+				t.Errorf("truncation = %q, evidence = %q: a resolved signal must not read as capped or refused", logs.Truncation, logs.Evidence)
+			}
+			if got, want := len(sampledCalls(runner)), len(between)+2; got != want {
+				t.Errorf("ran %d sampled probes, want %d: the refusal ends the walk", got, want)
+			}
+		})
 	}
 }
 

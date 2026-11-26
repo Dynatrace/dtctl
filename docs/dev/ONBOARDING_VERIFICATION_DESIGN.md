@@ -609,6 +609,8 @@ telemetry is not implicated.
     that matched nothing and ran to completion is an empty rung: the walk continues past it,
     and it supplies no bound, since nothing in the response confirms the ratio
     (`TestUnflaggedEmptyRungDoesNotEndTheWalk`, `TestSampledBoundComesFromAFlaggedRung`).
+    A refusal met after a thin hit ends the walk on that hit rather than discarding it
+    (`TestThinSampleSurvivesARefusedNextRung`).
   - *A sampled `takeMax` is biased old by about `window / sampled_records`* — measured at 91s
     for 11 records over 15m, and under a second for 676. A `stale` verdict the bias alone could
     explain is therefore withheld as `unknown`, because inventing an ingest outage is the most

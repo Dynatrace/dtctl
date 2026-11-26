@@ -270,7 +270,11 @@ walk:
 			}
 			// The environment declined to sample this object, so that retry
 			// was the original capped query over again and every further rung
-			// would be too. Say why the fallback does not apply here.
+			// would be too. A hit an earlier rung already made stands; without
+			// one, say why the fallback does not apply here.
+			if hit != nil {
+				break walk
+			}
 			sig.State = SignalUnknown
 			sig.Truncation = cause
 			sig.Evidence = samplingRefusedEvidence(def.DataObject, opts.Since, opts.ScanLimitGBytes)
