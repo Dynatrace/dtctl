@@ -339,7 +339,18 @@ func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 		require.NotContains(t, r, "filterSegments")
 	}
 	require.True(t, strings.HasPrefix(stderr, repoScopeApplying+"\n"+
-		"repo scope checkout: its segments "+entrySegmentRefs+" are not checked; verify query sends the query text only\n"), stderr)
+		"repo scope checkout: its segments "+entrySegmentRefs+" are neither read nor sent: verify query checks the query text only. "+
+		"query sends them, and runs unscoped when one cannot be read\n"), stderr)
+
+	// An entry that is only segments has nothing verify query applies.
+	repo := chdirTestRepo(t, segmentScope)
+	writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
+	chdirSubdir(t, "tools")
+	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only. "+
+		"query sends them, and runs unscoped when one cannot be read\n"), stderr)
+	require.NotContains(t, stderr, "applying repo scope")
 }
 
 // Whether a segment's variables are all bound is the platform's to say. When

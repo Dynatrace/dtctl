@@ -1,0 +1,14 @@
+Name:           billing
+Path:           services/billing
+Environment:    abc12345.apps.dynatrace.com
+File:           .dtctl-repo-scope.yaml
+Note:           selected by name; its path "services/billing" does not cover "."
+Services:       SERVICE-0123456789ABCDEF
+Segments:       Ab3dEf9hIjk?environment=production
+Filters:
+  fetch logs   no filter: entry "billing" binds nothing fetch logs is filtered by (dt.entity.process_group, service.name, or k8s.namespace.name with k8s.workload.name); its segments are still sent
+  fetch spans  | filter (in(dt.entity.service, array("SERVICE-0123456789ABCDEF")))
+  every query run under the entry is sent with its segments
+Live Debugger filters:
+  none: entry "billing" binds only service ids, which Live Debugger does not honour as a workspace label; bind --namespace/--workload or --process-group
+Other entries:  tools

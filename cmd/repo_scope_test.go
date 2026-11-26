@@ -512,6 +512,21 @@ func TestRepoScopeHumanOutput(t *testing.T) {
       service-names: [checkout]
       process-groups: [PROCESS_GROUP-FEDCBA9876543210]
 `
+	// An entry that references only segments still narrows every query, and
+	// one with both sends its segments where its bindings filter nothing.
+	segments := `environments:
+  abc12345.apps.dynatrace.com:
+    - name: tools
+      segments:
+        - id: plain-1
+    - name: billing
+      path: services/billing
+      services: [SERVICE-0123456789ABCDEF]
+      segments:
+        - id: Ab3dEf9hIjk
+          variables:
+            environment: [production]
+`
 	for _, tc := range []struct {
 		golden    string
 		repo      bool
@@ -533,6 +548,8 @@ func TestRepoScopeHumanOutput(t *testing.T) {
 		{golden: "describe-gradle-library", repo: true, fixture: gradle, scopeFile: webproxy, dir: "webproxy-api", args: []string{"describe"}},
 		{golden: "current-cluster", repo: true, scopeFile: oneCluster, args: []string{"current"}},
 		{golden: "describe-cluster", repo: true, scopeFile: oneCluster, args: []string{"describe"}},
+		{golden: "describe-segments-only", repo: true, scopeFile: segments, args: []string{"describe", "tools"}},
+		{golden: "describe-segments-and-bindings", repo: true, scopeFile: segments, args: []string{"describe", "billing"}},
 		{golden: "list", repo: true, scopeFile: billing, args: []string{"list"}},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {

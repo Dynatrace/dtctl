@@ -516,7 +516,7 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	warnRepoScopeFile(q.stderr, q.warning)
 	s := q.scope
 	if q.unsent != "" {
-		defer output.FprintInfo(q.stderr, "repo scope %s: its segments %s are not checked; verify query sends the query text only", s.Name, q.unsent)
+		defer output.FprintInfo(q.stderr, "repo scope %s: its segments %s are neither read nor sent: verify query checks the query text only. query sends them, and runs unscoped when one cannot be read", s.Name, q.unsent)
 		if !q.bound {
 			return
 		}

@@ -73,13 +73,26 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	kv("Process groups:", e.ProcessGroups...)
 	kv("Services:", e.Services...)
 	kv("Segments:", segmentRefs(e.Segments)...)
+	// An entry's segments are sent whether or not a filter is inserted, so
+	// a missing filter is "not scoped" only for an entry without them.
 	output.FprintDescribeSection(w, "Filters:")
 	for _, object := range reposcope.DataObjects() {
-		if filter, ok, reason := reposcope.Render(e, object); ok {
+		filter, ok, reason := reposcope.Render(e, object)
+		switch {
+		case !e.HasBindings():
+		case ok:
 			fmt.Fprintf(w, "  fetch %-6s | filter (%s)\n", object, filter.Expr)
-		} else {
+		case len(e.Segments) > 0:
+			fmt.Fprintf(w, "  fetch %-6s no filter: %s; its segments are still sent\n", object, reason)
+		default:
 			fmt.Fprintf(w, "  fetch %-6s not scoped: %s\n", object, reason)
 		}
+	}
+	switch {
+	case !e.HasBindings():
+		fmt.Fprintf(w, "  none: entry %q references only filter segments, which are sent with every query run under it\n", e.Name)
+	case len(e.Segments) > 0:
+		fmt.Fprintln(w, "  every query run under the entry is sent with its segments")
 	}
 	// One line per filter set, spelled the way --filters takes one.
 	output.FprintDescribeSection(w, "Live Debugger filters:")
