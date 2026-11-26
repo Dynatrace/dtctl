@@ -447,6 +447,57 @@ func findProfilingCmd(t *testing.T, kind string) *cobra.Command {
 	return c
 }
 
+// A window that cannot be analysed is refused before any request, in words that
+// name the flags to change.
+func TestExecProfiling_WindowErrors(t *testing.T) {
+	api := newProfilingAPI(t, http.StatusOK, profilingTree)
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"too long", []string{"--default-timeframe-start", "now()-3h", "--default-timeframe-end", "now()"},
+			"invalid timeframe: the window must not exceed 2h (got 3h0m0s) — narrow it; the window can lie anywhere in the past"},
+		{"too long, far back", []string{"--default-timeframe-start", "1700000000000", "--default-timeframe-end", "1700007200001"},
+			"invalid timeframe: the window must not exceed 2h (got 2h0m0.001s) — narrow it; the window can lie anywhere in the past"},
+		{"start in the future", []string{"--default-timeframe-start", "now()+5m"},
+			"invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-2h')"},
+		{"end in the future", []string{"--default-timeframe-end", "now()+1h"},
+			"invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now"},
+		{"end before start", []string{"--default-timeframe-start", "1700003600000", "--default-timeframe-end", "1700000000000"},
+			"invalid timeframe: the end must be after the start"},
+		{"unreadable start", []string{"--default-timeframe-start", "yesterday"},
+			`invalid --default-timeframe-start: cannot parse time "yesterday": use ISO-8601/RFC3339, epoch millis, or now()-<dur>`},
+		{"unreadable end", []string{"--default-timeframe-start", "now()-1h", "--default-timeframe-end", "now()-1y"},
+			`invalid --default-timeframe-end: invalid duration in "now()-1y": unknown duration "1y": use a number and a unit (ms, s, m, h, d, w), e.g. 1d or 1h30m`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runProfilingStreams(t, append([]string{"hotspots", testProcess}, tc.args...)...)
+			require.Equal(t, 1, code)
+			require.Empty(t, stdout)
+			require.Equal(t, "Error: "+tc.want+"\n", stderr)
+		})
+	}
+	require.Empty(t, api.paths, "a refused window must not reach the API")
+}
+
+// The envelope says which window was analysed, and when it was nobody's
+// choice.
+func TestExecProfiling_WindowInEnvelope(t *testing.T) {
+	newProfilingAPI(t, http.StatusOK, profilingTree)
+
+	env := runProfilingAgent(t, "hotspots", testProcess)
+	require.Equal(t, "2h", env.Context.Window.Span)
+	require.Equal(t, "no window given, so the last 2h; set one with --default-timeframe-start/--default-timeframe-end", env.Context.Window.Note)
+
+	env = runProfilingAgent(t, "hotspots", testProcess, "--default-timeframe-start", "1700000000000", "--default-timeframe-end", "1700005400000")
+	require.Equal(t, "2023-11-14T22:13:20Z", env.Context.Window.From)
+	require.Equal(t, "2023-11-14T23:43:20Z", env.Context.Window.To)
+	require.Equal(t, "90m", env.Context.Window.Span)
+	require.Empty(t, env.Context.Window.Note)
+}
+
 // An API failure fails the command.
 func TestExecProfiling_APIErrorFails(t *testing.T) {
 	newProfilingAPI(t, http.StatusForbidden, `{"error":{"code":403,"message":"missing scope"}}`)

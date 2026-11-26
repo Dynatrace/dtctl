@@ -1,6 +1,7 @@
 package profiling
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -8,79 +9,129 @@ import (
 	"time"
 )
 
-// MaxWindow caps the analysis window, and is also the length used when a bound
-// is missing. The API itself accepts up to 24h, but an analysis reads every
-// sample in its window and holds the result in memory on the server, so its
-// cost grows with the window, and the server only runs a few analyses per
-// environment at a time. 2h is enough to localize a hotspot; how far back the
-// window lies is not limited.
+// DefaultWindow is the length of a window when a bound is missing: the last
+// 2h, the 2h after a start, or the 2h before an end.
+const DefaultWindow = 2 * time.Hour
+
+// MaxWindow caps the analysis window. The API itself accepts up to 24h, but an
+// analysis reads every sample in its window and holds the result in memory on
+// the server, so its cost grows with the window, and the server only runs a
+// few analyses per environment at a time. 2h is enough to localize a hotspot;
+// how far back the window lies is not limited.
 const MaxWindow = 2 * time.Hour
 
-// Window is an analysis window in epoch milliseconds, the unit Payload takes.
+// Window is an analysis window in epoch milliseconds, from From up to To.
 type Window struct {
 	From int64
 	To   int64
 	// Default says neither bound was given, so the window is the last
-	// MaxWindow.
+	// DefaultWindow.
 	Default bool
 }
+
+// Span is the window's length.
+func (w Window) Span() time.Duration {
+	return time.Duration(w.To-w.From) * time.Millisecond
+}
+
+// The errors of ResolveWindow for a window that was read but cannot be
+// analysed. A window over MaxWindow is a *WindowTooLongError and a bound that
+// could not be read a *WindowBoundError.
+var (
+	// ErrWindowStartInFuture: the window starts now or later.
+	ErrWindowStartInFuture = errors.New("profiling: the window starts in the future")
+	// ErrWindowEndInFuture: the window starts in the past and ends later than
+	// now.
+	ErrWindowEndInFuture = errors.New("profiling: the window ends in the future")
+	// ErrWindowEmpty: the window ends at or before its start.
+	ErrWindowEmpty = errors.New("profiling: the window ends at or before its start")
+)
+
+// Bound names one end of a window.
+type Bound string
+
+const (
+	BoundStart Bound = "start"
+	BoundEnd   Bound = "end"
+)
+
+// WindowBoundError is the error ResolveWindow returns for a bound it could not
+// read.
+type WindowBoundError struct {
+	Bound Bound
+	// Value is the bound as it was given.
+	Value string
+	// Err says what is wrong with it.
+	Err error
+}
+
+func (e *WindowBoundError) Error() string {
+	return fmt.Sprintf("profiling: invalid window %s: %v", e.Bound, e.Err)
+}
+
+func (e *WindowBoundError) Unwrap() error { return e.Err }
 
 // WindowTooLongError is the error ResolveWindow returns for a window longer
 // than MaxWindow. The window is refused rather than shortened; Requested holds
 // it as asked for, so a caller can narrow it and say that it did.
 type WindowTooLongError struct {
 	Requested Window
+	// Max is the cap the window is over: MaxWindow.
+	Max time.Duration
 }
 
 func (e *WindowTooLongError) Error() string {
-	return fmt.Sprintf("invalid timeframe: the window must not exceed 2h (got %s) — narrow it; the window can lie anywhere in the past",
-		time.Duration(e.Requested.To-e.Requested.From)*time.Millisecond)
+	return fmt.Sprintf("profiling: the window is %s long, over the limit of %s", e.Requested.Span(), e.Max)
 }
 
 // ResolveWindow turns a requested start and end into an analysis window. Both
 // accept what `dtctl query` accepts (ISO-8601/RFC3339, epoch millis,
-// now()-relative), and either may be empty. A missing bound is MaxWindow from
-// the other: a start alone covers the 2h after it (but not past now), an end
-// alone the 2h before it, neither the last 2h. The window must not end in the
-// future, must be positive and must be at most MaxWindow (a
-// *WindowTooLongError otherwise), checked here so an invalid window never
-// reaches the API. The error texts name the dtctl flags the bounds come from.
+// now()-relative), and either may be empty. A missing bound is DefaultWindow
+// from the other: a start alone covers the 2h after it (but not past now), an
+// end alone the 2h before it, neither the last 2h.
+//
+// The window must start in the past, must not end in the future, must be
+// positive and must be at most MaxWindow, checked here so an invalid window
+// never reaches the API. Each failure has its own error: a *WindowBoundError
+// for a bound that cannot be read, ErrWindowStartInFuture,
+// ErrWindowEndInFuture, ErrWindowEmpty, and a *WindowTooLongError.
 func ResolveWindow(start, end string, now time.Time) (Window, error) {
 	nowMs := now.UnixMilli()
+	def := DefaultWindow.Milliseconds()
 	var from, to int64
 	var err error
 	if end != "" {
 		if to, err = parseTime(end, nowMs); err != nil {
-			return Window{}, fmt.Errorf("invalid --default-timeframe-end: %w", err)
+			return Window{}, &WindowBoundError{Bound: BoundEnd, Value: end, Err: err}
 		}
 	}
 	if start != "" {
 		if from, err = parseTime(start, nowMs); err != nil {
-			return Window{}, fmt.Errorf("invalid --default-timeframe-start: %w", err)
+			return Window{}, &WindowBoundError{Bound: BoundStart, Value: start, Err: err}
 		}
 	}
 	switch {
 	case start == "" && end == "":
 		to = nowMs
-		from = to - MaxWindow.Milliseconds()
+		from = to - def
 	case start == "":
-		from = to - MaxWindow.Milliseconds()
+		from = to - def
 	case end == "":
-		to = min(from+MaxWindow.Milliseconds(), nowMs)
+		to = min(from+def, nowMs)
 	}
 
 	if from >= nowMs {
-		return Window{}, fmt.Errorf("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-2h')")
+		return Window{}, ErrWindowStartInFuture
 	}
 	if to > nowMs {
-		return Window{}, fmt.Errorf("invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now")
+		return Window{}, ErrWindowEndInFuture
 	}
 	if to <= from {
-		return Window{}, fmt.Errorf("invalid timeframe: the end must be after the start")
+		return Window{}, ErrWindowEmpty
 	}
 	w := Window{From: from, To: to, Default: start == "" && end == ""}
-	if to-from > MaxWindow.Milliseconds() {
-		return Window{}, &WindowTooLongError{Requested: w}
+	if w.Span() > MaxWindow {
+		return Window{}, &WindowTooLongError{Requested: w, Max: MaxWindow}
 	}
 	return w, nil
 }

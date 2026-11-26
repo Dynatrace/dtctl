@@ -251,24 +251,23 @@ func addProfilingCommonFlags(c *cobra.Command, f *profilingFlags) {
 
 // profilingRun is what one analysis was run on, for the agent envelope.
 type profilingRun struct {
-	kind          string // hotspots or allocations
-	entity        string
-	leafType      string
-	status        string
-	from, to      int64
-	defaultWindow bool
+	kind     string // hotspots or allocations
+	entity   string
+	leafType string
+	status   string
+	window   profiling.Window
 }
 
 // annotate fills the envelope's window and profile fields.
 func (r *profilingRun) annotate(ap *output.AgentPrinter, view, state string) *output.ProfileContext {
 	ctx := ap.Context()
 	ctx.Window = &output.TimeWindow{
-		From: time.UnixMilli(r.from).UTC().Format(time.RFC3339),
-		To:   time.UnixMilli(r.to).UTC().Format(time.RFC3339),
-		Span: spanString(time.Duration(r.to-r.from) * time.Millisecond),
+		From: time.UnixMilli(r.window.From).UTC().Format(time.RFC3339),
+		To:   time.UnixMilli(r.window.To).UTC().Format(time.RFC3339),
+		Span: spanString(r.window.Span()),
 	}
-	if r.defaultWindow {
-		ctx.Window.Note = "no window given, so the last 2h; set one with --default-timeframe-start/--default-timeframe-end"
+	if r.window.Default {
+		ctx.Window.Note = fmt.Sprintf("no window given, so the last %s; set one with --default-timeframe-start/--default-timeframe-end", spanString(profiling.DefaultWindow))
 	}
 	p := &output.ProfileContext{
 		Entity: r.entity,
@@ -319,7 +318,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	}
 	window, err := profiling.ResolveWindow(f.start, f.end, time.Now())
 	if err != nil {
-		return err
+		return profilingWindowError(err)
 	}
 
 	// Code-level analysis only reads profiling data — gate on OperationRead.
@@ -328,14 +327,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return err
 	}
 
-	run := &profilingRun{
-		kind:          kind,
-		entity:        entityID,
-		leafType:      f.leafType,
-		from:          window.From,
-		to:            window.To,
-		defaultWindow: window.Default,
-	}
+	run := &profilingRun{kind: kind, entity: entityID, leafType: f.leafType, window: window}
 	h := profiling.NewHandler(c)
 	progress := output.NewProgressReporterTo(true, agentMode(ctx), currentStderr(ctx))
 	progress.Update(output.ProgressState{Label: fmt.Sprintf("running %s analysis", kind)})
@@ -377,6 +369,27 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		return renderProfilingFunctions(ctx, run, hs, f, state, sortKey)
 	}
 	return renderProfilingStacks(ctx, run, hs, f)
+}
+
+// profilingWindowError words a window ResolveWindow refused, naming the flags
+// its bounds come from.
+func profilingWindowError(err error) error {
+	var bound *profiling.WindowBoundError
+	var tooLong *profiling.WindowTooLongError
+	switch {
+	case errors.As(err, &bound):
+		return fmt.Errorf("invalid --default-timeframe-%s: %w", bound.Bound, bound.Err)
+	case errors.Is(err, profiling.ErrWindowStartInFuture):
+		return fmt.Errorf("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-2h')")
+	case errors.Is(err, profiling.ErrWindowEndInFuture):
+		return fmt.Errorf("invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now")
+	case errors.Is(err, profiling.ErrWindowEmpty):
+		return fmt.Errorf("invalid timeframe: the end must be after the start")
+	case errors.As(err, &tooLong):
+		return fmt.Errorf("invalid timeframe: the window must not exceed %s (got %s) — narrow it; the window can lie anywhere in the past",
+			spanString(tooLong.Max), tooLong.Requested.Span())
+	}
+	return err
 }
 
 // profilingViewOptions checks the hotspots view flags and returns the thread
@@ -680,7 +693,8 @@ func profilingEmptyNote(reason profiling.EmptyReason, run *profilingRun, state s
 	case profiling.EmptyAppOnly:
 		return fmt.Sprintf("no stacks for %s: --app-only removed every frame (the profiler classified none as application code) — re-run without --app-only", run.entity)
 	}
-	return fmt.Sprintf("no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result", run.entity, run.status)
+	return fmt.Sprintf("no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most %s), or --raw for the API's whole result",
+		run.entity, run.status, spanString(profiling.MaxWindow))
 }
 
 // profilingAPIError adds profiling-specific advice to the API failures a
