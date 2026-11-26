@@ -617,41 +617,50 @@ func TestCreateBreakpoint_OutsideARepository(t *testing.T) {
 	require.Empty(t, srv.ops())
 }
 
-// A dry run writes nothing and needs no safety level. Without a filter source
-// it reads the workspace and says what the default will do to it.
+// A dry run sends nothing, whatever the workspace holds, and needs no safety
+// level. Without a filter source it says what the default does to a
+// workspace without filters, as a condition it has not checked.
 func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
+	const keeps = "; a workspace that has filters keeps them, and one with active breakpoints asks first"
 	for _, tc := range []struct {
-		name    string
-		dir     string
-		args    []string
-		filters []string
-		want    string // formatted with the workspace name
+		name string
+		dir  string
+		args []string
+		want string // formatted with the workspace name
 	}{
-		{"a workspace without filters", "", nil, nil,
-			"Dry run: would create breakpoint at A.java:1; would set workspace %s's filters from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout"},
-		{"the entry's set", "", nil, []string{checkoutSetJSON},
-			"Dry run: would create breakpoint at A.java:1; workspace %s keeps its filters (k8s.namespace.name:payments,k8s.workload.name:checkout)"},
-		{"other filters", "", nil, []string{webSetJSON},
-			"Dry run: would create breakpoint at A.java:1; would warn: workspace %s holds k8s.namespace.name:web, repo scope checkout would set k8s.namespace.name:payments,k8s.workload.name:checkout"},
-		{"no single set", filepath.Join("services", "regions"), nil, nil,
-			"Dry run: creating breakpoint at A.java:1 in workspace %s would fail: no workspace filters configured; repo scope regions has no single workload filter set (it renders k8s.namespace.name:payments,k8s.workload.name:regions; k8s.namespace.name:web,k8s.workload.name:regions): pass --repo-scope regions for all of them, or --filters key:value"},
-		{"no entry", "", []string{"--no-repo-scope"}, nil,
-			"Dry run: creating breakpoint at A.java:1 in workspace %s would fail: no workspace filters configured; pass --filters key:value"},
+		{"an entry with one workload set", "", nil,
+			"Dry run: would create breakpoint at A.java:1 in workspace %s; if it has no filters, would set them from repo scope checkout: k8s.namespace.name:payments,k8s.workload.name:checkout" + keeps},
+		{"no single set", filepath.Join("services", "regions"), nil,
+			"Dry run: would create breakpoint at A.java:1 in workspace %s, if it has filters: repo scope regions has no single workload filter set (it renders k8s.namespace.name:payments,k8s.workload.name:regions; k8s.namespace.name:web,k8s.workload.name:regions), so pass --repo-scope regions for all of them, or --filters key:value"},
+		{"the default turned off", "", []string{"--no-repo-scope"},
+			"Dry run: would create breakpoint at A.java:1 in workspace %s, if it has filters: otherwise pass --filters key:value"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := newLiveDebuggerStub(t, "readonly", tc.filters...)
-			repo := filepath.Base(chdirTestRepo(t, breakpointScope))
-			entry := "checkout"
-			if tc.dir != "" {
-				chdirSubdir(t, tc.dir)
-				entry = filepath.Base(tc.dir)
-			}
-			code, stdout, stderr := runRepoScoped(append([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, tc.args...), RunOptions{})
-			require.Zero(t, code, stderr)
-			require.Equal(t, fmt.Sprintf(tc.want, repo+"/"+entry), breakpointMessage(t, stdout))
-			require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops(), "the preview reads the workspace and writes nothing")
-		})
+		for _, filters := range [][]string{nil, {webSetJSON}} {
+			t.Run(tc.name, func(t *testing.T) {
+				srv := newLiveDebuggerStub(t, "readonly", filters...)
+				srv.activeRules = 2
+				repo := filepath.Base(chdirTestRepo(t, breakpointScope))
+				entry := "checkout"
+				if tc.dir != "" {
+					chdirSubdir(t, tc.dir)
+					entry = filepath.Base(tc.dir)
+				}
+				code, stdout, stderr := runRepoScoped(append([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, tc.args...), RunOptions{})
+				require.Zero(t, code, stderr)
+				require.Equal(t, fmt.Sprintf(tc.want, repo+"/"+entry), breakpointMessage(t, stdout))
+				require.Empty(t, srv.ops(), "a preview sends nothing: asking for a workspace may create it")
+			})
+		}
 	}
+
+	t.Run("outside a repository", func(t *testing.T) {
+		srv := newLiveDebuggerStub(t, "readonly")
+		t.Chdir(t.TempDir())
+		code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Contains(t, breakpointMessage(t, stdout), ", if it has filters: otherwise pass --filters key:value")
+		require.Empty(t, srv.ops())
+	})
 
 	srv := newLiveDebuggerStub(t, "readonly")
 	repo := filepath.Base(chdirTestRepo(t, breakpointScope))
@@ -666,8 +675,8 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 	require.Contains(t, agentError(t, stdout).Message, "readonly", "the real run is still refused")
 	require.Empty(t, srv.ops())
 
-	// A preview never newly requires config: one that does not load leaves
-	// the default off and the workspace unnamed.
+	// A preview never newly requires config, nor a token: with a config
+	// that does not load the workspace goes unnamed.
 	t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, RunOptions{})
 	require.Zero(t, code, stderr)
@@ -675,17 +684,11 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 	code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run", "--filters", "k8s.namespace.name:web"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Contains(t, breakpointMessage(t, stdout), "Dry run: would set workspace filters (k8s.namespace.name:web)")
-}
 
-// A client that does not build fails the preview, as a read that fails does
-// and as delete --dry-run does: there is no workspace to say anything about.
-func TestCreateBreakpoint_DryRunNeedsAClient(t *testing.T) {
 	writeIsolatedConfig(t, "current-context: c\ncontexts:\n  - name: c\n    context:\n      environment: http://127.0.0.1:1\n      token-ref: missing\n      safety-level: readonly\n")
-	optInRepoScope(t)
-	chdirTestRepo(t, breakpointScope)
-	code, stdout, _ := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent", "--dry-run"}, RunOptions{})
-	require.NotZero(t, code, stdout)
-	require.Contains(t, agentError(t, stdout).Message, "missing")
+	code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, breakpointMessage(t, stdout), "Dry run: would create breakpoint at A.java:1 in workspace "+repo+"/checkout")
 }
 
 // breakpointMessage is the message of a --plain breakpoint result.

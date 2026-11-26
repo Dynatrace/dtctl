@@ -203,9 +203,10 @@ dtctl update breakpoint --repo-scope checkout                           # replac
 dtctl create breakpoint OrderController.java:306 --dry-run              # preview what the default will do
 ```
 
-The dry run reads the workspace and says whether the default would set its
-filters, keep them, warn, or fail; like `get breakpoints`, it may create an
-empty workspace.
+The dry run sends nothing to the environment, not even the request that looks
+a workspace up, because that request creates a workspace that does not exist
+yet. It therefore does not know whether the workspace has filters, and says
+what the default does as a condition.
 
 > **Verified labels.** `k8s.namespace.name` with `k8s.workload.name`, and
 > `dt.entity.process_group`, select processes; the labels of one set must all

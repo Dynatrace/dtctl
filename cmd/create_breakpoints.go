@@ -84,39 +84,37 @@ Examples:
 				filterSummary = formatFilters(parsed)
 			}
 
-			// A dry run with no named entry loads its config in the preview,
-			// which never newly requires one. Every other run needs it here:
-			// for the safety level, and because the entries are keyed by the
-			// context's environment.
-			var cfg *config.Config
-			if !dryRun(cmdContext(cmd)) || scopeName != "" {
-				if cfg, err = loadConfig(cmdContext(cmd)); err != nil {
-					return err
+			preview := createBreakpointPreview{location: location, scopeName: scopeName, filtersChanged: filtersChanged, filterSummary: filterSummary}
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				// A preview never newly requires config, except to find the
+				// entry it was asked for: without one it says less.
+				if dryRun(cmdContext(cmd)) && scopeName == "" {
+					return printBreakpointMessage(cmdContext(cmd), "create", preview.message())
 				}
-				if err := checkSafety(cmdContext(cmd), cfg, safety.OperationCreate, safety.OwnershipUnknown); err != nil {
+				return err
+			}
+			if err := checkSafety(cmdContext(cmd), cfg, safety.OperationCreate, safety.OwnershipUnknown); err != nil {
+				return err
+			}
+			// Setting the workspace's filters re-scopes every breakpoint in
+			// it, so it is checked as the update it is, like update
+			// breakpoint --filters, before the entry is read or anything is
+			// sent.
+			if filtersChanged || scopeName != "" {
+				if err := checkSafety(cmdContext(cmd), cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
 					return err
-				}
-				// Setting the workspace's filters re-scopes every breakpoint in
-				// it, so it is checked as the update it is, like update
-				// breakpoint --filters, before the entry is read or anything
-				// is sent.
-				if filtersChanged || scopeName != "" {
-					if err := checkSafety(cmdContext(cmd), cfg, safety.OperationUpdate, safety.OwnershipUnknown); err != nil {
-						return err
-					}
 				}
 			}
 
 			// The workspace is resolved before anything else reads the scope
 			// file, so a file that does not load refuses the run here.
-			var workspace breakpointWorkspace
-			if cfg != nil {
-				if workspace, err = resolveBreakpointWorkspace(cmd, cfg); err != nil {
-					return err
-				}
-				if err := workspace.requireScopeFile(); err != nil {
-					return err
-				}
+			workspace, err := resolveBreakpointWorkspace(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			if err := workspace.requireScopeFile(); err != nil {
+				return err
 			}
 
 			// A named entry is a filter source like --filters, resolved before
@@ -128,12 +126,19 @@ Examples:
 				filterSummary = filterSetsSummary(filterSets)
 			}
 
+			// A preview sends nothing, not even the read that finds the
+			// workspace: asking for a workspace may create it.
 			if dryRun(cmdContext(cmd)) {
-				msg, err := previewCreateBreakpoint(cmd, cfg, workspace, location, scopeName, filtersChanged, filterSummary)
-				if err != nil {
-					return err
+				preview.workspace, preview.filterSummary = workspace.name, filterSummary
+				if filterSets == nil {
+					if preview.cov, err = defaultBreakpointFilters(cmd, cfg); err != nil {
+						return err
+					}
+					if preview.cov.set != nil {
+						noteClusterNotSent(currentStderr(cmdContext(cmd)), preview.cov.entry)
+					}
 				}
-				return printBreakpointMessage(cmdContext(cmd), "create", msg)
+				return printBreakpointMessage(cmdContext(cmd), "create", preview.message())
 			}
 
 			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
@@ -216,60 +221,6 @@ Examples:
 	return c
 }
 
-// previewCreateBreakpoint is a dry run's message. Without a filter source it
-// reads the workspace, as get breakpoints and delete --dry-run do
-// (getOrCreateWorkspaceV2 is a read, though it may create an empty
-// workspace), so it can say what the repo scope default will do; a client
-// that does not build fails the preview like a read that fails. A preview
-// with a filter source sends nothing, and never newly requires config: when
-// none loads, the workspace goes unnamed.
-func previewCreateBreakpoint(cmd *cobra.Command, cfg *config.Config, workspace breakpointWorkspace, location, scopeName string, filtersChanged bool, filterSummary string) (string, error) {
-	ctx := cmdContext(cmd)
-	preview := createBreakpointPreview{location: location, scopeName: scopeName, filtersChanged: filtersChanged, filterSummary: filterSummary}
-	if cfg == nil {
-		loaded, err := loadConfig(ctx)
-		if err != nil {
-			return preview.message(), nil
-		}
-		cfg = loaded
-		if workspace, err = resolveBreakpointWorkspace(cmd, cfg); err != nil {
-			return "", err
-		}
-		if err := workspace.requireScopeFile(); err != nil {
-			return "", err
-		}
-	}
-	preview.workspace = workspace.name
-	var err error
-	if filtersChanged || scopeName != "" {
-		return preview.message(), nil
-	}
-	if preview.cov, err = defaultBreakpointFilters(cmd, cfg); err != nil {
-		return "", err
-	}
-	if err := checkSafety(ctx, cfg, safety.OperationCreate, safety.OwnershipUnknown); err != nil {
-		return "", err
-	}
-	handler, err := liveDebuggerHandler(ctx, cfg)
-	if err != nil {
-		return "", err
-	}
-	resp, _, err := handler.GetOrCreateWorkspace(preview.workspace)
-	if err != nil {
-		return "", err
-	}
-	if preview.hasFilters, err = livedebugger.WorkspaceHasFilters(resp); err != nil {
-		return "", err
-	}
-	if preview.current, err = livedebugger.WorkspaceFilterSets(resp); err != nil {
-		return "", err
-	}
-	if preview.cov.outcome(preview.hasFilters, preview.current) == defaultSets {
-		noteClusterNotSent(currentStderr(ctx), preview.cov.entry)
-	}
-	return preview.message(), nil
-}
-
 // liveDebuggerHandler is the Live Debugger handler for cfg's current context.
 func liveDebuggerHandler(ctx context.Context, cfg *config.Config) (*livedebugger.Handler, error) {
 	c, err := newClientFromConfig(ctx, cfg)
@@ -283,20 +234,19 @@ func liveDebuggerHandler(ctx context.Context, cfg *config.Config) (*livedebugger
 	return livedebugger.NewHandler(c, current.Environment)
 }
 
-// createBreakpointPreview is what a create's dry run knows: the filter source
-// it was given, if any, and otherwise the workspace's filters (hasFilters,
-// current) and what the repo scope default would do to them (cov).
+// createBreakpointPreview is what a create's dry run knows without asking
+// the environment: the filter source it was given, if any, and otherwise
+// what the repo scope default offers a workspace without filters (cov).
 // workspace is empty when no config loaded.
 type createBreakpointPreview struct {
 	location, workspace, scopeName string
 	filtersChanged                 bool
 	filterSummary                  string
 	cov                            coveringFilters
-	hasFilters                     bool
-	current                        []livedebugger.FilterSet
 }
 
-// message words the preview, the default's part as cov.outcome decides it.
+// message words the preview. Whether the workspace has filters is not
+// known, so what depends on it is worded as the condition it is.
 func (p createBreakpointPreview) message() string {
 	const rescopeNote = "(note: changing filters also re-scopes existing breakpoints in the workspace)"
 	filtersOf := "workspace filters"
@@ -313,22 +263,18 @@ func (p createBreakpointPreview) message() string {
 	if p.workspace == "" {
 		return msg
 	}
-	switch p.cov.outcome(p.hasFilters, p.current) {
-	case defaultSets:
-		msg += fmt.Sprintf("; would set %s from repo scope %s: %s", filtersOf, p.cov.name, formatFilters(p.cov.set))
-	case defaultNoEntry, defaultNoSet:
-		reason := "no workspace filters configured; pass --filters key:value"
-		if p.cov.name != "" || p.cov.skipped != "" {
-			reason = p.cov.noFilters(p.location)
-		}
-		return fmt.Sprintf("Dry run: creating breakpoint at %s in workspace %s would fail: %s", p.location, p.workspace, reason)
-	case defaultWarns:
-		msg += fmt.Sprintf("; would warn: workspace %s holds %s, repo scope %s would set %s",
-			p.workspace, workspaceFilterSummary(p.current), p.cov.name, filterSetsSummary(p.cov.sets))
-	case defaultKeeps:
-		msg += fmt.Sprintf("; workspace %s keeps its filters (%s)", p.workspace, workspaceFilterSummary(p.current))
+	msg += " in workspace " + p.workspace
+	switch {
+	case p.cov.set != nil:
+		return msg + fmt.Sprintf("; if it has no filters, would set them from repo scope %s: %s; a workspace that has filters keeps them, and one with active breakpoints asks first",
+			p.cov.name, formatFilters(p.cov.set))
+	case p.cov.name != "":
+		return msg + fmt.Sprintf(", if it has filters: repo scope %s has no single workload filter set (it renders %s), so pass --%s %s for all of them, or --filters key:value",
+			p.cov.name, filterSetsSummary(p.cov.sets), repoScopeFlag, p.cov.name)
+	case p.cov.skipped != "":
+		return msg + fmt.Sprintf(", if it has filters: %s, or pass --filters key:value", p.cov.skipped)
 	}
-	return msg
+	return msg + ", if it has filters: otherwise pass --filters key:value"
 }
 
 func extractCreatedBreakpointStableID(resp map[string]interface{}) string {
