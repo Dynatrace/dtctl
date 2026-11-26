@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -88,6 +87,9 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 		for _, set := range sets {
 			fmt.Fprintf(w, "  %s\n", formatFilters(set))
 		}
+		if e.BindsCluster() {
+			fmt.Fprintln(w, "  not narrowed by cluster: the filters include the same workload in other clusters")
+		}
 	} else {
 		fmt.Fprintf(w, "  none: %s\n", reason)
 	}
@@ -106,7 +108,7 @@ func repoScopeCoverage(e *reposcope.Entry) string {
 // cluster. Read as "the cluster narrows the entry", such an entry looks
 // narrower than the filter it renders.
 func repoScopeClusterNote(e *reposcope.Entry) string {
-	if !slices.ContainsFunc(e.Workloads, func(w reposcope.Workload) bool { return w.ClusterUID != "" }) {
+	if !e.BindsCluster() {
 		return ""
 	}
 	var others []string

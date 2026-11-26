@@ -244,6 +244,9 @@ func previewCreateBreakpoint(cmd *cobra.Command, cfg *config.Config, location, s
 	if preview.current, err = livedebugger.WorkspaceFilterSets(resp); err != nil {
 		return "", err
 	}
+	if preview.cov.outcome(preview.hasFilters, preview.current) == defaultSets {
+		noteClusterNotSent(currentStderr(ctx), preview.cov.entry)
+	}
 	return preview.message(), nil
 }
 

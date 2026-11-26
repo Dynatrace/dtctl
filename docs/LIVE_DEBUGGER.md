@@ -95,26 +95,22 @@ honour `dt.entity.service`. Only a one-set entry can be pasted into
 `--filters`. The default on create sends the workload set only; a named
 `--repo-scope` sends every set.
 
-A workload bound to a cluster (`cluster-uid` in the scope file) renders a set
-that carries the cluster as a third label, one set per namespace and cluster:
-
-```text
-Live Debugger filters:
-  k8s.cluster.uid:11111111-2222-3333-4444-555555555555,k8s.namespace.name:payments,k8s.workload.name:checkout
-```
-
 Filter segments an entry references (`segments` in the scope file) narrow its
 queries and nothing else: a workspace is filtered by labels and cannot take a
 segment, so they are never part of a filter set, and an entry that holds only
 segments renders none.
 
-`k8s.cluster.uid` has not been verified as a workspace label. The namespace,
-workload and process group labels have; this one is sent because leaving it
-out would place breakpoints in the same workload of a cluster the entry
-excludes. If a breakpoint set this way reports no instances in
-`dtctl describe breakpoint`, the workspace does not carry the label: set the
-filters by hand with `--filters k8s.namespace.name:<ns>,k8s.workload.name:<name>`,
-adding `k8s.cluster.name:<name>` to keep to one cluster.
+A workload's cluster (`cluster-uid` in the scope file) is not part of its
+filter set. `k8s.cluster.uid` has not been verified as a workspace label, and a
+label a workspace does not know selects nothing, so it is not sent: a workspace
+set from an entry that binds a cluster includes the same namespace and workload
+in other clusters. `create breakpoint` and `update breakpoint` say so whenever
+they set, or preview setting, filters from such an entry, and
+`repo-scope describe` says it under the sets:
+
+```text
+repo scope checkout binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters
+```
 
 - **Default on create.** `dtctl create breakpoint` without `--filters`, in a
   workspace that has no filters yet, applies the namespace-and-workload set of
@@ -132,8 +128,8 @@ adding `k8s.cluster.name:<name>` to keep to one cluster.
 
   A workspace that already has filters keeps them; when the covering entry
   would set different ones, a warning names `--repo-scope <entry>`. An entry
-  with no workload binding, or with workloads in several namespaces or
-  clusters, has no one set to apply, and the command says to pass `--repo-scope <entry>`. A
+  with no workload binding, or with workloads in several namespaces,
+  has no one set to apply, and the command says to pass `--repo-scope <entry>`. A
   workspace without filters normally holds no breakpoints; if it holds active
   ones, the default asks first, and is refused, naming `--yes`, where nobody
   can be asked (`--plain`, agent mode, an ended stdin).

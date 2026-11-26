@@ -257,6 +257,56 @@ func TestCreateBreakpoint_RepoScopeDefault(t *testing.T) {
 	require.Contains(t, strings.Join(resp.Context.Suggestions, "\n"), "--repo-scope <name>")
 }
 
+// A workspace is not narrowed by cluster: the label is not sent, since
+// nothing confirms a workspace honours it and a set that selects nothing
+// would be a breakpoint that never hits. Every path that sets filters from
+// an entry binding a cluster says so, the dry runs included.
+func TestBreakpoint_RepoScopeClusterIsNotSent(t *testing.T) {
+	const scope = `environments:
+  127.0.0.1:
+    - name: checkout
+      workloads:
+        - cluster-uid: 11111111-2222-3333-4444-555555555555
+          namespace: payments
+          name: checkout
+`
+	const note = "repo scope checkout binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters\n"
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		stderr string
+		sends  bool
+	}{
+		{"create by default", []string{"create", "breakpoint", "A.java:1"}, checkoutApplying + note, true},
+		{"create by default, dry run", []string{"create", "breakpoint", "A.java:1", "--dry-run"}, note, false},
+		{"create named", []string{"create", "breakpoint", "A.java:1", "--repo-scope", "checkout", "--yes"}, note, true},
+		{"create named, dry run", []string{"create", "breakpoint", "A.java:1", "--repo-scope", "checkout", "--dry-run"}, note, false},
+		{"update named", []string{"update", "breakpoint", "--repo-scope", "checkout", "--yes"}, note, true},
+		{"update named, dry run", []string{"update", "breakpoint", "--repo-scope", "checkout", "--dry-run"}, note, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readwrite-all")
+			chdirTestRepo(t, scope)
+			code, stdout, stderr := runRepoScoped(append(tc.args, "--plain"), RunOptions{})
+			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+			require.Equal(t, tc.stderr, stderr)
+			require.NotContains(t, stdout, "k8s.cluster.uid")
+			if tc.sends {
+				require.JSONEq(t, filterSetsPayload(t, checkoutFilterSet), srv.sentFilterSets(t))
+			} else {
+				require.NotContains(t, srv.ops(), "UpdateWorkspaceV2")
+			}
+		})
+	}
+
+	// An entry without a cluster has nothing to say.
+	newLiveDebuggerStub(t, "readwrite-all")
+	chdirTestRepo(t, breakpointScope)
+	code, _, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, checkoutApplying, stderr)
+}
+
 // A workspace without filters holds no breakpoints, so the default asks
 // nothing, even where it could: interactive, with nothing on stdin.
 func TestCreateBreakpoint_RepoScopeDefaultAsksOnlyWhenItRescopes(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"net"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -318,6 +319,12 @@ func segmentValueProblem(v string) string {
 // filter, and its segments are all it applies.
 func (e *Entry) HasBindings() bool {
 	return len(e.Services)+len(e.ProcessGroups)+len(e.ServiceNames)+len(e.Workloads) > 0
+}
+
+// BindsCluster reports whether a workload of the entry is bound to a
+// cluster.
+func (e *Entry) BindsCluster() bool {
+	return slices.ContainsFunc(e.Workloads, func(w Workload) bool { return w.ClusterUID != "" })
 }
 
 // validatePath holds Path to a clean, relative, slash-separated directory

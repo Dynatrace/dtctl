@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -52,7 +53,18 @@ func namedBreakpointFilters(cmd *cobra.Command, cfg *config.Config, name string)
 	if len(res.Status.Entry.Services) > 0 {
 		output.FprintInfo(stderr, "repo scope %s's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label", name)
 	}
+	noteClusterNotSent(stderr, res.Status.Entry)
 	return sets, nil
+}
+
+// noteClusterNotSent says, for an entry that binds a cluster, that the
+// filters set from it do not: a filter set carries the namespace and the
+// workload only, so it is wider than the entry. Every path that sets, or
+// previews setting, filters from an entry calls it.
+func noteClusterNotSent(stderr io.Writer, e *reposcope.Entry) {
+	if e.BindsCluster() {
+		output.FprintInfo(stderr, "repo scope %s binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters", e.Name)
+	}
 }
 
 // coveringFilters is what the entry covering the working directory offers a
@@ -68,6 +80,8 @@ type coveringFilters struct {
 	// namespace-and-workload set.
 	sets []map[string][]string
 	set  map[string][]string
+	// entry is the entry itself, nil when none applies.
+	entry *reposcope.Entry
 }
 
 // defaultBreakpointFilters is the entry covering the working directory,
@@ -88,7 +102,7 @@ func defaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config) (coveringF
 	if !ok {
 		return coveringFilters{skipped: reason}, nil
 	}
-	cov := coveringFilters{name: res.Status.Entry.Name, sets: sets}
+	cov := coveringFilters{name: res.Status.Entry.Name, sets: sets, entry: res.Status.Entry}
 	cov.set, _ = reposcope.WorkloadFilterSet(sets)
 	return cov, nil
 }
@@ -159,6 +173,7 @@ func applyDefaultBreakpointFilters(cmd *cobra.Command, cfg *config.Config, ws br
 	applied := appliedDefault{scope: cov.name, summary: formatFilters(cov.set)}
 	output.FprintInfo(stderr, "set the workspace filters from repo scope %s: %s (--filters sets them by hand, --%s turns this default off)",
 		cov.name, applied.summary, noRepoScopeFlag)
+	noteClusterNotSent(stderr, cov.entry)
 	if len(cov.sets) > 1 {
 		output.FprintInfo(stderr, "repo scope %s's other filter sets (%s) are set only with --%s %s",
 			cov.name, filterSetsSummary(withoutSet(cov.sets, cov.set)), repoScopeFlag, cov.name)

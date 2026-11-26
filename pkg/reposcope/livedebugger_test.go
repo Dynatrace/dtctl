@@ -30,15 +30,14 @@ func TestLiveDebuggerFilters(t *testing.T) {
 			},
 		},
 		{
-			name: "a workload's cluster is a label of its set, and a set of its own",
+			name: "a workload's cluster is not a label: the set is its namespace's",
 			entry: Entry{Name: "clusters", Workloads: []Workload{
 				{ClusterUID: clusterUID, Namespace: "payments", Name: "ledger"},
 				{Namespace: "payments", Name: "checkout"},
 				{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"},
 			}},
 			want: []map[string][]string{
-				{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout"}},
-				{"k8s.cluster.uid": {clusterUID}, "k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout", "ledger"}},
+				{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout", "ledger"}},
 			},
 		},
 		{
@@ -126,10 +125,13 @@ func TestWorkloadFilterSet(t *testing.T) {
 	assert.False(t, ok, "no workload")
 	_, ok = WorkloadFilterSet(render(Entry{Name: "split", Workloads: []Workload{{Namespace: "web", Name: "checkout"}, {Namespace: "payments", Name: "checkout"}}}))
 	assert.False(t, ok, "a workload set per namespace")
-	_, ok = WorkloadFilterSet(render(Entry{Name: "clusters", Workloads: []Workload{
+	set, ok = WorkloadFilterSet(render(Entry{Name: "clusters", Workloads: []Workload{
 		{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"}, {Namespace: "payments", Name: "checkout"}}}))
-	assert.False(t, ok, "a workload set per cluster")
-	set, ok = WorkloadFilterSet(render(Entry{Name: "checkout", Workloads: []Workload{{ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"}}}))
-	require.True(t, ok)
-	assert.Equal(t, map[string][]string{"k8s.cluster.uid": {clusterUID}, "k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout"}}, set)
+	require.True(t, ok, "a cluster makes no set of its own")
+	assert.Equal(t, map[string][]string{"k8s.namespace.name": {"payments"}, "k8s.workload.name": {"checkout"}}, set)
+}
+
+func TestEntry_BindsCluster(t *testing.T) {
+	assert.True(t, (&Entry{Workloads: []Workload{{Namespace: "payments", Name: "ledger"}, {ClusterUID: clusterUID, Namespace: "payments", Name: "checkout"}}}).BindsCluster())
+	assert.False(t, (&Entry{ServiceNames: []string{"checkout"}, Workloads: []Workload{{Namespace: "payments", Name: "checkout"}}}).BindsCluster())
 }
