@@ -435,10 +435,16 @@ func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) e
 // diagnosis takes it to mean the request is not the user's own, so an
 // unscoped query must not carry it.
 func (q *repoScopedQuery) typedIfScoped() string {
-	if q.scope == nil || (!q.filtered && len(q.segments) == 0) {
+	if !q.changedRequest() {
 		return ""
 	}
 	return q.typed
+}
+
+// changedRequest reports that the request is not the one the user wrote:
+// the scope inserted its filter, or sends segments.
+func (q *repoScopedQuery) changedRequest() bool {
+	return q.scope != nil && (q.filtered || len(q.segments) > 0)
 }
 
 // asTyped is what to change on this command line to run the query as typed.
@@ -787,8 +793,20 @@ func (q *repoScopedQuery) decorate(c *output.ResponseContext, result *exec.DQLQu
 
 // wrapError marks a failure of a query the scope rewrote or sent segments
 // with, so its report shows what was actually sent.
+//
+// Only a query the platform refused is marked. Whatever else fails after the
+// query came back (a --jq program, a write) has nothing to do with the scope,
+// and advice to run unscoped would send its reader the wrong way.
 func (q *repoScopedQuery) wrapError(err error) error {
-	if err == nil || q.scope == nil || !q.scope.Applied {
+	if err == nil || !q.changedRequest() {
+		return err
+	}
+	var (
+		refused  *exec.QueryError
+		variable *exec.SegmentVariableError
+		state    *exec.QueryStateError
+	)
+	if !errors.As(err, &refused) && !errors.As(err, &variable) && !errors.As(err, &state) {
 		return err
 	}
 	return &ScopedQueryError{Err: err, Scope: q.scope, Sent: q.Query, asTyped: q.asTyped(), without: q.without(), userSegments: q.userSegments}

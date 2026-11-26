@@ -236,7 +236,7 @@ Examples:
 
 			result, err := waiter.Wait(ctx)
 			if err != nil && err != context.DeadlineExceeded {
-				return fmt.Errorf("wait failed: %w", scoped.wrapError(err))
+				return fmt.Errorf("wait failed: %w", err)
 			}
 
 			// A refused query is not an outcome of the condition. The waiter

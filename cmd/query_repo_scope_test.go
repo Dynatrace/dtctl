@@ -664,6 +664,17 @@ func TestQueryRepoScope_ErrorWrapsScope(t *testing.T) {
 	code, stdout, _ = runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--no-repo-scope"}, RunOptions{})
 	require.NotZero(t, code)
 	require.NotContains(t, strings.Join(agentError(t, stdout).Suggestions, "\n"), "repo scope")
+
+	// Nor does a failure that is not the platform refusing the query: a --jq
+	// program that fails after a scoped query succeeded is the program's, and
+	// running unscoped would not help it.
+	newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+	code, stdout, _ = runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--jq", `.records[] | error("x")`}, RunOptions{})
+	require.NotZero(t, code)
+	detail = agentError(t, stdout)
+	require.Contains(t, detail.Message, "--jq")
+	require.NotContains(t, strings.Join(detail.Suggestions, "\n"), "repo scope")
+	require.NotContains(t, strings.Join(detail.Suggestions, "\n"), "--no-repo-scope")
 }
 
 // exec dql is the raw passthrough: what it is given is what it sends. Pinned
