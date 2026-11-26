@@ -22,4 +22,9 @@
 // Location.Exists first: resolving the empty File answers "no entry for
 // this environment", which is true and is not what a repository without a
 // file should be told. Status.Code says which answer a Status is.
+//
+// The Go API is experimental, like the commands built on it. It may change
+// in any release, and the package may be split: reading a scope and
+// discovering one live here together for the first release only. The file
+// format is the contract.
 package reposcope
