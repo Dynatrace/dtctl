@@ -221,6 +221,9 @@ type repoScopedQuery struct {
 	// overridden says the user named a segment the entry references, which
 	// is then theirs and no longer among segments.
 	overridden bool
+	// userSegments are the ids of the segments the command line sent beside
+	// the entry's, for a failure that names none.
+	userSegments []string
 	// refusedCode and refusedReason are why the filter was not inserted, and
 	// unavailable why a segment could not be read; settle reports them.
 	refusedCode, refusedReason, unavailable string
@@ -525,6 +528,10 @@ func (q *repoScopedQuery) withSegments(user []exec.FilterSegmentRef) []exec.Filt
 		return user
 	}
 	out := slices.Clone(user)
+	q.userSegments = nil
+	for _, u := range user {
+		q.userSegments = append(q.userSegments, u.ID)
+	}
 	for _, seg := range q.segments {
 		ref := exec.FilterSegmentRef{ID: seg.ID}
 		for _, name := range seg.VariableNames() {
@@ -755,7 +762,7 @@ func (q *repoScopedQuery) wrapError(err error) error {
 	if err == nil || q.scope == nil || !q.scope.Applied {
 		return err
 	}
-	return &ScopedQueryError{Err: err, Scope: q.scope, Sent: q.Query, asTyped: q.asTyped(), without: q.without()}
+	return &ScopedQueryError{Err: err, Scope: q.scope, Sent: q.Query, asTyped: q.asTyped(), without: q.without(), userSegments: q.userSegments}
 }
 
 // ScopedQueryError is a query that failed after repo scoping rewrote it. Grail
@@ -770,6 +777,8 @@ type ScopedQueryError struct {
 	// asTyped and without say how the command line that failed runs the
 	// query as typed (repoScopedQuery.asTyped, without).
 	asTyped, without string
+	// userSegments are the ids of the segments the command line sent too.
+	userSegments []string
 }
 
 // repoScopeSegmentVariableCode is the agent error code of a query that
@@ -805,6 +814,10 @@ func (e *ScopedQueryError) segmentVariable() (msg string, ok bool) {
 		}
 		return fmt.Sprintf("segment %s requires variable %q, and repo scope %s sends it without one: give the variable a value under the entry's segments in %s, or %s to run the query as typed",
 			required.Segment, required.Variable, e.Scope.Name, reposcope.FileName, e.asTyped), true
+	case errors.As(e.Err, &queryErr) && queryErr.ErrorType == "MISSING_FILTER_SEGMENT_VARIABLE" && len(e.userSegments) > 0:
+		// The platform names no segment here, so neither does dtctl.
+		return fmt.Sprintf("one of the filter segments sent needs a variable this query cannot supply (%s): repo scope %s sent %s and the command line sent %s; remove the segment from the entry in %s or from the command line, or %s to send only the command line's",
+			firstLineOf(queryErr.Error()), e.Scope.Name, e.segmentList(), strings.Join(e.userSegments, ", "), reposcope.FileName, e.asTyped), true
 	case errors.As(e.Err, &queryErr) && queryErr.ErrorType == "MISSING_FILTER_SEGMENT_VARIABLE":
 		return fmt.Sprintf("repo scope %s sends the filter segments %s, and one of them needs a variable this query cannot supply (%s): remove the segment from the entry in %s, or %s to run the query as typed",
 			e.Scope.Name, e.segmentList(), firstLineOf(queryErr.Error()), reposcope.FileName, e.asTyped), true

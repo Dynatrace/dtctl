@@ -450,6 +450,20 @@ func TestQueryRepoScope_SegmentVariableErrorNamesTheEntry(t *testing.T) {
 	detail := agentError(t, stdout)
 	require.Equal(t, "error", detail.Code)
 	require.Contains(t, detail.Message, `-S "other-2?region=your-value-here"`)
+
+	// A failure that names no segment, on a run that sent the entry's and the
+	// user's, is not pinned on the entry: both sources are named.
+	srv = segmentRecorder(t, answer(http.StatusBadRequest,
+		`{"error":{"code":400,"message":"A variable is missing.","details":{"errorType":"MISSING_FILTER_SEGMENT_VARIABLE"}}}`))
+	srv.segments["other-2"] = http.StatusOK
+	chdirTestRepo(t, segmentScope)
+	code, stdout, _ = runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--segment", "other-2"}, RunOptions{})
+	require.NotZero(t, code)
+	detail = agentError(t, stdout)
+	require.Equal(t, "repo_scope_segment_variable", detail.Code)
+	require.Equal(t, `one of the filter segments sent needs a variable this query cannot supply (query failed (MISSING_FILTER_SEGMENT_VARIABLE): A variable is missing.): `+
+		`repo scope checkout sent `+entrySegmentRefs+` and the command line sent other-2; `+
+		`remove the segment from the entry in .dtctl-repo-scope.yaml or from the command line, or pass --no-repo-scope to send only the command line's`, detail.Message)
 }
 
 // slowSegmentReads makes every segment read of srv hang until its request is
