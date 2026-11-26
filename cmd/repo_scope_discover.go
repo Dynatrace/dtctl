@@ -41,7 +41,10 @@ func newRepoScopeDiscoverCmd() *cobra.Command {
 Reads names from the repository (Kubernetes manifests, Helm charts, Dockerfiles,
 build files and the origin remote) and compares them to k8s.workload.name and
 service.name in the last 24 hours of spans and logs; entity names are searched
-only when the records find nothing. When a candidate's spans match and no logs
+only when the records find nothing. A workload whose name only holds one of
+them between "-" or "." (acme-prod-checkout for checkout) is found too, ranked
+below one named exactly, when the name has at least five letters and digits.
+Each candidate is one workload in one cluster, and its line binds that cluster. When a candidate's spans match and no logs
 do, its logs are looked up once by the process group the spans carried. It
 names every value before sending it, and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
 that saves it. Test content (test, testdata, e2e, examples and similar

@@ -24,12 +24,15 @@ dtctl repo-scope current -A
 
 2. Show the user the candidate(s) and the evidence, and ask. Do not save on your own initiative: the scope changes what every later query in this repository returns, for everyone who clones it.
 
-3. On the user's confirmation, run the candidate's `setCommand` exactly as given. It already carries the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone; the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
+   A candidate is a workload first: `clusterUid` and `clusterName`, `namespace`, `workload`, then `serviceName`, then the entity ids. The same namespace and workload in two clusters are two candidates (`workloadShared: true`); ask which cluster the user means, by `clusterName`. `tier: "segment"` means the repository's name is only part of the workload's name (`acme-prod-checkout` for `checkout`): such a candidate is never a `match`, so confirm it is the user's deployment before saving.
+
+3. On the user's confirmation, run the candidate's `setCommand` exactly as given. It already carries the `--cluster-uid` of the cluster the candidate runs in, the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone; the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
 
 On `none`: retry with a name the user knows (`--term <name>`) or another directory of a monorepo (`--path services/<dir>`), or ask for the namespace and workload, or the OpenTelemetry `service.name`, and set it by hand:
 
 ```bash
 dtctl repo-scope set <name> --namespace <ns> --workload <workload>
+dtctl repo-scope set <name> --cluster-uid <k8s.cluster.uid> --namespace <ns> --workload <workload>   # one cluster only
 dtctl repo-scope set <name> --service-name <service.name>
 ```
 
@@ -43,7 +46,7 @@ Discovery works per unit: the nearest directory at or above the working director
 dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20' -A
 ```
 
-`context.repo_scope` says what happened: `applied: true` with the `filter` inserted after `fetch`, or `applied: false` with a `code` and `reason` (the query then ran exactly as typed). Your own `filter` on a scoped field (`service.name`, `k8s.workload.name`, ...) wins over the scope. With `--repo-scope <name>`, a scope that cannot narrow the query is a `validation_error` and nothing is sent. `wait query` and `verify query` are scoped too, but report it only on stderr.
+`context.repo_scope` says what happened: `applied: true` with the `filter` inserted after `fetch`, or `applied: false` with a `code` and `reason` (the query then ran exactly as typed). Your own `filter` on a scoped field (`service.name`, `k8s.workload.name`, `k8s.cluster.uid` when the entry binds a cluster, ...) wins over the scope. With `--repo-scope <name>`, a scope that cannot narrow the query is a `validation_error` and nothing is sent. `wait query` and `verify query` are scoped too, but report it only on stderr.
 
 - **0 records under a scope** — run the same query with `--no-repo-scope` before concluding the service is quiet; the bindings may not match what the records carry. The same goes for a `summarize count()` of 0, and for a `wait query` that ends with `condition not met under repo scope`.
 - **Unbounded scan under a scope** — the scope narrows rows, not the scan; when a suggestion says only the environment's default cap applies, add `scanLimitGBytes:` to the `fetch` or pass `--default-scan-limit-gbytes`.
@@ -55,7 +58,7 @@ dtctl query 'fetch logs | filter loglevel == "ERROR" | limit 20' -A
 
 ## Live Debugger
 
-- `dtctl create breakpoint File.java:N` in a linked repository gives a workspace without filters the covering entry's namespace-and-workload set, in workspace `<repo>/<entry>`; `--repo-scope <name>` sets every set, `--no-repo-scope` turns the default off, and `dtctl repo-scope describe <name> -A` → `result.liveDebuggerFilters` lists the sets. Details: [LIVE_DEBUGGER.md](https://github.com/Dynatrace/dtctl/blob/main/docs/LIVE_DEBUGGER.md#filters-from-the-repo-scope).
+- `dtctl create breakpoint File.java:N` in a linked repository gives a workspace without filters the covering entry's namespace-and-workload set, in workspace `<repo>/<entry>`; `--repo-scope <name>` sets every set, `--no-repo-scope` turns the default off, and `dtctl repo-scope describe <name> -A` → `result.liveDebuggerFilters` lists the sets. A workload bound to a cluster sends `k8s.cluster.uid` as a label, which is not verified for workspaces: if `dtctl describe breakpoint` then reports no instances, set the filters by hand with `--filters`. Details: [LIVE_DEBUGGER.md](https://github.com/Dynatrace/dtctl/blob/main/docs/LIVE_DEBUGGER.md#filters-from-the-repo-scope).
 
 ## Manage
 

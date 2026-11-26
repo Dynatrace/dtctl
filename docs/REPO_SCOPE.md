@@ -9,7 +9,7 @@ This guide explains how to link a git repository to the Dynatrace entities that 
 
 ## Overview
 
-A **repo scope** is a data-only file at the repository root, `.dtctl-repo-scope.yaml`, committed like code. For each Dynatrace environment it names the services, process groups, service names and Kubernetes workloads that run the repository's code. Inside a linked repository:
+A **repo scope** is a data-only file at the repository root, `.dtctl-repo-scope.yaml`, committed like code. For each Dynatrace environment it names the Kubernetes workloads, service names, process groups and services that run the repository's code. Inside a linked repository:
 
 - `dtctl query`, `dtctl wait query` and `dtctl verify query` narrow `fetch logs` and `fetch spans` to those entities by default, and say so on stderr
 - `--no-repo-scope` runs one query exactly as typed; `DTCTL_NO_REPO_SCOPE=1` does it for a whole shell or CI job
@@ -44,17 +44,20 @@ dtctl repo-scope discover
 Sending to abc12345.apps.dynatrace.com: "checkout" (compared to k8s.workload.name, service.name, entity.name); nothing else leaves this machine
 Unit: .
 
-#  SERVICE                   PROCESS GROUP                   WORKLOAD           SERVICE NAME  TIER
-1  SERVICE-0123456789ABCDEF  PROCESS_GROUP-FEDCBA9876543210  payments/checkout  checkout      exact
+#  CLUSTER  WORKLOAD           SERVICE NAME  PROCESS GROUP                   SERVICE                   TIER
+1  prod-eu  payments/checkout  checkout      PROCESS_GROUP-FEDCBA9876543210  SERVICE-0123456789ABCDEF  exact
+   k8s.cluster.uid "11111111-2222-3333-4444-555555555555" (k8s.cluster.name "prod-eu")
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
    k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
    service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
-   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
    12400 spans, 88000 logs in 24h
 
-Verdict: match: process group, service, service name, workload
+Verdict: match: workload, service name, process group, service
 2 of 11 queries ran in 0.6s. Nothing was written. Save it with:
-  dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout
+  dtctl repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout --service-name checkout
 ```
+
+A candidate is listed workload first: its cluster, namespace and workload, then its service name, then the entity ids, the same order its `set` line and every other `repo-scope` output use. The cluster column shows the cluster's name; the uid a binding uses is in the evidence and the line.
 
 **`discover` never writes.** Each candidate comes with the `dtctl repo-scope set` line that saves it; running that line is the confirmation. When several candidates match, the verdict is `ambiguous` and each gets its own line. When none does, `discover` lists every query it tried and every value it sent, and says what to do next:
 
@@ -67,9 +70,11 @@ dtctl repo-scope discover --path services/ledger    # another service of a monor
 
 The `set` line saves exactly the candidate shown:
 
-- It binds the workload and the service name. Entity ids are proposed only for a candidate neither describes, or whose logs neither reaches (below), because both id fields are deprecated (see [Save an entry](#2-save-an-entry)), and never for one whose ids discovery could not list in full: a workload that runs as 200 service ids shows two of them and `+198 more`, and gets no `--service` line.
+- It binds the workload, with the cluster its records name (`--cluster-uid`), and the service name. Entity ids are proposed only for a candidate neither describes, or whose logs neither reaches (below), because both id fields are deprecated (see [Save an entry](#2-save-an-entry)), and never for one whose ids discovery could not list in full: a workload that runs as 200 service ids shows two of them and `+198 more`, and gets no `--service` line.
 - Logs need not carry `k8s.workload.name` or `service.name`: depending on how they are ingested they may carry only `dt.entity.process_group`. When a candidate's spans match and no logs do, discovery looks the logs up by the process groups the spans carried. If it finds them, the evidence says so (`5012 logs in 24h carry its process group, none its workload or service name`) and the line adds `--process-group`; without it the entry would return the candidate's spans and none of its logs. If it does not, or cannot ask (the logs query was capped or sampled, the process groups are not all listed, or another workload carries one of them), a note says the candidate's logs were not found.
-- A candidate found by sampling (see [What discovery sends](#what-discovery-sends)) gets its `--namespace`/`--workload` binding only: a quieter candidate sharing its service name or ids could sit below the sample's floor. One with no workload gets no line, and a note says why. When spans or logs were sampled, a candidate read whole gets no `--service-name` either, since a candidate sharing the name could be the one below the other data object's floor.
+- One namespace and workload name in two clusters is two candidates, each with its own line, and the verdict is `ambiguous`. A candidate whose records name no cluster, while another runs the same namespace and workload in one, gets no line and a note: without `--cluster-uid` its binding would select both.
+- A workload deployed under a longer name than the repository spells (`acme-prod-checkout` for `checkout`) is found when the repository's name is a whole run of the workload name's segments, the parts between `-` and `.`. Its tier is `segment`, it ranks below a workload named exactly, its evidence says which name it holds (`k8s.workload.name "acme-prod-checkout" contains workload "checkout" (deploy/k8s/deployment.yaml:4) (segment match)`), and on its own it is `ambiguous`, never a match: the repository does not say which prefix is its own. Only a name of at least five letters and digits is looked for this way; a shorter one, such as `cart`, is part of too many workload names and matches only whole.
+- A candidate found by sampling (see [What discovery sends](#what-discovery-sends)) gets its workload binding only (`--cluster-uid`, `--namespace`, `--workload`): a quieter candidate sharing its service name or ids could sit below the sample's floor. One with no workload gets no line, and a note says why. When spans or logs were sampled, a candidate read whole gets no `--service-name` either, since a candidate sharing the name could be the one below the other data object's floor.
 - When more than one candidate reports the same service name (two namespaces, or a canary beside its main workload), their lines leave `--service-name` out and a note says so: the bindings of an entry are alternatives, and that name would select every such candidate's records. A candidate no other binding selects alone gets no line; when no candidate has one, discovery says nothing tells them apart and offers the `--service-name` line as selecting all of them.
 - It carries `--context` when discovery ran in a context other than the config's current one (`--context` or `DTCTL_CONTEXT`), and `--config` when discovery was given one, so it saves under the environment discovery asked.
 
@@ -93,16 +98,21 @@ A run sends at most eleven queries: two record queries, three sampled retries of
 
 ```text
 fetch spans, from:now()-24h, scanLimitGBytes:5
-| filter in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>))
-| summarize {records = count(),
+| filter in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>)) or contains(k8s.workload.name, "<value>")
+| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),
     serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
     processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
-    by:{k8s.namespace.name, k8s.workload.name, service.name}
+    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}
+| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-")
+| filter in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>)) or contains(workloadSegments, "-<value>-")
+| fieldsRemove workloadSegments
 | sort records desc
 | limit 200
 ```
 
-and the same over `logs`. Each row is one namespace, workload and service name. Its entity ids are counted exactly and listed up to 50, so a workload that runs as hundreds of service ids is one candidate, not a page of them.
+and the same over `logs`. Each row is one cluster, namespace, workload and service name. Its entity ids are counted exactly and listed up to 50, so a workload that runs as hundreds of service ids is one candidate, not a page of them.
+
+The `contains` clause and the three stages after the aggregation are how a workload named with a prefix is found in the same query: the first filter keeps records whose workload name holds a sent name, and the second keeps, of the aggregated rows, those where it is a whole run of segments. They are there only when a sent name has at least five letters and digits. A name whose words a workload joins with both `-` and `.` (`billing.engine-v2` for `billing-engine-v2`) is not found this way.
 
 On a busy environment a day of spans or logs scans more than the 5 GB cap even with the filter, and a capped scan covers an unknown part of the window. Discovery then retries the record query sampled, coarsest first, and stops at the first retry that finds a candidate:
 
@@ -154,11 +164,14 @@ The entry is filed under the current context's environment host. `set` always re
 
 | Flag | Binds | Format |
 |---|---|---|
-| `--service` | `dt.entity.service` on spans | `SERVICE-` and 16 hex digits (repeatable) |
-| `--process-group` | `dt.entity.process_group` on logs | `PROCESS_GROUP-` and 16 hex digits (repeatable) |
-| `--service-name` | `service.name` on spans and logs | any printable text without `"` or `\` (repeatable) |
 | `--namespace` with `--workload` | `k8s.namespace.name` and `k8s.workload.name` on spans and logs, where the records carry them | Kubernetes names; `--workload` is repeatable |
+| `--cluster-uid` | `k8s.cluster.uid` of the `--workload` names; without it, the workload in any cluster | a lowercase UUID, as `discover` prints it; needs `--namespace` and `--workload` |
+| `--service-name` | `service.name` on spans and logs | any printable text without `"` or `\` (repeatable) |
+| `--process-group` | `dt.entity.process_group` on logs | `PROCESS_GROUP-` and 16 hex digits (repeatable) |
+| `--service` | `dt.entity.service` on spans | `SERVICE-` and 16 hex digits (repeatable) |
 | `--path` | the directory the entry covers | relative to the repository root; default the whole repository |
+
+A cluster is bound by its uid, never its name: the uid is what identifies a cluster, while a name is chosen at deployment and can be changed or given to another cluster. `discover` shows the name beside the uid so you can tell which cluster a line is for. `--cluster-uid` applies to every `--workload` of the command; an entry whose workloads run in different clusters is written by hand in [the file](#the-file).
 
 Workload and service-name bindings are the ones to prefer: they are names you already know and they need no entity ids. They select only records that carry those fields, though, and logs do not always: an environment may record a workload's spans with `k8s.workload.name` and its logs with `dt.entity.process_group` alone, and a workload binding then returns no logs. `discover` checks this and proposes `--process-group` beside the workload when the logs need it; for an entry written by hand, [check your scope](#check-your-scope). They are also stable fields in the Dynatrace semantic dictionary, while both id fields are deprecated there (`dt.entity.service` in favour of `dt.smartscape.service`, `dt.entity.process_group` in favour of `dt.process_group.id`). Spans and logs carry the classic ids today, so `--service` and `--process-group` bind them; a later version of the file will move id bindings to their successors, and workload and service-name bindings are unaffected.
 
@@ -259,12 +272,13 @@ environments:
   abc12345.apps.dynatrace.com:        # environment host, lowercase
     - name: checkout
       path: services/checkout         # optional; omitted = whole repository
-      services: [SERVICE-0123456789ABCDEF]
-      process-groups: [PROCESS_GROUP-FEDCBA9876543210]
-      service-names: [checkout]
       workloads:
-        - namespace: payments
+        - cluster-uid: 11111111-2222-3333-4444-555555555555   # optional; omitted = any cluster
+          namespace: payments
           name: checkout
+      service-names: [checkout]
+      process-groups: [PROCESS_GROUP-FEDCBA9876543210]
+      services: [SERVICE-0123456789ABCDEF]
     - name: ledger
       path: services/ledger
       workloads:
@@ -280,10 +294,12 @@ The file holds bindings, never DQL. dtctl renders the filter itself, with every 
 
 Within an entry the bindings are alternatives, OR-ed together; each data object is filtered on these fields, and a record that carries none of the bound ones is not selected:
 
-| Data object | `services` | `process-groups` | `service-names` | `workloads` |
+| Data object | `workloads` | `service-names` | `process-groups` | `services` |
 |---|---|---|---|---|
-| `spans` | `dt.entity.service` | — | `service.name` | `k8s.namespace.name` and `k8s.workload.name` |
-| `logs` | — | `dt.entity.process_group` | `service.name` | `k8s.namespace.name` and `k8s.workload.name` |
+| `spans` | `k8s.namespace.name` and `k8s.workload.name`, with `k8s.cluster.uid` when bound | `service.name` | — | `dt.entity.service` |
+| `logs` | `k8s.namespace.name` and `k8s.workload.name`, with `k8s.cluster.uid` when bound | `service.name` | `dt.entity.process_group` | — |
+
+A workload with a `cluster-uid` renders `(k8s.cluster.uid == "…" and k8s.namespace.name == "…" and k8s.workload.name == "…")`, so it selects only records that carry all three fields. `k8s.cluster.uid` then counts as a field the scope filters on: a `filter` of your own on it wins, as one on the namespace or the workload does.
 
 `dtctl repo-scope describe <name>` prints the exact filter for each.
 
@@ -324,6 +340,6 @@ In agent mode `discover` returns its report as the envelope `result`, with each 
 ## Limits
 
 - Only `fetch logs` and `fetch spans` are scoped. Metrics (`timeseries`), events and business events are not; their queries run unscoped with a warning.
-- Discovery looks at the last 24 hours, or the last hour when it has to sample, and says so in its notes. A service that has been quiet longer, quieter than a sample's floor, or that runs under a name the repository does not spell out, needs `--term` or a `set` by hand.
+- Discovery looks at the last 24 hours, or the last hour when it has to sample, and says so in its notes. A service that has been quiet longer, quieter than a sample's floor, or that runs under a name the repository does not spell out, needs `--term` or a `set` by hand. So does a workload that only holds a name shorter than five letters and digits (`shop-cart` for `cart`), and a `service.name` that is longer than the repository's name: service names are compared whole.
 - Entity ids per candidate are counted exactly and listed up to 50; `-o json` has the list and the count (`serviceCount`, `servicesCapped`).
 - `inventory arrivals --scope` does not use the repo scope.
