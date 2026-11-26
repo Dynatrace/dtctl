@@ -112,20 +112,33 @@ func TestRepoScopeDiscoverIndirectEvidenceProposesNoSharedLine(t *testing.T) {
 // the unit's own workload: the name is then tied to this code by more than
 // the manifest that spells it.
 func TestRepoScopeDiscoverSharedLineNeedsOneDirectCandidate(t *testing.T) {
-	const tail = `"service.name":"redis-cache","records":"10","serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`
-	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
-		"spans": `{"k8s.workload.name":"checkout",` + tail + `,{"k8s.namespace.name":"shared-infra",` + tail}))
-	chdirCheckoutWithRedis(t)
-
-	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", "json"}, RunOptions{})
-	require.Zero(t, code, stderr)
-	var reports []reposcope.DiscoveryReport
-	require.NoError(t, json.Unmarshal([]byte(stdout), &reports))
-	require.Len(t, reports[0].Candidates, 2)
-	require.Empty(t, reports[0].Candidates[0].Indirect, "the workload is named by go.mod")
-	require.NotEmpty(t, reports[0].Candidates[1].Indirect)
-	for _, c := range reports[0].Candidates {
-		require.Empty(t, c.SetCommand)
+	row := func(workload, records string) string {
+		// Without a namespace no workload binding selects either alone.
+		return `{"k8s.workload.name":"` + workload + `","service.name":"redis-cache","records":"` + records +
+			`","serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`
 	}
-	require.Contains(t, stdout, "the line that does: dtctl --context c repo-scope set redis-cache --service-name redis-cache")
+	// Whichever of the two has more records, and whether the unit's
+	// workload carries its name exactly or inside a longer one.
+	for own, rows := range map[string]string{
+		"checkout":       row("checkout", "1000") + "," + row("redis-cache", "10"),
+		"eu-checkout-v2": row("redis-cache", "1000") + "," + row("eu-checkout-v2", "10"),
+	} {
+		newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": rows}))
+		chdirCheckoutWithRedis(t)
+
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", "json"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		var reports []reposcope.DiscoveryReport
+		require.NoError(t, json.Unmarshal([]byte(stdout), &reports))
+		require.Len(t, reports[0].Candidates, 2)
+		direct := 0
+		for _, c := range reports[0].Candidates {
+			if c.Indirect == "" {
+				direct++
+				require.Equal(t, own, c.Workload, "the workload go.mod names")
+			}
+		}
+		require.Equal(t, 1, direct)
+		require.Contains(t, stdout, "repo-scope set redis-cache --service-name redis-cache", rows)
+	}
 }
