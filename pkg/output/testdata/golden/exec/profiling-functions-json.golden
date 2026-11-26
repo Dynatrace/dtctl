@@ -1,0 +1,18 @@
+[
+  {
+    "self": 50,
+    "selfPct": 50,
+    "total": 50,
+    "totalPct": 50,
+    "paths": 2,
+    "function": "com.example.Util.wrap"
+  },
+  {
+    "self": 10,
+    "selfPct": 12.5,
+    "total": 100,
+    "totalPct": 100,
+    "paths": 1,
+    "function": "com.example.Main.main"
+  }
+]

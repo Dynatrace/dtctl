@@ -31,6 +31,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/platform"
 	"github.com/Dynatrace/dtctl/pkg/resources/platformtoken"
 	"github.com/Dynatrace/dtctl/pkg/resources/previewprocessor"
+	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 	"github.com/Dynatrace/dtctl/pkg/resources/schedulingrule"
 	"github.com/Dynatrace/dtctl/pkg/resources/segment"
 	"github.com/Dynatrace/dtctl/pkg/resources/serviceuser"
@@ -3105,6 +3106,51 @@ func TestGolden_ExecPreviewProcessor(t *testing.T) {
 			}
 			assertGolden(t, "exec/preview-processor-"+name, buf.String())
 		})
+	}
+}
+
+// The rows of `dtctl exec profiling`, one fixture per view. The stack views
+// print a table as folded lines in cmd/, so the printer only ever gets their
+// rows for a structured format; the per-function views print a table as well.
+// The YAML keys are the JSON ones: docs/PROFILING.md names the fields once.
+func TestGolden_ExecProfiling(t *testing.T) {
+	structured := []string{"json", "yaml", "csv"}
+	withTable := []string{"table", "json", "yaml", "csv"}
+	views := []struct {
+		name    string
+		formats []string
+		rows    interface{}
+	}{
+		{"profiling-stacks", structured, []profiling.StackRow{
+			{Running: 412, Wait: 3, Stack: "com.example.OrderController.list;com.example.OrdersOverview.build"},
+			{Running: 2, Lock: 388, NetIO: 5, DiskIO: 1, Stack: "com.example.CardController.issue;com.example.Slots.reserve"},
+		}},
+		{"profiling-allocations", structured, []profiling.AllocationRow{
+			{AllocBytes: 52428800, SurvivedBytes: 157286400, AllocCount: 1200, SurvivedCount: 3600, Stack: "com.example.Cache.put;com.example.OrderService.load"},
+			{AllocBytes: 1048576, AllocCount: 16, Stack: "com.example.Buffer.grow"},
+		}},
+		{"profiling-functions", withTable, []profiling.FunctionRow{
+			{Self: 50, SelfPct: 50, Total: 50, TotalPct: 50, Paths: 2, Function: "com.example.Util.wrap"},
+			{Self: 10, SelfPct: 12.5, Total: 100, TotalPct: 100, Paths: 1, Function: "com.example.Main.main"},
+		}},
+		{"profiling-focus", withTable, []profiling.FocusRow{
+			{Relation: "total", Samples: 50, Share: 100, Function: "com.example.Util.wrap"},
+			{Relation: "self", Samples: 50, Share: 100, Function: "com.example.Util.wrap"},
+			{Relation: "caller", Samples: 30, Share: 60, Function: "com.example.Loader.load"},
+			{Relation: "caller", Samples: 20, Share: 40, Function: profiling.RootCaller},
+			{Relation: "callee", Samples: 5, Share: 12.5, Function: "com.example.Json.parse"},
+		}},
+	}
+	for _, v := range views {
+		for _, format := range v.formats {
+			t.Run(v.name+"-"+format, func(t *testing.T) {
+				var buf bytes.Buffer
+				if err := NewPrinterWithWriter(format, &buf).PrintList(v.rows); err != nil {
+					t.Fatalf("PrintList failed: %v", err)
+				}
+				assertGolden(t, "exec/"+v.name+"-"+format, buf.String())
+			})
+		}
 	}
 }
 

@@ -1,0 +1,6 @@
+RELATION,SAMPLES,SHARE%,FUNCTION
+total,50,100,com.example.Util.wrap
+self,50,100,com.example.Util.wrap
+caller,30,60,com.example.Loader.load
+caller,20,40,(root)
+callee,5,12.5,com.example.Json.parse

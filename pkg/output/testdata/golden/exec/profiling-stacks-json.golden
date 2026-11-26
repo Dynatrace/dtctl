@@ -1,0 +1,18 @@
+[
+  {
+    "running": 412,
+    "lock": 0,
+    "net_io": 0,
+    "disk_io": 0,
+    "wait": 3,
+    "stack": "com.example.OrderController.list;com.example.OrdersOverview.build"
+  },
+  {
+    "running": 2,
+    "lock": 388,
+    "net_io": 5,
+    "disk_io": 1,
+    "wait": 0,
+    "stack": "com.example.CardController.issue;com.example.Slots.reserve"
+  }
+]

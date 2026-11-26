@@ -113,14 +113,14 @@ func stateValue(samples map[string]int, state State) int {
 // FunctionRow is one function in the functions view. Shares are percentages of
 // all counted samples (in the chosen state) in the window.
 type FunctionRow struct {
-	Self     int     `json:"self" table:"SELF"`
-	SelfPct  float64 `json:"selfPct" table:"SELF%"`
-	Total    int     `json:"total" table:"TOTAL"`
-	TotalPct float64 `json:"totalPct" table:"TOTAL%"`
+	Self     int     `json:"self" yaml:"self" table:"SELF"`
+	SelfPct  float64 `json:"selfPct" yaml:"selfPct" table:"SELF%"`
+	Total    int     `json:"total" yaml:"total" table:"TOTAL"`
+	TotalPct float64 `json:"totalPct" yaml:"totalPct" table:"TOTAL%"`
 	// Paths counts the distinct call paths that reach the function: how
 	// scattered it is over the stack view's rows.
-	Paths    int    `json:"paths" table:"PATHS"`
-	Function string `json:"function" table:"FUNCTION"`
+	Paths    int    `json:"paths" yaml:"paths" table:"PATHS"`
+	Function string `json:"function" yaml:"function" table:"FUNCTION"`
 }
 
 // FunctionView is the functions view of a hotspots analysis.
@@ -203,11 +203,11 @@ func (e *AmbiguousMatchError) Error() string {
 // FocusRow is one line of the focus (callers/callees) view.
 type FocusRow struct {
 	// Relation is total, self, caller or callee.
-	Relation string `json:"relation" table:"RELATION"`
-	Samples  int    `json:"samples" table:"SAMPLES"`
+	Relation string `json:"relation" yaml:"relation" table:"RELATION"`
+	Samples  int    `json:"samples" yaml:"samples" table:"SAMPLES"`
 	// Share is the percentage of the focused function's total time.
-	Share    float64 `json:"share" table:"SHARE%"`
-	Function string  `json:"function" table:"FUNCTION"`
+	Share    float64 `json:"share" yaml:"share" table:"SHARE%"`
+	Function string  `json:"function" yaml:"function" table:"FUNCTION"`
 }
 
 // RootCaller names the caller of a function that is the outermost kept frame.

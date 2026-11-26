@@ -10,12 +10,12 @@ import (
 // StackRow is one row of the hotspots stack view: a unique call stack with its
 // own (self) samples in each thread state.
 type StackRow struct {
-	Running int    `json:"running" table:"RUNNING"`
-	Lock    int    `json:"lock" table:"LOCK"`
-	NetIO   int    `json:"net_io" table:"NET_IO"`
-	DiskIO  int    `json:"disk_io" table:"DISK_IO"`
-	Wait    int    `json:"wait" table:"WAIT"`
-	Stack   string `json:"stack" table:"STACK"`
+	Running int    `json:"running" yaml:"running" table:"RUNNING"`
+	Lock    int    `json:"lock" yaml:"lock" table:"LOCK"`
+	NetIO   int    `json:"net_io" yaml:"net_io" table:"NET_IO"`
+	DiskIO  int    `json:"disk_io" yaml:"disk_io" table:"DISK_IO"`
+	Wait    int    `json:"wait" yaml:"wait" table:"WAIT"`
+	Stack   string `json:"stack" yaml:"stack" table:"STACK"`
 }
 
 // SurvivedNote says what the survived figures are, for every output that
@@ -29,11 +29,11 @@ const SurvivedNote = "survived_bytes/survived_count are summed over every GC an 
 // The figures are int64, as the view's totals are: a byte count outgrows an
 // int on a 32-bit platform.
 type AllocationRow struct {
-	AllocBytes    int64  `json:"alloc_bytes" table:"ALLOC_BYTES"`
-	SurvivedBytes int64  `json:"survived_bytes" table:"SURVIVED_BYTES"`
-	AllocCount    int64  `json:"alloc_count" table:"ALLOC_COUNT"`
-	SurvivedCount int64  `json:"survived_count" table:"SURVIVED_COUNT"`
-	Stack         string `json:"stack" table:"STACK"`
+	AllocBytes    int64  `json:"alloc_bytes" yaml:"alloc_bytes" table:"ALLOC_BYTES"`
+	SurvivedBytes int64  `json:"survived_bytes" yaml:"survived_bytes" table:"SURVIVED_BYTES"`
+	AllocCount    int64  `json:"alloc_count" yaml:"alloc_count" table:"ALLOC_COUNT"`
+	SurvivedCount int64  `json:"survived_count" yaml:"survived_count" table:"SURVIVED_COUNT"`
+	Stack         string `json:"stack" yaml:"stack" table:"STACK"`
 }
 
 // FoldStacks renders stack rows as collapsed (folded) stacks, one line per row:
