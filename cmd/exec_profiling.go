@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,17 +21,6 @@ import (
 // profilingSince is the release in which `exec profiling` entered the
 // experimental tier. One constant for the whole family.
 const profilingSince = "0.47.0"
-
-const (
-	// profilingDefaultWindowMs is the window used when a bound is missing.
-	profilingDefaultWindowMs = 2 * 60 * 60 * 1000
-	// profilingMaxWindowMs caps the window length. The API itself accepts up to
-	// 24h, but an analysis reads every sample in its window and holds the
-	// result in memory on the server, so its cost grows with the window, and
-	// the server only runs a few analyses per environment at a time. 2h is
-	// enough to localize a hotspot; how far back the window lies is not limited.
-	profilingMaxWindowMs = 2 * 60 * 60 * 1000
-)
 
 // profilingFindIDsQuery lists eligible entity ids.
 const profilingFindIDsQuery = `dtctl query 'smartscapeNodes PROCESS | fields id, dt.process_group.detected_name, dt.process_group.id'`
@@ -340,7 +327,7 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 			return fmt.Errorf("--raw prints a nested document; use -o json or -o yaml")
 		}
 	}
-	from, to, err := resolveProfilingTimeframe(f.start, f.end, time.Now().UnixMilli())
+	window, err := profiling.ResolveWindow(f.start, f.end, time.Now())
 	if err != nil {
 		return err
 	}
@@ -357,8 +344,8 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	resp, err := profiling.NewHandler(c).Run(cmd.Context(), profiling.Payload{
 		Kind:          apiKind,
 		EntityID:      entityID,
-		From:          from,
-		To:            to,
+		From:          window.From,
+		To:            window.To,
 		LeafType:      f.leafType,
 		ShowWaiting:   f.showWaiting,
 		SurvivorsOnly: f.survivorsOnly,
@@ -384,9 +371,9 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 		entity:        entityID,
 		leafType:      f.leafType,
 		status:        resp.Status,
-		from:          from,
-		to:            to,
-		defaultWindow: f.start == "" && f.end == "",
+		from:          window.From,
+		to:            window.To,
+		defaultWindow: window.Default,
 	}
 	switch {
 	case f.raw:
@@ -744,110 +731,6 @@ func noProfilingStacksNote(apiKind string, result interface{}, appOnly bool) str
 	return fmt.Sprintf("# no stacks for %s: no profiling samples in the window (status=%s) — the process may be idle, restarted, or not under load; try another window (at most 2h), or --raw for the API's whole result", entity, status)
 }
 
-// resolveProfilingTimeframe turns the --default-timeframe-start/-end values
-// into an epoch-millis window. Both accept what `dtctl query` accepts
-// (ISO-8601/RFC3339, epoch millis, now()-relative). A missing bound is 2h from
-// the other: a start alone covers the 2h after it (but not past now), an end
-// alone the 2h before it, neither the last 2h. The window must not end in the
-// future, must be positive and must be at most profilingMaxWindowMs, checked
-// here so an invalid window never reaches the API.
-func resolveProfilingTimeframe(startStr, endStr string, nowMs int64) (int64, int64, error) {
-	var from, to int64
-	var err error
-	if endStr != "" {
-		if to, err = parseProfilingTime(endStr, nowMs); err != nil {
-			return 0, 0, fmt.Errorf("invalid --default-timeframe-end: %w", err)
-		}
-	}
-	if startStr != "" {
-		if from, err = parseProfilingTime(startStr, nowMs); err != nil {
-			return 0, 0, fmt.Errorf("invalid --default-timeframe-start: %w", err)
-		}
-	}
-	switch {
-	case startStr == "" && endStr == "":
-		to = nowMs
-		from = to - profilingDefaultWindowMs
-	case startStr == "":
-		from = to - profilingDefaultWindowMs
-	case endStr == "":
-		to = min(from+profilingDefaultWindowMs, nowMs)
-	}
-
-	if from >= nowMs {
-		return 0, 0, fmt.Errorf("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-2h')")
-	}
-	if to > nowMs {
-		return 0, 0, fmt.Errorf("invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now")
-	}
-	if to <= from {
-		return 0, 0, fmt.Errorf("invalid timeframe: the end must be after the start")
-	}
-	if to-from > profilingMaxWindowMs {
-		return 0, 0, fmt.Errorf("invalid timeframe: the window must not exceed 2h (got %s) — narrow it; the window can lie anywhere in the past", time.Duration(to-from)*time.Millisecond)
-	}
-	return from, to, nil
-}
-
-// profilingDurationUnits are the duration units a now()-relative bound takes:
-// DQL's, plus Go's spellings.
-var profilingDurationUnits = map[string]time.Duration{
-	"ns": time.Nanosecond, "us": time.Microsecond, "µs": time.Microsecond, "ms": time.Millisecond,
-	"s": time.Second, "m": time.Minute, "min": time.Minute, "h": time.Hour,
-	"d": 24 * time.Hour, "w": 7 * 24 * time.Hour,
-}
-
-var profilingDurationPart = regexp.MustCompile(`^(\d+(?:\.\d+)?)(ns|us|µs|ms|min|s|m|h|d|w)`)
-
-// parseProfilingDuration parses a duration such as 1d, 90m, 1h30m or 1.5h.
-func parseProfilingDuration(s string) (time.Duration, error) {
-	s = strings.ReplaceAll(s, " ", "")
-	if s == "" {
-		return 0, fmt.Errorf("missing duration")
-	}
-	var d time.Duration
-	for s != "" {
-		m := profilingDurationPart.FindStringSubmatch(s)
-		if m == nil {
-			return 0, fmt.Errorf("unknown duration %q: use a number and a unit (ms, s, m, h, d, w), e.g. 1d or 1h30m", s)
-		}
-		n, err := strconv.ParseFloat(m[1], 64)
-		if err != nil {
-			return 0, err
-		}
-		d += time.Duration(n * float64(profilingDurationUnits[m[2]]))
-		s = s[len(m[0]):]
-	}
-	return d, nil
-}
-
-// parseProfilingTime parses one timeframe bound: a now()-relative expression
-// (now(), now()-1d, now()-90m, now()-1h30m), epoch millis, or ISO-8601/RFC3339.
-func parseProfilingTime(s string, nowMs int64) (int64, error) {
-	s = strings.TrimSpace(s)
-	if rest, ok := strings.CutPrefix(s, "now()"); ok {
-		rest = strings.TrimSpace(rest)
-		if rest == "" {
-			return nowMs, nil
-		}
-		var sign int64
-		switch rest[0] {
-		case '-':
-			sign = -1
-		case '+':
-			sign = 1
-		default:
-			return 0, fmt.Errorf("expected now()-<duration> or now()+<duration>, got %q", s)
-		}
-		d, err := parseProfilingDuration(rest[1:])
-		if err != nil {
-			return 0, fmt.Errorf("invalid duration in %q: %w", s, err)
-		}
-		return nowMs + sign*d.Milliseconds(), nil
-	}
-	return parseProfileTimestamp(s)
-}
-
 // isEligibleProfilingEntity reports whether id is a process-level entity the
 // code-level analysis API accepts (PROCESS_GROUP, PROCESS_GROUP_INSTANCE, or the
 // 3rd-gen PROCESS rename). "PROCESS-" does not prefix-match "PROCESS_GROUP-" (the
@@ -857,27 +740,6 @@ func isEligibleProfilingEntity(id string) bool {
 	return strings.HasPrefix(id, "PROCESS-") ||
 		strings.HasPrefix(id, "PROCESS_GROUP-") ||
 		strings.HasPrefix(id, "PROCESS_GROUP_INSTANCE-")
-}
-
-// profilingTimeLayouts are the absolute timestamp forms a bound takes, beyond
-// epoch millis. Forms without a zone are UTC.
-var profilingTimeLayouts = []string{
-	time.RFC3339Nano,
-	"2006-01-02T15:04:05.999999999",
-	"2006-01-02T15:04",
-	"2006-01-02",
-}
-
-func parseProfileTimestamp(s string) (int64, error) {
-	if ms, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return ms, nil
-	}
-	for _, layout := range profilingTimeLayouts {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.UnixMilli(), nil
-		}
-	}
-	return 0, fmt.Errorf("cannot parse time %q: use ISO-8601/RFC3339, epoch millis, or now()-<dur>", s)
 }
 
 // profilingVisualOnlyKeys are fields that carry UI rendering metadata with no
