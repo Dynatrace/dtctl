@@ -298,6 +298,14 @@ func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
 			e.Services, err = items(v, p, text)
 		case "segments":
 			e.Segments, err = items(v, p, r.segment)
+		case "annotations":
+			err = r.mapping(v, p, func(name string, k, v *yaml.Node) (err *InvalidError) {
+				if e.Annotations == nil {
+					e.Annotations = map[string]string{}
+				}
+				e.Annotations[name], err = text(v, place{fmt.Sprintf("annotation %q", name), k.Line})
+				return err
+			})
 		default:
 			r.unknownIn("an entry", k)
 		}

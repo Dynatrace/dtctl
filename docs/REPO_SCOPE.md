@@ -315,6 +315,8 @@ environments:
         - id: Ab3dEf9hIjk
           variables:                  # optional; name: [values]
             environment: [production]
+      annotations:                    # optional; notes dtctl keeps and never reads
+        owner: team-payments
     - name: ledger
       path: services/ledger
       workloads:
@@ -342,6 +344,8 @@ The cluster narrows the workload it is written on, and nothing else. A service n
 `dtctl repo-scope describe <name>` prints the exact filter for each.
 
 `segments` are not alternatives: each one, and the filter, must hold (see [Filter segments](#filter-segments)). Ids and variable values are checked like every other value, and travel beside the query, never in its text. A variable value cannot hold `,`, `&` or `=`: dtctl prints a segment the way `--segment` takes it, and those separate its values there.
+
+`annotations` are notes on an entry, for people and for other tools: a map of text to text. dtctl checks their form (at most 64 per entry; a key of lowercase letters, digits and `.`, `_`, `-`, `/` inside, at most 253 characters; a value of one line, at most 1024 bytes), shows them in `describe`, keeps them when `set` rewrites the entry, and never reads them. No annotation changes what an entry covers or selects, in this dtctl or a later one, so it is the one place in an entry where a key this dtctl does not know may be written.
 
 The file spells its keys in kebab-case (`process-groups`, `service-names`); the JSON and YAML that `-o json`, `-o yaml` and agent mode print for a result use camelCase (`processGroups`, `serviceNames`), except an entry in YAML output, which keeps the file's spelling.
 

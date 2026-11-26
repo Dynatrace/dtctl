@@ -136,6 +136,30 @@ func TestCheck(t *testing.T) {
 		{name: "a trailing document ended at once", doc: entry("name: checkout", "service-names: [checkout]") + "---\n...\n"},
 		{name: "a trailing explicit null", doc: entry("name: checkout", "service-names: [checkout]") + "---\n~\n"},
 
+		{name: "annotations", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {owner: team-payments, example.invalid/tier: '1', note: \"Kasse \u2013 EU\"}")},
+		{name: "an annotation with an empty value", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {reviewed: ''}")},
+		{name: "annotations at their limits", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {"+strings.Repeat("k", 253)+": "+strings.Repeat("v", 1024)+"}")},
+		{name: "annotations that are not a mapping", doc: entry("name: checkout", "service-names: [checkout]", "annotations: [owner]"),
+			msg: `annotations on line 5 must be a mapping`},
+		{name: "annotations without a value", doc: entry("name: checkout", "service-names: [checkout]", "annotations:"),
+			msg: `annotations on line 5 has no value`},
+		{name: "an annotation that is a list", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {owner: [a, b]}"),
+			msg: `annotation "owner" on line 5 must be a single value`},
+		{name: "an annotation without a value", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {owner: }"),
+			msg: `annotation "owner" on line 5 has no value`},
+		{name: "an annotation key in capitals", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {Owner: a}"),
+			msg: `annotation "Owner" is not an annotation key (lowercase letters, digits, and . _ - / inside; at most 253)`},
+		{name: "an annotation key too long", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {"+strings.Repeat("k", 254)+": a}"),
+			msg: `is not an annotation key`},
+		{name: "an annotation value too long", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {owner: "+strings.Repeat("v", 1025)+"}"),
+			msg: `annotation "owner" is longer than 1024 bytes`},
+		{name: "an annotation value of two lines", doc: entry("name: checkout", "service-names: [checkout]", `annotations: {owner: "a\nb"}`),
+			msg: `annotation "owner" must not contain control or non-printing characters`},
+		{name: "an annotation given twice", doc: entry("name: checkout", "service-names: [checkout]", "annotations:", "  owner: a", "  owner: b"),
+			msg: `key "owner" on line 7 is already given on line 6`},
+		{name: "an entry of annotations alone", doc: entry("name: checkout", "annotations: {owner: a}"),
+			msg: `binds nothing`},
+
 		{name: "apiVersion v2", doc: "apiVersion: v2\n" + entry("name: checkout", "service-names: [checkout]"),
 			msg: `apiVersion "v2" on line 1 is not supported (this dtctl reads "v1")`},
 		{name: "uppercase host", doc: "environments:\n  ABC12345.apps.dynatrace.com:\n    - name: checkout\n      service-names: [checkout]\n",
@@ -304,6 +328,49 @@ func TestCheck(t *testing.T) {
 
 // The limits are part of the format: a file within them is read, and one
 // beyond them is refused whole, not read in part.
+// An entry's annotations are bounded like its lists.
+func TestCheck_AnnotationLimit(t *testing.T) {
+	e := Entry{Name: "checkout", ServiceNames: []string{"checkout"}, Annotations: map[string]string{}}
+	for i := range maxAnnotations {
+		e.Annotations[fmt.Sprintf("k%d", i)] = "v"
+	}
+	require.Empty(t, e.Problem())
+	e.Annotations["one-more"] = "v"
+	require.Equal(t, "has 65 annotations; an entry takes at most 64", e.Problem())
+}
+
+// Annotations are kept and never read: an entry selects, renders and
+// resolves the same with them as without, and a rewrite writes them back.
+func TestAnnotationsAreKeptAndNeverInterpreted(t *testing.T) {
+	plain := Entry{Name: "checkout", Path: "services/checkout", ServiceNames: []string{"checkout"},
+		Workloads: []Workload{{Namespace: "payments", Name: "checkout"}}}
+	annotated := plain.clone()
+	annotated.Annotations = map[string]string{"owner": "team-payments", "example.invalid/tier": "1", "path": "elsewhere", "cluster-uid": clusterUID}
+
+	resolve := func(e Entry) *Status {
+		s, err := Resolve(nil, &File{Environments: map[string][]Entry{prodHost: {e}}}, prodHost, "services/checkout", "")
+		require.NoError(t, err)
+		return s
+	}
+	with, without := resolve(annotated), resolve(plain)
+	assert.Equal(t, annotated, *with.Entry)
+	with.Entry = without.Entry
+	assert.Equal(t, without, with, "nothing but the entry itself differs")
+
+	f := &File{APIVersion: apiVersion, Environments: map[string][]Entry{prodHost: {annotated}}}
+	data, err := encode(f)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "      annotations:\n        cluster-uid: "+clusterUID+"\n        example.invalid/tier: \"1\"\n        owner: team-payments\n        path: elsewhere\n")
+	back, invalidErr := decode(data)
+	require.Nil(t, invalidErr)
+	assert.Equal(t, f, back)
+
+	// A copy handed out does not share the map.
+	copied := f.Entries(prodHost)[0]
+	copied.Annotations["owner"] = "changed"
+	assert.Equal(t, "team-payments", f.Environments[prodHost][0].Annotations["owner"])
+}
+
 func TestCheck_Limits(t *testing.T) {
 	entries := func(n int) string {
 		var b strings.Builder

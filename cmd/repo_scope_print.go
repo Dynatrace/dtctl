@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,6 +75,7 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	kv("Process groups:", e.ProcessGroups...)
 	kv("Services:", e.Services...)
 	kv("Segments:", segmentRefs(e.Segments)...)
+	kv("Annotations:", repoScopeAnnotations(e)...)
 	// An entry's segments are sent whether or not a filter is inserted, so
 	// a missing filter is "not scoped" only for an entry without them.
 	output.FprintDescribeSection(w, "Filters:")
@@ -108,6 +110,15 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 		fmt.Fprintf(w, "  none: %s\n", reason)
 	}
 	kv("Other entries:", s.Others...)
+}
+
+// repoScopeAnnotations are an entry's annotations as key=value, by key.
+func repoScopeAnnotations(e *reposcope.Entry) []string {
+	var out []string
+	for _, key := range slices.Sorted(maps.Keys(e.Annotations)) {
+		out = append(out, key+"="+e.Annotations[key])
+	}
+	return out
 }
 
 // repoScopeCoverage names the directory an entry covers.

@@ -376,6 +376,36 @@ func TestRepoScopeHostWithATrailingDot(t *testing.T) {
 	require.Equal(t, []string{"checkout", "ledger", "tools"}, f.Names(repoScopeTestEnvHost))
 }
 
+// set replaces an entry's bindings and has no flag for its annotations, which
+// are not dtctl's to read: the entry it writes keeps the ones the file held,
+// and describe shows them.
+func TestRepoScopeSetKeepsAnnotations(t *testing.T) {
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, `environments:
+  abc12345.apps.dynatrace.com:
+    - name: checkout
+      service-names: [checkout]
+      annotations:
+        owner: team-payments
+        example.invalid/tier: "1"
+`)
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "checkout", "--namespace", "payments", "--workload", "checkout"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []reposcope.Entry{{
+		Name:        "checkout",
+		Workloads:   []reposcope.Workload{{Namespace: "payments", Name: "checkout"}},
+		Annotations: map[string]string{"owner": "team-payments", "example.invalid/tier": "1"},
+	}}, loadScopeFile(t, repo).Entries(repoScopeTestEnvHost))
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe", "checkout"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Regexp(t, `Annotations:\s+example\.invalid/tier=1, owner=team-payments\n`, stdout)
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "describe", "checkout", "-o", "json"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, `"annotations": {`)
+}
+
 // --cluster-uid qualifies the --workload names, as --namespace does.
 func TestRepoScopeSetClusterUID(t *testing.T) {
 	const uid = "11111111-2222-3333-4444-555555555555"

@@ -517,6 +517,13 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 		}
 		entry.Path = norm.NFC.String(dir)
 	}
+	// set replaces the bindings of an entry. Its annotations are not among
+	// them and are not dtctl's to drop.
+	for _, old := range scope.file.Entries(scope.host) {
+		if old.Name == entry.Name {
+			entry.Annotations = old.Annotations
+		}
+	}
 	scope.file.Upsert(scope.host, entry)
 	if err := reposcope.Save(scope.loc, scope.file); err != nil {
 		return err

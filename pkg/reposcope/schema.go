@@ -2,6 +2,7 @@ package reposcope
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"path"
 	"regexp"
@@ -56,6 +57,12 @@ type Entry struct {
 	// one must hold, together with the filter the bindings render. An entry
 	// may hold nothing else.
 	Segments []Segment `yaml:"segments,omitempty" json:"segments,omitempty"`
+	// Annotations are notes on the entry, for people and for other tools.
+	// dtctl checks their form, keeps them when it rewrites the file and
+	// never reads them: no annotation changes what an entry covers or
+	// selects, in this dtctl or a later one. It is the one place in an
+	// entry where a key this dtctl does not know may be written.
+	Annotations map[string]string `yaml:"annotations,omitempty" json:"annotations,omitempty"`
 }
 
 // Segment references one filter segment of the environment by its id, with
@@ -308,6 +315,9 @@ func (e *Entry) validate() *InvalidError {
 	if err := e.validateSegments(); err != nil {
 		return err
 	}
+	if err := e.validateAnnotations(); err != nil {
+		return err
+	}
 	if !e.HasBindings() && len(e.Segments) == 0 {
 		return invalid("binds nothing",
 			"add at least one of workloads, service-names, process-groups, services or segments")
@@ -323,6 +333,36 @@ func (e Entry) Problem() string {
 		return err.Msg
 	}
 	return ""
+}
+
+// The bounds of an entry's annotations. A key has the form of a Kubernetes
+// annotation key without its upper case, and a value is one line of text.
+const (
+	maxAnnotations         = 64
+	maxAnnotationKeyBytes  = 253
+	maxAnnotationValueSize = 1024
+)
+
+var annotationKeyRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$`)
+
+// validateAnnotations checks the form of the entry's annotations, which is
+// all dtctl knows about them.
+func (e *Entry) validateAnnotations() *InvalidError {
+	if n := len(e.Annotations); n > maxAnnotations {
+		return invalid(fmt.Sprintf("has %d annotations; an entry takes at most %d", n, maxAnnotations))
+	}
+	for _, key := range slices.Sorted(maps.Keys(e.Annotations)) {
+		value := e.Annotations[key]
+		switch {
+		case len(key) > maxAnnotationKeyBytes || !annotationKeyRe.MatchString(key):
+			return invalid(fmt.Sprintf("annotation %q is not an annotation key (lowercase letters, digits, and . _ - / inside; at most %d)", key, maxAnnotationKeyBytes))
+		case len(value) > maxAnnotationValueSize:
+			return invalid(fmt.Sprintf("annotation %q is longer than %d bytes", key, maxAnnotationValueSize))
+		case !utf8.ValidString(value) || !printable(value):
+			return invalid(fmt.Sprintf("annotation %q must not contain control or non-printing characters", key))
+		}
+	}
+	return nil
 }
 
 // validateSegments checks the segments the entry references.
@@ -564,6 +604,7 @@ func (e *Entry) clone() Entry {
 	c.ProcessGroups = slices.Clone(e.ProcessGroups)
 	c.Services = slices.Clone(e.Services)
 	c.Segments = slices.Clone(e.Segments)
+	c.Annotations = maps.Clone(e.Annotations)
 	for i, seg := range c.Segments {
 		if seg.Variables == nil {
 			continue
