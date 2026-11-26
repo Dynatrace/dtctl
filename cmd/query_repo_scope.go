@@ -721,9 +721,54 @@ type ScopedQueryError struct {
 	Sent  string
 }
 
-// Error is the original message. The human output already carried the
-// "applying repo scope" notice before the query ran.
-func (e *ScopedQueryError) Error() string { return e.Err.Error() }
+// repoScopeSegmentVariableCode is the agent error code of a query that
+// failed over a variable of a segment the entry sent.
+const repoScopeSegmentVariableCode = "repo_scope_segment_variable"
+
+// Error is the original message: the human output already carried the
+// "applying repo scope" notice before the query ran. A failure over a
+// variable of a segment the entry sent is the exception, because the
+// original advises flags the user never typed; segmentVariable words it.
+func (e *ScopedQueryError) Error() string {
+	if msg, ok := e.segmentVariable(); ok {
+		return msg
+	}
+	return e.Err.Error()
+}
+
+// segmentVariable words the two failures a segment of the entry causes
+// through its variables, naming the entry as the source and both ways out.
+// One is a required variable the entry gives no value. The other is a
+// variable the query cannot supply: a segment written for one kind of data
+// fails a query over another, so an entry can break queries it has nothing
+// to do with. ok is false for any other failure, and for a segment that is
+// not the entry's.
+func (e *ScopedQueryError) segmentVariable() (msg string, ok bool) {
+	var required *exec.SegmentVariableError
+	var queryErr *exec.QueryError
+	switch {
+	case len(e.Scope.Segments) == 0:
+	case errors.As(e.Err, &required):
+		if !slices.ContainsFunc(e.Scope.Segments, func(s output.RepoScopeSegment) bool { return s.ID == required.Segment }) {
+			break
+		}
+		return fmt.Sprintf("segment %s requires variable %q, and repo scope %s sends it without one: give the variable a value under the entry's segments in %s, or pass --%s to run the query as typed",
+			required.Segment, required.Variable, e.Scope.Name, reposcope.FileName, noRepoScopeFlag), true
+	case errors.As(e.Err, &queryErr) && queryErr.ErrorType == "MISSING_FILTER_SEGMENT_VARIABLE":
+		return fmt.Sprintf("repo scope %s sends the filter segments %s, and one of them needs a variable this query cannot supply (%s): remove the segment from the entry in %s, or pass --%s to run the query as typed",
+			e.Scope.Name, e.segmentList(), firstLineOf(queryErr.Error()), reposcope.FileName, noRepoScopeFlag), true
+	}
+	return "", false
+}
+
+// segmentList spells the segments the scope sent the way --segment takes them.
+func (e *ScopedQueryError) segmentList() string {
+	refs := make([]string, len(e.Scope.Segments))
+	for i, s := range e.Scope.Segments {
+		refs[i] = reposcope.Segment{ID: s.ID, Variables: s.Variables}.String()
+	}
+	return strings.Join(refs, ", ")
+}
 
 func (e *ScopedQueryError) Unwrap() error { return e.Err }
 
@@ -737,12 +782,8 @@ func (e *ScopedQueryError) Suggestions() []string {
 			e.Scope.Name, e.Scope.DataObject, e.Sent))
 	}
 	if len(e.Scope.Segments) > 0 {
-		refs := make([]string, len(e.Scope.Segments))
-		for i, s := range e.Scope.Segments {
-			refs[i] = reposcope.Segment{ID: s.ID, Variables: s.Variables}.String()
-		}
 		out = append(out, fmt.Sprintf("repo scope %s also sent the filter segments %s; if the failure names a segment or one of its variables, correct the entry's segments in %s",
-			e.Scope.Name, strings.Join(refs, ", "), reposcope.FileName))
+			e.Scope.Name, e.segmentList(), reposcope.FileName))
 	}
 	return append(out, fmt.Sprintf("retry with --%s to run the query exactly as typed", noRepoScopeFlag))
 }

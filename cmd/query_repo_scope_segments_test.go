@@ -342,17 +342,50 @@ func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 		"repo scope checkout: its segments "+entrySegmentRefs+" are not checked; verify query sends the query text only\n"), stderr)
 }
 
-// Whether a segment's variables are all bound is the platform's to say. Its
-// failure names the scope and the segments, and the way to rule them out.
-func TestQueryRepoScope_SegmentErrorNamesTheScope(t *testing.T) {
-	segmentRecorder(t, answer(http.StatusBadRequest,
-		`{"error":{"code":400,"message":"Segment requires a variable.","details":{"errorType":"FILTER_SEGMENT_REQUIRES_VARIABLE"}}}`))
-	chdirTestRepo(t, segmentScope)
+// Whether a segment's variables are all bound is the platform's to say. When
+// the segment is the entry's, the failure is the entry's: it names the entry
+// and the file as the source, and both ways out, where the executor's own
+// text would advise a -S the user never typed.
+func TestQueryRepoScope_SegmentVariableErrorNamesTheEntry(t *testing.T) {
+	const required = `segment Ab3dEf9hIjk requires variable "region", and repo scope checkout sends it without one: ` +
+		`give the variable a value under the entry's segments in .dtctl-repo-scope.yaml, or pass --no-repo-scope to run the query as typed`
+	const missing = `repo scope checkout sends the filter segments ` + entrySegmentRefs + `, and one of them needs a variable this query cannot supply ` +
+		`(query failed (MISSING_FILTER_SEGMENT_VARIABLE): A variable is missing.): ` +
+		`remove the segment from the entry in .dtctl-repo-scope.yaml, or pass --no-repo-scope to run the query as typed`
+	for name, tc := range map[string]struct{ response, message string }{
+		"a required variable is not bound": {
+			`{"error":{"code":400,"message":"Segment requires a variable.","details":{"errorType":"FILTER_SEGMENT_REQUIRES_VARIABLE","arguments":["` + "`Ab3dEf9hIjk`" + `","x","$region"]}}}`,
+			required},
+		"the query cannot supply a variable": {
+			`{"error":{"code":400,"message":"A variable is missing.","details":{"errorType":"MISSING_FILTER_SEGMENT_VARIABLE"}}}`,
+			missing},
+	} {
+		t.Run(name, func(t *testing.T) {
+			segmentRecorder(t, answer(http.StatusBadRequest, tc.response))
+			chdirTestRepo(t, segmentScope)
 
-	code, stdout, _ := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
+			code, stdout, _ := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
+			require.NotZero(t, code)
+			detail := agentError(t, stdout)
+			require.Equal(t, "repo_scope_segment_variable", detail.Code)
+			require.Equal(t, tc.message, detail.Message)
+			require.Contains(t, strings.Join(detail.Suggestions, "\n"), "retry with --no-repo-scope to run the query exactly as typed")
+
+			code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--no-agent"}, RunOptions{})
+			require.NotZero(t, code)
+			require.Contains(t, stderr, tc.message)
+			require.NotContains(t, stderr, "-S")
+		})
+	}
+
+	// A segment the user gave is theirs to bind, and keeps the executor's text.
+	srv := segmentRecorder(t, answer(http.StatusBadRequest,
+		`{"error":{"code":400,"message":"Segment requires a variable.","details":{"errorType":"FILTER_SEGMENT_REQUIRES_VARIABLE","arguments":["`+"`other-2`"+`","x","$region"]}}}`))
+	srv.segments["other-2"] = http.StatusOK
+	chdirTestRepo(t, segmentScope)
+	code, stdout, _ := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--segment", "other-2"}, RunOptions{})
 	require.NotZero(t, code)
-	suggestions := strings.Join(agentError(t, stdout).Suggestions, "\n")
-	require.Contains(t, suggestions, "repo scope checkout also sent the filter segments "+entrySegmentRefs+
-		"; if the failure names a segment or one of its variables, correct the entry's segments in .dtctl-repo-scope.yaml")
-	require.Contains(t, suggestions, "--no-repo-scope")
+	detail := agentError(t, stdout)
+	require.Equal(t, "error", detail.Code)
+	require.Contains(t, detail.Message, `-S "other-2?region=your-value-here"`)
 }

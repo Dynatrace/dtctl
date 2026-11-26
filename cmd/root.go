@@ -775,6 +775,11 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 	var scopedErr *ScopedQueryError
 	if errors.As(err, &scopedErr) {
 		detail := errorToDetail(ctx, scopedErr.Err)
+		// A failure over a variable of a segment the entry sent is the
+		// entry's: it gets a code and a message of its own.
+		if msg, ok := scopedErr.segmentVariable(); ok {
+			detail.Code, detail.Message = repoScopeSegmentVariableCode, msg
+		}
 		detail.Suggestions = append(detail.Suggestions, scopedErr.Suggestions()...)
 		return detail
 	}

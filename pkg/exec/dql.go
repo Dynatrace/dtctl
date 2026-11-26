@@ -546,6 +546,28 @@ func isQueryError(err error, target **QueryError) bool {
 	return errors.As(err, target)
 }
 
+// SegmentVariableError is a query the platform refused because a filter
+// segment sent with it requires a variable that was given no value. Its text
+// advises the flags that bind one; a caller that sent the segment for the
+// user reads Segment and Variable and says where its values come from.
+type SegmentVariableError struct {
+	Segment, Variable string
+}
+
+func (e *SegmentVariableError) Error() string {
+	return fmt.Sprintf("segment %s requires variable %q\n\n"+
+		"Bind the variable inline on -S using URL-query syntax:\n\n"+
+		"  dtctl query \"...\" -S \"%s?%s=your-value-here\"\n\n"+
+		"Or use --segments-file with a YAML file for complex cases:\n\n"+
+		"  # segments.yaml\n"+
+		"  - id: %s\n"+
+		"    variables:\n"+
+		"      - name: %s\n"+
+		"        values: [\"your-value-here\"]\n\n"+
+		"  dtctl query \"...\" --segments-file segments.yaml",
+		e.Segment, e.Variable, e.Segment, e.Variable, e.Segment, e.Variable)
+}
+
 // formatSegmentVariableError produces a helpful error message when a segment
 // requires variable bindings, including ready-to-use -S inline and --segments-file examples.
 func formatSegmentVariableError(qErr *QueryError) error {
@@ -558,18 +580,7 @@ func formatSegmentVariableError(qErr *QueryError) error {
 	if len(args) >= 3 {
 		variableName = strings.TrimPrefix(args[2], "$")
 	}
-
-	return fmt.Errorf("segment %s requires variable %q\n\n"+
-		"Bind the variable inline on -S using URL-query syntax:\n\n"+
-		"  dtctl query \"...\" -S \"%s?%s=your-value-here\"\n\n"+
-		"Or use --segments-file with a YAML file for complex cases:\n\n"+
-		"  # segments.yaml\n"+
-		"  - id: %s\n"+
-		"    variables:\n"+
-		"      - name: %s\n"+
-		"        values: [\"your-value-here\"]\n\n"+
-		"  dtctl query \"...\" --segments-file segments.yaml",
-		segmentID, variableName, segmentID, variableName, segmentID, variableName)
+	return &SegmentVariableError{Segment: segmentID, Variable: variableName}
 }
 
 // formatSingleQuoteError produces a helpful error when a query uses single

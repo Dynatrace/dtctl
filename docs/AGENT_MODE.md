@@ -86,6 +86,7 @@ Error codes are stable identifiers that agents can match on programmatically:
 | `validation_error` | Local input validation failed | Fix the file or flags |
 | `unknown_command` | Unknown command, resource type or flag | Follow the suggestion (a runnable command where dtctl can name one); re-read `dtctl commands` |
 | `context_error` | No active context, or the named context is missing | Select a context (`dtctl ctx <name>`) |
+| `repo_scope_segment_variable` | A query failed over a variable of a filter segment the repository's scope entry sent: one the entry gives no value, or one this query's data cannot supply. The message names the entry | Retry with `--no-repo-scope`; tell the user, who corrects the entry's `segments` in `.dtctl-repo-scope.yaml` |
 | `config_error` | The dtctl config could not be read or is invalid | Report it; needs human repair |
 | `spill_file_not_found` | The spilled result file is gone | `dtctl inspect --list`, or re-run the query |
 | `spill_file_unreadable` | The spill file exists but cannot be parsed | Re-run the query |
