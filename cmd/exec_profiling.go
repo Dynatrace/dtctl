@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,18 +14,14 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 	"github.com/Dynatrace/dtctl/pkg/safety"
 	"github.com/Dynatrace/dtctl/pkg/stability"
-	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // profilingSince is the release in which `exec profiling` entered the
 // experimental tier. One constant for the whole family.
 const profilingSince = "0.47.0"
 
-// profilingFindIDsQuery lists eligible entity ids.
-const profilingFindIDsQuery = `dtctl query 'smartscapeNodes PROCESS | fields id, dt.process_group.detected_name, dt.process_group.id'`
-
 // profilingFindIDsHint tells the caller how to find an eligible entity id.
-const profilingFindIDsHint = profilingFindIDsQuery + `
+const profilingFindIDsHint = profiling.FindIDsQuery + `
   # id is the PROCESS-xxx id to pass; dt.process_group.id is its PROCESS_GROUP-xxx id`
 
 // profilingExperimentalNotice opens every profiling help page, so whoever
@@ -681,38 +676,15 @@ func noProfilingFunctionsNote(result interface{}, f *profilingFlags) string {
 // caller can act on. Everything else passes through unchanged and gets dtctl's
 // generic handling.
 func profilingAPIError(err error) error {
-	var apiErr *httpclient.APIError
-	if !errors.As(err, &apiErr) {
-		return err
-	}
-	var suggestions []string
-	switch apiErr.StatusCode {
-	case 400:
-		suggestions = []string{
-			"The API rejected the request parameters — check the timeframe (in the past, at most 2h) and the entity id",
-		}
-	case 403:
-		suggestions = []string{
-			"Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy",
-			"OAuth (dtctl auth login): log in again so the session requests storage:profiles:read",
-		}
-	case 404:
-		suggestions = []string{
-			"The environment knows no such process (ids are per environment, and short-lived process instances disappear)",
-			"List eligible ids: " + profilingFindIDsQuery,
-		}
-	case 429:
-		suggestions = []string{
-			"The environment limits concurrent profiling analyses and is at that limit — wait and retry, and avoid running many analyses in parallel",
-		}
-	default:
+	f, ok := profiling.ClassifyError(err)
+	if !ok {
 		return err
 	}
 	return &diagnostic.Error{
 		Operation:   "run profiling analysis",
-		StatusCode:  apiErr.StatusCode,
-		Message:     apiErr.Message,
-		Suggestions: suggestions,
+		StatusCode:  f.StatusCode,
+		Message:     f.Message,
+		Suggestions: f.Advice,
 		Err:         err,
 	}
 }
