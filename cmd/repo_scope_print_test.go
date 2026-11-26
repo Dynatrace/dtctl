@@ -142,9 +142,13 @@ func TestRepoScopeDiscoveryOneAmbiguousCandidate(t *testing.T) {
 		tier    string
 		partial bool
 		verdict string
+		offer   string
 	}{
-		{"a partial name match", "segment", false, "Verdict: ambiguous: one candidate, matched by a segment of its name rather than the whole of it\n"},
-		{"a partial result", "exact", true, "Verdict: ambiguous: one candidate, but the result is partial (see the notes)\n"},
+		{"a partial name match", "segment", false, "Verdict: ambiguous: one candidate, matched by a segment of its name rather than the whole of it\n",
+			"If it is what runs this code, save it with:\n  dtctl repo-scope set checkout --service " + flowService + "\n"},
+		// What a partial result did not see could carry the same id.
+		{"a partial result", "exact", true, "Verdict: ambiguous: one candidate, but the result is partial (see the notes)\n",
+			"No binding selects any candidate alone.\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			report := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Verdict: reposcope.VerdictAmbiguous, Partial: tc.partial,
@@ -153,7 +157,7 @@ func TestRepoScopeDiscoveryOneAmbiguousCandidate(t *testing.T) {
 			var out bytes.Buffer
 			printRepoScopeDiscovery(&out, report, newRepoScopeProposal(report, nil), 0)
 			require.Contains(t, out.String(), tc.verdict)
-			require.Contains(t, out.String(), "If it is what runs this code, save it with:\n  dtctl repo-scope set checkout --service "+flowService+"\n")
+			require.Contains(t, out.String(), tc.offer)
 		})
 	}
 }
@@ -174,7 +178,7 @@ func TestRepoScopeListsBindingsWorkloadFirst(t *testing.T) {
 	require.Regexp(t, `1\s+-\s+payments/checkout\s+checkout\s+`+pg+`\s+`+svc+`\s+exact\n`, out.String())
 	require.Contains(t, out.String(), "Verdict: match: workload, service name, process group, service\n")
 
-	ids := reposcope.Candidate{Name: "checkout", Services: []string{svc}, ServiceCount: 1, ProcessGroups: []string{pg}, ProcessGroupCount: 1}
+	ids := reposcope.Candidate{Rank: 1, Name: "checkout", Services: []string{svc}, ServiceCount: 1, ProcessGroups: []string{pg}, ProcessGroupCount: 1}
 	require.Equal(t, "dtctl repo-scope set checkout --process-group "+pg+" --service "+svc, repoScopeSetCommand(r, ids, nil))
 	links, _ := repoScopeHandLinks(r, nil)
 	require.Equal(t, "dtctl repo-scope set <name> --process-group PROCESS_GROUP-… --service SERVICE-…", links[2])

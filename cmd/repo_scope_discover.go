@@ -404,9 +404,9 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // When any record query was sampled, a candidate gets its workload binding
 // only, whether its own records were sampled or read whole: another
 // candidate sharing its service name could sit below the sample's floor, so
-// ServiceNameShared cannot be trusted. No id binding is proposed for a
-// sampled or capped candidate either: it would bind only the ids discovery
-// happened to list.
+// ServiceNameShared cannot be trusted. The same holds for a partial report:
+// a query that did not answer could have found that other candidate. An id
+// binding is held to more still, see repoScopeIDRefusal.
 func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
 	var bindings []string
 	flag := func(name string, values ...string) {
@@ -421,11 +421,12 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 		flag("--namespace", c.Namespace)
 		flag("--workload", c.Workload)
 	}
-	if c.ServiceName != "" && slices.Contains(r.Sent, c.ServiceName) && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() {
+	if c.ServiceName != "" && slices.Contains(r.Sent, c.ServiceName) && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() && !r.Partial {
 		flag("--service-name", c.ServiceName)
 	}
-	if len(bindings) == 0 {
-		if c.Sampled || c.ServicesCapped || c.ProcessGroupsCapped {
+	switch {
+	case len(bindings) == 0:
+		if repoScopeIDRefusal(r, c, true) != nil {
 			return ""
 		}
 		flag("--process-group", c.ProcessGroups...)
@@ -433,10 +434,71 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 		if len(bindings) == 0 {
 			return ""
 		}
-	} else if c.LogsByProcessGroup > 0 {
+	case c.LogsByProcessGroup > 0 && repoScopeIDRefusal(r, c, false) == nil:
 		flag("--process-group", c.ProcessGroups...)
 	}
 	return repoScopeSetLine(exec.ShellQuote(c.Name), bindings, repoScopeDir(r, c), selectors)
+}
+
+// repoScopeRefusal is why a line binds none of a candidate's entity ids:
+// the cause, and what follows from it for a candidate left with no line.
+type repoScopeRefusal struct{ cause, noLine string }
+
+// repoScopeIDRefusal is why a line for c must not bind its entity ids, nil
+// when it may. An id binding saves the ids discovery listed, so they must be
+// all of the candidate's (not a sample's, not a list cut short), no other
+// candidate's (the result whole, and no candidate shown carrying one), and,
+// when alone is true and they are the whole entry, enough to reach the
+// records the candidate was found in and more than a name matched inside a
+// longer word. alone false asks about the process groups a line adds to a
+// workload or service-name binding.
+func repoScopeIDRefusal(r *reposcope.DiscoveryReport, c reposcope.Candidate, alone bool) *repoScopeRefusal {
+	const workloadOnly = ", so only --namespace with --workload is proposed, and "
+	switch {
+	case c.Sampled:
+		return &repoScopeRefusal{"it was found by sampling, which can miss another candidate sharing its service name or ids",
+			workloadOnly + "its records name no workload"}
+	case c.ProcessGroupsCapped || alone && c.ServicesCapped:
+		return &repoScopeRefusal{"its records carry more entity ids than discovery lists",
+			", so no --service or --process-group binding is proposed"}
+	case r.Partial:
+		return &repoScopeRefusal{"the result is partial, and a candidate it did not see could share its service name or ids",
+			workloadOnly + "no workload binding selects it"}
+	}
+	ids := c.ProcessGroups
+	if alone {
+		ids = slices.Concat(ids, c.Services)
+	}
+	if len(ids) == 0 {
+		return nil // nothing to bind, and nothing to explain
+	}
+	carries := func(o reposcope.Candidate) bool {
+		return o.Rank != c.Rank && slices.ContainsFunc(ids, func(id string) bool {
+			return slices.Contains(o.ProcessGroups, id) || slices.Contains(o.Services, id)
+		})
+	}
+	if i := slices.IndexFunc(r.Candidates, carries); i >= 0 {
+		return &repoScopeRefusal{cause: fmt.Sprintf("candidate %d carries one of its entity ids, so a binding by id would select both", r.Candidates[i].Rank)}
+	}
+	if !alone {
+		return nil
+	}
+	// The entry would be the ids and nothing else. A scope filters each data
+	// object by one kind of id, so an object the candidate was found in
+	// needs its kind, or the entry binds nothing for it.
+	unreached := func(object, field string, found int64, ids []string) *repoScopeRefusal {
+		if found == 0 || len(ids) > 0 {
+			return nil
+		}
+		return &repoScopeRefusal{cause: fmt.Sprintf("its %s carry no %s, the id a scope filters %s by, so a binding by id would leave them out", object, field, object)}
+	}
+	switch {
+	case c.Tier == "substring":
+		return &repoScopeRefusal{cause: "it matched only inside a longer name, which is too weak a tie to bind it by entity id"}
+	case unreached("spans", "dt.entity.service", c.Spans, c.Services) != nil:
+		return unreached("spans", "dt.entity.service", c.Spans, c.Services)
+	}
+	return unreached("logs", "dt.entity.process_group", c.Logs, c.ProcessGroups)
 }
 
 // repoScopeSetLine assembles a `repo-scope set` line. name, bindings and
@@ -609,23 +671,27 @@ func repoScopeSharedNameNotes(r *reposcope.DiscoveryReport) []string {
 func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 	var notes []string
 	for _, c := range r.Candidates {
+		if c.SetCommand != "" {
+			if c.ClusterUID != "" && len(c.WithoutCluster) > 0 {
+				notes = append(notes, fmt.Sprintf("candidate %d's line leaves --cluster-uid out: its %s carry no k8s.cluster.uid, so a binding with it would return none of them; without it the entry selects %s/%s in any cluster",
+					c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
+			}
+			if why := repoScopeIDRefusal(r, c, false); why != nil && c.LogsByProcessGroup > 0 {
+				notes = append(notes, fmt.Sprintf("candidate %d's line leaves --process-group out, and with it the %d logs found by process group: %s",
+					c.Rank, c.LogsByProcessGroup, why.cause))
+			}
+			continue
+		}
+		why := repoScopeIDRefusal(r, c, true)
 		switch {
-		case c.SetCommand != "" && c.ClusterUID != "" && len(c.WithoutCluster) > 0:
-			notes = append(notes, fmt.Sprintf("candidate %d's line leaves --cluster-uid out: its %s carry no k8s.cluster.uid, so a binding with it would return none of them; without it the entry selects %s/%s in any cluster",
-				c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
-		case c.SetCommand != "":
 		case c.WorkloadShared && c.ClusterRefused != "":
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records carry k8s.cluster.uid %q, which is not a cluster uid a scope file can hold (a lowercase UUID), and another candidate runs the same namespace and workload, so a binding without --cluster-uid would select both",
 				c.Rank, c.ClusterRefused))
 		case c.WorkloadShared && c.ClusterUID == "":
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records name no cluster, and another candidate runs the same namespace and workload in one, so a binding without --cluster-uid would select both; to bind the workload in every cluster, leave --cluster-uid out of that candidate's line",
 				c.Rank))
-		case c.Sampled:
-			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it was found by sampling, which can miss another candidate sharing its service name or ids, so only --namespace with --workload is proposed, and its records name no workload",
-				c.Rank))
-		case c.ServicesCapped || c.ProcessGroupsCapped:
-			notes = append(notes, fmt.Sprintf("candidate %d has no set line: its records carry more entity ids than discovery lists, so no --service or --process-group binding is proposed",
-				c.Rank))
+		case why != nil:
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: %s%s", c.Rank, why.cause, why.noLine))
 		}
 	}
 	return notes
