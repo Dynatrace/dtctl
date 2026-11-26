@@ -230,6 +230,11 @@ project config is the declared level clamped to the global binding of the token
 the login writes (`Config.EffectiveSafetyLevelFor`). The declared level is what
 gets saved; the file is not rewritten to the clamped one.
 
+The clamp is by rank, and the scope sets are not nested (`readonly` requests six
+read scopes `readwrite-mine` does not), so in a project config the login requests
+only scopes that both the declared level and the bound level request
+(`projectLoginScopes`).
+
 A login replaces the stored token, which is keyed by OAuth tier and token name.
 Before the browser opens, the login names every other context on the same tier
 and token name, in the loaded config and in the global one, whose level requests

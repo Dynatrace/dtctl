@@ -352,6 +352,13 @@ the level also decides what the stored token can do.
   `.dtctl.yaml`, dtctl enforces no more for a context than the global config
   grants its token. The login requests the scopes of that enforced level, also
   for a new context and when `--safety-level` asks for more, and prints why.
+  The scope sets of the levels are not nested: `readonly` requests six read
+  scopes that `readwrite-mine` does not (`storage:application.snapshots:read`,
+  `storage:user.events:read`, `storage:user.sessions:read`,
+  `storage:user.replays:read`, `storage:fieldsets:read`,
+  `storage:fieldset-definitions:read`). When one of the two is declared and the
+  other is what the global config grants, the login leaves those six out and
+  lists them.
 - **A value that is not a level is refused.** If a context stores, say,
   `read-only`, the login stops before it requests a token. Repair it with
   `dtctl ctx set <name> --safety-level <level>`, or pass `--safety-level` to

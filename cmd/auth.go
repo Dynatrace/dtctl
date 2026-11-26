@@ -618,6 +618,33 @@ func (l loginLevels) ceilingNotice(tokenName string, bound bool) string {
 	return fmt.Sprintf("%s; %s, so the login requests %s scopes.", declared, ceiling, l.requested)
 }
 
+// projectLoginScopes narrows the scopes of a browser login in a project
+// config to those the global binding of tokenName requests as well, and
+// returns that binding's level and what was left out.
+//
+// The levels are ranked, but their scope sets are not nested: readonly
+// requests read scopes that readwrite-mine does not. Clamping the level by
+// rank therefore still lets a project file obtain scopes the token's owner
+// never asked for, in either direction, so the login requests only what both
+// the declared level and the bound one request. Outside a project config, and
+// for every pair of levels whose sets are nested, scopes come back unchanged.
+func projectLoginScopes(cfg *config.Config, tokenName string, levels loginLevels, scopes []string) (kept, leftOut []string, bound config.SafetyLevel) {
+	if !cfg.IsLocal() {
+		return scopes, nil, ""
+	}
+	// The most permissive level, clamped: what is left is the binding's.
+	bound = cfg.EffectiveSafetyLevelFor(&config.Context{TokenRef: tokenName, SafetyLevel: config.SafetyLevelDangerouslyUnrestricted})
+	declaredScopes, boundScopes := auth.GetScopesForSafetyLevel(levels.declared), auth.GetScopesForSafetyLevel(bound)
+	for _, s := range scopes {
+		if slices.Contains(declaredScopes, s) && slices.Contains(boundScopes, s) {
+			kept = append(kept, s)
+		} else {
+			leftOut = append(leftOut, s)
+		}
+	}
+	return kept, leftOut, bound
+}
+
 // validSafetyLevelList is the list of valid levels as an error message shows it.
 func validSafetyLevelList() string {
 	levels := config.ValidSafetyLevels()
@@ -791,7 +818,9 @@ Safety level:
 
   In a directory with a .dtctl.yaml, dtctl enforces no more for a context than
   the global config grants its token. The login requests the scopes of that
-  level, for a new context and with --safety-level too, and says so.
+  level, for a new context and with --safety-level too, and says so. Where
+  the declared level and the granted one do not request the same scopes
+  (readonly and readwrite-mine), it requests only those both do.
 
   A login replaces the stored token. If another context uses the same token
   and its level needs scopes this login does not request, the login names it
@@ -1004,6 +1033,9 @@ Non-interactive login (CI/CD):
 
 			// Detect environment and create appropriate OAuth config with safety level
 			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, scopeLevel)
+			var scopesLeftOut []string
+			var boundLevel config.SafetyLevel
+			oauthConfig.Scopes, scopesLeftOut, boundLevel = projectLoginScopes(cfg, tokenName, levels, oauthConfig.Scopes)
 
 			// Log which environment we detected
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Detected environment: %s", oauthConfig.Environment)
@@ -1059,6 +1091,9 @@ Non-interactive login (CI/CD):
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Requesting OAuth scopes for safety level %s...", oauthConfig.SafetyLevel)
 				if scopeLevel != levels.declared {
 					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", levels.ceilingNotice(tokenName, tokenBoundIn(globalContexts, tokenName)))
+				}
+				if len(scopesLeftOut) > 0 {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "The login requests only scopes that both the declared level (%s) and the global binding of token %q (%s) request. Left out: %s.", levels.declared, tokenName, boundLevel, strings.Join(scopesLeftOut, ", "))
 				}
 				// Said before the browser opens, while the login can still be abandoned.
 				warnContextsNarrowedByLogin(currentStderr(cmdContext(cmd)), tokenName, contextsNarrowedByLogin(peers, oauthConfig.Scopes), cfg.IsLocal())

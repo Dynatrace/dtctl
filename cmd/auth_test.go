@@ -2191,3 +2191,90 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 		}
 	})
 }
+
+// TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests: the scope
+// sets of the levels are not nested. readonly requests six read scopes that
+// readwrite-mine does not, so a rank alone lets a project context obtain
+// scopes its token's owner never asked for. In a project directory the login
+// requests only what both the declared level and the global binding request.
+func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	onlyReadonly := []string{
+		"storage:application.snapshots:read",
+		"storage:user.events:read",
+		"storage:user.sessions:read",
+		"storage:user.replays:read",
+		"storage:fieldsets:read",
+		"storage:fieldset-definitions:read",
+	}
+	const notice = `The login requests only scopes that both the declared level (%s) and the global binding of token "prod-oauth" (%s) request. Left out: storage:application.snapshots:read, storage:user.events:read, storage:user.sessions:read, storage:user.replays:read, storage:fieldsets:read, storage:fieldset-definitions:read.`
+
+	tests := []struct {
+		name            string
+		bound, declared config.SafetyLevel
+	}{
+		{"readonly under a readwrite-mine binding", config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly},
+		{"readwrite-mine under a readonly binding", config.SafetyLevelReadOnly, config.SafetyLevelReadWriteMine},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", tt.bound})
+			setupLoginProject(t, global, loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", tt.declared}))
+
+			stderr, oauthConfig, runErr := runBrowserLogin(t, "--context", "project")
+			if !errors.Is(runErr, errBrowserLoginStubbed) {
+				t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+			}
+			// Either way dtctl enforces readonly, the lower of the two.
+			if want := "Safety level: readonly\n"; !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+			if got, want := len(oauthConfig.Scopes), 38; got != want {
+				t.Errorf("%d scopes requested, want %d (the 44 of readonly without the six)", got, want)
+			}
+			for _, s := range onlyReadonly {
+				if slices.Contains(oauthConfig.Scopes, s) {
+					t.Errorf("%s is requested; readwrite-mine does not request it", s)
+				}
+			}
+			for _, s := range oauthConfig.Scopes {
+				if !slices.Contains(auth.GetScopesForSafetyLevel(config.SafetyLevelReadOnly), s) {
+					t.Errorf("%s is requested; readonly does not request it", s)
+				}
+			}
+			if want := fmt.Sprintf(notice, tt.declared, tt.bound); !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+			// The global context holds the token and needs a scope the login
+			// does not request, in both directions.
+			if want := `Token 'prod-oauth' is also used by "prod" (global config), whose safety level requests scopes this login does not.`; !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		})
+	}
+
+	t.Run("outside a project directory a readonly login requests all of readonly", func(t *testing.T) {
+		configPath := setupAuthTestConfig(t, "other", envURL, "other-oauth")
+		cfg, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		cfg.SetContextWithOptions("ro", envURL, "ro-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadOnly})
+		if err := cfg.SaveTo(configPath); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+		gFlags.cfgFile = configPath
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+
+		stderr, oauthConfig, runErr := runBrowserLogin(t, "--context", "ro")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		if got, want := len(oauthConfig.Scopes), 44; got != want {
+			t.Errorf("%d scopes requested, want %d", got, want)
+		}
+		if strings.Contains(stderr, "Left out") {
+			t.Errorf("stderr reports scopes left out:\n%s", stderr)
+		}
+	})
+}
