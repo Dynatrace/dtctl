@@ -426,13 +426,14 @@ func (d *discovery) addEntity(object string, rec map[string]interface{}) {
 }
 
 // entityMatch finds the best tier at which an entity name matches a sent
-// value.
+// value. It is exact when the whole name is the value, as written or as its
+// words joined with "-", the first spelling every name is sent in. The name
+// is not read the way a repository's is: an entity called retired/checkout
+// is not the image checkout with a registry in front, it only holds the
+// name.
 func (d *discovery) entityMatch(name string) (best tier, bestMatch matcher, ok bool) {
 	lower := strings.ToLower(name)
-	normal := ""
-	if v := variants(name); len(v) > 0 {
-		normal = v[0]
-	}
+	normal := strings.Join(splitWords(name), "-")
 	for _, m := range d.matchers {
 		var t tier
 		switch {

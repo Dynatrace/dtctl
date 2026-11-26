@@ -383,3 +383,27 @@ func TestDiscover_IDListCutIsReadFromTheList(t *testing.T) {
 	}
 	assert.Contains(t, singleGo(t).Queries[0].DQL, "services = collectDistinct(dt.entity.service, maxLength:51),")
 }
+
+// An entity is named exactly when its whole name is a sent name, in any
+// spelling of its words. A name qualified with a path, a tag or a prefix
+// only holds one: "retired/checkout" was read as the image name "checkout"
+// and reported as an exact match.
+func TestDiscover_QualifiedEntityNameIsNotExact(t *testing.T) {
+	for name, want := range map[string]string{
+		"checkout":         "exact",
+		"Checkout":         "exact",
+		"Checkout Service": "exact",
+		"checkout_service": "exact",
+		"retired/checkout": "substring",
+		"checkout:v2":      "substring",
+		"checkout@sha256":  "substring",
+		"eu.checkout":      "segment",
+	} {
+		r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+			"dt.entity.service": {{records: []map[string]interface{}{{fieldEntityID: svcID, fieldEntityName: name}}}},
+		}}, singleGo(t), prodHost)
+		require.NoError(t, err)
+		require.Len(t, r.Candidates, 1, name)
+		assert.Equal(t, want, r.Candidates[0].Tier, name)
+	}
+}
