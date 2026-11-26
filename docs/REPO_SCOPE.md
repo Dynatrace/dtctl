@@ -290,6 +290,19 @@ Scoping applies in every mode (terminal, CI and agent) because the file is commi
 
 Server mode (`dtctl serve`, `pkg/engine`) has no working directory: the `repo-scope` commands are not available there and queries are never scoped.
 
+## With dtui
+
+[dtui](https://github.com/dynatrace-oss/dtui) has a project file of its own, `.dtui.yaml`, which among other things lists the filter segments it applies to every view. The two files are separate and do different jobs:
+
+- `.dtctl-repo-scope.yaml` binds directories of a repository to the entities that run them. dtctl writes it, and it never selects an environment.
+- `.dtui.yaml` sets dtui's environment, start view, timeframe, presets and segments. dtctl does not read it.
+
+To query with the segments your `.dtui.yaml` names, pass them yourself; they combine with the repo scope, and a record has to match both:
+
+```bash
+dtctl query 'fetch logs | limit 20' --segment payments-prod
+```
+
 ## AI agents
 
 In agent mode `discover` returns its report as the envelope `result`, with each candidate's `setCommand` and the top one in `context.suggestions`, offered for confirmation and never to run on the agent's own initiative. A scoped query's envelope carries `context.repo_scope`; see [AGENT_MODE.md](AGENT_MODE.md#repo-scope-contextrepo_scope). The `dtctl` skill has the procedure in [references/repo-scope.md](../skills/dtctl/references/repo-scope.md).

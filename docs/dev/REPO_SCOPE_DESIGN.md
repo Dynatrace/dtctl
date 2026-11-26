@@ -16,6 +16,25 @@ Filter segments are how Dynatrace scopes a query, and `dtctl query` already take
 
 Rendering an entry onto an existing segment, so that the platform applies it, is a follow-up; the file format does not stand in its way.
 
+## dtui's workspace file
+
+[dtui](https://github.com/dynatrace-oss/dtui) reads a second per-project file, `.dtui.yaml`: the environment to open, a timeframe, a start view, presets, and the filter segments it applies to every view. The two files stay separate, each owned by one tool, and compose by a fixed rule.
+
+| | `.dtctl-repo-scope.yaml` | `.dtui.yaml` |
+|---|---|---|
+| Owner | dtctl (`pkg/reposcope`) | dtui |
+| Found | at the `.git` root only | walking up to `/` |
+| Narrows by | bindings, rendered to a filter in the query text | existing filter segments, sent beside the query |
+| Varies by directory | yes, an entry's `path` | no |
+| Selects the environment | never | `environment`, in dtui |
+| Unknown keys | reported; `set` and `delete` refuse to rewrite | ignored |
+
+1. **dtctl does not read `.dtui.yaml`.** Its `environment` key picks the context, which is harmless in a read-only viewer and not in a CLI that writes: a cloned file would decide which environment `apply` and `delete` reach, and under which safety level. Its segments would change the rows of a stable command for everyone who already has the file, including a personal one in a home directory. The same segments are available explicitly through `--segment` and `--segments-file`.
+2. **dtui reads the scope file through `pkg/reposcope`,** not through a parser of its own. The lookup rules (the `.git` stop, the regular-file and size check), the validation and the renderer are what make a cloned file safe to honour, and a second implementation would drift in exactly those places. The read path is `Locate`, `Load`, `Resolve`, `Filters` and `dql.InsertFilter`, shown in the package example; none of them writes.
+3. **The two narrowings are ANDed and independent.** Segments travel in the request and the scope filter sits in the query text, so a query that has both is narrowed by both, and neither replaces, merges with or takes precedence over the other. Each has its own switch. Bindings and segments that share no records give no rows, which is the correct answer to the question asked.
+4. **The scope file never selects an environment.** `--context`, `DTCTL_CONTEXT` and, in dtui, the workspace file's `environment` decide that; the scope is then looked up under the resulting host, and a host without entries means no scope.
+5. **Neither file moves into the other.** A workspace file is hand-written, tolerant of keys it does not know and found from any parent directory; the scope file is written by `set`, refuses to drop what it does not know and belongs to one repository. One file could keep only one of those behaviours.
+
 ## Background
 
 The question a developer asks from a checkout is about the code in front of them: what is failing in *this* service, how slow is *this* endpoint. The environment answers in terms of entities (service and process group ids, `service.name`, Kubernetes workloads), and nothing in dtctl connected the two. Every query had to name the entity, and the names in the repository (a Go module, a Helm chart, a Maven artifactId) are rarely the names the environment records.
@@ -154,6 +173,7 @@ Candidates are keyed by namespace, workload and service name, so the result does
 4. **No lock for concurrent `set`.** The write is a temp file, fsync and rename, so the last writer wins cleanly. The rename is atomic on POSIX systems; on Windows `os.Rename` replaces the file with `MoveFileEx`, which can fail while another process holds it open (the old file then stays in place and `set` reports the error) and is not documented as atomic. Concurrent edits of one committed file are git's problem.
 5. **No set-time applicability probe.** `set` sends nothing. Whether the records carry the bound fields is what discovery checks before it proposes an id, and the zero-rows hint covers bindings written by hand.
 6. **CLI only.** The working directory and the scope file are host state. `repo-scope` is in the engine's `unsupportedCommands`, and `currentWorkDir` refuses an invocation without `HostWorkingDirectory` or with a session, so a service request never resolves a scope even when the host process happens to run inside a checkout. `TestEngineOutputEqualsCLI` runs its CLI side in a temporary directory for the same reason.
+7. **`.dtui.yaml` is not read.** See [dtui's workspace file](#dtuis-workspace-file): dtui consumes the scope file through `pkg/reposcope`, and dtctl leaves the workspace file to dtui.
 
 ## Testing
 
@@ -175,3 +195,4 @@ Candidates are keyed by namespace, workload and service name, so the result does
 10. `catalog-info.yaml` and `skaffold.yaml` as name sources (a Gradle build's chart already supplies the deployed name, and `--term` covers the rest); stripping naming prefixes, which is organisation-specific.
 11. A Maven multi-module build as one unit, like a Gradle settings build: the asymmetry is deliberate until field data asks for it.
 12. `get snapshots` after a re-version (hit limit, update) reads only the current immutable id. Earlier ids cannot be recovered: snapshots carry only `breakpoint.id`, the rule API returns `revision_count` but no ids, and ids are a tenant-wide sequence. Unblocked by the rule API listing its revisions' ids, or by snapshots carrying the rule's mutable id, which create already sends.
+13. dtui applying the scope file to its logs and spans views through `pkg/reposcope`, once a release carries the package. Reporting a checkout's `.dtui.yaml` in `repo-scope describe` (its segments as `--segment` flags, its environment against the context's) and an opt-in query flag for those segments wait for dtui to agree on a shared parser for that file.
