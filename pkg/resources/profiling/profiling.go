@@ -48,7 +48,10 @@ type Handler struct {
 	sdk *sdkcla.Handler
 }
 
-// NewHandler returns a Handler that sends its requests through c.
+// NewHandler returns a Handler that sends its requests through c. A program
+// other than dtctl builds c with sdk/session (session.NewClientFromConfig and
+// its own User-Agent), of whose Client client.Client is an alias; pkg/client
+// builds dtctl's own, which identifies itself as dtctl.
 func NewHandler(c *client.Client) *Handler {
 	return &Handler{sdk: sdkcla.NewHandler(httpclient.Wrap(c.HTTP()))}
 }

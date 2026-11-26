@@ -210,7 +210,7 @@ func TestToCollapsed_TopCapsRowsNoSections(t *testing.T) {
 }
 
 // jsnode builds a Node.js frame the way the API returns it: no class, the function
-// in methodName, and the file in fileName/filePath (recorded shape, gmg80500).
+// in methodName, and the file in fileName/filePath (the shape the API records).
 func jsnode(id, method, filePath, fileName, ruleID string, running int, children ...string) map[string]interface{} {
 	kids := make([]interface{}, len(children))
 	for i, c := range children {

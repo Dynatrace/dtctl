@@ -10,9 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Dynatrace/dtctl/pkg/client"
-	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
+	"github.com/Dynatrace/dtctl/sdk/session"
 )
 
 // The call sequence of a program that runs a hotspots analysis itself rather
@@ -28,9 +27,9 @@ func Example() {
 	}))
 	defer env.Close()
 
-	// The client comes from the dtctl configuration, as it does for the
-	// command: the current context of ~/.config/dtctl/config, or of the file
-	// DTCTL_CONFIG names. Here that file points at the stand-in.
+	// The client comes from a dtctl configuration file, as it does for the
+	// command. Here the file is a temporary one whose only context points at
+	// the stand-in; see exampleClient.
 	dir, err := os.MkdirTemp("", "profiling-example")
 	if err != nil {
 		fmt.Println(err)
@@ -42,15 +41,7 @@ func Example() {
 		fmt.Println(err)
 		return
 	}
-	os.Setenv("DTCTL_CONFIG", path)
-	defer os.Unsetenv("DTCTL_CONFIG")
-
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	c, err := client.NewFromConfig(cfg)
+	c, err := exampleClient(path)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -107,6 +98,24 @@ func Example() {
 	//  8 app.Main.main;lib.Json.parse
 	//  2 app.Main.main
 	// no functions: no_state_samples
+}
+
+// exampleClient builds the client a program hands to profiling.NewHandler,
+// from the dtctl configuration file at path. A program uses sdk/session for
+// this, under its own User-Agent; pkg/config and pkg/client are dtctl's own
+// and send dtctl's.
+//
+// The example's file carries its token inline, so the configuration is sealed
+// and no credential store of the host is asked for one. A program that works
+// with the user's own login (`dtctl auth login`) loads the configuration with
+// session.Load and does not seal it.
+func exampleClient(path string) (*session.Client, error) {
+	cfg, err := session.LoadFrom(path)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SealInlineCredentials()
+	return session.NewClientFromConfig(cfg, session.WithUserAgentProduct("profiling-example", "0.1.0"))
 }
 
 // exampleConfig is a dtctl configuration with one context for environment.
