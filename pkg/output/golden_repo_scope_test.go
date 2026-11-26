@@ -211,7 +211,7 @@ func TestGolden_RepoScope(t *testing.T) {
 	}{
 		"status-linked":       {repoScopeStatusLinked(), all},
 		"status-segments":     {repoScopeStatus("services/ledger"), all},
-		"status-unlinked":     {reposcope.Status{Reason: "not inside a git repository"}, all},
+		"status-unlinked":     {reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, all},
 		"discovery-match":     {repoScopeDiscoveryMatch(), all},
 		"discovery-none":      {repoScopeDiscoveryNone(), []string{"json"}},
 		"discovery-partial":   {repoScopeDiscoveryPartial(), []string{"json"}},

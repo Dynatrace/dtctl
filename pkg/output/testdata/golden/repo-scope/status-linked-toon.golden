@@ -1,3 +1,4 @@
+code: linked
 dir: services/checkout/internal
 entry:
   name: checkout
@@ -20,3 +21,4 @@ liveDebuggerFilters[3]:
   - service.name[1]: checkout
   - dt.entity.process_group[1]: PROCESS_GROUP-FEDCBA9876543210
 others[1]: ledger
+selected: directory

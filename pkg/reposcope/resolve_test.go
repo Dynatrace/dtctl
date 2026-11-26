@@ -1,8 +1,13 @@
 package reposcope
 
 import (
+	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	gotoken "go/token"
 	"io/fs"
+	"regexp"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -53,47 +58,49 @@ func TestResolve(t *testing.T) {
 		reason    string
 		others    []string
 		ambiguous bool
+		code      StatusCode
+		selected  Selection
 	}{
-		{name: "exact path", file: monorepoFile(), host: prodHost, dir: "services/checkout",
+		{code: StatusLinked, selected: SelectedByDirectory, name: "exact path", file: monorepoFile(), host: prodHost, dir: "services/checkout",
 			entry: "checkout", others: []string{"checkout-v2", "ledger", "ledger-close"}},
-		{name: "below a path", file: monorepoFile(), host: prodHost, dir: "services/checkout/internal/api",
+		{code: StatusLinked, selected: SelectedByDirectory, name: "below a path", file: monorepoFile(), host: prodHost, dir: "services/checkout/internal/api",
 			entry: "checkout", others: []string{"checkout-v2", "ledger", "ledger-close"}},
-		{name: "a prefix that is not a path segment", file: monorepoFile(), host: prodHost, dir: "services/checkout-v2/cmd",
+		{code: StatusLinked, selected: SelectedByDirectory, name: "a prefix that is not a path segment", file: monorepoFile(), host: prodHost, dir: "services/checkout-v2/cmd",
 			entry: "checkout-v2", others: []string{"checkout", "ledger", "ledger-close"}},
-		{name: "the longest path wins", file: monorepoFile(), host: prodHost, dir: "services/ledger/close/job",
+		{code: StatusLinked, selected: SelectedByDirectory, name: "the longest path wins", file: monorepoFile(), host: prodHost, dir: "services/ledger/close/job",
 			entry: "ledger-close", others: []string{"checkout", "checkout-v2", "ledger"}},
-		{name: "no entry covers the directory", file: monorepoFile(), host: prodHost, dir: ".",
-			reason: `no entry covers "."; entries here cover services/checkout, services/checkout-v2, services/ledger, services/ledger/close; pick one with --repo-scope <name>`,
+		{code: StatusNoEntry, name: "no entry covers the directory", file: monorepoFile(), host: prodHost, dir: ".",
+			reason: `no entry covers "."; entries here cover services/checkout, services/checkout-v2, services/ledger, services/ledger/close`,
 			others: []string{"checkout", "checkout-v2", "ledger", "ledger-close"}},
-		{name: "the repository-wide entry catches the rest", file: withRepositoryWide(monorepoFile()), host: prodHost, dir: "docs",
+		{code: StatusLinked, selected: SelectedByDirectory, name: "the repository-wide entry catches the rest", file: withRepositoryWide(monorepoFile()), host: prodHost, dir: "docs",
 			entry: "shop", others: []string{"checkout", "checkout-v2", "ledger", "ledger-close"}},
-		{name: "a path entry beats the repository-wide one", file: withRepositoryWide(monorepoFile()), host: prodHost, dir: "services/ledger",
+		{code: StatusLinked, selected: SelectedByDirectory, name: "a path entry beats the repository-wide one", file: withRepositoryWide(monorepoFile()), host: prodHost, dir: "services/ledger",
 			entry: "ledger", others: []string{"checkout", "checkout-v2", "ledger-close", "shop"}},
-		{name: "no entries for this host", file: monorepoFile(), host: stgHost, dir: "services/checkout",
+		{code: StatusNoEntryForEnvironment, name: "no entries for this host", file: monorepoFile(), host: stgHost, dir: "services/checkout",
 			reason: "no entry for stg98765.apps.dynatrace.com; the file defines: abc12345.apps.dynatrace.com"},
-		{name: "a file with no entries at all", file: &File{}, host: prodHost, dir: ".",
+		{code: StatusNoEntryForEnvironment, name: "a file with no entries at all", file: &File{}, host: prodHost, dir: ".",
 			reason: "no entry for abc12345.apps.dynatrace.com; the file defines no entries"},
-		{name: "selected by name from anywhere", file: monorepoFile(), host: prodHost, dir: ".", pick: "ledger",
+		{code: StatusLinked, selected: SelectedByName, name: "selected by name from anywhere", file: monorepoFile(), host: prodHost, dir: ".", pick: "ledger",
 			entry: "ledger", reason: `selected by name; its path "services/ledger" does not cover "."`,
 			others: []string{"checkout", "checkout-v2", "ledger-close"}},
-		{name: "selected by name where it applies anyway", file: monorepoFile(), host: prodHost, dir: "services/ledger", pick: "ledger",
+		{code: StatusLinked, selected: SelectedByName, name: "selected by name where it applies anyway", file: monorepoFile(), host: prodHost, dir: "services/ledger", pick: "ledger",
 			entry: "ledger", others: []string{"checkout", "checkout-v2", "ledger-close"}},
-		{name: "a Gradle deployable", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy/src",
+		{code: StatusLinked, selected: SelectedByDirectory, name: "a Gradle deployable", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy/src",
 			entry: "webproxy", others: []string{"admin"}},
-		{name: "a library one deployable depends on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-api/src",
+		{code: StatusLinked, selected: SelectedByBuild, name: "a library one deployable depends on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-api/src",
 			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-api", others: []string{"admin"}},
-		{name: "a library two deployables depend on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core/src/main/kotlin",
-			reason: "covered by entries webproxy and admin; pick one with --repo-scope <name>", others: []string{"admin", "webproxy"}, ambiguous: true},
-		{name: "a library two deployables depend on, selected by name", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core",
+		{code: StatusAmbiguousEntry, name: "a library two deployables depend on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core/src/main/kotlin",
+			reason: "covered by entries webproxy and admin", others: []string{"admin", "webproxy"}, ambiguous: true},
+		{code: StatusLinked, selected: SelectedByName, name: "a library two deployables depend on, selected by name", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core",
 			pick: "admin", entry: "admin", reason: "covered through the Gradle build: admin depends on webproxy-core", others: []string{"webproxy"}},
-		{name: "a library only an entry's deployable is known to depend on", repo: gradle, file: onlyWebproxy, host: prodHost, dir: "webproxy-core",
+		{code: StatusLinked, selected: SelectedByBuild, name: "a library only an entry's deployable is known to depend on", repo: gradle, file: onlyWebproxy, host: prodHost, dir: "webproxy-core",
 			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-core"},
-		{name: "the settings directory", repo: gradle, file: gradleFile(), host: prodHost, dir: ".",
-			reason: `no entry covers "."; entries here cover admin, webproxy; pick one with --repo-scope <name>`, others: []string{"admin", "webproxy"}},
-		{name: "selected by name outside its build closure", repo: gradle, file: gradleFile(), host: prodHost, dir: "admin", pick: "webproxy",
+		{code: StatusNoEntry, name: "the settings directory", repo: gradle, file: gradleFile(), host: prodHost, dir: ".",
+			reason: `no entry covers "."; entries here cover admin, webproxy`, others: []string{"admin", "webproxy"}},
+		{code: StatusLinked, selected: SelectedByName, name: "selected by name outside its build closure", repo: gradle, file: gradleFile(), host: prodHost, dir: "admin", pick: "webproxy",
 			entry: "webproxy", reason: `selected by name; its path "webproxy" does not cover "admin"`, others: []string{"admin"}},
-		{name: "a build file that does not read", repo: symlinked, file: gradleFile(), host: prodHost, dir: "webproxy-api",
-			reason: `no entry covers "webproxy-api"; entries here cover admin, webproxy; pick one with --repo-scope <name>`, others: []string{"admin", "webproxy"}},
+		{code: StatusNoEntry, name: "a build file that does not read", repo: symlinked, file: gradleFile(), host: prodHost, dir: "webproxy-api",
+			reason: `no entry covers "webproxy-api"; entries here cover admin, webproxy`, others: []string{"admin", "webproxy"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -116,6 +123,8 @@ func TestResolve(t *testing.T) {
 			assert.Equal(t, tt.reason, r.Reason)
 			assert.Equal(t, tt.others, r.Others)
 			assert.Equal(t, tt.ambiguous, r.Ambiguous())
+			assert.Equal(t, tt.code, r.Code)
+			assert.Equal(t, tt.selected, r.Selected)
 		})
 	}
 }
@@ -131,7 +140,50 @@ func TestResolve_Ambiguous(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, r.Ambiguous())
 	assert.Nil(t, r.Entry)
-	assert.Equal(t, "covered by entries webproxy, admin and edge; pick one with --repo-scope <name>", r.Reason)
+	assert.Equal(t, "covered by entries webproxy, admin and edge", r.Reason)
+}
+
+// What a Status says, it says as data: a program that keeps one, or reads
+// it from another program's output, finds the tie and the kind of answer in
+// it without reading the reason.
+func TestResolve_StatusSurvivesJSON(t *testing.T) {
+	r, err := Resolve(fixture(t, "gradle-multi"), gradleFile(), prodHost, "webproxy-core", "")
+	require.NoError(t, err)
+	data, err := json.Marshal(r)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"linked":false,"code":"ambiguous_entry","file":".dtctl-repo-scope.yaml","environment":"`+prodHost+`","dir":"webproxy-core",
+		"reason":"covered by entries webproxy and admin","tied":["webproxy","admin"],"others":["admin","webproxy"],"hosts":["`+prodHost+`"]}`, string(data))
+	var back Status
+	require.NoError(t, json.Unmarshal(data, &back))
+	assert.True(t, back.Ambiguous())
+	assert.Equal(t, []string{"webproxy", "admin"}, back.Tied)
+
+	r, err = Resolve(fixture(t, "gradle-multi"), gradleFile(), prodHost, "webproxy-api", "")
+	require.NoError(t, err)
+	data, err = json.Marshal(r)
+	require.NoError(t, err)
+	back = Status{}
+	require.NoError(t, json.Unmarshal(data, &back))
+	assert.Equal(t, StatusLinked, back.Code)
+	assert.Equal(t, SelectedByBuild, back.Selected)
+	assert.False(t, back.Ambiguous())
+}
+
+// What the package says is read by programs other than dtctl, and how a
+// command line spells an option is the command's to say: no message built
+// here names a flag.
+func TestMessagesNameNoFlag(t *testing.T) {
+	flag := regexp.MustCompile(`(^|[^-])--[a-z]`)
+	for _, file := range []string{"schema.go", "decode.go", "resolve.go", "store.go", "errors.go"} {
+		f, err := parser.ParseFile(gotoken.NewFileSet(), file, nil, 0)
+		require.NoError(t, err)
+		ast.Inspect(f, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == gotoken.STRING {
+				assert.NotRegexp(t, flag, lit.Value, file)
+			}
+			return true
+		})
+	}
 }
 
 func TestResolve_UnknownName(t *testing.T) {
@@ -210,6 +262,8 @@ func TestResolve_Status(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, &Status{
 		Linked:      true,
+		Code:        StatusLinked,
+		Selected:    SelectedByDirectory,
 		File:        FileName,
 		Environment: prodHost,
 		Dir:         "services/checkout/internal",
@@ -358,7 +412,7 @@ func TestResolve_SharedModuleInsideADeployable(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, r.Entry)
 		assert.True(t, r.Ambiguous())
-		assert.Equal(t, "covered by entries "+entries[0].Name+" and "+entries[1].Name+"; pick one with --repo-scope <name>", r.Reason)
+		assert.Equal(t, "covered by entries "+entries[0].Name+" and "+entries[1].Name+"", r.Reason)
 
 		r, err = Resolve(sharedLibraryRepo(), f, prodHost, "app/src", "")
 		require.NoError(t, err)

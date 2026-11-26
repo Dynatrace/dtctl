@@ -28,6 +28,10 @@ const (
 	repoScopeNarrowHint   = "add a name you know with --term <name>, or discover for another directory with --path <dir>"
 	repoScopeCheckoutHint = "run dtctl from inside a git checkout"
 	repoScopeNoFileReason = "this repository has no " + reposcope.FileName
+	// repoScopePickHint is how a directory without an entry of its own gets
+	// one: reposcope says that none applies, the command says with which
+	// flag one is named.
+	repoScopePickHint = "pick one with --" + repoScopeFlag + " <name>"
 )
 
 var repoScopeCmd = newRepoScopeCmd()
@@ -152,7 +156,7 @@ Examples:
 	c.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
 	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
-	c.Flags().StringArrayVar(&segments, "segment", nil, `existing filter segment a query under the entry also sends, by id (repeatable, max 10)
+	c.Flags().StringArrayVar(&segments, "segment", nil, `existing filter segment a query under the entry also sends, by the id 'dtctl get segments' lists (repeatable, max 10)
 bind its variables inline: "ID?var=val&var2=val1,val2"`)
 	for _, name := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "segment", "path"} {
 		rejectEmptyFlag(c, name)
@@ -291,7 +295,7 @@ func openRepoScope(ctx context.Context, cfg *config.Config) (*repoScopeFile, err
 // resolve picks the entry named, or the one covering the working directory.
 func (s *repoScopeFile) resolve(name string) (*reposcope.Status, error) {
 	if !s.loc.Exists && name == "" {
-		return &reposcope.Status{Environment: s.host, Dir: s.loc.RelDir, Reason: repoScopeNoFileReason}, nil
+		return &reposcope.Status{Code: reposcope.StatusNoFile, Environment: s.host, Dir: s.loc.RelDir, Reason: repoScopeNoFileReason}, nil
 	}
 	return reposcope.Resolve(reposcope.RepoFS(s.loc), s.file, s.host, s.loc.RelDir, name)
 }
@@ -310,28 +314,30 @@ func openRepoScopeForEdit(ctx context.Context) (*repoScopeFile, error) {
 	return s, nil
 }
 
-// repoScopeStatus is what current and describe report. Without a name, every
-// answer short of a broken config is a Status, outside a repository and with
-// a file that does not validate included, because these commands are how a
-// user finds out why a query was not scoped. With a name, what does not
-// resolve is the error.
-func repoScopeStatus(ctx context.Context, name string) (*reposcope.Status, error) {
+// repoScopeStatus is what current and describe report, with the advice a
+// file that does not load gives about itself. Without a name, every answer
+// short of a broken config is a Status, outside a repository and with a file
+// that does not validate included, because these commands are how a user
+// finds out why a query was not scoped. With a name, what does not resolve
+// is the error.
+func repoScopeStatus(ctx context.Context, name string) (status *reposcope.Status, advice []string, err error) {
 	cfg, err := loadConfig(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	scope, err := openRepoScope(ctx, cfg)
 	var invalid *reposcope.InvalidError
 	switch {
 	case err == nil:
-		return scope.resolve(name)
+		status, err = scope.resolve(name)
+		return status, nil, err
 	case name != "" || !errors.As(err, &invalid):
-		return nil, err
+		return nil, nil, err
 	case scope == nil:
-		return &reposcope.Status{Reason: "not inside a git repository"}, nil
+		return &reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, nil, nil
 	}
-	return &reposcope.Status{File: reposcope.FileName, Environment: scope.host, Dir: scope.loc.RelDir,
-		Reason: scope.unusable(invalid)}, nil
+	return &reposcope.Status{Code: reposcope.StatusInvalidFile, File: reposcope.FileName, Environment: scope.host, Dir: scope.loc.RelDir,
+		Reason: scope.unusable(invalid)}, invalid.Suggestions, nil
 }
 
 // unusable is why the file did not load, for a command that reports it and
@@ -342,11 +348,22 @@ func (s *repoScopeFile) unusable(err error) string {
 	return strings.ReplaceAll(err.Error(), s.loc.Path, reposcope.FileName)
 }
 
+// repoScopeReason is a Status's reason as a command prints it: where no
+// entry applies and one could be named, it ends with the flag that names
+// one.
+func repoScopeReason(s *reposcope.Status) string {
+	switch s.Code {
+	case reposcope.StatusNoEntry, reposcope.StatusAmbiguousEntry:
+		return s.Reason + "; " + repoScopePickHint
+	}
+	return s.Reason
+}
+
 // showRepoScope is current and describe: the same Status, one line or in
 // detail for a terminal, as is in every other format.
 func showRepoScope(cmd *cobra.Command, verb, name string) error {
 	ctx := cmdContext(cmd)
-	status, err := repoScopeStatus(ctx, name)
+	status, advice, err := repoScopeStatus(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -361,23 +378,30 @@ func showRepoScope(cmd *cobra.Command, verb, name string) error {
 	}
 	printer := newPrinterCtx(ctx)
 	if ap := enrichAgent(printer, verb, "repo-scope"); ap != nil {
-		ap.SetSuggestions(repoScopeStatusSuggestions(status))
+		ap.SetSuggestions(repoScopeStatusSuggestions(status, advice))
 	}
 	return printer.Print(status)
 }
 
 // repoScopeStatusSuggestions are the next steps an agent reading a Status can
-// take.
-func repoScopeStatusSuggestions(s *reposcope.Status) []string {
-	switch {
-	case s.Linked:
+// take. advice is what a file that did not load says about itself.
+func repoScopeStatusSuggestions(s *reposcope.Status, advice []string) []string {
+	switch s.Code {
+	case reposcope.StatusLinked:
+		// Only the entry in effect here narrows the queries run here. One
+		// asked for by name may cover another directory.
+		if s.Selected == reposcope.SelectedByName {
+			return []string{fmt.Sprintf("pass --%s %s to 'dtctl query' to narrow fetch logs and fetch spans to this entry from any directory", repoScopeFlag, s.Entry.Name)}
+		}
 		return []string{fmt.Sprintf("'dtctl query' narrows fetch logs and fetch spans to %q here; add --%s to run a query unscoped", s.Entry.Name, noRepoScopeFlag)}
-	case s.Environment == "":
+	case reposcope.StatusNotARepository:
 		return []string{repoScopeCheckoutHint}
-	case s.Ambiguous():
-		return []string{s.Reason}
-	case len(s.Others) > 0:
-		return []string{"no entry covers this directory; pass --repo-scope <name> to use one of: " + strings.Join(s.Others, ", ")}
+	case reposcope.StatusInvalidFile:
+		return append([]string{"correct " + reposcope.FileName + ": nothing in it is applied until it loads"}, advice...)
+	case reposcope.StatusAmbiguousEntry:
+		return []string{repoScopeReason(s)}
+	case reposcope.StatusNoEntry:
+		return []string{"no entry covers this directory; pass --" + repoScopeFlag + " <name> to use one of: " + strings.Join(s.Others, ", ")}
 	}
 	return []string{repoScopeDiscoverHint}
 }

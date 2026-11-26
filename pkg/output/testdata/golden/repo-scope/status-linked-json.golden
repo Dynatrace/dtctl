@@ -1,5 +1,6 @@
 {
   "linked": true,
+  "code": "linked",
   "file": ".dtctl-repo-scope.yaml",
   "environment": "abc12345.apps.dynatrace.com",
   "dir": "services/checkout/internal",
@@ -23,6 +24,7 @@
       "SERVICE-0123456789ABCDEF"
     ]
   },
+  "selected": "directory",
   "filters": {
     "logs": "in(dt.entity.process_group, array(\"PROCESS_GROUP-FEDCBA9876543210\")) or service.name == \"checkout\" or (k8s.cluster.uid == \"11111111-2222-3333-4444-555555555555\" and k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")",
     "spans": "in(dt.entity.service, array(\"SERVICE-0123456789ABCDEF\")) or service.name == \"checkout\" or (k8s.cluster.uid == \"11111111-2222-3333-4444-555555555555\" and k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")"

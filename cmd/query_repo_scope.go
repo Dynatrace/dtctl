@@ -177,7 +177,7 @@ func resolveRepoScope(cmd *cobra.Command, cfg *config.Config, name string) (*rep
 		if status.Ambiguous() {
 			code = repoScopeAmbiguousEntry
 		}
-		res.Scope = &output.RepoScope{File: status.File, Environment: status.Environment, Code: code, Reason: status.Reason}
+		res.Scope = &output.RepoScope{File: status.File, Environment: status.Environment, Code: code, Reason: repoScopeReason(status)}
 	}
 	return res, nil
 }

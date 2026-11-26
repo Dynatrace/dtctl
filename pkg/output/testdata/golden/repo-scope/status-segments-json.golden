@@ -1,5 +1,6 @@
 {
   "linked": true,
+  "code": "linked",
   "file": ".dtctl-repo-scope.yaml",
   "environment": "abc12345.apps.dynatrace.com",
   "dir": "services/ledger",
@@ -27,6 +28,7 @@
       }
     ]
   },
+  "selected": "directory",
   "filters": {
     "logs": "(k8s.namespace.name == \"payments\" and k8s.workload.name == \"ledger\")",
     "spans": "(k8s.namespace.name == \"payments\" and k8s.workload.name == \"ledger\")"

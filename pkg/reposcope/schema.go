@@ -76,10 +76,10 @@ func (s Segment) VariableNames() []string {
 	return names
 }
 
-// String renders the reference in the spelling query --segment takes:
-// "id", or "id?name=value,value&name=value" with the variables by name. A
-// valid segment reads back from it unchanged: validation refuses a value
-// holding one of the separators.
+// String renders the reference on one line, the spelling dtctl's commands
+// take a segment in: "id", or "id?name=value,value&name=value" with the
+// variables by name. A valid segment reads back from it unchanged:
+// validation refuses a value holding one of the separators.
 func (s Segment) String() string {
 	var vars []string
 	for _, name := range s.VariableNames() {
@@ -334,7 +334,7 @@ func (e *Entry) validateSegments() *InvalidError {
 	for i, s := range e.Segments {
 		if !segmentIDRe.MatchString(s.ID) {
 			return invalid(fmt.Sprintf("segments[%d] id %q is not a filter segment id (letters, digits, - and _; a name is not accepted)", i, s.ID),
-				"find the id with: dtctl get segments")
+				"reference the segment by its id, which the environment lists with its segments")
 		}
 		if seen[s.ID] {
 			return invalid(fmt.Sprintf("segments[%d] id %q is listed twice", i, s.ID))
@@ -398,7 +398,7 @@ func segmentValueProblem(v string) string {
 		return fmt.Sprintf("is longer than %d characters", maxSegmentValueRunes)
 	case strings.ContainsAny(v, ",&="):
 		// String must read back as the reference it renders.
-		return "must not contain , & or =, which separate values where a segment is spelt as --segment takes it"
+		return "must not contain , & or =, which separate the values where a segment is written as one reference (id?name=value,value)"
 	case strings.TrimSpace(v) != v:
 		// For the same reason: the space is dropped where that spelling is
 		// read.

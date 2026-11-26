@@ -31,7 +31,7 @@ const repoScopeShownIDs = 2
 // `ctx current` answers, with the reason when there is one.
 func printRepoScopeCurrent(w io.Writer, s *reposcope.Status) {
 	if s.Entry == nil {
-		fmt.Fprintf(w, "none  (%s)\n", s.Reason)
+		fmt.Fprintf(w, "none  (%s)\n", repoScopeReason(s))
 		return
 	}
 	how := repoScopeCoverage(s.Entry) + " · " + s.Environment
@@ -54,7 +54,7 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	}
 	if s.Entry == nil {
 		kv("Repo scope:", "none")
-		kv("Reason:", s.Reason)
+		kv("Reason:", repoScopeReason(s))
 		kv("Environment:", s.Environment)
 		kv("File:", s.File)
 		kv("Warning:", s.Warning)

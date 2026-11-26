@@ -938,9 +938,15 @@ func TestRepoScopeGradleTie(t *testing.T) {
 	require.Equal(t, reason, s.Reason)
 	require.Contains(t, stderr, "repo scope not applied: "+reason)
 
+	// The result carries the tie as data; the flag that picks an entry is
+	// the command's to name, in the suggestion.
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current", "--agent"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, []string{reason}, agentEnvelope(t, stdout).Context.Suggestions)
+	var status reposcope.Status
+	require.Equal(t, []string{reason}, agentResult(t, stdout, &status).Context.Suggestions)
+	require.Equal(t, reposcope.StatusAmbiguousEntry, status.Code)
+	require.Equal(t, []string{"webproxy", "admin"}, status.Tied)
+	require.Equal(t, "covered by entries webproxy and admin", status.Reason)
 }
 
 // A token that provably cannot read spans is refused before the first query

@@ -33,12 +33,25 @@ func TestRepoScopeAgentSetAndHumanDeleteLastEntry(t *testing.T) {
 
 func TestRepoScopeUnlinkedAgentSuggestions(t *testing.T) {
 	for _, tc := range []struct {
-		name, file, suggestion string
-		outside                bool
+		name, file  string
+		code        reposcope.StatusCode
+		suggestions []string
+		outside     bool
 	}{
-		{name: "outside", outside: true, suggestion: repoScopeCheckoutHint},
-		{name: "no file", suggestion: repoScopeDiscoverHint},
-		{name: "uncovered directory", file: monorepoScope, suggestion: "no entry covers this directory; pass --repo-scope <name> to use one of: checkout, ledger"},
+		{name: "outside", outside: true, code: reposcope.StatusNotARepository, suggestions: []string{repoScopeCheckoutHint}},
+		{name: "no file", code: reposcope.StatusNoFile, suggestions: []string{repoScopeDiscoverHint}},
+		{name: "uncovered directory", file: monorepoScope, code: reposcope.StatusNoEntry,
+			suggestions: []string{"no entry covers this directory; pass --repo-scope <name> to use one of: checkout, ledger"}},
+		{name: "another environment", file: "environments:\n  other.example.invalid:\n    - name: checkout\n      service-names: [checkout]\n",
+			code: reposcope.StatusNoEntryForEnvironment, suggestions: []string{repoScopeDiscoverHint}},
+		// The file is there: the next step is to correct it, with the advice
+		// its own error gives, and not to discover what it already says.
+		{name: "a file with a misspelt key", file: "environments:\n  " + repoScopeTestEnvHost + ":\n    - name: checkout\n      service_names: [checkout]\n",
+			code: reposcope.StatusInvalidFile, suggestions: []string{
+				"correct .dtctl-repo-scope.yaml: nothing in it is applied until it loads",
+				"correct the key, or upgrade dtctl if a newer one wrote it"}},
+		{name: "a file with a value of the wrong format", file: "environments:\n  " + repoScopeTestEnvHost + ":\n    - name: checkout\n      services: [checkout]\n",
+			code: reposcope.StatusInvalidFile, suggestions: []string{"correct .dtctl-repo-scope.yaml: nothing in it is applied until it loads"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			localRepoScopeConfig(t)
@@ -52,8 +65,38 @@ func TestRepoScopeUnlinkedAgentSuggestions(t *testing.T) {
 			var status reposcope.Status
 			response := agentResult(t, stdout, &status)
 			require.False(t, status.Linked)
-			require.Equal(t, []string{tc.suggestion}, response.Context.Suggestions)
+			require.Equal(t, tc.code, status.Code)
+			require.Equal(t, tc.suggestions, response.Context.Suggestions)
 		})
+	}
+}
+
+// What an agent is told next depends on how the entry was chosen. Only the
+// entry in effect in the working directory narrows the queries run there; one
+// described by name may cover another directory, and is used by naming it.
+func TestRepoScopeLinkedAgentSuggestions(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, monorepoScope)
+	chdirSubdir(t, "services/checkout")
+	for _, tc := range []struct {
+		args       []string
+		selected   reposcope.Selection
+		suggestion string
+	}{
+		{[]string{"current"}, reposcope.SelectedByDirectory,
+			`'dtctl query' narrows fetch logs and fetch spans to "checkout" here; add --no-repo-scope to run a query unscoped`},
+		{[]string{"describe", "ledger"}, reposcope.SelectedByName,
+			`pass --repo-scope ledger to 'dtctl query' to narrow fetch logs and fetch spans to this entry from any directory`},
+		{[]string{"describe", "checkout"}, reposcope.SelectedByName,
+			`pass --repo-scope checkout to 'dtctl query' to narrow fetch logs and fetch spans to this entry from any directory`},
+	} {
+		code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "--agent"}, tc.args...), RunOptions{})
+		require.Zero(t, code, stderr)
+		var status reposcope.Status
+		response := agentResult(t, stdout, &status)
+		require.Equal(t, reposcope.StatusLinked, status.Code)
+		require.Equal(t, tc.selected, status.Selected)
+		require.Equal(t, []string{tc.suggestion}, response.Context.Suggestions)
 	}
 }
 

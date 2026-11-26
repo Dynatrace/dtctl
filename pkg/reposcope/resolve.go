@@ -20,16 +20,62 @@ import (
 // both rules can be exercised on any host.
 var foldPathCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 
+// StatusCode says which answer a Status is, for a program; Reason says it
+// for a person.
+type StatusCode string
+
+const (
+	// StatusLinked: Entry is the entry asked for, and Selected says how it
+	// was chosen.
+	StatusLinked StatusCode = "linked"
+	// StatusNoEntry: the environment has entries and none covers Dir.
+	StatusNoEntry StatusCode = "no_entry"
+	// StatusAmbiguousEntry: the entries in Tied cover Dir as closely, so
+	// none applies.
+	StatusAmbiguousEntry StatusCode = "ambiguous_entry"
+	// StatusNoEntryForEnvironment: the file has no entry for Environment.
+	StatusNoEntryForEnvironment StatusCode = "no_entry_for_environment"
+
+	// Resolve returns the codes above. The ones below are for the caller,
+	// which is who knows that there was nothing to resolve.
+
+	// StatusNoFile: the repository has no scope file (Location.Exists).
+	StatusNoFile StatusCode = "no_file"
+	// StatusInvalidFile: the scope file is there and does not load.
+	StatusInvalidFile StatusCode = "invalid_file"
+	// StatusNotARepository: the directory is in no git repository.
+	StatusNotARepository StatusCode = "not_a_repository"
+)
+
+// Selection says how the entry of a linked Status was chosen.
+type Selection string
+
+const (
+	// SelectedByDirectory: the entry covers Dir, by its path or as the entry
+	// of the whole repository. It is the entry in effect there.
+	SelectedByDirectory Selection = "directory"
+	// SelectedByBuild: the entry covers Dir through the Gradle build, and is
+	// the entry in effect there.
+	SelectedByBuild Selection = "build"
+	// SelectedByName: the caller named the entry. It need not be the entry
+	// in effect in Dir, nor cover it at all.
+	SelectedByName Selection = "name"
+)
+
 // Status is the entry in effect for one directory, with the reason, as
-// `repo-scope current` and `describe` print it. Linked is false and Entry nil
-// when the directory is linked but no entry covers it: that is reported,
-// never silent.
+// `repo-scope current` and `describe` print it. Code says which answer it
+// is. Linked is false and Entry nil whenever no entry was selected, and a
+// directory of a linked repository that no entry covers is such an answer:
+// it is reported, never silent.
 type Status struct {
-	Linked      bool   `json:"linked" yaml:"linked"`
-	File        string `json:"file,omitempty" yaml:"file,omitempty"`
-	Environment string `json:"environment,omitempty" yaml:"environment,omitempty"`
-	Dir         string `json:"dir,omitempty" yaml:"dir,omitempty"`
-	Entry       *Entry `json:"entry,omitempty" yaml:"entry,omitempty"`
+	Linked      bool       `json:"linked" yaml:"linked"`
+	Code        StatusCode `json:"code" yaml:"code"`
+	File        string     `json:"file,omitempty" yaml:"file,omitempty"`
+	Environment string     `json:"environment,omitempty" yaml:"environment,omitempty"`
+	Dir         string     `json:"dir,omitempty" yaml:"dir,omitempty"`
+	Entry       *Entry     `json:"entry,omitempty" yaml:"entry,omitempty"`
+	// Selected says how Entry was chosen; it is empty without one.
+	Selected Selection `json:"selected,omitempty" yaml:"selected,omitempty"`
 	// Filters maps each data object to the expression the entry inserts.
 	Filters map[string]string `json:"filters,omitempty" yaml:"filters,omitempty"`
 	// LiveDebuggerFilters are the Live Debugger workspace filter sets the
@@ -39,11 +85,12 @@ type Status struct {
 	LiveDebuggerFilters []map[string][]string `json:"liveDebuggerFilters,omitempty" yaml:"liveDebuggerFilters,omitempty"`
 	// liveDebuggerReason says why an entry renders no filter sets.
 	liveDebuggerReason string
-	// tied says the entries Reason names cover Dir as closely.
-	tied bool
 	// Reason explains a nil Entry, an entry chosen by name that does not
-	// cover Dir, or one that covers it through a Gradle build.
+	// cover Dir, or one that covers it through a Gradle build. It is for a
+	// person; a program reads Code, Selected and Tied.
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	// Tied names the entries that cover Dir as closely, in file order.
+	Tied []string `json:"tied,omitempty" yaml:"tied,omitempty"`
 	// Warning is File.Warning: keys the entries apply without.
 	Warning string   `json:"warning,omitempty" yaml:"warning,omitempty"`
 	Others  []string `json:"others,omitempty" yaml:"others,omitempty"`
@@ -85,6 +132,7 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 			return nil, &NotFoundError{Name: name, Host: host, Known: f.Names(host)}
 		}
 	case len(entries) == 0:
+		s.Code = StatusNoEntryForEnvironment
 		s.Reason = fmt.Sprintf("no entry for %s; the file defines no entries", host)
 		if hosts := f.Hosts(); len(hosts) > 0 {
 			s.Reason = fmt.Sprintf("no entry for %s; the file defines: %s", host, strings.Join(hosts, ", "))
@@ -93,24 +141,32 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 	default:
 		var tied []*Entry
 		if entry, tied = closestEntry(entries, relDir, build()); tied != nil {
-			names := []string{entry.Name}
+			s.Tied = []string{entry.Name}
 			for _, e := range tied {
-				names = append(names, e.Name)
+				s.Tied = append(s.Tied, e.Name)
 			}
-			s.Reason = fmt.Sprintf("covered by entries %s; pick one with --repo-scope <name>", joinAnd(names))
-			s.tied, entry = true, nil
+			s.Code = StatusAmbiguousEntry
+			s.Reason = "covered by entries " + joinAnd(s.Tied)
+			entry = nil
 		}
 	}
 	if entry == nil {
-		if s.Reason == "" {
-			s.Reason = fmt.Sprintf("no entry covers %q; entries here cover %s; pick one with --repo-scope <name>",
-				relDir, strings.Join(entryPaths(entries), ", "))
+		if s.Code == "" {
+			s.Code = StatusNoEntry
+			s.Reason = fmt.Sprintf("no entry covers %q; entries here cover %s", relDir, strings.Join(entryPaths(entries), ", "))
 		}
 		s.Others = othersThan(entries, "")
 		return s, nil
 	}
+	s.Selected = SelectedByDirectory
+	if name != "" {
+		s.Selected = SelectedByName
+	}
 	if entry.Path != "" && !covers(entry.Path, relDir) {
 		if build := build(); build.owns(entry) {
+			if name == "" {
+				s.Selected = SelectedByBuild
+			}
 			s.Reason = fmt.Sprintf("covered through the Gradle build: %s depends on %s", entry.Path, build.module)
 		} else {
 			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", entry.Path, relDir)
@@ -118,6 +174,7 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 	}
 	e := entry.clone()
 	s.Entry = &e
+	s.Code = StatusLinked
 	s.Linked = true
 	s.Others = othersThan(entries, s.Entry.Name)
 	s.Filters = map[string]string{}
@@ -144,8 +201,8 @@ func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, 
 }
 
 // Ambiguous reports whether several entries cover Dir as closely, none
-// applying; Reason names them.
-func (s *Status) Ambiguous() bool { return s.tied }
+// applying; Tied names them.
+func (s *Status) Ambiguous() bool { return len(s.Tied) > 0 }
 
 // closestEntry is the entry with the longest path covering relDir, else the
 // one with no path. An entry the build covers relDir through is as close as

@@ -1,3 +1,4 @@
+code: linked
 dir: services/ledger
 entry:
   name: ledger
@@ -20,3 +21,4 @@ liveDebuggerFilters[1]:
   - k8s.namespace.name[1]: payments
     k8s.workload.name[1]: ledger
 others[1]: checkout
+selected: directory
