@@ -73,6 +73,10 @@ func TestInsertFilter(t *testing.T) {
 			"fetch logs " + logsStage + "\n| fields `field\\`name`"},
 		{"a filter spelled inside an identifier is text", "fetch logs | fields `field\\` | filter k8s.workload.name \\`name`", Applied, "logs",
 			"fetch logs " + logsStage + "\n| fields `field\\` | filter k8s.workload.name \\`name`"},
+		{"a # inside a string is text", `fetch logs | filter content == "#1 | fetch logs"`, Applied, "logs",
+			"fetch logs " + logsStage + "\n" + `| filter content == "#1 | fetch logs"`},
+		{"a # inside a comment is text", "fetch logs // #1\n| limit 1", Applied, "logs",
+			"fetch logs // #1\n" + logsStage + "\n| limit 1"},
 		{"CRLF line endings are kept", "fetch logs\r\n| limit 1", Applied, "logs",
 			"fetch logs\r\n" + logsStage + "\n| limit 1"},
 		// Bytes that are not UTF-8 are Grail's to reject. The rewrite reads
@@ -127,6 +131,11 @@ func TestInsertFilter(t *testing.T) {
 		{"unterminated identifier", "fetch logs | fields `x", Unscannable, "", ""},
 		{"unbalanced bracket", "fetch logs | filter (a == 1", Unscannable, "", ""},
 		{"single quote", "fetch logs | filter it's", Unscannable, "", ""},
+		// A # outside a literal is the byte the scan masks with, so the scan
+		// could not tell it from a comment: the text after it would be skipped.
+		{"a # glued to the object", "fetch logs#| limit 1", Unscannable, "", ""},
+		{"a # before the object", "fetch # logs", Unscannable, "", ""},
+		{"a # in a later stage", "fetch logs | limit 1 #", Unscannable, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

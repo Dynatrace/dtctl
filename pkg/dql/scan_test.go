@@ -16,6 +16,7 @@ func TestScan_MasksLiteralsAndComments(t *testing.T) {
 		commands     []string
 		comments     bool
 		singleQuotes bool
+		typedMask    bool
 	}{
 		{
 			name:     "plain pipeline",
@@ -95,6 +96,20 @@ func TestScan_MasksLiteralsAndComments(t *testing.T) {
 			comments: true,
 		},
 		{
+			name:      "a # typed as code is reported: Code cannot tell it from masked text",
+			query:     "fetch logs # | limit 1",
+			code:      "fetch logs # | limit 1",
+			commands:  []string{"fetch", "limit"},
+			typedMask: true,
+		},
+		{
+			name:     "a # inside a string or comment is not reported",
+			query:    "fetch logs | filter a == \"#1\" // #2",
+			code:     "fetch logs | filter a == \"##\" #####",
+			commands: []string{"fetch", "filter"},
+			comments: true,
+		},
+		{
 			name:     "a stage without a command word",
 			query:    "fetch logs | ",
 			code:     "fetch logs | ",
@@ -109,6 +124,7 @@ func TestScan_MasksLiteralsAndComments(t *testing.T) {
 			assert.Len(t, s.Depth, len(tt.query), "Depth has one entry per byte")
 			assert.Equal(t, tt.comments, s.HasComments)
 			assert.Equal(t, tt.singleQuotes, s.singleQuote)
+			assert.Equal(t, tt.typedMask, s.typedMask)
 
 			var commands []string
 			for _, seg := range s.Segments {
@@ -201,6 +217,7 @@ func TestUngroupedCount(t *testing.T) {
 		{"fetch logs | summarize c = sum(1)", ""},
 		{"fetch logs | limit 5", ""},
 		{`fetch logs | summarize c = count(`, ""},
+		{"fetch logs | summarize c = count() #", ""},
 	} {
 		column, ok := UngroupedCount(tc.query)
 		assert.Equal(t, tc.column, column, tc.query)

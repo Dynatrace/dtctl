@@ -145,7 +145,7 @@ dtctl has no DQL parser by design. The rewrite (`dql.InsertFilter`) is a lexical
 - the entry binds nothing that data object is filtered by (`no_binding`)
 - a `filter`/`filterOut` stage already compares a bound field (`user_filter`): the user's own filter wins. The same field in `summarize by:`, `fields`, a comment or a string is not an override
 - a scoped data object is fetched again at bracket depth > 0 (`subquery`): scoping only the outer fetch would report "applied" over environment-wide rows
-- an unterminated literal or comment, unbalanced brackets, or a single quote (`unscannable`)
+- an unterminated literal or comment, unbalanced brackets, a single quote, or a `#` outside a literal and a comment (`unscannable`). The scanner masks with `#`, so one typed as code would read as a comment and hide what follows it. DQL comments are `//` and `/* */`, which is what every other DQL reader in dtctl assumes; that Grail rejects a bare `#` has not been verified against an environment
 
 Grail reads command and data object names without regard to case, and field names with it: on an environment `FETCH Spans`, `| FILTER` and `append [Fetch Spans]` ran like their lower-case spellings, while `K8S.Namespace.Name` matched nothing. The rewrite follows that. `fetch Spans` is scoped as `spans`; a nested `Fetch Spans` is the subquery it is, which matters more, since missing it would report "applied" over environment-wide rows; and a bound field counts as the user's own filter only as written.
 

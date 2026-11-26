@@ -12,10 +12,17 @@ import (
 	"strings"
 )
 
-// mask is what Scan writes over the contents of literals and comments. DQL
-// code cannot contain it, so no rule reading Masked.Code mistakes masked text
-// for an operator, a pipe or a bracket. Quotes and backticks stay unmasked,
-// so a run of mask that starts a token is always a comment.
+// mask is what Scan writes over the contents of literals and comments, so no
+// rule reading Masked.Code mistakes masked text for an operator, a pipe or a
+// bracket. Quotes and backticks stay unmasked, so a run of mask that starts a
+// token is always a comment.
+//
+// That only holds while the byte cannot also be code. DQL has no use for a #
+// outside a literal: its comments are // and /* */, as every reader of DQL in
+// dtctl assumes, and no operator is spelled with one. Scan records a query
+// that types one there (Masked.typedMask), and a caller that acts on Code
+// refuses it rather than read the #, and what follows it, as a comment Grail
+// would not see.
 const mask = '#'
 
 // Masked is a structural view of a query. Code has the query's length, with
@@ -37,6 +44,12 @@ type Masked struct {
 	// has no single-quoted strings, so what follows one is prose to Grail.
 	// It is left unmasked because the quoting hint reads the query as typed.
 	singleQuote bool
+
+	// typedMask is the mask byte outside every literal and comment, where
+	// Code cannot tell it from masked text. It is recorded rather than
+	// refused for the same reason: a single-quoted 'issue #12' holds one,
+	// and that query is the quoting hint's to repair.
+	typedMask bool
 }
 
 // Segment is one pipeline stage, query[Start:End] without its pipe, and the
@@ -101,6 +114,8 @@ func Scan(q string) (m Masked, ok bool) {
 			next := i + 2 + end + 2
 			m.HasComments = true
 			i = span(i, next, i, next)
+		case c == mask:
+			m.typedMask = true
 		case c == '\'':
 			m.singleQuote = true
 		case c == '(' || c == '[' || c == '{':
@@ -178,7 +193,7 @@ var (
 // after it, an expression around the count, or a backtick-quoted name.
 func UngroupedCount(query string) (column string, ok bool) {
 	m, scanned := Scan(query)
-	if !scanned || len(m.Segments) == 0 {
+	if !scanned || m.typedMask {
 		return "", false
 	}
 	last := m.Segments[len(m.Segments)-1]

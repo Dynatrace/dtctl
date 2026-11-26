@@ -333,7 +333,7 @@ still stopped, points at the executor's scan-limit advice.
 | `no_binding` | the entry binds nothing that data object is filtered by; `reason` says which binding to add |
 | `user_filter` | a `filter`/`filterOut` stage compares a field the scope filters on, and the query's own filter wins |
 | `subquery` | the data object is fetched again inside `[...]`, which the scope cannot reach |
-| `unscannable` | dtctl cannot read the text safely (an unterminated string or comment, unbalanced brackets, a single quote) |
+| `unscannable` | dtctl cannot read the text safely (an unterminated string or comment, unbalanced brackets, a single quote, a `#` outside a string) |
 | `no_entry` | no entry covers the working directory; pick one with `--repo-scope <name>` |
 | `ambiguous_entry` | several entries cover the working directory as closely; `reason` names them; pick one with `--repo-scope <name>` |
 | `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |

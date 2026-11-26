@@ -64,8 +64,8 @@ var filteringCommands = map[string]bool{"filter": true, "filterout": true}
 // compared as written.
 //
 // A wrong insertion silently returns the wrong data, so whatever the scan
-// cannot vouch for is refused with the query unchanged: text Scan rejects or
-// that holds a single quote; a first stage that is not exactly
+// cannot vouch for is refused with the query unchanged: text Scan rejects,
+// or that holds a single quote or a # outside a literal; a first stage that is not exactly
 // `fetch <name>`; an object without a filter; a subquery that fetches a
 // filtered object again, which the insertion cannot reach; and a condition
 // the query already places on one of the filter's fields.
@@ -75,9 +75,9 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 	}
 
 	m, ok := Scan(query)
-	if !ok || m.singleQuote {
+	if !ok || m.singleQuote || m.typedMask {
 		return refuse(Unscannable, "",
-			"dtctl cannot read the query text safely (an unterminated string or comment, unbalanced brackets, or a single quote)")
+			"dtctl cannot read the query text safely (an unterminated string or comment, unbalanced brackets, a single quote, or a # outside a string)")
 	}
 	first := m.Segments[0]
 	object, ok := leadingFetch(m.Code[:first.End])

@@ -46,6 +46,13 @@ func TestSuggest_HabitRewrites(t *testing.T) {
 			match: "single-quotes",
 		},
 		{
+			name: "a single-quoted string that holds a #",
+			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
+				Query: "fetch logs | filter content == 'issue #12' | limit 1", Span: span(32, 42)},
+			want:  `fetch logs | filter content == "issue #12" | limit 1`,
+			match: "single-quotes",
+		},
+		{
 			name: "single quotes with an SQL-escaped quote",
 			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
 				Query: "fetch logs | filter loglevel == 'ERROR' and content != 'it''s'", Span: span(60, 62)},
