@@ -182,7 +182,7 @@ func UngroupedCount(query string) (column string, ok bool) {
 		return "", false
 	}
 	last := m.Segments[len(m.Segments)-1]
-	if last.Command != "summarize" {
+	if asciiLower(last.Command) != "summarize" {
 		return "", false
 	}
 	const blank = " \t\r\n#" // whitespace, and what Scan masks a comment with

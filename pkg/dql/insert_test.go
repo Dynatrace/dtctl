@@ -76,22 +76,34 @@ func TestInsertFilter(t *testing.T) {
 		{"CRLF line endings are kept", "fetch logs\r\n| limit 1", Applied, "logs",
 			"fetch logs\r\n" + logsStage + "\n| limit 1"},
 
+		// Grail reads command and data object names without regard to case,
+		// so `fetch Spans` is the scoped object, reported under its own name.
+		{"a capitalised object", "fetch Spans | limit 5", Applied, "spans",
+			"fetch Spans " + spanStage + "\n| limit 5"},
+		{"an upper-case fetch", "FETCH LOGS", Applied, "logs",
+			"FETCH LOGS\n" + logsStage},
+
 		// The user's own filter on a bound field wins.
 		{"filter on a bound field", `fetch logs | filter k8s.namespace.name == "x"`, UserFilter, "logs", ""},
 		{"filterOut on a bound field", `fetch logs | filterOut dt.entity.process_group == "x"`, UserFilter, "logs", ""},
 		{"a backtick-quoted bound field", "fetch logs | filter `k8s.workload.name` == \"x\"", UserFilter, "logs", ""},
 		{"a filter between identifiers ending in escaped backticks", "fetch logs | fields `a\\`` | filter k8s.workload.name == \"x\" | fields `b\\``", UserFilter, "logs", ""},
 		{"a comment before the filter command", `fetch logs | /* c */ filter k8s.workload.name == "x"`, UserFilter, "logs", ""},
+		{"a capitalised filter command", `fetch logs | Filter k8s.workload.name == "x"`, UserFilter, "logs", ""},
+		{"an upper-case filterOut", `fetch logs | FILTEROUT k8s.workload.name == "x"`, UserFilter, "logs", ""},
+		// Field names, unlike commands, are case-sensitive: this is another field.
+		{"a bound field in another case", `fetch logs | filter K8S.Workload.Name == "x"`, Applied, "logs",
+			"fetch logs " + logsStage + "\n" + `| filter K8S.Workload.Name == "x"`},
 
 		// A scoped object fetched again in a subquery.
 		{"subquery in in()", "fetch logs | filter in(x, [fetch spans | fields id])", Subquery, "logs", ""},
 		{"subquery in append", `fetch logs | append [fetch logs | filter loglevel == "ERROR"]`, Subquery, "logs", ""},
 		{"a comment between fetch and the object", "fetch logs | join [fetch /*x*/ logs], on:{a}", Subquery, "logs", ""},
+		{"a subquery in another case", "fetch logs | append [Fetch Spans | limit 1]", Subquery, "logs", ""},
 
 		// Not a leading fetch.
 		{"timeseries", "timeseries avg(x)", NotFetch, "", ""},
 		{"smartscape", "smartscapeNodes SERVICE", NotFetch, "", ""},
-		{"fetch is case-sensitive", "FETCH logs", NotFetch, "", ""},
 		{"bracketed fetch", "(fetch logs)", NotFetch, "", ""},
 		{"fetch glued to its object", "fetchlogs", NotFetch, "", ""},
 		{"an object name that does not end cleanly", "fetch logs-archive", NotFetch, "", ""},
@@ -100,6 +112,7 @@ func TestInsertFilter(t *testing.T) {
 		// Objects without a filter.
 		{"events", "fetch events", UnsupportedObject, "events", ""},
 		{"an entity table", "fetch dt.entity.service", UnsupportedObject, "dt.entity.service", ""},
+		{"an unscoped object keeps its spelling", "fetch BizEvents", UnsupportedObject, "BizEvents", ""},
 		{"a name that only starts like a scoped one", "fetch logs_archive", UnsupportedObject, "logs_archive", ""},
 
 		// Text a lexical rewrite must not touch.

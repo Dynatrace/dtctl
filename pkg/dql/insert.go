@@ -48,15 +48,20 @@ type Rewrite struct {
 // scanBounds are the fetch parameters that bound what a fetch scans.
 var scanBounds = []string{"scanLimitGBytes", "samplingRatio"}
 
-// filteringCommands are the stages that drop records by a condition. A user's
-// condition on a bound field in one of them wins over the inserted filter. A
-// filtering command DQL adds later belongs here: otherwise the scope is ANDed
-// with it and reported as applied.
-var filteringCommands = map[string]bool{"filter": true, "filterOut": true}
+// filteringCommands are the stages that drop records by a condition, in lower
+// case. A user's condition on a bound field in one of them wins over the
+// inserted filter. A filtering command DQL adds later belongs here: otherwise
+// the scope is ANDed with it and reported as applied.
+var filteringCommands = map[string]bool{"filter": true, "filterout": true}
 
 // InsertFilter adds "| filter (<expr>)" right after the query's leading
 // `fetch <object>`, with the filter for that object. filters is keyed by data
-// object.
+// object, in lower case.
+//
+// Grail reads command and data object names without regard to case (`FETCH
+// Spans` is `fetch spans`), so they are matched that way here and a scoped
+// object is reported under its key. Field names are case-sensitive and are
+// compared as written.
 //
 // A wrong insertion silently returns the wrong data, so whatever the scan
 // cannot vouch for is refused with the query unchanged: text Scan rejects or
@@ -79,7 +84,10 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 	if !ok {
 		return refuse(NotFetch, "", "the query does not start with 'fetch <data object>'")
 	}
-	f := filters[object]
+	f, scoped := filters[asciiLower(object)]
+	if scoped {
+		object = asciiLower(object)
+	}
 	if f.Expr == "" {
 		return refuse(UnsupportedObject, object,
 			fmt.Sprintf("repo scope has no filter for %s (it filters %s)", object, filteredObjects(filters)))
@@ -121,7 +129,7 @@ func leadingFetch(stage string) (object string, ok bool) {
 		i = len(byteOrderMark)
 	}
 	i = skipSpaceAndComments(stage, i)
-	if !strings.HasPrefix(stage[i:], "fetch") {
+	if len(stage)-i < len("fetch") || !strings.EqualFold(stage[i:i+len("fetch")], "fetch") {
 		return "", false
 	}
 	i += len("fetch")
@@ -139,31 +147,43 @@ func leadingFetch(stage string) (object string, ok bool) {
 // nestedFetch finds a `fetch <object>` inside brackets for an object filters
 // names, with or without a condition.
 func nestedFetch(m Masked, filters map[string]Filter) (object string, found bool) {
+	code := asciiLower(m.Code)
 	for off := 0; ; {
-		i := strings.Index(m.Code[off:], "fetch")
+		i := strings.Index(code[off:], "fetch")
 		if i < 0 {
 			return "", false
 		}
 		i += off
 		off = i + len("fetch")
-		if m.Depth[i] == 0 || !isWholeWord(m.Code, i, "fetch") {
+		if m.Depth[i] == 0 || !isWholeWord(code, i, "fetch") {
 			continue
 		}
-		name := skipSpaceAndComments(m.Code, off)
+		name := skipSpaceAndComments(code, off)
 		if name == off {
 			continue
 		}
-		if _, scoped := filters[m.Code[name:nameEnd(m.Code, name)]]; scoped {
-			return m.Code[name:nameEnd(m.Code, name)], true
+		if _, scoped := filters[code[name:nameEnd(code, name)]]; scoped {
+			return code[name:nameEnd(code, name)], true
 		}
 	}
+}
+
+// asciiLower lower-cases the ASCII letters of s and nothing else, so offsets
+// into the result are offsets into s.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
 }
 
 // userFilterField returns the first of fields that a filtering stage names,
 // bare or as a backtick identifier.
 func userFilterField(q string, m Masked, fields []string) (field string, found bool) {
 	for _, seg := range m.Segments {
-		if !filteringCommands[seg.Command] {
+		if !filteringCommands[asciiLower(seg.Command)] {
 			continue
 		}
 		code := m.Code[seg.Start:seg.End]

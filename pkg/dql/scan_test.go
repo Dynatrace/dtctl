@@ -186,6 +186,7 @@ func TestUngroupedCount(t *testing.T) {
 		{"fetch logs | summarize {total = count(), slow = countIf(duration > 1s)}", "total"},
 		{"fetch logs | summarize avg(duration), log.count = count( )", "log.count"},
 		{"fetch logs\n| summarize c = count() // every record\n", "c"},
+		{"fetch logs | SUMMARIZE c = count()", "c"},
 
 		// A grouped summarize has no row for nothing, and anything after the
 		// summarize may have changed the column.
