@@ -138,6 +138,13 @@ func TestQueryRepoScope_SegmentsWithoutAFilter(t *testing.T) {
 	require.Len(t, scope.Segments, 2)
 	require.Contains(t, agentEnvelope(t, stdout).Context.Suggestions, "run unscoped: pass --no-repo-scope", "the segments are still the scope's")
 
+	// The segments still narrowed the request, so nothing back is still
+	// worth comparing with the query as typed.
+	segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
+	code, _, stderr = runRepoScoped([]string{"query", timeseries, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.True(t, strings.HasSuffix(stderr, "\n0 records under repo scope checkout; compare with --no-repo-scope\n"), stderr)
+
 	// Naming an entry asks for its rows; a filter that cannot be inserted
 	// stays the error it was.
 	code, stdout, _ = runRepoScoped([]string{"query", timeseries, "--agent", "--repo-scope", "checkout"}, RunOptions{})
