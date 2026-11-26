@@ -300,6 +300,32 @@ func (r *profilingRun) annotate(ap *output.AgentPrinter, view, state string) *ou
 	return p
 }
 
+// profilingError is a failure this command words itself, with the agent error
+// code decided where the failure is recognised. The text quotes what the
+// caller typed and the function names of the profile, so a code read off the
+// text would follow them: --focus Config was reported as a config_error. The
+// text, the exit code and the code of every other input are what they were.
+type profilingError struct {
+	code string // the agent error code
+	err  error
+}
+
+func (e *profilingError) Error() string { return e.err.Error() }
+func (e *profilingError) Unwrap() error { return e.err }
+
+// profilingInvalid is the error for a value the caller passed that the command
+// refuses before any request.
+func profilingInvalid(format string, args ...interface{}) error {
+	return &profilingError{code: "validation_error", err: fmt.Errorf(format, args...)}
+}
+
+// profilingFailed is the error for every other failure the command words: a
+// combination of flags it refuses, and a run that could not give what was
+// asked for.
+func profilingFailed(format string, args ...interface{}) error {
+	return &profilingError{code: "error", err: fmt.Errorf(format, args...)}
+}
+
 // runProfiling validates the input, runs one analysis and prints it. Every
 // input check happens before the config is loaded, so a typo fails fast
 // rather than after a multi-second analysis.
@@ -307,11 +333,11 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	ctx := cmdContext(cmd)
 
 	if !profiling.EligibleEntity(entityID) {
-		return fmt.Errorf("invalid entity %q: profiling takes a process id, PROCESS-xxx (classic PROCESS_GROUP-xxx and PROCESS_GROUP_INSTANCE-xxx ids work too; SERVICE ids do not).\nFind a process id:\n  %s", entityID, profilingFindIDsHint)
+		return profilingInvalid("invalid entity %q: profiling takes a process id, PROCESS-xxx (classic PROCESS_GROUP-xxx and PROCESS_GROUP_INSTANCE-xxx ids work too; SERVICE ids do not).\nFind a process id:\n  %s", entityID, profilingFindIDsHint)
 	}
 	leafType, err := profiling.ParseLeafType(f.leafType)
 	if err != nil {
-		return fmt.Errorf("invalid --leaf-type %q: use total, service, or background", f.leafType)
+		return profilingInvalid("invalid --leaf-type %q: use total, service, or background", f.leafType)
 	}
 	state, sortKey, err := profilingViewOptions(f)
 	if err != nil {
@@ -319,11 +345,11 @@ func runProfiling(cmd *cobra.Command, kind, entityID string, f *profilingFlags) 
 	}
 	if f.raw {
 		if f.focus != "" || (f.view != "" && f.view != "stacks") {
-			return fmt.Errorf("--raw prints the API's whole result; drop --view/--focus")
+			return profilingFailed("--raw prints the API's whole result; drop --view/--focus")
 		}
 		switch outputFormat(ctx) {
 		case "csv", "parquet":
-			return fmt.Errorf("--raw prints a nested document; use -o json or -o yaml")
+			return profilingFailed("--raw prints a nested document; use -o json or -o yaml")
 		}
 	}
 	window, err := profiling.ResolveWindow(f.start, f.end, time.Now())
@@ -388,15 +414,15 @@ func profilingWindowError(err error) error {
 	var tooLong *profiling.WindowTooLongError
 	switch {
 	case errors.As(err, &bound):
-		return fmt.Errorf("invalid --default-timeframe-%s: %w", bound.Bound, bound.Err)
+		return profilingInvalid("invalid --default-timeframe-%s: %w", bound.Bound, bound.Err)
 	case errors.Is(err, profiling.ErrWindowStartInFuture):
-		return fmt.Errorf("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-%s')", profilingDefaultSpan)
+		return profilingInvalid("invalid timeframe: the start is in the future — profiling only covers the past (e.g. --default-timeframe-start 'now()-%s')", profilingDefaultSpan)
 	case errors.Is(err, profiling.ErrWindowEndInFuture):
-		return fmt.Errorf("invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now")
+		return profilingInvalid("invalid timeframe: the end is in the future — profiling only covers the past; leave --default-timeframe-end out to end now")
 	case errors.Is(err, profiling.ErrWindowEmpty):
-		return fmt.Errorf("invalid timeframe: the end must be after the start")
+		return profilingInvalid("invalid timeframe: the end must be after the start")
 	case errors.As(err, &tooLong):
-		return fmt.Errorf("invalid timeframe: the window must not exceed %s (got %s) — narrow it; the window can lie anywhere in the past",
+		return profilingInvalid("invalid timeframe: the window must not exceed %s (got %s) — narrow it; the window can lie anywhere in the past",
 			spanString(tooLong.Max), tooLong.Requested.Span())
 	}
 	return err
@@ -410,10 +436,10 @@ func profilingViewOptions(f *profilingFlags) (profiling.State, profiling.SortKey
 	switch f.view {
 	case "", "stacks", "functions":
 	default:
-		return "", "", fmt.Errorf("invalid --view %q: use stacks or functions", f.view)
+		return "", "", profilingInvalid("invalid --view %q: use stacks or functions", f.view)
 	}
 	if f.focus != "" && f.view == "functions" {
-		return "", "", fmt.Errorf("--focus prints its own view (callers and callees); drop --view functions")
+		return "", "", profilingFailed("--focus prints its own view (callers and callees); drop --view functions")
 	}
 	perFunction := f.focus != "" || f.view == "functions"
 	state, err := profiling.ParseState(f.state)
@@ -422,17 +448,17 @@ func profilingViewOptions(f *profilingFlags) (profiling.State, profiling.SortKey
 		for _, s := range profiling.States() {
 			names = append(names, string(s))
 		}
-		return "", "", fmt.Errorf("invalid --state %q: use %s", f.state, strings.Join(names, ", "))
+		return "", "", profilingInvalid("invalid --state %q: use %s", f.state, strings.Join(names, ", "))
 	}
 	if state != profiling.StateRunning && !perFunction {
-		return "", "", fmt.Errorf("--state applies to --view functions and --focus; the stack view always carries all five thread-state counts")
+		return "", "", profilingFailed("--state applies to --view functions and --focus; the stack view always carries all five thread-state counts")
 	}
 	sortKey, err := profiling.ParseSortKey(f.sortBy)
 	if err != nil {
-		return "", "", fmt.Errorf("invalid --sort %q: use self or total", f.sortBy)
+		return "", "", profilingInvalid("invalid --sort %q: use self or total", f.sortBy)
 	}
 	if sortKey == profiling.SortByTotal && f.view != "functions" {
-		return "", "", fmt.Errorf("--sort applies to --view functions")
+		return "", "", profilingFailed("--sort applies to --view functions")
 	}
 	return state, sortKey, nil
 }
@@ -651,13 +677,13 @@ func renderProfilingFocus(ctx context.Context, run *profilingRun, h *profiling.H
 	var ambiguous *profiling.AmbiguousMatchError
 	switch {
 	case errors.As(err, &noMatch):
-		return fmt.Errorf("no function in the profile matches %q — list them with --view functions", noMatch.Pattern)
+		return profilingFailed("no function in the profile matches %q — list them with --view functions", noMatch.Pattern)
 	case errors.As(err, &ambiguous):
 		shown := ambiguous.Candidates
 		if len(shown) > profilingFocusCandidates {
 			shown = shown[:profilingFocusCandidates]
 		}
-		return fmt.Errorf("%q matches %d functions; pass one exactly:\n  %s", ambiguous.Pattern, len(ambiguous.Candidates), strings.Join(shown, "\n  "))
+		return profilingFailed("%q matches %d functions; pass one exactly:\n  %s", ambiguous.Pattern, len(ambiguous.Candidates), strings.Join(shown, "\n  "))
 	case err != nil:
 		return err
 	}
@@ -757,7 +783,8 @@ func profilingEmptyNote(reason profiling.EmptyReason, run *profilingRun, state s
 // profilingAPIError adds profiling-specific advice to the failures a caller
 // can act on. Everything else passes through unchanged and gets dtctl's generic
 // handling, as do the failures whose own text already says what happened: a
-// request the SDK refused, a server error and an analysis that did not finish.
+// request the SDK refused and a server error. An analysis that did not finish
+// keeps its text too.
 func profilingAPIError(err error) error {
 	f, ok := profiling.ClassifyError(err)
 	if !ok {
@@ -787,7 +814,11 @@ func profilingAPIError(err error) error {
 		suggestions = []string{
 			"The environment is throttling profiling requests (it limits how many analyses run at once) — wait and retry, and avoid running many analyses in parallel",
 		}
-	case profiling.FailureInvalidInput, profiling.FailureServer, profiling.FailureTimeout:
+	case profiling.FailureTimeout:
+		// Its own text says what happened. It quotes the task's token, which
+		// the environment chose, so the code is fixed here.
+		return &profilingError{code: "error", err: err}
+	case profiling.FailureInvalidInput, profiling.FailureServer:
 		// Their own text says what happened.
 		return err
 	default:

@@ -995,6 +995,17 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// A failure `exec profiling` worded itself. Its text quotes the caller's
+	// input and the function names of a profile, so the code is the one the
+	// command chose, not one the text suggests.
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return &output.ErrorDetail{
+			Code:    profilingErr.code,
+			Message: err.Error(),
+		}
+	}
+
 	// suggest.FlagError — unknown flag with "did you mean?" suggestion
 	var flagErr *suggest.FlagError
 	if errors.As(err, &flagErr) {

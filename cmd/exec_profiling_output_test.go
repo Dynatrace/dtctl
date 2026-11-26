@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -194,7 +196,7 @@ func TestProfilingAPIError(t *testing.T) {
 		}},
 		{reason: profiling.FailureServer, err: api(sdkcla.PhaseSubmit, 503), exit: 1},
 		{reason: profiling.FailureTimeout, exit: 1,
-			err: &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: fmt.Errorf("%w within 60s (token t1)", sdkcla.ErrNotCompleted)}},
+			err: &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: fmt.Errorf("%w within 60s (token config-timeout)", sdkcla.ErrNotCompleted)}},
 	}
 	seen := map[profiling.FailureReason]bool{}
 	for _, tc := range cases {
@@ -206,6 +208,14 @@ func TestProfilingAPIError(t *testing.T) {
 
 			got := profilingAPIError(tc.err)
 			require.Equal(t, tc.exit, exitCodeForError(got))
+			if tc.reason == profiling.FailureTimeout {
+				// The text is the error's own, and the agent code does not
+				// follow the token it quotes.
+				require.Equal(t, tc.err.Error(), got.Error())
+				require.ErrorIs(t, got, tc.err)
+				require.Equal(t, "error", errorToDetail(context.Background(), got).Code)
+				return
+			}
 			if tc.suggestions == nil {
 				require.Same(t, tc.err, got, "an error with nothing profiling-specific to add passes through")
 				return
@@ -423,4 +433,50 @@ func TestExecProfiling_WindowAtTheEpoch(t *testing.T) {
 	require.Empty(t, stdout)
 	require.Equal(t, "Error: invalid timeframe: the end must be after the start\n", stderr)
 	require.Empty(t, api.paths)
+}
+
+// The agent error code of a failure the command words itself is decided where
+// the failure is recognised. Its text quotes what the caller typed and the
+// function names of the profile, and a code read off that text would follow
+// them: --focus Config was a config_error, --focus Timeout a timeout.
+func TestExecProfiling_AgentCodeIgnoresWhatTheMessageQuotes(t *testing.T) {
+	// Two functions whose names hold a word the generic classification reads.
+	const configured = `{"dataRootNodeId":"0","dataNodes":[
+ {"id":"0","className":"","methodName":"","samples":{"RUNNING":0},"childIds":["A","B"]},
+ {"id":"A","className":"app.Configuration","methodName":"load","samples":{"RUNNING":7},"childIds":[]},
+ {"id":"B","className":"app.Configuration","methodName":"timeout","samples":{"RUNNING":3},"childIds":[]}]}`
+	api := newProfilingAPI(t, http.StatusOK, configured)
+
+	cases := []struct {
+		name string
+		args []string
+		code string
+	}{
+		{"focus matches nothing", []string{"hotspots", testProcess, "--focus", "Config.absent"}, "error"},
+		{"focus matches nothing, timeout", []string{"hotspots", testProcess, "--focus", "request timed out"}, "error"},
+		{"focus matches nothing, invalid", []string{"hotspots", testProcess, "--focus", "Validation.invalid"}, "error"},
+		{"focus matches nothing, context", []string{"hotspots", testProcess, "--focus", "no context"}, "error"},
+		{"focus matches several", []string{"hotspots", testProcess, "--focus", "app"}, "error"},
+		{"entity", []string{"hotspots", "SERVICE-config"}, "validation_error"},
+		{"leaf type", []string{"hotspots", testProcess, "--leaf-type", "config"}, "validation_error"},
+		{"view", []string{"hotspots", testProcess, "--view", "no context"}, "validation_error"},
+		{"state", []string{"hotspots", testProcess, "--view", "functions", "--state", "config"}, "validation_error"},
+		{"sort", []string{"hotspots", testProcess, "--view", "functions", "--sort", "timeout"}, "validation_error"},
+		{"start", []string{"hotspots", testProcess, "--default-timeframe-start", "config"}, "validation_error"},
+		{"end", []string{"allocations", testProcess, "--default-timeframe-end", "now()-1timeout"}, "validation_error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, stderr := runProfilingStreams(t, tc.args...)
+			require.Equal(t, 1, code)
+			require.True(t, strings.HasPrefix(stderr, "Error: "), stderr)
+			want := strings.TrimSuffix(strings.TrimPrefix(stderr, "Error: "), "\n")
+
+			code, stdout, stderr := runProfilingStreams(t, append(tc.args, "--agent")...)
+			require.Equal(t, 1, code)
+			require.Empty(t, stderr)
+			require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{Code: tc.code, Message: want}}, decodeProfilingError(t, stdout))
+		})
+	}
+	require.Len(t, api.paths, 10, "only the --focus cases reach the API, once with and once without --agent")
 }
