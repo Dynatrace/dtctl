@@ -393,3 +393,32 @@ func TestFocusExact(t *testing.T) {
 		t.Errorf("FocusExact(disk_io, C.run) = %+v, %v; want an empty view saying %q", got, err, EmptyState)
 	}
 }
+
+// With appOnly the focus view counts as the functions view does: a hidden
+// frame's samples go to the nearest application frame above it, so the hidden
+// frames are neither callers nor callees, and the function's own time holds
+// theirs.
+func TestFocus_AppOnly(t *testing.T) {
+	h := hotspotsOf(fnTree())
+
+	want := FocusView{
+		Function: "app.handle", Total: 30, Self: 30,
+		Callers: []FocusRow{{Relation: "caller", Samples: 30, Share: 100, Function: "app.main"}},
+	}
+	if got, err := h.Focus(true, StateRunning, "handle"); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("Focus(appOnly, handle) = %+v, %v\nwant %+v", got, err, want)
+	}
+	want = FocusView{
+		Function: "app.main", Total: 100, Self: 70,
+		Callers: []FocusRow{{Relation: "caller", Samples: 100, Share: 100, Function: RootCaller}},
+		Callees: []FocusRow{{Relation: "callee", Samples: 30, Share: 30, Function: "app.handle"}},
+	}
+	if got, err := h.FocusExact(true, StateRunning, "app.main"); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("FocusExact(appOnly, app.main) = %+v, %v\nwant %+v", got, err, want)
+	}
+	// A frame appOnly hides is no function of the view.
+	var noMatch *NoMatchError
+	if _, err := h.Focus(true, StateRunning, "lib.wrap"); !errors.As(err, &noMatch) {
+		t.Errorf("Focus(appOnly, lib.wrap): err = %v, want a *NoMatchError", err)
+	}
+}

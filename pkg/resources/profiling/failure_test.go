@@ -20,7 +20,8 @@ func TestClassifyError(t *testing.T) {
 	api := func(phase sdkcla.Phase, status int) error {
 		return &sdkcla.Error{Phase: phase, Err: fmt.Errorf("codelevelanalysis: %s: %w", phase, httpclient.NewAPIError(status, "the API's message", ""))}
 	}
-	notCompleted := &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: sdkcla.ErrNotCompleted}
+	// As the SDK's poll returns it: ErrNotCompleted wrapped with the details.
+	notCompleted := &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: fmt.Errorf("%w within 60s (token t1)", sdkcla.ErrNotCompleted)}
 	refused := &sdkcla.Error{Phase: sdkcla.PhaseValidate, Err: errors.New(`codelevelanalysis: unknown leaf type "nope": use total, service, or background`)}
 	cases := []struct {
 		name string
@@ -47,7 +48,9 @@ func TestClassifyError(t *testing.T) {
 		{name: "503 on a poll", err: api(sdkcla.PhasePoll, 503), ok: true,
 			want: Failure{Reason: FailureServer, StatusCode: 503, Message: "the API's message"}},
 		{name: "never completed", err: notCompleted, ok: true,
-			want: Failure{Reason: FailureTimeout, Message: "codelevelanalysis: analysis did not complete"}},
+			want: Failure{Reason: FailureTimeout, Message: "codelevelanalysis: analysis did not complete within 60s (token t1)"}},
+		{name: "429 on a poll", err: api(sdkcla.PhasePoll, 429), ok: true,
+			want: Failure{Reason: FailureThrottled, StatusCode: 429, Message: "the API's message"}},
 		{name: "request refused before it was sent", err: refused, ok: true,
 			want: Failure{Reason: FailureInvalidInput, Message: `codelevelanalysis: unknown leaf type "nope": use total, service, or background`}},
 		{name: "wrapped again by the caller", err: fmt.Errorf("profile: %w", api(sdkcla.PhasePoll, 404)), ok: true,

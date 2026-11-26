@@ -799,3 +799,45 @@ func TestParseLeafType(t *testing.T) {
 		t.Errorf("validate(leaf type ambient) = %v, want an error that wraps ErrUnknownLeafType", err)
 	}
 }
+
+// A poll answered with 204 ends the analysis: there is nothing to analyse.
+func TestPollNoContentIsNoData(t *testing.T) {
+	resp, err := pollHandler(t, func(w http.ResponseWriter, n int) {
+		if n < 3 {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}).Run(context.Background(), Payload{Kind: KindAllocations, EntityID: "PROCESS-ABC", From: 1, To: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "no-data" || resp.PollCount != 3 || resp.Kind != KindAllocations || resp.EntityID != "PROCESS-ABC" || resp.Result != nil {
+		t.Errorf("resp = %+v, want no-data after 3 polls for the payload's kind and entity, without a result", *resp)
+	}
+}
+
+// The details analysis is of one allocated type in one allocating method, and
+// is refused without either before a request is sent.
+func TestAllocationDetailsNeedTypeAndMethod(t *testing.T) {
+	base := Payload{Kind: KindAllocationDetails, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2}
+	for name, p := range map[string]Payload{
+		"neither":     base,
+		"type only":   {Kind: base.Kind, EntityID: base.EntityID, From: 1, To: 2, Type: "byte[]"},
+		"method only": {Kind: base.Kind, EntityID: base.EntityID, From: 1, To: 2, Method: "Cache.put"},
+	} {
+		err := validate(p)
+		if want := "codelevelanalysis: memoryAllocationDetails requires type and method"; err == nil || err.Error() != want {
+			t.Errorf("%s: validate = %v, want %q", name, err, want)
+		}
+	}
+	ok := base
+	ok.Type, ok.Method = "byte[]", "Cache.put"
+	if err := validate(ok); err != nil {
+		t.Errorf("validate with type and method = %v", err)
+	}
+	// The other kinds take neither.
+	if err := validate(Payload{Kind: KindAllocations, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2}); err != nil {
+		t.Errorf("validate(allocations) = %v", err)
+	}
+}

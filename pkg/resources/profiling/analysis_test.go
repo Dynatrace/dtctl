@@ -441,18 +441,29 @@ func TestResults_ConcurrentReaders(t *testing.T) {
 			for j := 0; j < 50; j++ {
 				delete(h.Raw(), "result")
 				delete(a.Raw()["result"].(map[string]interface{}), "analysisResult")
-				if got := h.Stacks(j%2 == 0); got.Samples != 100 {
-					t.Errorf("Stacks: %d samples, want 100", got.Samples)
+				// What a view returns is the caller's: every reader changes
+				// its rows, and none sees another's change.
+				stacks := h.Stacks(j%2 == 0)
+				if stacks.Samples != 100 || stacks.Rows[0].Running == 0 {
+					t.Errorf("Stacks: %+v, want 100 samples and a first row with some", stacks)
 				}
-				if got, err := h.Functions(false, StateRunning, SortBySelf); err != nil || got.Samples != 100 {
-					t.Errorf("Functions: %+v, %v", got, err)
+				stacks.Rows[0] = StackRow{}
+				fns, err := h.Functions(false, StateRunning, SortBySelf)
+				if err != nil || fns.Samples != 100 || fns.Rows[0].Function != "lib.wrap" {
+					t.Errorf("Functions: %+v, %v", fns, err)
 				}
-				if got, err := h.Focus(false, StateRunning, "wrap"); err != nil || got.Function != "lib.wrap" {
-					t.Errorf("Focus: %q, %v", got.Function, err)
+				fns.Rows[0].Function = "changed"
+				focus, err := h.Focus(false, StateRunning, "wrap")
+				if err != nil || focus.Function != "lib.wrap" || len(focus.Callers) != 2 || focus.Callers[0].Function != "lib.load" {
+					t.Errorf("Focus: %+v, %v", focus, err)
 				}
-				if got := a.Stacks(false, false); got.AllocatedBytes != 100 {
-					t.Errorf("Allocations.Stacks: %+v", got)
+				focus.Callers[0].Function = "changed"
+				focus.Rows(0)[0].Function = "changed"
+				allocs := a.Stacks(false, false)
+				if allocs.AllocatedBytes != 100 || allocs.Rows[0].Stack != "Cache.put" {
+					t.Errorf("Allocations.Stacks: %+v", allocs)
 				}
+				allocs.Rows[0].Stack = "changed"
 			}
 		}()
 	}

@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunProfiling_RejectsBadInputBeforeAnyAPICall(t *testing.T) {
@@ -25,6 +28,12 @@ func TestRunProfiling_RejectsBadInputBeforeAnyAPICall(t *testing.T) {
 		{"view on allocations", []string{"allocations", "PROCESS-0000000000000000", "--view", "functions"}, "unknown flag: --view"},
 		{"memory alias", []string{"memory", "PROCESS-0000000000000000", "--view", "functions"}, "unknown flag: --view"},
 	}
+	// A check that let its input through would run the analysis: against this
+	// stand-in, never the configuration of whoever runs the tests.
+	api := newProfilingAPI(t, http.StatusOK, profilingTree)
+	t.Cleanup(func() {
+		require.Empty(t, api.paths, "refused input must not reach the API")
+	})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newExecProfilingCmd()

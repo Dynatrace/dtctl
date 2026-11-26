@@ -2,12 +2,18 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Dynatrace/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
+	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 const profilingAllocTree = `{"analysisResult":{"stacktreeRootIds":[1],"stacktreeNodes":[` +
@@ -146,4 +152,93 @@ func TestProfilingEmptyNote(t *testing.T) {
 	for _, tc := range cases {
 		require.Equal(t, tc.want, profilingEmptyNote(tc.reason, run, tc.state), "%s, state %q", tc.reason, tc.state)
 	}
+}
+
+// What the command makes of every reason an analysis can fail for: the advice,
+// the exit code and the agent error code. profilingAPIError is a function of
+// the error alone, so a throttled analysis is pinned here without the minutes
+// of waiting a real one takes.
+func TestProfilingAPIError(t *testing.T) {
+	api := func(phase sdkcla.Phase, status int) error {
+		return &sdkcla.Error{Phase: phase, Err: fmt.Errorf("codelevelanalysis: %s: %w", phase, httpclient.NewAPIError(status, "the API's message", ""))}
+	}
+	cases := []struct {
+		reason      profiling.FailureReason
+		err         error
+		exit        int
+		code        string   // the agent error code; empty when the error passes through
+		suggestions []string // nil when the error passes through unchanged
+	}{
+		{reason: profiling.FailureInvalidInput, exit: 1,
+			err: &sdkcla.Error{Phase: sdkcla.PhaseValidate, Err: profiling.ErrWindowEmpty}},
+		{reason: profiling.FailureBadRequest, err: api(sdkcla.PhaseSubmit, 400), exit: 1, code: "bad_request", suggestions: []string{
+			"The API rejected the request parameters — check the timeframe (in the past, at most 2h) and the entity id",
+		}},
+		{reason: profiling.FailureForbidden, err: api(sdkcla.PhaseSubmit, 403), exit: 5, code: "permission_denied", suggestions: []string{
+			"Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy",
+			"OAuth (dtctl auth login): log in again so the session requests storage:profiles:read",
+		}},
+		{reason: profiling.FailureNotFound, err: api(sdkcla.PhaseSubmit, 404), exit: 4, code: "not_found", suggestions: []string{
+			"The environment knows no such process (ids are per environment, and short-lived process instances disappear)",
+			"List eligible ids: dtctl query 'smartscapeNodes PROCESS | fields id, dt.process_group.detected_name, dt.process_group.id'",
+		}},
+		{reason: profiling.FailureTaskExpired, err: api(sdkcla.PhasePoll, 404), exit: 4, code: "not_found", suggestions: []string{
+			"The analysis was started, but the environment no longer knows its task (it expired, or it ran on a node that is gone) — run the command again",
+		}},
+		{reason: profiling.FailureThrottled, err: api(sdkcla.PhaseSubmit, 429), exit: 1, code: "rate_limited", suggestions: []string{
+			"The environment is throttling profiling requests (it limits how many analyses run at once) — wait and retry, and avoid running many analyses in parallel",
+		}},
+		// A poll budget that ended throttled is the same failure.
+		{reason: profiling.FailureThrottled, err: api(sdkcla.PhasePoll, 429), exit: 1, code: "rate_limited", suggestions: []string{
+			"The environment is throttling profiling requests (it limits how many analyses run at once) — wait and retry, and avoid running many analyses in parallel",
+		}},
+		{reason: profiling.FailureServer, err: api(sdkcla.PhaseSubmit, 503), exit: 1},
+		{reason: profiling.FailureTimeout, exit: 1,
+			err: &sdkcla.Error{Phase: sdkcla.PhasePoll, Err: fmt.Errorf("%w within 60s (token t1)", sdkcla.ErrNotCompleted)}},
+	}
+	seen := map[profiling.FailureReason]bool{}
+	for _, tc := range cases {
+		t.Run(string(tc.reason), func(t *testing.T) {
+			f, ok := profiling.ClassifyError(tc.err)
+			require.True(t, ok)
+			require.Equal(t, tc.reason, f.Reason)
+			seen[tc.reason] = true
+
+			got := profilingAPIError(tc.err)
+			require.Equal(t, tc.exit, exitCodeForError(got))
+			if tc.suggestions == nil {
+				require.Same(t, tc.err, got, "an error with nothing profiling-specific to add passes through")
+				return
+			}
+			var diag *diagnostic.Error
+			require.True(t, errors.As(got, &diag), "%T", got)
+			require.Equal(t, "run profiling analysis", diag.Operation)
+			require.Equal(t, "the API's message", diag.Message)
+			require.Equal(t, tc.suggestions, diag.Suggestions)
+			require.Equal(t, tc.code, output.ClassifyHTTPError(diag.StatusCode))
+			require.Same(t, tc.err, diag.Err)
+		})
+	}
+	// Every reason the package names is in the table.
+	for _, r := range []profiling.FailureReason{
+		profiling.FailureInvalidInput, profiling.FailureBadRequest, profiling.FailureForbidden, profiling.FailureNotFound,
+		profiling.FailureTaskExpired, profiling.FailureThrottled, profiling.FailureServer, profiling.FailureTimeout,
+	} {
+		require.True(t, seen[r], "no case for %s", r)
+	}
+
+	// An error that is no failure of an analysis passes through too.
+	other := errors.New("boom")
+	require.Same(t, other, profilingAPIError(other))
+}
+
+// allocations words its failures as hotspots does.
+func TestExecProfiling_AllocationsAPIError(t *testing.T) {
+	newProfilingAPI(t, http.StatusForbidden, `{"error":{"code":403,"message":"the API's message"}}`)
+	code, stdout, stderr := runProfilingStreams(t, "allocations", testProcess)
+	require.Equal(t, 5, code)
+	require.Empty(t, stdout)
+	require.Equal(t, "Error: Failed to run profiling analysis (HTTP 403): the API's message\n\nTroubleshooting suggestions:\n"+
+		"  • Profiling needs storage:profiles:read and storage:entities:read, both on the token and in the IAM policy\n"+
+		"  • OAuth (dtctl auth login): log in again so the session requests storage:profiles:read\n", stderr)
 }

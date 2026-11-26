@@ -746,8 +746,11 @@ func profilingAPIError(err error) error {
 		}
 	case profiling.FailureThrottled:
 		suggestions = []string{
-			"The environment limits concurrent profiling analyses and is at that limit — wait and retry, and avoid running many analyses in parallel",
+			"The environment is throttling profiling requests (it limits how many analyses run at once) — wait and retry, and avoid running many analyses in parallel",
 		}
+	case profiling.FailureInvalidInput, profiling.FailureServer, profiling.FailureTimeout:
+		// Their own text says what happened.
+		return err
 	default:
 		return err
 	}

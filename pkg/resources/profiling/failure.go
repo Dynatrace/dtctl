@@ -32,8 +32,10 @@ const (
 	// longer knows its task (404 while waiting for the result). Running it
 	// again starts a new one.
 	FailureTaskExpired FailureReason = "task_expired"
-	// FailureThrottled: the environment is at its limit of concurrent
-	// analyses (429), after the waits the SDK already made.
+	// FailureThrottled: the API turned the request away (429), after the
+	// waits the SDK already made. On the request that starts the analysis
+	// that is the environment's limit of concurrent analyses; while waiting
+	// for the result it is the last answer before the SDK stopped asking.
 	FailureThrottled FailureReason = "throttled"
 	// FailureServer: the API failed on its side (5xx).
 	FailureServer FailureReason = "server_error"

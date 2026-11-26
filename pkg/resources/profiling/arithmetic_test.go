@@ -276,3 +276,30 @@ func TestHotspots_NumericChildIDs(t *testing.T) {
 		t.Errorf("Functions(false, running) = %+v\nwant %+v", got, wantFns)
 	}
 }
+
+// Every figure of an allocation row is merged the same way when appOnly folds
+// paths together: survived bytes and both counts as well as allocated bytes.
+func TestCounts_MergedAllocationRowOverTheLimit(t *testing.T) {
+	info := func(v float64) map[string]interface{} {
+		return map[string]interface{}{"allocationSize": v, "survivorSize": v, "allocationCount": v, "survivorCount": v}
+	}
+	a := allocationsOf(allocationsResult([]interface{}{float64(1)},
+		map[string]interface{}{"id": float64(1), "name": "A.a", "apiInfo": map[string]interface{}{"systemApi": true},
+			"childIds": []interface{}{float64(2), float64(3)}, "allocationInfo": info(1e300)},
+		map[string]interface{}{"id": float64(2), "name": "lib.x", "apiInfo": map[string]interface{}{"systemApi": false},
+			"childIds": []interface{}{}, "allocationInfo": info(6e18)},
+		map[string]interface{}{"id": float64(3), "name": "lib.y", "apiInfo": map[string]interface{}{"systemApi": false},
+			"childIds": []interface{}{}, "allocationInfo": info(6e18)},
+	))
+	want := AllocationView{AllocatedBytes: math.MaxInt64, SurvivedBytes: math.MaxInt64, Rows: []AllocationRow{
+		{AllocBytes: math.MaxInt64, SurvivedBytes: math.MaxInt64, AllocCount: math.MaxInt64, SurvivedCount: math.MaxInt64, Stack: "A.a"},
+	}}
+	if got := a.Stacks(true, false); !reflect.DeepEqual(got, want) {
+		t.Errorf("Stacks(appOnly) = %+v\nwant %+v", got, want)
+	}
+	// Unmerged, the totals over the two rows saturate as well.
+	got := a.Stacks(false, true)
+	if len(got.Rows) != 2 || got.AllocatedBytes != math.MaxInt64 || got.SurvivedBytes != math.MaxInt64 {
+		t.Errorf("Stacks = %+v, want two rows and totals of %d", got, int64(math.MaxInt64))
+	}
+}
