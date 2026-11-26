@@ -385,7 +385,9 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // (LogsByProcessGroup), and without that binding the entry would return its
 // spans and none of its logs. A service name another candidate also reports
 // is left out: it would select that candidate's records as well, and the
-// bindings are alternatives.
+// bindings are alternatives. So is one the candidate's records carry that
+// discovery did not send: the queries compare service.name to the sent names
+// only, so nothing looked for what else reports it.
 //
 // The workload binding carries the cluster the candidate's records name, so
 // the same namespace and workload in another cluster stays out of the entry.
@@ -419,7 +421,7 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 		flag("--namespace", c.Namespace)
 		flag("--workload", c.Workload)
 	}
-	if c.ServiceName != "" && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() {
+	if c.ServiceName != "" && slices.Contains(r.Sent, c.ServiceName) && !c.ServiceNameShared && !c.Sampled && !r.SampledRecords() {
 		flag("--service-name", c.ServiceName)
 	}
 	if len(bindings) == 0 {

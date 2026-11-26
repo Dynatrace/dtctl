@@ -15,6 +15,6 @@ Unit: .
 Verdict: ambiguous (candidates: 2)
 3 of 11 queries ran in 0.6s. Nothing was written. Save the one that runs this code with its line:
   1  dtctl repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout --service-name checkout
-  2  dtctl repo-scope set checkout-ledger --namespace payments --workload checkout-ledger --service-name checkout-ledger
+  2  dtctl repo-scope set checkout-ledger --namespace payments --workload checkout-ledger
 Note: candidate 1 has spans, but no logs in 24h carry its k8s.workload.name, service.name or process group, so a scoped fetch logs returns nothing
 Note: candidate 2 has spans, but no logs carry its k8s.workload.name or service.name, so an entry bound by those reaches no logs; if its logs carry a process group, bind it with --process-group

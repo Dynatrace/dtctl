@@ -15,6 +15,7 @@ import (
 func TestRepoScopeDiscoveryLimitsProposedLines(t *testing.T) {
 	report := &reposcope.DiscoveryReport{Unit: "services/checkout", Dir: "services/checkout", Verdict: reposcope.VerdictAmbiguous}
 	for i := 1; i <= 7; i++ {
+		report.Sent = append(report.Sent, fmt.Sprintf("checkout-%d", i))
 		c := reposcope.Candidate{Rank: i, Name: fmt.Sprintf("checkout-%d", i), ServiceName: fmt.Sprintf("checkout-%d", i), Tier: "exact"}
 		c.SetCommand = repoScopeSetCommand(report, c, nil)
 		report.Candidates = append(report.Candidates, c)
@@ -92,14 +93,14 @@ func TestRepoScopeSetCommandBindsOnlyWholeIDLists(t *testing.T) {
 // that sample's floor.
 func TestRepoScopeSetCommandHoldsBackTheServiceNameWhenAnyObjectWasSampled(t *testing.T) {
 	c := reposcope.Candidate{Name: "checkout", Namespace: "payments", Workload: "checkout", ServiceName: "checkout", Logs: 88000}
-	whole := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Queries: []reposcope.Query{
+	whole := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"checkout"}, Queries: []reposcope.Query{
 		{DataObject: "spans", Rows: 0},
 		{DataObject: "logs", Rows: 1},
 	}}
 	require.Equal(t, "dtctl repo-scope set checkout --namespace payments --workload checkout --service-name checkout",
 		repoScopeSetCommand(whole, c, nil))
 
-	sampled := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Queries: []reposcope.Query{
+	sampled := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"checkout"}, Queries: []reposcope.Query{
 		{DataObject: "spans", Truncated: true, Cause: "truncated"},
 		{DataObject: "spans", Window: "1h", SamplingRatio: 100000},
 		{DataObject: "logs", Rows: 1},
@@ -107,7 +108,7 @@ func TestRepoScopeSetCommandHoldsBackTheServiceNameWhenAnyObjectWasSampled(t *te
 	require.Equal(t, "dtctl repo-scope set checkout --namespace payments --workload checkout", repoScopeSetCommand(sampled, c, nil),
 		"the spans sample matched nothing, and a spans-only checkout below its floor would share the name")
 
-	refused := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Queries: []reposcope.Query{
+	refused := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"checkout"}, Queries: []reposcope.Query{
 		{DataObject: "spans", Window: "1h", SamplingRatio: 100000, Cause: "sampling_refused"},
 	}}
 	require.Contains(t, repoScopeSetCommand(refused, c, nil), "--service-name checkout", "a rung Grail did not sample read whole")
