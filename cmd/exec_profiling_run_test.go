@@ -390,7 +390,13 @@ func TestExecProfiling_StackViewAgent(t *testing.T) {
 	require.Equal(t, "hotspots", p.Kind)
 	require.Equal(t, "stacks", p.View)
 	require.Equal(t, "total", p.LeafType)
+	require.Equal(t, "running", p.State, "the stack view ranks by running samples")
 	require.Equal(t, 100, *p.Samples)
+
+	// An id the API takes as it is has no second spelling to disclose.
+	env = runProfilingAgent(t, "hotspots", testProcess)
+	require.Equal(t, testProcess, env.Context.Profile.Entity)
+	require.Empty(t, env.Context.Profile.APIEntity)
 	require.Equal(t, "2h", env.Context.Window.Span)
 	require.NotEmpty(t, env.Context.Window.Note, "the default window says so")
 }
@@ -460,6 +466,13 @@ func TestExecProfiling_AllocationsSurvivedNote(t *testing.T) {
 	env := runProfilingAgent(t, "allocations", testProcess)
 	require.Contains(t, env.Context.Suggestions, profilingSurvivedNote)
 	require.EqualValues(t, 500, env.Result[0]["survived_bytes"])
+	// An allocations analysis has no leaf type and counts no thread state.
+	p := env.Context.Profile
+	require.Equal(t, "allocations", p.Kind)
+	require.Equal(t, "stacks", p.View)
+	require.Empty(t, p.LeafType)
+	require.Empty(t, p.State)
+	require.EqualValues(t, 100, *p.AllocatedBytes)
 
 	help := findProfilingCmd(t, "allocations").Long
 	require.Contains(t, help, "Don't report them as heap used or retained.")
@@ -678,4 +691,107 @@ Find a process id:
 `, stderr)
 		require.Empty(t, api.paths)
 	})
+}
+
+// profilingFanTree is a hotspots result in which app.P.run calls n functions,
+// app.C.m0 to m<n-1>, and has no samples of its own: n stacks, n+1 functions,
+// and n callees of app.P.run.
+func profilingFanTree(n int) string {
+	var nodes, ids []string
+	total := 0
+	for i := 0; i < n; i++ {
+		ids = append(ids, fmt.Sprintf(`"n%d"`, i))
+		nodes = append(nodes, fmt.Sprintf(`{"id":"n%d","className":"app.C","methodName":"m%d","apiInfo":{"systemApi":true},"samples":{"RUNNING":%d},"childIds":[]}`, i, i, i+1))
+		total += i + 1
+	}
+	return fmt.Sprintf(`{"dataRootNodeId":"0","dataNodes":[`+
+		`{"id":"0","className":"","methodName":"","samples":{"RUNNING":0},"childIds":["P"]},`+
+		`{"id":"P","className":"app.P","methodName":"run","apiInfo":{"systemApi":true},"samples":{"RUNNING":%d},"childIds":[%s]},%s]}`,
+		total, strings.Join(ids, ","), strings.Join(nodes, ","))
+}
+
+// Each view has its own default row cap, and only the stack view's is lower
+// for an agent: 100 stacks (20 for an agent), 30 functions, 10 callers and 10
+// callees.
+func TestExecProfiling_DefaultLimits(t *testing.T) {
+	const n = 35
+	newProfilingAPI(t, http.StatusOK, profilingFanTree(n))
+
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess)
+	require.Zero(t, code, stderr)
+	require.Len(t, strings.Split(strings.TrimSuffix(stdout, "\n"), "\n"), n, "a table lists up to 100 stacks")
+	require.NotContains(t, stdout, "#")
+
+	env := runProfilingAgent(t, "hotspots", testProcess)
+	require.Len(t, env.Result, profilingStacksAgentDefaultLimit)
+	require.Equal(t, n, *env.Context.Total)
+	require.Equal(t, []string{"showing 20 of 35 stacks, by running samples; --limit 0 lists them all"}, env.Context.Warnings)
+
+	code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--view", "functions")
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "# 30 of 36 functions, by self running samples (630 running samples in the window)\n"+
+		"# showing 30 of 36 functions, by self running samples; --limit 0 lists every function\n")
+
+	env = runProfilingAgent(t, "hotspots", testProcess, "--view", "functions")
+	require.Len(t, env.Result, profilingFunctionsDefaultLimit, "an agent gets as many functions as a table")
+	require.Equal(t, n+1, *env.Context.Total)
+	require.True(t, env.Context.HasMore)
+
+	// One caller, (root), and 35 callees: only the callees are over the cap.
+	env = runProfilingAgent(t, "hotspots", testProcess, "--focus", "app.P.run")
+	require.Len(t, env.Result, 2+1+profilingFocusDefaultLimit)
+	require.Equal(t, 2+1+n, *env.Context.Total)
+	require.True(t, env.Context.HasMore)
+	require.Equal(t, []string{"showing up to 10 callers and 10 callees; --limit 0 lists them all"}, env.Context.Warnings)
+}
+
+// --limit 0 lifts the cap of every view, for an agent as well.
+func TestExecProfiling_LimitZeroListsAll(t *testing.T) {
+	const n = 35
+	newProfilingAPI(t, http.StatusOK, profilingFanTree(n))
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		rows int
+	}{
+		{"stacks", []string{"hotspots", testProcess}, n},
+		{"functions", []string{"hotspots", testProcess, "--view", "functions"}, n + 1},
+		{"focus", []string{"hotspots", testProcess, "--focus", "app.P.run"}, 2 + 1 + n},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(tc.args, "--limit", "0")
+			code, stdout, stderr := runProfilingStreams(t, append(args, "-o", "json")...)
+			require.Zero(t, code, stderr)
+			var rows []map[string]interface{}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &rows), stdout)
+			require.Len(t, rows, tc.rows)
+
+			env := runProfilingAgent(t, args...)
+			require.Len(t, env.Result, tc.rows)
+			require.Equal(t, tc.rows, *env.Context.Total)
+			require.False(t, env.Context.HasMore)
+			require.Empty(t, env.Context.Warnings)
+		})
+	}
+
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess, "--limit", "0")
+	require.Zero(t, code, stderr)
+	require.Len(t, strings.Split(strings.TrimSuffix(stdout, "\n"), "\n"), n)
+	require.NotContains(t, stdout, "#")
+}
+
+// --raw prints a nested document, which a format of rows and columns cannot
+// hold: it is refused with one, before any request.
+func TestExecProfiling_RawNeedsANestedFormat(t *testing.T) {
+	api := newProfilingAPI(t, http.StatusOK, profilingTree)
+	for _, format := range []string{"csv", "parquet"} {
+		for _, kind := range []string{"hotspots", "allocations"} {
+			code, stdout, stderr := runProfilingStreams(t, kind, testProcess, "--raw", "-o", format)
+			require.Equal(t, 1, code, format)
+			require.Empty(t, stdout, format)
+			require.Equal(t, "Error: --raw prints a nested document; use -o json or -o yaml\n", stderr, format)
+		}
+	}
+	require.Empty(t, api.paths)
 }
