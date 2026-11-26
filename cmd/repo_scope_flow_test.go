@@ -529,10 +529,11 @@ func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) 
 	for _, n := range report.Notes {
 		if strings.Contains(n, "so they were sampled 1-in-") {
 			sampling = append(sampling, n)
-			require.NotContains(t, suggestions, n, "the notes carry it once")
+			require.Contains(t, suggestions, n, "the floor a candidate may sit below is the agent's to pass on")
 		}
 	}
 	require.Len(t, sampling, 2)
+	require.Equal(t, sampling, report.SamplingNotes())
 
 	newDQLRecorder(t, "readonly", cappedThenSampled(map[string]string{
 		"spans": `{"service.name":"checkout","records":"12","serviceCount":"1","services":["` + flowService + `"]}`,

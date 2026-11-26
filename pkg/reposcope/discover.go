@@ -510,7 +510,8 @@ type DiscoveryReport struct {
 
 // Discover runs p's queries through runner and ranks what came back. It only
 // reads. A cancelled run returns the report so far together with ctx.Err(),
-// so a Ctrl-C after the first query still shows what it found.
+// so a caller can still show what it found after a Ctrl-C; the CLI does in
+// every mode but the agent's, whose envelope is a result or an error.
 func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string) (*DiscoveryReport, error) {
 	r := &DiscoveryReport{Environment: host, Dir: p.Dir, Unit: p.Unit,
 		Queries: append([]Query{}, p.Queries...), Sent: []string{}}
@@ -556,7 +557,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 			r.runRecordQuery(ctx, runner, q, r.rungsAfter(i), d)
 		}
 	}
-	for _, n := range r.samplingNotes() {
+	for _, n := range r.SamplingNotes() {
 		r.note(n)
 	}
 	d.foldServiceless()
@@ -855,7 +856,7 @@ func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCau
 	return limit, cut
 }
 
-// samplingNotes states, for each data object discovery had to sample, what
+// SamplingNotes states, for each data object discovery had to sample, what
 // the sample can have missed. The floor comes from the ratio a rung asked
 // for: Grail only ever samples more finely than asked, so it is the
 // conservative bound, and it is defined when the sample matched nothing.
@@ -863,7 +864,7 @@ func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCau
 // an absence, so the report stays partial. An object the environment turned
 // out not to sample gets no such note: its capped answer stands, and an
 // earlier rung that came back empty bounds nothing.
-func (r *DiscoveryReport) samplingNotes() []string {
+func (r *DiscoveryReport) SamplingNotes() []string {
 	var answered []*Query
 	for i := range r.Queries {
 		q := &r.Queries[i]

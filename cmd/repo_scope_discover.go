@@ -290,6 +290,9 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	if table {
 		return err
 	}
+	// An interrupted run has printed its tables by now. An agent envelope is
+	// a result or an error, never both, so there the interruption is the
+	// whole answer and the partial reports are not printed.
 	if err != nil && agentMode(ctx) {
 		return err
 	}
@@ -897,6 +900,9 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, p repoScopeProp
 	}
 	s = append(s, p.sharedNotes...)
 	s = append(s, p.lineNotes...)
+	// What a sample can have missed is the agent's to tell the user: it is
+	// why one sampled candidate is not a match.
+	s = append(s, r.SamplingNotes()...)
 	if len(r.Candidates) > 0 {
 		s = append(s, "nothing has been saved; running the set command is the confirmation")
 	}
