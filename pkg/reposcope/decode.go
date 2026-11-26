@@ -23,7 +23,7 @@ var unknownFieldRe = regexp.MustCompile(`^line (\d+): field (.+) not found in ty
 // narrowingTypes are the parts of the document in which a key can narrow
 // what an entry selects, by the name of their type, with how an error names
 // the place.
-var narrowingTypes = map[string]string{"Entry": "an entry", "Workload": "a workload"}
+var narrowingTypes = map[string]string{"Entry": "an entry", "Workload": "a workload", "Segment": "a segment"}
 
 // decode parses and validates a scope file's bytes. Empty input is an empty,
 // valid File.

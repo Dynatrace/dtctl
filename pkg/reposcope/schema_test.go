@@ -89,6 +89,9 @@ func TestDecode_UnknownKeysOfAnEntryFailTheRead(t *testing.T) {
 		"a misspelt binding": {
 			"      service_names: [checkout]\n      services: [" + svcID + "]\n",
 			`unknown key "service_names" on line 4, in an entry (a typo, or written by a newer dtctl); a key there can narrow the entry, so the file is not applied without it`},
+		"a misspelt segment key": {
+			"      service-names: [checkout]\n      segments:\n        - id: Ab3dEf9hIjk\n          variable: {env: [prod]}\n",
+			`unknown key "variable" on line 7, in a segment (a typo, or written by a newer dtctl); a key there can narrow the entry, so the file is not applied without it`},
 		"several": {
 			"      service-names: [checkout]\n      discovered: 2026-09-30\n      workloads:\n        - namespace: payments\n          name: checkout\n          container: app\n",
 			`unknown keys "discovered" on line 5, in an entry, "container" on line 9, in a workload (a typo, or written by a newer dtctl); a key there can narrow the entry, so the file is not applied without them`},
