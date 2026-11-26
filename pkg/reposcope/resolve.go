@@ -148,21 +148,25 @@ func (s *Status) Ambiguous() bool { return s.tied }
 
 // closestEntry is the entry with the longest path covering relDir, else the
 // one with no path. An entry the build covers relDir through is as close as
-// relDir's module. tied are the other entries as close, in file order: further
-// deployables whose closure holds that module.
+// relDir's module, whether or not its own path covers relDir from further
+// up: a module inside one deployable's directory that another deployable
+// depends on as well belongs to both. tied are the other entries as close, in
+// file order: further deployables whose closure holds that module.
 func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best *Entry, tied []*Entry) {
 	var wide *Entry
 	longest := 0
 	for i := range entries {
 		e := &entries[i]
 		n := 0
-		switch {
-		case e.Path == "":
+		if e.Path == "" {
 			wide = e
-		case covers(e.Path, relDir):
+			continue
+		}
+		if covers(e.Path, relDir) {
 			n = len(e.Path)
-		case build.owns(e):
-			n = len(build.module)
+		}
+		if build.owns(e) {
+			n = max(n, len(build.module))
 		}
 		switch {
 		case n == 0 || n < longest:

@@ -333,3 +333,43 @@ func TestResolve_WithoutARepository(t *testing.T) {
 	require.NotNil(t, r.Entry)
 	assert.Equal(t, "ledger-close", r.Entry.Name)
 }
+
+// sharedLibraryRepo is a build whose two deployables both depend on a module
+// that lies inside the directory of one of them.
+func sharedLibraryRepo() fstest.MapFS {
+	uses := &fstest.MapFile{Data: []byte(`dependencies { implementation(project(":app:lib")) }`)}
+	return fstest.MapFS{
+		"settings.gradle.kts":      {Data: []byte(`include(":app", ":peer", ":app:lib")`)},
+		"app/build.gradle.kts":     uses,
+		"peer/build.gradle.kts":    uses,
+		"app/lib/build.gradle.kts": {Data: []byte("plugins { `java-library` }")},
+	}
+}
+
+// A module two deployables depend on belongs to neither, also when it lies
+// in the directory of one of them: that one is no closer through its path
+// than the other is through the build.
+func TestResolve_SharedModuleInsideADeployable(t *testing.T) {
+	app := Entry{Name: "app", Path: "app", ServiceNames: []string{"app"}}
+	peer := Entry{Name: "peer", Path: "peer", ServiceNames: []string{"peer"}}
+	for _, entries := range [][]Entry{{app, peer}, {peer, app}} {
+		f := &File{Environments: map[string][]Entry{prodHost: entries}}
+		r, err := Resolve(sharedLibraryRepo(), f, prodHost, "app/lib/src", "")
+		require.NoError(t, err)
+		assert.Nil(t, r.Entry)
+		assert.True(t, r.Ambiguous())
+		assert.Equal(t, "covered by entries "+entries[0].Name+" and "+entries[1].Name+"; pick one with --repo-scope <name>", r.Reason)
+
+		r, err = Resolve(sharedLibraryRepo(), f, prodHost, "app/src", "")
+		require.NoError(t, err)
+		require.NotNil(t, r.Entry, "the deployable's own sources are its own")
+		assert.Equal(t, "app", r.Entry.Name)
+	}
+
+	// An entry on the module itself is closer than either.
+	lib := Entry{Name: "lib", Path: "app/lib", ServiceNames: []string{"lib"}}
+	r, err := Resolve(sharedLibraryRepo(), &File{Environments: map[string][]Entry{prodHost: {app, peer, lib}}}, prodHost, "app/lib/src", "")
+	require.NoError(t, err)
+	require.NotNil(t, r.Entry)
+	assert.Equal(t, "lib", r.Entry.Name)
+}
