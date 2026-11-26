@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -769,35 +770,63 @@ func TestQueryRepoScope_StableFloor(t *testing.T) {
 
 // dtui's workspace file is dtui's: a `.dtui.yaml` beside the scope file
 // changes nothing about a query. Its environment must not pick the context,
-// which in a CLI that writes would let a cloned file choose the environment,
-// and its segments must not be applied or even looked up. The recorder
-// answers 404 to everything but a query, so a segment lookup would fail the
-// run, and a request sent to the file's environment would never reach it.
+// which in a CLI that writes would let a cloned file choose the environment;
+// its timeframe and its segments, by name or by id, must not travel with the
+// query; and the file is not opened at all.
+//
+// Each of those is a difference the comparison can see. The whole of every
+// request is compared, not the query text, because a timeframe or a segment
+// id is sent beside the query and needs no lookup. The file's environment
+// does not resolve, so a run that honoured it would never reach the recorder.
+// And a workspace file that cannot be read, or is a directory, leaves the run
+// exactly as it was, which a run that opened it could not.
 func TestQueryLeavesTheDtuiWorkspaceFileUnread(t *testing.T) {
 	const workspaceFile = `version: 1
-environment: https://xyz98765.apps.dynatrace.com
+environment: https://dtui-workspace.invalid
 timeframe: 30m
 segments:
   - payments-prod
+  - 5fRkT2mQx7L
 `
-	run := func(t *testing.T, withWorkspaceFile bool) (query, stdout, stderr string) {
+	type outcome struct {
+		code           int
+		requests       []string
+		stdout, stderr string
+	}
+	run := func(t *testing.T, place func(t *testing.T, path string)) outcome {
 		srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
 		dir := chdirTestRepo(t, checkoutScope)
-		if withWorkspaceFile {
-			require.NoError(t, os.WriteFile(filepath.Join(dir, ".dtui.yaml"), []byte(workspaceFile), 0o644))
+		if place != nil {
+			place(t, filepath.Join(dir, ".dtui.yaml"))
 		}
 		code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery}, RunOptions{})
-		require.Zero(t, code, stderr)
-		return srv.first(t), stdout, stderr
+		return outcome{code, srv.requests(), stdout, stderr}
 	}
 
-	var without, with [3]string
-	t.Run("scope file only", func(t *testing.T) {
-		without[0], without[1], without[2] = run(t, false)
-	})
-	t.Run("with .dtui.yaml", func(t *testing.T) {
-		with[0], with[1], with[2] = run(t, true)
-	})
-	require.Equal(t, repoScopeScopedQuery, without[0])
-	require.Equal(t, without, with)
+	var without outcome
+	t.Run("scope file only", func(t *testing.T) { without = run(t, nil) })
+	require.Zero(t, without.code, without.stderr)
+	require.Len(t, without.requests, 1)
+	require.Contains(t, without.requests[0], "/query:execute")
+	require.NotContains(t, without.requests[0], "filterSegments")
+	require.NotContains(t, without.requests[0], "defaultTimeframe")
+
+	for name, place := range map[string]func(t *testing.T, path string){
+		"with .dtui.yaml": func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path, []byte(workspaceFile), 0o644))
+		},
+		"an unreadable .dtui.yaml": func(t *testing.T, path string) {
+			if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+				t.Skip("the file mode does not keep this user from reading")
+			}
+			require.NoError(t, os.WriteFile(path, []byte(workspaceFile), 0o000))
+		},
+		"a directory named .dtui.yaml": func(t *testing.T, path string) {
+			require.NoError(t, os.Mkdir(path, 0o755))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, without, run(t, place))
+		})
+	}
 }

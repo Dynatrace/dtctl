@@ -126,6 +126,9 @@ type dqlRecorder struct {
 	*httptest.Server
 	mu   sync.Mutex
 	sent []string
+	// all is every request the server got, answered or not: method, path
+	// and body.
+	all []string
 }
 
 // newDQLRecorder starts the server and points an isolated config's only
@@ -137,6 +140,10 @@ func newDQLRecorder(t *testing.T, safetyLevel string, respond func(r *http.Reque
 	t.Helper()
 	s := &dqlRecorder{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		s.mu.Lock()
+		s.all = append(s.all, fmt.Sprintf("%s %s %s", r.Method, r.URL.RequestURI(), raw))
+		s.mu.Unlock()
 		if !strings.HasSuffix(r.URL.Path, "/query:execute") && !strings.HasSuffix(r.URL.Path, "/query:verify") {
 			http.NotFound(w, r)
 			return
@@ -144,7 +151,6 @@ func newDQLRecorder(t *testing.T, safetyLevel string, respond func(r *http.Reque
 		var req struct {
 			Query string `json:"query"`
 		}
-		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &req)
 		s.mu.Lock()
 		s.sent = append(s.sent, req.Query)
@@ -180,6 +186,14 @@ func rowsByObject(rows map[string]string) func(*http.Request, string) (int, stri
 		object := strings.TrimSuffix(strings.Fields(query + " ,")[1], ",")
 		return http.StatusOK, fmt.Sprintf(`{"state":"SUCCEEDED","result":{"records":[%s]}}`, rows[object])
 	}
+}
+
+// requests is every request the server was sent, whole: a test that claims
+// nothing travels beside the query compares these, not the query text.
+func (s *dqlRecorder) requests() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.all...)
 }
 
 func (s *dqlRecorder) queries() []string {
