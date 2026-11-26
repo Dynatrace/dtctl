@@ -39,6 +39,42 @@ func setupAuthTestConfig(t *testing.T, contextName, environment, tokenRef string
 	return configPath
 }
 
+// setXDGHome points one XDG base directory (XDG_DATA_HOME, XDG_CONFIG_HOME) at
+// dir for the rest of the test and makes the xdg package follow.
+func setXDGHome(t *testing.T, key, dir string) {
+	t.Helper()
+	// Registered before t.Setenv so that it runs after the variable is
+	// restored. The other way round the reload still sees dir, and xdg keeps
+	// that deleted path for every later test in the package.
+	t.Cleanup(xdg.Reload)
+	t.Setenv(key, dir)
+	xdg.Reload()
+}
+
+// TestSetXDGHomeRestoresThePaths: a test that moves an XDG directory must hand
+// the next test the paths it found.
+func TestSetXDGHomeRestoresThePaths(t *testing.T) {
+	xdg.Reload()
+	dataHome, configHome := xdg.DataHome, xdg.ConfigHome
+
+	var dataDir, configDir string
+	t.Run("moved", func(t *testing.T) {
+		dataDir, configDir = t.TempDir(), t.TempDir()
+		setXDGHome(t, "XDG_CONFIG_HOME", configDir)
+		setXDGHome(t, "XDG_DATA_HOME", dataDir)
+		if xdg.DataHome != dataDir || xdg.ConfigHome != configDir {
+			t.Fatalf("xdg.DataHome %q, xdg.ConfigHome %q; want %q and %q", xdg.DataHome, xdg.ConfigHome, dataDir, configDir)
+		}
+	})
+
+	if xdg.DataHome != dataHome {
+		t.Errorf("xdg.DataHome is %q after the test, want %q", xdg.DataHome, dataHome)
+	}
+	if xdg.ConfigHome != configHome {
+		t.Errorf("xdg.ConfigHome is %q after the test, want %q", xdg.ConfigHome, configHome)
+	}
+}
+
 // resetAuthLoginFlags resets all auth login command flags to their default values.
 // This is needed because cobra/pflag retains flag values across Execute() calls when
 // the global rootCmd is reused in tests — a flag not present in the args of a new
@@ -844,9 +880,7 @@ func TestAuthLogin_ClientCredentials_SkipsBrowserFlow(t *testing.T) {
 	t.Setenv(config.EnvTokenStorage, "file")
 	// The command really does store the minted token, so keep the file store
 	// off the developer's own ~/.local/share/dtctl.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	xdg.Reload()
-	t.Cleanup(xdg.Reload)
+	setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 	t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
 	t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
 	t.Setenv(envLoginAccountURN, "urn:dtaccount:00000000-0000-0000-0000-000000000000")
@@ -968,9 +1002,7 @@ func TestAuthLogin_ClientCredentials_ReportsTokenAuthority(t *testing.T) {
 			resetAuthLoginFlags(t)
 			t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 			t.Setenv(config.EnvTokenStorage, "file")
-			t.Setenv("XDG_DATA_HOME", t.TempDir())
-			xdg.Reload()
-			t.Cleanup(xdg.Reload)
+			setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 			t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
 			t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
 			t.Setenv(envLoginAccountURN, "")
@@ -1027,9 +1059,7 @@ func TestAuthRefresh_NoRefreshToken_PointsAtLogin(t *testing.T) {
 	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 	t.Setenv(config.EnvTokenStorage, "file")
 	dataHome := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	xdg.Reload()
-	t.Cleanup(xdg.Reload)
+	setXDGHome(t, "XDG_DATA_HOME", dataHome)
 
 	const (
 		ctxName   = "cc-refresh-ctx"
@@ -1200,9 +1230,7 @@ func TestAuthLogin_KeepsTheContextsSafetyLevel(t *testing.T) {
 			resetAuthLoginFlags(t)
 			t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 			t.Setenv(config.EnvTokenStorage, "file")
-			t.Setenv("XDG_DATA_HOME", t.TempDir())
-			xdg.Reload()
-			t.Cleanup(xdg.Reload)
+			setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 			t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
 			t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
 			t.Setenv(envLoginAccountURN, "")
@@ -1336,9 +1364,9 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(globalDir, "config"), []byte(global), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_CONFIG_HOME", xdgDir)
-	xdg.Reload()
-	t.Cleanup(xdg.Reload)
+	setXDGHome(t, "XDG_CONFIG_HOME", xdgDir)
+	// A DTCTL_CONFIG in the developer's shell would short-circuit discovery.
+	t.Setenv(config.EnvConfig, "")
 
 	projectDir := t.TempDir()
 	local := "apiVersion: v1\nkind: Config\ncurrent-context: project\ncontexts:\n  - name: project\n    context:\n      environment: " + envURL + "\n      token-ref: prod-oauth\n      safety-level: dangerously-unrestricted\n"
@@ -1372,8 +1400,7 @@ func TestLoginSafetyLevels_ProjectConfigCannotRaiseTheScopes(t *testing.T) {
 	resetAuthLoginFlags(t)
 	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
 	t.Setenv(config.EnvTokenStorage, "file")
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	xdg.Reload()
+	setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 	t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
 	t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
 	t.Setenv(envLoginAccountURN, "")
@@ -1464,9 +1491,7 @@ func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 		viper.Reset()
 		resetAuthLoginFlags(t)
 		t.Setenv(config.EnvTokenStorage, "file")
-		t.Setenv("XDG_DATA_HOME", t.TempDir())
-		xdg.Reload()
-		t.Cleanup(xdg.Reload)
+		setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 		t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
 		t.Setenv(envLoginClientSecret, "dt0s02.EXAMPLE.SECRET")
 		t.Setenv(envLoginAccountURN, "")
@@ -1541,4 +1566,104 @@ func TestAuthLogin_StoredLevelThroughTheCommand(t *testing.T) {
 			t.Errorf("the config was rewritten: level %q", saved)
 		}
 	})
+}
+
+// errBrowserLoginStubbed is what the stubbed browser step returns, so a test
+// can tell that the command got that far and no further.
+var errBrowserLoginStubbed = errors.New("browser login stubbed in test")
+
+// runBrowserLogin runs `auth login` on the browser path with nothing behind
+// it: the keyring check passes, the OAuth configuration is captured where the
+// command hands it to the flow, and the browser step fails before anything
+// could reach the identity provider. It returns what the command printed, the
+// captured configuration (nil if the command stopped earlier) and its error.
+func runBrowserLogin(t *testing.T, args ...string) (stderr string, oauthConfig *auth.OAuthConfig, runErr error) {
+	t.Helper()
+	viper.Reset()
+	resetAuthLoginFlags(t)
+	// Any of these would select the client credentials grant.
+	t.Setenv(envLoginClientID, "")
+	t.Setenv(envLoginClientSecret, "")
+	t.Setenv(envLoginAccountURN, "")
+
+	origCheck := authCheckKeyringFunc
+	t.Cleanup(func() { authCheckKeyringFunc = origCheck })
+	authCheckKeyringFunc = func() error { return nil }
+
+	origNewFlow := authNewOAuthFlowFunc
+	t.Cleanup(func() { authNewOAuthFlowFunc = origNewFlow })
+	authNewOAuthFlowFunc = func(c *auth.OAuthConfig) (*auth.OAuthFlow, error) {
+		oauthConfig = c
+		return origNewFlow(c)
+	}
+
+	origBrowser := authBrowserFlowFunc
+	t.Cleanup(func() { authBrowserFlowFunc = origBrowser })
+	authBrowserFlowFunc = func(context.Context, *auth.OAuthFlow) (*auth.TokenSet, error) {
+		return nil, errBrowserLoginStubbed
+	}
+
+	stderr = captureAuthStderr(t, func() {
+		rootCmd.SetArgs(append([]string{"auth", "login"}, args...))
+		runErr = rootCmd.Execute()
+	})
+	return stderr, oauthConfig, runErr
+}
+
+// TestAuthLogin_BrowserFlowRequestsTheKeptLevelsScopes reads the scope list a
+// browser login is about to request. Renewing the session of an existing
+// context must ask for that context's level, in both directions.
+func TestAuthLogin_BrowserFlowRequestsTheKeptLevelsScopes(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+
+	tests := []struct {
+		stored config.SafetyLevel
+		// One scope that tells the levels apart, and whether it is requested.
+		writeDocuments  bool
+		truncateBuckets bool
+	}{
+		{config.SafetyLevelReadOnly, false, false},
+		{config.SafetyLevelReadWriteAll, true, false},
+		{config.SafetyLevelDangerouslyUnrestricted, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.stored), func(t *testing.T) {
+			configPath := setupAuthTestConfig(t, "other", envURL, "other-oauth")
+			cfg, err := config.LoadFrom(configPath)
+			if err != nil {
+				t.Fatalf("load config: %v", err)
+			}
+			cfg.SetContextWithOptions("kept", envURL, "kept-oauth", &config.ContextOptions{SafetyLevel: tt.stored})
+			if err := cfg.SaveTo(configPath); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+			gFlags.cfgFile = configPath
+			t.Cleanup(func() { gFlags.cfgFile = "" })
+
+			stderr, oauthConfig, runErr := runBrowserLogin(t, "--context", "kept")
+			if !errors.Is(runErr, errBrowserLoginStubbed) {
+				t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+			}
+			if oauthConfig == nil {
+				t.Fatal("the command built no OAuth flow")
+			}
+			if want := auth.GetScopesForSafetyLevel(tt.stored); !slices.Equal(oauthConfig.Scopes, want) {
+				t.Errorf("requested scopes:\n%v\nwant those of %s:\n%v", oauthConfig.Scopes, tt.stored, want)
+			}
+			if got := slices.Contains(oauthConfig.Scopes, "document:documents:write"); got != tt.writeDocuments {
+				t.Errorf("document:documents:write requested = %v, want %v", got, tt.writeDocuments)
+			}
+			if got := slices.Contains(oauthConfig.Scopes, "storage:bucket-definitions:truncate"); got != tt.truncateBuckets {
+				t.Errorf("storage:bucket-definitions:truncate requested = %v, want %v", got, tt.truncateBuckets)
+			}
+			for _, want := range []string{
+				"Safety level: " + string(tt.stored),
+				"Requesting OAuth scopes for safety level " + string(tt.stored) + "...",
+			} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr lacks %q:\n%s", want, stderr)
+				}
+			}
+		})
+	}
 }

@@ -115,6 +115,11 @@ var authBrowserFlowFunc = func(ctx context.Context, flow *auth.OAuthFlow) (*auth
 	return flow.Start(ctx)
 }
 
+// authNewOAuthFlowFunc builds the OAuth flow from the configuration auth login
+// composed. It defaults to the real constructor; tests override it to read the
+// scopes a login is about to request, which the flow itself does not expose.
+var authNewOAuthFlowFunc = auth.NewOAuthFlow
+
 // authCmd represents the auth command
 var authCmd = newAuthCmd()
 
@@ -839,7 +844,7 @@ Non-interactive login (CI/CD):
 			}
 
 			// Create OAuth flow
-			flow, err := auth.NewOAuthFlow(oauthConfig)
+			flow, err := authNewOAuthFlowFunc(oauthConfig)
 			if err != nil {
 				return fmt.Errorf("failed to initialize OAuth: %w", err)
 			}
