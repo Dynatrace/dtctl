@@ -125,11 +125,16 @@ func TestQueryRepoScope_SegmentsWithoutAFilter(t *testing.T) {
 	require.Contains(t, body, segmentsSent)
 	require.Contains(t, stderr, "repo scope checkout: its filter was not inserted: ")
 	require.Contains(t, stderr, "; its segments "+entrySegmentRefs+" still apply (use --no-repo-scope to ignore them)\n")
+	// The entry's bindings were refused, so the rows are wider than the file
+	// says: that is never reported as applied. The code is the refusal's, and
+	// the segments that were sent are listed.
 	scope = repoScopeContext(t, stdout)
-	require.True(t, scope.Applied, "the query sent was narrowed")
+	require.False(t, scope.Applied, "a scope without its filter is wider than the file says")
+	require.Equal(t, "not_fetch", scope.Code)
 	require.Empty(t, scope.Filter)
-	require.Contains(t, scope.Reason, "filter not inserted (not_fetch): ")
+	require.Equal(t, "the query does not start with 'fetch <data object>'; the entry's filter segments were sent", scope.Reason)
 	require.Len(t, scope.Segments, 2)
+	require.Contains(t, agentEnvelope(t, stdout).Context.Suggestions, "run unscoped: pass --no-repo-scope", "the segments are still the scope's")
 
 	// Naming an entry asks for its rows; a filter that cannot be inserted
 	// stays the error it was.

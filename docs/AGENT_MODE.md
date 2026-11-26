@@ -354,11 +354,13 @@ with its `id` and its `variables` by name:
                "code": "applied"}
 ```
 
-`applied` is true whenever the query sent was narrowed, by the filter, by
-segments or both. An entry that references only segments has no `filter`. When
-an entry has both and the filter could not be inserted, the segments are still
-sent: `applied` stays true, `filter` is absent, and `reason` starts with
-`filter not inserted (<code>):` and one of the codes above. A segment the
+`applied` is true when everything the entry holds went out with the query:
+its filter, and its segments when it references any. An entry that references
+only segments has no `filter`. When an entry has both and the filter could not
+be inserted, the segments are still sent, but the rows are wider than the
+file says, so `applied` is false: `code` is the refusal's (one of the codes
+above), `filter` is absent, `reason` ends with `the entry's filter segments
+were sent`, and `segments` lists them. A segment the
 command line also gives (`--segment`) is the caller's: it is sent with the
 caller's variables and is not listed under `segments`. `wait query` sends
 the segments too; `verify query` does not, and says so on stderr.

@@ -211,8 +211,8 @@ type repoScopedQuery struct {
 	// a stability floor hides is not advice. asTyped and without word
 	// the way back to the typed query by it and by named.
 	optOut bool
-	// filtered says the entry's filter was inserted. scope.Applied is wider:
-	// it also holds for a query narrowed by the entry's segments alone.
+	// filtered says the entry's filter was inserted. scope.Applied also holds
+	// for an entry without bindings whose segments are sent.
 	filtered bool
 	// bound says the entry has bindings, so a filter was attempted; an entry
 	// without them references segments and nothing else.
@@ -329,16 +329,18 @@ func (q *repoScopedQuery) rewrite(res *reposcope.Status) (refused string) {
 	return q.refusedCode
 }
 
-// settle derives what the envelope says from the two halves: the scope is
-// applied when the filter was inserted or segments are to be sent, and a
-// scope applied by its segments alone says why the filter is missing.
+// settle derives what the envelope says from the two halves. The scope is
+// applied when everything the entry holds went out: its filter, and its
+// segments when it has any. An entry whose filter was refused is not applied
+// even though its segments are sent, because the rows are then wider than
+// the file says; it carries the refusal's code, and lists the segments.
 func (q *repoScopedQuery) settle() {
 	s := q.scope
 	s.Segments = nil
 	for _, seg := range q.segments {
 		s.Segments = append(s.Segments, output.RepoScopeSegment{ID: seg.ID, Variables: seg.Variables})
 	}
-	s.Applied = q.filtered || len(q.segments) > 0
+	s.Applied = q.filtered || (!q.bound && len(q.segments) > 0)
 	switch {
 	case q.unavailable != "":
 		s.Code = repoScopeSegmentUnavailable
@@ -353,9 +355,9 @@ func (q *repoScopedQuery) settle() {
 	case q.filtered || !q.bound:
 		s.Code = string(dql.Applied)
 		q.setReason("")
-	case s.Applied:
-		s.Code = string(dql.Applied)
-		q.setReason(fmt.Sprintf("filter not inserted (%s): %s", q.refusedCode, q.refusedReason))
+	case len(q.segments) > 0:
+		s.Code = q.refusedCode
+		q.setReason(q.refusedReason + "; the entry's filter segments were sent")
 	default:
 		s.Code = q.refusedCode
 		q.setReason(q.refusedReason)
@@ -645,7 +647,7 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 // binding the records do not carry, so it says how to tell the two apart. A
 // scoped query the scan cap stopped says what the scope does to the scan.
 func (q *repoScopedQuery) onResult(n int, result *exec.DQLQueryResponse) {
-	if q.scope == nil || !q.scope.Applied {
+	if !q.changedRequest() {
 		return
 	}
 	if n == 0 || q.countedNothing(n, result) {
@@ -693,7 +695,7 @@ func (q *repoScopedQuery) countedNothing(n int, result *exec.DQLQueryResponse) b
 // output ago.
 func (q *repoScopedQuery) noticeWaitOutcome(met bool, records int64) {
 	switch {
-	case q.scope == nil || !q.scope.Applied:
+	case !q.changedRequest():
 	case !met:
 		output.FprintInfo(q.stderr, "condition not met under repo scope %s; compare %s", q.scope.Name, q.without())
 	case records == 0:
@@ -779,7 +781,7 @@ func (q *repoScopedQuery) decorate(c *output.ResponseContext, result *exec.DQLQu
 		c.Suggestions = append([]string{fmt.Sprintf(
 			"0 records under repo scope %s: run the same query %s to tell whether the scope or the query filtered everything out",
 			q.scope.Name, q.without())}, c.Suggestions...)
-	case q.scope.Applied:
+	case q.changedRequest():
 		c.Suggestions = append(c.Suggestions, "run unscoped: "+q.asTyped())
 	}
 	// One scan suggestion: the cap that was hit, or else the advice.
