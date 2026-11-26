@@ -2,6 +2,7 @@ package reposcope
 
 import (
 	"io/fs"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -20,11 +21,11 @@ const gitConfig = ".git/config"
 // readRemote reads the origin remote's repository name from .git/config as a
 // discovery token.
 func readRemote(fsys fs.FS) []sourceNames {
-	url, line, ok := originURL(fsys)
+	remote, line, ok := originURL(fsys)
 	if !ok {
 		return nil
 	}
-	if t, ok := newToken(kindRemote, repositoryName(url), gitConfig, line); ok {
+	if t, ok := newToken(kindRemote, repositoryName(remote), gitConfig, line); ok {
 		return []sourceNames{{dir: ".", tokens: []token{t}}}
 	}
 	return nil
@@ -35,17 +36,17 @@ func readRemote(fsys fs.FS) []sourceNames {
 // origin to read. It is what a clone is called on every machine, unlike the
 // directory it was cloned into.
 func RepositoryName(fsys fs.FS) string {
-	url, _, ok := originURL(fsys)
+	remote, _, ok := originURL(fsys)
 	if !ok {
 		return ""
 	}
-	return repositoryName(url)
+	return repositoryName(remote)
 }
 
 // originURL is the origin remote's URL in .git/config, with its line. When
 // .git is a file (a worktree or a submodule) the configuration lives outside
 // the repository root fsys is limited to, and there is none.
-func originURL(fsys fs.FS) (url string, line int, ok bool) {
+func originURL(fsys fs.FS) (remote string, line int, ok bool) {
 	data, err := readRegular(fsys, gitConfig)
 	if err != nil {
 		return "", 0, false
@@ -63,13 +64,31 @@ func originURL(fsys fs.FS) (url string, line int, ok bool) {
 	return "", 0, false
 }
 
-// repositoryName is the last path segment of a remote URL without ".git",
-// for both URL ("https://host/org/repo.git") and scp ("git@host:repo.git")
-// forms.
-func repositoryName(url string) string {
-	name := strings.TrimSuffix(strings.TrimSuffix(url, "/"), ".git")
-	if i := strings.LastIndexAny(name, "/:"); i >= 0 {
-		name = name[i+1:]
+// repositoryName is the last segment of a remote's path without ".git", or
+// "" when the remote names no repository. Only the path is read: a remote may
+// carry credentials, a query string or a fragment, and none of them is a name.
+//
+// A remote with a scheme ("https://host/org/repo.git") is parsed as a URL. Any
+// other is git's scp form ("git@host:org/repo.git"), whose path follows the
+// first colon when no slash comes before it, or a local path. A path written
+// with backslashes names no repository: its segments are a machine's
+// directories, a user's among them.
+func repositoryName(remote string) string {
+	p := remote
+	switch {
+	case strings.ContainsRune(remote, '\\'):
+		return ""
+	case strings.Contains(remote, "://"):
+		u, err := url.Parse(remote)
+		if err != nil {
+			return ""
+		}
+		p = u.Path
+	default:
+		if i := strings.IndexByte(remote, ':'); i >= 0 && !strings.ContainsRune(remote[:i], '/') {
+			p = remote[i+1:]
+		}
 	}
-	return name
+	p = strings.TrimSuffix(strings.TrimRight(p, "/"), ".git")
+	return p[strings.LastIndexByte(p, '/')+1:]
 }

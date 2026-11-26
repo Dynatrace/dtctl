@@ -126,6 +126,43 @@ func TestRepositoryName(t *testing.T) {
 	}
 }
 
+// Only the last segment of the remote's path is a name. Credentials, a query
+// string, a fragment and the directories of a local path are not, and a remote
+// with no path names nothing.
+func TestRemoteSendsOnlyTheRepositoryName(t *testing.T) {
+	for _, tt := range []struct {
+		remote, name string
+		sent         []string
+	}{
+		{"https://example.invalid/shop/checkout.git", "checkout", []string{"checkout"}},
+		{"https://example.invalid/shop/checkout", "checkout", []string{"checkout"}},
+		{"https://example.invalid/shop/checkout/", "checkout", []string{"checkout"}},
+		{"https://example.invalid/shop/checkout?token=SECRET999", "checkout", []string{"checkout"}},
+		{"https://example.invalid/shop/checkout.git#frag", "checkout", []string{"checkout"}},
+		{"https://someone:SECRET999@example.invalid/shop/checkout.git", "checkout", []string{"checkout"}},
+		{"https://someone:SECRET999@example.invalid", "", []string{}},
+		{"https://example.invalid/", "", []string{}},
+		{"https://example.invalid:port/shop/checkout.git", "", []string{}},
+		{"ssh://git@example.invalid:2222/shop/checkout.git", "checkout", []string{"checkout"}},
+		{"file:///srv/git/checkout.git", "checkout", []string{"checkout"}},
+		{"git@example.invalid:shop/checkout.git", "checkout", []string{"checkout"}},
+		{"git@example.invalid:checkout.git", "checkout", []string{"checkout"}},
+		{"git@example.invalid:", "", []string{}},
+		{"someone:SECRET999@example.invalid/shop/checkout.git", "checkout", []string{"checkout"}},
+		{"/srv/git/checkout.git", "checkout", []string{"checkout"}},
+		{"../checkout", "checkout", []string{"checkout"}},
+		{`C:\Users\someone\checkout`, "", []string{}},
+		{`\\fileserver\share\checkout.git`, "", []string{}},
+		{"https://example.invalid/shop/Billing%20Engine.git", "Billing Engine", []string{"billing-engine", "billing.engine", "billing_engine", "billingengine"}},
+	} {
+		fsys := fstest.MapFS{".git/config": {Data: []byte("[remote \"origin\"]\n\turl = " + tt.remote + "\n")}}
+		require.Equal(t, tt.name, RepositoryName(fsys), tt.remote)
+		p, err := PlanDiscovery(fsys, ".", nil)
+		require.NoError(t, err)
+		require.Equal(t, tt.sent, p.Sent, tt.remote)
+	}
+}
+
 func TestExtractTemplateNamesAreNotSent(t *testing.T) {
 	for _, name := range []string{"${SERVICE_NAME}", "{{ .Values.name }}"} {
 		p, err := PlanDiscovery(fstest.MapFS{"package.json": {Data: []byte(`{"name":"` + name + `"}`)}}, ".", nil)
