@@ -162,7 +162,11 @@ func satAdd(a, b int64) int64 {
 	return a + b
 }
 
-func satAddInt(a, b int) int { return int(satAdd(int64(a), int64(b))) }
+// satAddInt is satAdd for an int, which is narrower than an int64 on a 32-bit
+// platform.
+func satAddInt(a, b int) int {
+	return int(min(max(satAdd(int64(a), int64(b)), math.MinInt), math.MaxInt))
+}
 
 func satSub(a, b int64) int64 {
 	switch {

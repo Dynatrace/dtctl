@@ -154,7 +154,7 @@ func (h *Hotspots) Stacks(appOnly bool) StackView {
 		v.Samples = satAddInt(v.Samples, r.Running)
 	}
 	if len(v.Rows) == 0 {
-		v.Empty = h.whyEmpty("")
+		v.Empty = h.whyEmpty(appOnly, "")
 	}
 	return v
 }
@@ -207,7 +207,7 @@ func (h *Hotspots) Functions(appOnly bool, state State, by SortKey) (FunctionVie
 	}
 	v := hotspotFunctions(h.result, appOnly, state, by)
 	if len(v.Rows) == 0 {
-		v.Empty = h.whyEmpty(state)
+		v.Empty = h.whyEmpty(appOnly, state)
 	}
 	return v, nil
 }
@@ -228,7 +228,7 @@ func (h *Hotspots) Focus(appOnly bool, state State, pattern string) (FocusView, 
 		return FocusView{}, err
 	}
 	if v.Function == "" {
-		v.Empty = h.whyEmpty(state)
+		v.Empty = h.whyEmpty(appOnly, state)
 	}
 	return v, nil
 }
@@ -250,16 +250,17 @@ const (
 	EmptyAppOnly EmptyReason = "app_only"
 )
 
-// whyEmpty says why a view that has no rows has none. state is the thread
-// state a per-function view counted, and empty for the stack view. The reason
-// is read from the data, in a fixed order: no samples at all, then none in
-// that state, and only then appOnly, which is all that is left to have removed
-// them.
-func (h *Hotspots) whyEmpty(state State) EmptyReason {
+// whyEmpty says why a view that has no rows has none. appOnly is what the view
+// was read with, and state the thread state a per-function view counted, empty
+// for the stack view. The reason is read from the data, in a fixed order: no
+// samples at all, then none in that state, and only then appOnly, which is all
+// that is left to have removed them. A view read without appOnly never has
+// that reason.
+func (h *Hotspots) whyEmpty(appOnly bool, state State) EmptyReason {
 	if len(hotspotStacks(h.result, false)) == 0 {
 		return EmptyNoSamples
 	}
-	if state != "" && hotspotFunctions(h.result, false, state, SortBySelf).Samples == 0 {
+	if state != "" && (!appOnly || hotspotFunctions(h.result, false, state, SortBySelf).Samples == 0) {
 		return EmptyState
 	}
 	return EmptyAppOnly

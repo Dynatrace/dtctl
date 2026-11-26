@@ -121,7 +121,7 @@ func hotspotStacks(raw interface{}, appOnly bool) []StackRow {
 			path = append(slices.Clip(stack), n.label)
 		}
 		self := n.self(nodeMap)
-		if len(path) > 0 && sampleTotal(self) > 0 {
+		if len(path) > 0 && hasSamples(self) {
 			key := strings.Join(path, ";")
 			m := agg[key]
 			if m == nil {
@@ -130,7 +130,7 @@ func hotspotStacks(raw interface{}, appOnly bool) []StackRow {
 				order = append(order, key)
 			}
 			for k, v := range self {
-				m[k] += v
+				m[k] = satAddInt(m[k], v)
 			}
 		}
 		for _, cid := range n.children {
@@ -154,14 +154,15 @@ func hotspotStacks(raw interface{}, appOnly bool) []StackRow {
 	return rows
 }
 
-// sampleTotal sums a node's per-state sample counts; a node with zero total
-// contributes no line to the fold.
-func sampleTotal(s map[string]int) int {
-	t := 0
+// hasSamples reports whether a node has samples of its own in any thread
+// state; a node with none contributes no line to the fold.
+func hasSamples(s map[string]int) bool {
 	for _, v := range s {
-		t += v
+		if v > 0 {
+			return true
+		}
 	}
-	return t
+	return false
 }
 
 // allocationStacks folds a memory allocation result into one row per unique
@@ -233,10 +234,10 @@ func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 		v := intVal(n.ai, key)
 		for _, cid := range n.children {
 			if c := nodeMap[cid]; c != nil {
-				v -= intVal(c.ai, key)
+				v = max(v-intVal(c.ai, key), 0) // at every step, as treeNode.self
 			}
 		}
-		return max(v, 0)
+		return v
 	}
 
 	visited := make(map[string]bool, len(nodeMap))

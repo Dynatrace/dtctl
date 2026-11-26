@@ -105,7 +105,7 @@ func ParseSortKey(s string) (SortKey, error) {
 func stateValue(samples map[string]int, state State) int {
 	v := 0
 	for _, k := range stateKeys[state] {
-		v += samples[k]
+		v = satAddInt(v, samples[k])
 	}
 	return v
 }
@@ -268,18 +268,19 @@ func (w *funcWalk) walk(id, nearest string, key uint64, inFocus bool, callee str
 	self := stateValue(n.self(w.nodes), w.state)
 	if inFocus && self > 0 {
 		if callee == "" {
-			w.ownSelf += self
+			w.ownSelf = satAddInt(w.ownSelf, self)
 		} else {
-			w.callees[callee] += self
+			w.callees[callee] = satAddInt(w.callees[callee], self)
 		}
 	}
 	sub := self
 	for _, cid := range n.children {
-		sub += w.walk(cid, label, key, inFocus, callee)
+		sub = satAddInt(sub, w.walk(cid, label, key, inFocus, callee))
 	}
 
 	if label != "" && self > 0 {
-		w.acc(label).self += self
+		a := w.acc(label)
+		a.self = satAddInt(a.self, self)
 	}
 	if kept {
 		w.onPath[label]--
@@ -287,7 +288,7 @@ func (w *funcWalk) walk(id, nearest string, key uint64, inFocus bool, callee str
 		if outermost {
 			// The outermost occurrence's subtree already holds every nested
 			// (recursive) one, so total counts each sample once.
-			a.total += sub
+			a.total = satAddInt(a.total, sub)
 		}
 		if sub > 0 {
 			a.paths[key] = struct{}{}
@@ -296,7 +297,7 @@ func (w *funcWalk) walk(id, nearest string, key uint64, inFocus bool, callee str
 			if caller == "" {
 				caller = RootCaller
 			}
-			w.callers[caller] += sub
+			w.callers[caller] = satAddInt(w.callers[caller], sub)
 		}
 	}
 	return sub
@@ -353,7 +354,7 @@ func hotspotFunctions(raw interface{}, appOnly bool, state State, sortBy SortKey
 	w.walk(root, "", 0, false, "")
 
 	for _, a := range w.funcs {
-		t.Samples += a.self
+		t.Samples = satAddInt(t.Samples, a.self)
 	}
 	if t.Samples == 0 {
 		return t

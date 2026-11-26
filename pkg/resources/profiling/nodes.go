@@ -40,9 +40,8 @@ func hotspotTree(raw interface{}) (map[string]*treeNode, string) {
 		}
 		if cids, ok := nm["childIds"].([]interface{}); ok {
 			for _, c := range cids {
-				if s, ok := c.(string); ok {
-					nd.children = append(nd.children, s)
-				}
+				// Read as a node's own id is: the API writes either form.
+				nd.children = append(nd.children, nodeIDStr(c))
 			}
 		}
 		nodeMap[nodeIDStr(nm["id"])] = nd
@@ -64,12 +63,10 @@ func (n *treeNode) self(nodeMap map[string]*treeNode) map[string]int {
 			continue
 		}
 		for k, v := range c.samples {
-			self[k] -= v
-		}
-	}
-	for k, v := range self {
-		if v < 0 {
-			self[k] = 0
+			// Clamped at every step, not once at the end: no count is
+			// negative, so the result is the same, and children that
+			// together exceed the largest count cannot wrap it around.
+			self[k] = max(self[k]-v, 0)
 		}
 	}
 	return self
@@ -189,7 +186,7 @@ func nodeSamples(n map[string]interface{}) map[string]int {
 	}
 	for k := range out {
 		if v, ok := s[k].(float64); ok {
-			out[k] = floatInt(v)
+			out[k] = count(v)
 		}
 	}
 	return out
@@ -212,8 +209,13 @@ func strVal(m map[string]interface{}, key string) string {
 
 func intVal(m map[string]interface{}, key string) int {
 	v, _ := m[key].(float64)
-	return floatInt(v)
+	return count(v)
 }
+
+// count is the count a JSON number stands for. A negative one is no count: it
+// would turn into samples of the frame above, whose own share is its count
+// minus its children's.
+func count(v float64) int { return max(floatInt(v), 0) }
 
 // floatInt is the integer a JSON number stands for, held at the nearest int
 // where it has none: converting a float64 out of range does not fail but gives
