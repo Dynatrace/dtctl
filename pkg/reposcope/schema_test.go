@@ -160,6 +160,9 @@ func TestCheck(t *testing.T) {
 		{name: "an entry of annotations alone", doc: entry("name: checkout", "annotations: {owner: a}"),
 			msg: `binds nothing`},
 
+		{name: "a cluster that is no uid, on a workload already listed without one",
+			doc: entry("name: checkout", "workloads:", "  - {namespace: ns, name: w}", `  - {namespace: ns, name: w, cluster-uid: "\e[2J"}`),
+			msg: `workloads[1] cluster-uid "\x1b[2J" is not a Kubernetes cluster uid`},
 		{name: "apiVersion v2", doc: "apiVersion: v2\n" + entry("name: checkout", "service-names: [checkout]"),
 			msg: `apiVersion "v2" on line 1 is not supported (this dtctl reads "v1")`},
 		{name: "uppercase host", doc: "environments:\n  ABC12345.apps.dynatrace.com:\n    - name: checkout\n      service-names: [checkout]\n",

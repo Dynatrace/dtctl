@@ -293,6 +293,18 @@ func (e *Entry) validate() *InvalidError {
 	// cluster (true) or without one.
 	bound := map[Workload]bool{}
 	for i, w := range e.Workloads {
+		// A workload's own fields first: the two checks after them name the
+		// workload, and a message quotes no value that has not passed its
+		// pattern.
+		if w.ClusterUID != "" && !clusterUIDRe.MatchString(w.ClusterUID) {
+			return invalid(fmt.Sprintf("workloads[%d] cluster-uid %q is not a Kubernetes cluster uid (a lowercase UUID, the value of %s)", i, w.ClusterUID, fieldClusterUID))
+		}
+		if !dnsLabelRe.MatchString(w.Namespace) {
+			return invalid(fmt.Sprintf("workloads[%d] namespace %q is not a Kubernetes namespace name", i, w.Namespace))
+		}
+		if len(w.Name) > maxDNSSubdomain || !dnsSubdomainRe.MatchString(w.Name) {
+			return invalid(fmt.Sprintf("workloads[%d] name %q is not a Kubernetes workload name", i, w.Name))
+		}
 		if workloads[w] {
 			return invalid(fmt.Sprintf("workloads[%d] %s is listed twice", i, w))
 		}
@@ -305,15 +317,6 @@ func (e *Entry) validate() *InvalidError {
 			return invalid(fmt.Sprintf("workloads[%d] %s is listed with and without a cluster; without one it selects the workload in every cluster", i, w))
 		}
 		bound[anywhere] = w.ClusterUID != ""
-		if w.ClusterUID != "" && !clusterUIDRe.MatchString(w.ClusterUID) {
-			return invalid(fmt.Sprintf("workloads[%d] cluster-uid %q is not a Kubernetes cluster uid (a lowercase UUID, the value of %s)", i, w.ClusterUID, fieldClusterUID))
-		}
-		if !dnsLabelRe.MatchString(w.Namespace) {
-			return invalid(fmt.Sprintf("workloads[%d] namespace %q is not a Kubernetes namespace name", i, w.Namespace))
-		}
-		if len(w.Name) > maxDNSSubdomain || !dnsSubdomainRe.MatchString(w.Name) {
-			return invalid(fmt.Sprintf("workloads[%d] name %q is not a Kubernetes workload name", i, w.Name))
-		}
 	}
 	if err := e.validateSegments(); err != nil {
 		return err
