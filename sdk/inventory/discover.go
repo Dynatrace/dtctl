@@ -35,6 +35,17 @@ type RunResult struct {
 	// reports both as a warning on a 200 rather than an error. A probe that
 	// assumed its requested ratio had been honoured would extrapolate a
 	// refused object's count by that whole factor.
+	//
+	// False is also what a Runner that never sets the field reports, so what
+	// discovery concludes from it is part of the contract. On the sampled
+	// retry of a scan-capped probe (sampling.go), a result without the flag
+	// that matched nothing and was not cut short is read as an empty rung,
+	// and the next ratio is tried. One that matched a record or was cut short
+	// is read as the capped query run again, which ends the retries. Either
+	// way an unflagged result supplies no count and no bound, so a Runner
+	// that leaves Sampled unset loses every sampled verdict: the signal stays
+	// "unknown", it never gets a wrong count. Copy the flag from the
+	// response's metadata.
 	Sampled bool
 }
 

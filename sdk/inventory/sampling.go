@@ -27,8 +27,9 @@ import (
 // What makes this usable for arrival verification is an asymmetry. Sampling
 // only ever drops records, so a sampled *hit* proves arrival at any ratio: it
 // is as conclusive as an exhaustive one. A sampled *miss* proves much less. So
-// the ladder below does not converge on precision — it stops at the first
-// conclusive answer, which is usually the very first and cheapest rung.
+// the ladder below does not converge on a precise count: it stops at the first
+// rung whose sample is thick enough to date the arrival as well as prove it,
+// which is usually the very first and cheapest rung.
 //
 // The error that remains scales inversely with volume, and the scan cap only
 // binds on high volume, so the two failure modes barely overlap: the signals
@@ -40,11 +41,20 @@ import (
 // finer step to take and asking for one silently gets a coarser probe than the
 // evidence would claim.
 //
-// Descending is what makes the walk affordable. A hit ends it, so the common
-// case costs one near-free query; each further rung costs roughly ten times the
-// last, and the walk stops as soon as a rung is itself cut short by the cap. The
-// total is therefore bounded at a little over one cap's worth of scan, not one
-// per rung.
+// Descending is what makes the walk affordable. A rung that matches
+// minSampledRecords or more ends it, so the common case costs one near-free
+// query. A thinner hit does not: it proves arrival but cannot date it, so the
+// walk keeps descending to thicken the sample, and it also continues past a
+// rung that matched nothing, flagged as sampled or not. Each further rung reads
+// roughly ten times the last, and the walk ends at the first rung that is cut
+// short, so while every rung is sampled the total is bounded at a little over
+// one cap's worth of scan, not one per rung.
+//
+// That bound is an argument about sampled rungs only. A rung the environment
+// answered without sampling reads everything. The walk ends on such a rung
+// when it matched a record or was cut short, which is how the unsampled retry
+// of a capped stream comes back, but nothing in a response says how much an
+// unflagged rung that matched nothing has scanned.
 var samplingLadder = []int64{100000, 10000, 1000, 100, 10}
 
 // minSampledRecords is how many sampled records a rung must match before its

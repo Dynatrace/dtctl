@@ -28,6 +28,11 @@ import (
 // Rather than document those as rules to follow, the helpers below do the
 // translation, so a Runner over the Dynatrace query API can hand the response
 // straight through. See RunResult.
+//
+// A third field needs no helper because it is a plain copy, and omitting it
+// degrades rather than misleads: RunResult.Sampled is the response's
+// metadata.sampled. A Runner that leaves it false gets no sampled recovery for
+// a scan-capped stream, which then stays "unknown".
 
 // ColumnTypesOf flattens the query API's per-index-range type blocks into the
 // single column→type map RunResult carries.

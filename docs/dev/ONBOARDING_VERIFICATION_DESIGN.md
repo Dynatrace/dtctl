@@ -596,10 +596,18 @@ telemetry is not implicated.
   probe fell from **341 GB to 0.92 GB** at 1-in-1000 while landing within **1.5%** of the true
   count, turning an `unknown` into a real `live`. Four properties make it safe to lean on, and
   each is a guarded rule rather than an assumption:
-  - *A hit is conclusive at any ratio*, because sampling only ever drops records. So the
-    ladder walks **most-aggressive-first and stops at the first hit** — it does not converge
-    on precision, which would cost ~10x per extra rung for no change in verdict
-    (`TestSampledProbeStopsAtFirstConclusiveRung`).
+  - *A hit is conclusive about arrival at any ratio*, because sampling only ever drops
+    records. So the ladder walks **most-aggressive-first and stops at the first rung that
+    matches 30 records or more** — it does not converge on a precise count, which would cost
+    ~10x per extra rung for no change in verdict (`TestSampledProbeStopsAtFirstConclusiveRung`).
+    A thinner hit proves arrival but cannot date it, so the walk keeps descending, and ends
+    on the last hit it made when no rung reaches 30
+    (`TestThinSampleDescendsForATrustworthyAge`). The walk also continues past a rung that
+    matched nothing, and ends at the first rung that is cut short. While every rung is
+    sampled, that bounds the total scan at a little over one cap. The bound says nothing
+    about a rung the environment answered without sampling: such a rung ends the walk when
+    it matched a record or was cut short, but a response does not say how much an unflagged
+    rung that matched nothing has scanned.
   - *A miss is a bound, not an absence.* A sampled zero stays `unknown` and reports the
     population it can rule out (~3x the ratio, at 95%). This is strictly better evidence than
     the truncation it replaces, which covers an unspecified slice of the window and supports
