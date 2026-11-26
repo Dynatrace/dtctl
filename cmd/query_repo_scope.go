@@ -239,12 +239,15 @@ type repoScopedQuery struct {
 	zeroRows bool
 	// scanBounded is set when the fetch stage bounds its own scan.
 	scanBounded bool
+	// scanLifted is set when a scan limit of -1, in the fetch stage or as
+	// the flag's default, removes the limit altogether.
+	scanLifted bool
 	// unboundedScan is set when the scope line said nothing bounds the scan
-	// below the environment's default cap. It implies scanCapNoticed, which
-	// a capped result after the run sets too.
+	// below the environment's default cap, or at all. That is advice given
+	// before the run, and does not stand in for the observation below.
 	unboundedScan bool
-	// scanCapNoticed is set once the scan-cap line is printed, or once the
-	// scope line made it redundant, so a caller that polls prints it once.
+	// scanCapNoticed is set once the scan-cap line is printed, so a caller
+	// that polls prints it once.
 	scanCapNoticed bool
 }
 
@@ -305,6 +308,7 @@ func (q *repoScopedQuery) rewrite(res *reposcope.Status) (refused string) {
 	if q.bound {
 		rw := dql.InsertFilter(q.Query, reposcope.Filters(e))
 		q.Query, q.scanBounded, q.filtered = rw.Query, rw.ScanBounded, rw.Outcome == dql.Applied
+		q.scanLifted = rw.ScanLimitLifted
 		q.scope.DataObject, q.scope.Filter = rw.DataObject, rw.Filter
 		code, reason := string(rw.Outcome), rw.Reason
 		// The rewrite only knows the filters it was given. For an object
@@ -594,8 +598,10 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	switch {
 	case q.filtered:
 		clause := ""
-		if !q.scanBounded && limits != nil && limits.ScanLimitGbytes <= 0 && limits.SamplingRatio <= 1 {
-			q.unboundedScan, q.scanCapNoticed = true, true
+		// The fetch stage's own limit wins over the flag's default.
+		if !q.scanBounded && limits != nil && limits.SamplingRatio <= 1 && (q.scanLifted || limits.ScanLimitGbytes <= 0) {
+			q.unboundedScan = true
+			q.scanLifted = q.scanLifted || limits.ScanLimitGbytes < 0
 			clause = "; " + q.scanClause()
 		}
 		output.FprintInfo(q.stderr, "applying repo scope %s to fetch %s: %s%s%s%s",
@@ -703,6 +709,10 @@ func (q *repoScopedQuery) noticeScanCap(_ int, result *exec.DQLQueryResponse) {
 // scanClause ends the scope line of a run nothing bounds the scan of, and is
 // the envelope's suggestion for it.
 func (q *repoScopedQuery) scanClause() string {
+	if q.scanLifted {
+		return fmt.Sprintf("the repo scope filters early with %s, and no scan limit applies to this query (a scanLimitGBytes of -1): set a positive one to bound the scan",
+			q.comparisons())
+	}
 	return fmt.Sprintf("the repo scope filters early with %s, but no scan limit is set for this query, so the environment's default cap applies: add scanLimitGBytes: or --default-scan-limit-gbytes to scan less",
 		q.comparisons())
 }
@@ -759,11 +769,12 @@ func (q *repoScopedQuery) decorate(c *output.ResponseContext, result *exec.DQLQu
 	case q.scope.Applied:
 		c.Suggestions = append(c.Suggestions, "run unscoped: "+q.asTyped())
 	}
+	// One scan suggestion: the cap that was hit, or else the advice.
 	switch {
-	case q.unboundedScan:
-		c.Suggestions = append(c.Suggestions, q.scanClause())
 	case q.filtered && scanCapped(result):
 		c.Suggestions = append(c.Suggestions, q.scanCapNotice())
+	case q.unboundedScan:
+		c.Suggestions = append(c.Suggestions, q.scanClause())
 	}
 }
 

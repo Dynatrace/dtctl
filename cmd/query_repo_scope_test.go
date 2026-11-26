@@ -291,11 +291,14 @@ func TestQueryRepoScope_ScanLinesNameTheFilter(t *testing.T) {
 			chdirTestRepo(t, tc.file)
 			_, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
 			clause := "the repo scope filters early with " + tc.with + ", but no scan limit is set for this query"
+			capped := "repo scope checkout already filters early with " + tc.with + ", and the scan still hit its cap"
 			require.Contains(t, stderr, clause)
-			require.Contains(t, strings.Join(agentEnvelope(t, stdout).Context.Suggestions, "\n"), clause)
+			require.Contains(t, stderr, capped)
+			require.Contains(t, strings.Join(agentEnvelope(t, stdout).Context.Suggestions, "\n"), capped)
 
 			_, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--default-scan-limit-gbytes", "5"}, RunOptions{})
-			require.Contains(t, stderr, "repo scope checkout already filters early with "+tc.with+", and the scan still hit its cap")
+			require.Contains(t, stderr, capped)
+			require.NotContains(t, stderr, clause)
 		})
 	}
 }
@@ -558,37 +561,39 @@ const repoScopeScanCapNotice = "repo scope checkout already filters early with =
 
 // A scoped query nothing bounds the scan of says so before it is sent: in the
 // scope line, and as the envelope's one scan suggestion. A positive scan limit
-// (ScanCapNotice runs with one) or a sampling ratio above 1 bounds it; -1, as
-// a flag or in the query, is no bound. The clause makes the post-run notice
-// redundant.
+// (ScanCapNotice runs with one) or a sampling ratio above 1 bounds it. A
+// limit of -1, as a flag or in the query, lifts the environment's default cap
+// as well, and the clause says that instead of naming a cap that is gone.
 func TestQueryRepoScope_ScanClause(t *testing.T) {
 	optInRepoScope(t)
-	newDQLRecorder(t, "readonly", answer(http.StatusOK, scanCappedRecord))
+	newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
 	chdirTestRepo(t, checkoutScope)
+	const lifted = "the repo scope filters early with ==, and no scan limit applies to this query (a scanLimitGBytes of -1): set a positive one to bound the scan"
 
 	for _, tc := range []struct {
 		name   string
 		query  string
 		args   []string
-		clause bool
+		clause string
 	}{
-		{"no limit", repoScopeTypedQuery, nil, true},
-		{"unlimited", repoScopeTypedQuery, []string{"--default-scan-limit-gbytes", "-1"}, true},
-		{"unlimited in the query", "fetch logs, scanLimitGBytes: -1 | limit 5", nil, true},
-		{"a sampling ratio", repoScopeTypedQuery, []string{"--default-sampling-ratio", "100"}, false},
+		{"no limit", repoScopeTypedQuery, nil, repoScopeScanClause},
+		{"unlimited", repoScopeTypedQuery, []string{"--default-scan-limit-gbytes", "-1"}, lifted},
+		{"unlimited in the query", "fetch logs, scanLimitGBytes: -1 | limit 5", nil, lifted},
+		{"unlimited in the query, whatever the flag", "fetch logs, scanLimitGBytes: -1 | limit 5", []string{"--default-scan-limit-gbytes", "5"}, lifted},
+		{"a sampling ratio", repoScopeTypedQuery, []string{"--default-sampling-ratio", "100"}, ""},
+		{"a limit in the query", "fetch logs, scanLimitGBytes: 5 | limit 5", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := runRepoScoped(append([]string{"query", tc.query, "--agent"}, tc.args...), RunOptions{})
 			require.Zero(t, code, stderr)
 			suggestions := agentEnvelope(t, stdout).Context.Suggestions
-			if !tc.clause {
-				require.NotContains(t, stderr, repoScopeScanClause)
-				require.NotContains(t, suggestions, repoScopeScanClause)
+			if tc.clause == "" {
+				require.NotContains(t, stderr, "scan limit")
+				require.NotContains(t, strings.Join(suggestions, "\n"), "scan limit")
 				return
 			}
-			require.Equal(t, repoScopeNotice, stderr)
-			require.Contains(t, suggestions, repoScopeScanClause)
-			require.NotContains(t, suggestions, repoScopeScanCapNotice, "one scan suggestion")
+			require.Equal(t, repoScopeApplying+"; "+tc.clause+"\n", stderr)
+			require.Contains(t, suggestions, tc.clause)
 		})
 	}
 }
@@ -624,9 +629,18 @@ func TestQueryRepoScope_ScanCapNotice(t *testing.T) {
 	require.Len(t, srv.queries(), 2)
 	require.Equal(t, 1, strings.Count(stderr, repoScopeScanCapNotice), stderr)
 
+	// What is said before the run is advice; the cap that was then hit is an
+	// observation, and is reported once whatever the advice said.
 	_, _, stderr = runRepoScoped(wait, RunOptions{})
 	require.Equal(t, 1, strings.Count(stderr, repoScopeScanClause), stderr)
-	require.NotContains(t, stderr, repoScopeScanCapNotice)
+	require.Equal(t, 1, strings.Count(stderr, repoScopeScanCapNotice), stderr)
+
+	code, stdout, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, repoScopeNotice+repoScopeScanCapNotice+"\n", stderr)
+	suggestions := agentEnvelope(t, stdout).Context.Suggestions
+	require.Contains(t, suggestions, repoScopeScanCapNotice)
+	require.NotContains(t, suggestions, repoScopeScanClause, "one scan suggestion, and the observation is it")
 }
 
 // A scoped query that fails keeps the query's own error code and adds what was
