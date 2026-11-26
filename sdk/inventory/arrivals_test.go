@@ -340,6 +340,50 @@ func TestAllZeroTripwire(t *testing.T) {
 	if allZeroTripwire(withNA) == "" {
 		t.Error("an inapplicable signal must not suppress the tripwire")
 	}
+
+	// An unknown says nothing about the scope unless it carries a match: a
+	// sampled hit too thin to date is unknown and has still proven that the
+	// scope selects records. "Every signal matched 0 records" is then false,
+	// and the scope is the one thing known to be right.
+	for name, matched := range map[string]Signal{
+		"a sampled count":       {Name: "logs", State: SignalUnknown, RecordsSampled: 2},
+		"an extrapolated count": {Name: "logs", State: SignalUnknown, Records: 200000},
+	} {
+		if n := allZeroTripwire([]Signal{{Name: "rum", State: SignalEmpty}, {Name: "spans", State: SignalEmpty}, matched}); n != "" {
+			t.Errorf("an unknown signal with %s must suppress the tripwire, got %q", name, n)
+		}
+	}
+}
+
+// TestTripwireStaysQuietNextToAThinSampledHit drives the same case through
+// Discover: two empty streams and a logs signal whose sample matched records
+// but is too thin to date.
+func TestTripwireStaysQuietNextToAThinSampledHit(t *testing.T) {
+	runner := windowRunner()
+	rungs := []mockResponse{cappedLogs(), sampledRung(100000, 2, 200000, at(6, 0))}
+	for _, ratio := range []int64{10000, 1000, 100, 10} {
+		rungs = append(rungs, sampledRung(ratio, 0, 0, ""))
+	}
+	// spans matches nothing here, like user.events, and both hold data.
+	rungs = append(rungs, mockResponse{match: "fetch spans, from:now()-15m | filter k8s", records: []map[string]interface{}{rec("matched", "0")}})
+	runner.responses = append(rungs, runner.responses...)
+	opts := windowOpts()
+	opts.Signals = []string{"logs", "spans", "rum"}
+
+	inv := discoverWith(t, runner, opts)
+	if logs := signalByName(t, inv, "logs"); logs.State != SignalUnknown || logs.RecordsSampled != 2 {
+		t.Fatalf("logs state/sampled = %q/%d, want unknown/2", logs.State, logs.RecordsSampled)
+	}
+	for _, name := range []string{"spans", "rum"} {
+		if got := signalByName(t, inv, name).State; got != SignalEmpty {
+			t.Fatalf("%s state = %q, want empty", name, got)
+		}
+	}
+	for _, note := range inv.Notes {
+		if strings.Contains(note, "every signal matched 0 records") {
+			t.Errorf("note %q blames the scope while logs matched records for it", note)
+		}
+	}
 }
 
 func TestTimeFieldOnlyWithDataObject(t *testing.T) {

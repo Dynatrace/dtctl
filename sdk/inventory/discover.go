@@ -807,6 +807,12 @@ func needMetricCatalog(defs map[string]*CapabilityDef, opts DiscoverOptions, win
 func allZeroTripwire(signals []Signal) string {
 	evaluated, empty := 0, 0
 	for _, s := range signals {
+		// A match is a match in any state. A sampled hit too thin to date is
+		// unknown and has still shown that the scope selects records, which
+		// is the one thing this warning doubts.
+		if s.Records > 0 || s.RecordsSampled > 0 {
+			return ""
+		}
 		switch s.State {
 		// None of these say anything about whether the scope is valid, so
 		// none of them can weigh against the wrong-scope explanation. Leaving
