@@ -60,14 +60,17 @@ type Status struct {
 // entries that cover relDir as closely (see Ambiguous).
 //
 // Path comparison folds case on darwin and windows and is exact elsewhere.
+// The Status holds a copy of the entry, so it stays the answer it was when f
+// changes.
 func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 	s := &Status{File: FileName, Environment: host, Dir: relDir, Warning: f.Warning(), Hosts: f.Hosts()}
-	entries := f.Entries(host)
+	entries := f.Environments[host]
 	build := newGradleCoverage(repo, entries, relDir)
+	var entry *Entry
 	switch {
 	case name != "":
-		s.Entry = entryNamed(entries, name)
-		if s.Entry == nil {
+		entry = entryNamed(entries, name)
+		if entry == nil {
 			return nil, &NotFoundError{Name: name, Host: host, Known: f.Names(host)}
 		}
 	case len(entries) == 0:
@@ -78,16 +81,16 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		return s, nil
 	default:
 		var tied []*Entry
-		if s.Entry, tied = closestEntry(entries, relDir, build); tied != nil {
-			names := []string{s.Entry.Name}
+		if entry, tied = closestEntry(entries, relDir, build); tied != nil {
+			names := []string{entry.Name}
 			for _, e := range tied {
 				names = append(names, e.Name)
 			}
 			s.Reason = fmt.Sprintf("covered by entries %s; pick one with --repo-scope <name>", joinAnd(names))
-			s.tied, s.Entry = true, nil
+			s.tied, entry = true, nil
 		}
 	}
-	if s.Entry == nil {
+	if entry == nil {
 		if s.Reason == "" {
 			s.Reason = fmt.Sprintf("no entry covers %q; entries here cover %s; pick one with --repo-scope <name>",
 				relDir, strings.Join(entryPaths(entries), ", "))
@@ -95,13 +98,15 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		s.Others = othersThan(entries, "")
 		return s, nil
 	}
-	if e := s.Entry; e.Path != "" && !covers(e.Path, relDir) {
-		if build.owns(e) {
-			s.Reason = fmt.Sprintf("covered through the Gradle build: %s depends on %s", e.Path, build.module)
+	if entry.Path != "" && !covers(entry.Path, relDir) {
+		if build.owns(entry) {
+			s.Reason = fmt.Sprintf("covered through the Gradle build: %s depends on %s", entry.Path, build.module)
 		} else {
-			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", e.Path, relDir)
+			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", entry.Path, relDir)
 		}
 	}
+	e := entry.clone()
+	s.Entry = &e
 	s.Linked = true
 	s.Others = othersThan(entries, s.Entry.Name)
 	s.Filters = map[string]string{}

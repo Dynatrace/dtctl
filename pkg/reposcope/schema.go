@@ -542,9 +542,38 @@ func (f *File) Remove(host, name string) bool {
 	return false
 }
 
-// Entries returns the entries for host, nil when the host has none.
+// Entries returns a copy of the entries for host, nil when the host has
+// none. Upsert and Remove are how the file changes.
 func (f *File) Entries(host string) []Entry {
-	return f.Environments[host]
+	entries := f.Environments[host]
+	if entries == nil {
+		return nil
+	}
+	out := make([]Entry, len(entries))
+	for i := range entries {
+		out[i] = entries[i].clone()
+	}
+	return out
+}
+
+// clone is a copy of e that shares nothing with it.
+func (e *Entry) clone() Entry {
+	c := *e
+	c.Workloads = slices.Clone(e.Workloads)
+	c.ServiceNames = slices.Clone(e.ServiceNames)
+	c.ProcessGroups = slices.Clone(e.ProcessGroups)
+	c.Services = slices.Clone(e.Services)
+	c.Segments = slices.Clone(e.Segments)
+	for i, seg := range c.Segments {
+		if seg.Variables == nil {
+			continue
+		}
+		c.Segments[i].Variables = make(map[string][]string, len(seg.Variables))
+		for name, values := range seg.Variables {
+			c.Segments[i].Variables[name] = slices.Clone(values)
+		}
+	}
+	return c
 }
 
 // Names lists the entry names for host, in file order.

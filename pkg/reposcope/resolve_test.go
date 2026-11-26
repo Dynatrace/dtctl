@@ -226,3 +226,35 @@ func TestResolve_Status(t *testing.T) {
 		Hosts:   []string{prodHost, stgHost},
 	}, r)
 }
+
+// A Status is an answer about the file as it was. It does not change when
+// the file does, and nothing done to it reaches the file.
+func TestResolve_StatusIsACopy(t *testing.T) {
+	f := exampleFile()
+	f.Environments[prodHost][0].Segments = []Segment{{ID: "Ab3dEf9hIjk", Variables: map[string][]string{"env": {"prod"}}}}
+	r, err := Resolve(fstest.MapFS{}, f, prodHost, "services/checkout", "")
+	require.NoError(t, err)
+
+	f.Upsert(prodHost, Entry{Name: "checkout", Path: "services/checkout", ServiceNames: []string{"cart"}})
+	assert.Equal(t, []string{"checkout"}, r.Entry.ServiceNames, "the entry the filters were rendered from")
+	assert.Contains(t, r.Filters["logs"], `service.name == "checkout"`)
+
+	f = exampleFile()
+	f.Environments[prodHost][0].Segments = []Segment{{ID: "Ab3dEf9hIjk", Variables: map[string][]string{"env": {"prod"}}}}
+	r, err = Resolve(fstest.MapFS{}, f, prodHost, "services/checkout", "checkout")
+	require.NoError(t, err)
+	r.Entry.ServiceNames[0] = "cart"
+	r.Entry.Workloads[0].Name = "cart"
+	r.Entry.Segments[0].Variables["env"][0] = "stage"
+	r.Entry.Segments[0].Variables["more"] = []string{"x"}
+	want := exampleFile()
+	want.Environments[prodHost][0].Segments = []Segment{{ID: "Ab3dEf9hIjk", Variables: map[string][]string{"env": {"prod"}}}}
+	assert.Equal(t, want, f)
+
+	// Entries hands out a copy too.
+	entries := f.Entries(prodHost)
+	entries[0].ServiceNames[0] = "cart"
+	entries[1] = Entry{}
+	assert.Equal(t, want, f)
+	assert.Nil(t, f.Entries(stgHost+".invalid"))
+}
