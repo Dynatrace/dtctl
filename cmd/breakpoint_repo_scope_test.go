@@ -355,7 +355,7 @@ func TestCreateBreakpoint_SetsNoFiltersUnasked(t *testing.T) {
 // names the command that applies them: an update, since the breakpoint
 // exists by then. In agent mode the line is a suggestion.
 func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
-	const hint = "workspace %s's filters (k8s.namespace.name:web) are not the ones repo scope checkout, which covers this directory, renders (k8s.namespace.name:payments,k8s.workload.name:checkout); to apply them: dtctl update breakpoint --repo-scope checkout"
+	const hint = "workspace %s's filters (k8s.namespace.name:web) are not the ones repo scope checkout, which covers this directory, renders (k8s.namespace.name:payments,k8s.workload.name:checkout); to apply them: dtctl --context c update breakpoint --repo-scope checkout"
 	t.Run("other filters", func(t *testing.T) {
 		srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
 		repo := filepath.Base(chdirTestRepo(t, breakpointScope))
@@ -403,6 +403,30 @@ func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
 			require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
 		})
 	}
+}
+
+// The hint's line sets filters, so it carries the context of the create that
+// printed it: run as printed under another current context, it writes the
+// entry's filters to the workspace of the environment the create ran in.
+func TestCreateBreakpoint_HintKeepsTheContext(t *testing.T) {
+	prod := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+	staging := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+	writeIsolatedConfig(t, twoContextConfig(staging, prod))
+	ws := filepath.Base(chdirTestRepo(t, breakpointScope)) + "/checkout"
+
+	code, stdout, stderr := runRepoScoped([]string{"--context", "staging", "create", "breakpoint", "A.java:1", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	suggestions := agentEnvelope(t, stdout).Context.Suggestions
+	require.Len(t, suggestions, 1)
+	line := suggestedCommand(t, suggestions[0])
+	require.Equal(t, "dtctl --context staging update breakpoint --repo-scope checkout", line)
+
+	staging.reset()
+	require.Zero(t, runSuggested(t, line, "--agent", "--yes"))
+	require.Equal(t, []string{"UpdateWorkspaceV2"}, staging.mutations())
+	require.Equal(t, []string{ws}, staging.workedIn())
+	require.JSONEq(t, filterSetsJSON(checkoutSetJSON), staging.sentFilterSets(t))
+	require.Empty(t, prod.ops(), "nothing reaches the config's current context")
 }
 
 // Where the hint is off, a workspace without filters fails as it did before

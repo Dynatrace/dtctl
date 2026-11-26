@@ -145,8 +145,12 @@ repo scope checkout sets service.name, which is not verified as a workspace labe
     `context.suggestions` entry):
 
     ```text
-    workspace storefront/checkout's filters (k8s.namespace.name:web) are not the ones repo scope checkout, which covers this directory, renders (k8s.namespace.name:payments,k8s.workload.name:checkout); to apply them: dtctl update breakpoint --repo-scope checkout
+    workspace storefront/checkout's filters (k8s.namespace.name:web) are not the ones repo scope checkout, which covers this directory, renders (k8s.namespace.name:payments,k8s.workload.name:checkout); to apply them: dtctl --context staging update breakpoint --repo-scope checkout
     ```
+
+    The line names the context the create ran in (and the config, when
+    `--config` named it), so it reaches the same environment when it is run
+    later, under another current context.
 
   `DTCTL_NO_REPO_SCOPE=1` turns both off, and the commands then say what they
   said before repo scopes existed. `create breakpoint` has no
@@ -289,7 +293,8 @@ breakpoints, so `dtctl` prompts for confirmation unless you pass `--yes` (`-y`).
   second fails after the first, the filters stay as set and are not rolled
   back: the error names the workspace, its filters before and after, and the
   commands that show them, restore them where one command can, and try the
-  create again (in agent mode these are the first `error.suggestions`)
+  create again, each naming the context the create ran in (in agent mode
+  these are the first `error.suggestions`)
 - `--dry-run` is supported and sends nothing
 
 Example:

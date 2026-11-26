@@ -1,13 +1,41 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
 
+	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
+
+// breakpointSelectors are the global flags that pick the config and context
+// a breakpoint command ran against, for every line it suggests to carry (see
+// repoScopeSelectors). A workspace is found by its name alone, and a
+// repository names the same one in every environment, so a line that sets
+// filters or creates a breakpoint, run where another context is current,
+// would change that environment's workspace of the same name. A session has
+// no context a caller could name, so its lines carry none.
+func breakpointSelectors(ctx context.Context, cfg *config.Config) []string {
+	if currentSession(ctx) != nil {
+		return nil
+	}
+	return repoScopeSelectors(ctx, cfg)
+}
+
+// breakpointCommandLine is a dtctl line a breakpoint command suggests
+// running: the selectors, which arrive shell-quoted, then args, each quoted
+// here, so a file name or a label value a shell would split stays one word.
+func breakpointCommandLine(selectors []string, args ...string) string {
+	words := append([]string{"dtctl"}, selectors...)
+	for _, arg := range args {
+		words = append(words, exec.ShellQuote(arg))
+	}
+	return strings.Join(words, " ")
+}
 
 // workspaceFiltersChange is the filter change a create breakpoint made
 // before it created the breakpoint: the two are separate requests, so the
@@ -22,6 +50,11 @@ type workspaceFiltersChange struct {
 	scopeName string
 	// location is where the breakpoint was to be created.
 	location string
+	// covering is the entry the workspace is named after, for a change
+	// --filters made there: its filters are ones a command can set again.
+	covering coveringEntry
+	// selectors go into every line the error suggests.
+	selectors []string
 }
 
 // thenFailed is the error of a create that failed after the change.
@@ -63,22 +96,24 @@ func (e *filtersChangedError) Headline() string {
 // previous filters where one command can, and try the create again.
 func (e *filtersChangedError) Suggestions() []string {
 	c := e.change
-	named := ""
+	var named []string
 	if c.scopeName != "" {
-		named = " --" + repoScopeFlag + " " + c.scopeName
+		named = []string{"--" + repoScopeFlag, c.scopeName}
 	}
 	return []string{
 		fmt.Sprintf("the filters were not rolled back: every breakpoint in workspace %s is scoped by them now", c.workspace),
-		"to see the workspace and its filters: dtctl get breakpoints -v" + named,
+		"to see the workspace and its filters: " + breakpointCommandLine(c.selectors, append([]string{"get", "breakpoints", "-v"}, named...)...),
 		c.restore(),
-		fmt.Sprintf("to try again once the cause is fixed: dtctl create breakpoint %s%s", c.location, named),
+		"to try again once the cause is fixed: " + breakpointCommandLine(c.selectors, append([]string{"create", "breakpoint", c.location}, named...)...),
 	}
 }
 
 // restore says how to put the previous filters back, or why no one command
 // does. --filters sets one set of labels in the workspace of the working
 // directory, so it restores only that, and only where the change was made
-// there.
+// there. Anything else is restored by --repo-scope with the entry the
+// workspace is named after, when that entry renders exactly the previous
+// filters. A line is offered only when it sets them and nothing else.
 func (c workspaceFiltersChange) restore() string {
 	switch set, pasteable := pasteableFilterSet(c.before); {
 	case workspaceFilterSummary(c.before) == "":
@@ -86,9 +121,13 @@ func (c workspaceFiltersChange) restore() string {
 	case c.scopeName != "":
 		return "the previous filters are in this message; no single command restores them in a workspace --" + repoScopeFlag + " named"
 	case pasteable:
-		return "to restore the previous filters: dtctl update breakpoint --filters " + set
+		return "to restore the previous filters: " + breakpointCommandLine(c.selectors, "update", "breakpoint", "--filters", set)
+	case c.covering.name != "" && workspaceHolds(c.before, c.covering.sets):
+		return "to restore the previous filters: " + breakpointCommandLine(c.selectors, "update", "breakpoint", "--"+repoScopeFlag, c.covering.name)
+	case len(c.before) > 1 && c.covering.name != "":
+		return "the previous filters were several sets, which --filters cannot spell, and they are not the ones repo scope " + c.covering.name + " renders: they are in this message, and no single command restores them"
 	case len(c.before) > 1:
-		return "the previous filters were several sets, which --filters cannot spell: set them again from the repo scope entry that renders them, with dtctl update breakpoint --" + repoScopeFlag + " <name>"
+		return "the previous filters were several sets, which --filters cannot spell: they are in this message, and no single command restores them"
 	}
 	return "the previous filters are in this message; --filters cannot spell them"
 }

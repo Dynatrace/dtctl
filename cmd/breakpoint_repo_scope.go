@@ -122,13 +122,15 @@ func (cov coveringEntry) noFilters(workspace, location string) error {
 // hint is the one line a create prints after it made a breakpoint in a
 // workspace whose filters are not the covering entry's: the entry exists,
 // and this command applies it. It is empty when there is no such entry or
-// the workspace already holds its filters.
-func (cov coveringEntry) hint(workspace string, current []livedebugger.FilterSet) string {
+// the workspace already holds its filters. The command changes the
+// workspace's filters, so it carries selectors (breakpointSelectors).
+func (cov coveringEntry) hint(workspace string, current []livedebugger.FilterSet, selectors []string) string {
 	if cov.name == "" || workspaceHolds(current, cov.sets) {
 		return ""
 	}
-	return fmt.Sprintf("workspace %s's filters (%s) are not the ones repo scope %s, which covers this directory, renders (%s); to apply them: dtctl update breakpoint --%s %s",
-		workspace, workspaceFilterSummary(current), cov.name, filterSetsSummary(cov.sets), repoScopeFlag, cov.name)
+	return fmt.Sprintf("workspace %s's filters (%s) are not the ones repo scope %s, which covers this directory, renders (%s); to apply them: %s",
+		workspace, workspaceFilterSummary(current), cov.name, filterSetsSummary(cov.sets),
+		breakpointCommandLine(selectors, "update", "breakpoint", "--"+repoScopeFlag, cov.name))
 }
 
 // preview is what a dry run of such a create says after naming the
