@@ -79,7 +79,18 @@ func TestSetXDGHomeRestoresThePaths(t *testing.T) {
 // This is needed because cobra/pflag retains flag values across Execute() calls when
 // the global rootCmd is reused in tests — a flag not present in the args of a new
 // Execute() call keeps the value set by the previous call.
+//
+// It resets them again when the test is done: the test that runs next may be
+// one that does not reset them itself, and would log in with this test's
+// --context.
 func resetAuthLoginFlags(t *testing.T) {
+	t.Helper()
+	clearAuthLoginFlags(t)
+	t.Cleanup(func() { clearAuthLoginFlags(t) })
+}
+
+// clearAuthLoginFlags is the reset resetAuthLoginFlags does twice.
+func clearAuthLoginFlags(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{"context", "environment", "token-name", "timeout", "safety-level", "client-id", "client-secret", "account-urn", "scopes"} {
 		if f := authLoginCmd.Flags().Lookup(name); f != nil {
@@ -136,6 +147,7 @@ func TestAuthLogin_FlagValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			viper.Reset()
+			resetAuthLoginFlags(t)
 
 			if tt.name == "no flags no config errors helpfully" {
 				// Point to a non-existent config file
@@ -179,6 +191,7 @@ func TestAuthLogin_FlagValidation(t *testing.T) {
 // error – i.e. it gets past flag validation.
 func TestAuthLogin_CurrentContextFallback(t *testing.T) {
 	viper.Reset()
+	resetAuthLoginFlags(t)
 
 	const (
 		ctxName  = "my-context"
@@ -247,6 +260,7 @@ func TestAuthLogin_PartialFlags_EnvironmentFromContext(t *testing.T) {
 // allows the flow to continue past the keyring gate.
 func TestAuthLogin_KeyringRecovery(t *testing.T) {
 	viper.Reset()
+	resetAuthLoginFlags(t)
 
 	const (
 		ctxName = "recover-ctx"
@@ -638,6 +652,7 @@ func TestAuthLogin_NewContext_RequiresEnvironment(t *testing.T) {
 // diagnostic error with suggestions including file-based storage.
 func TestAuthLogin_KeyringRecoveryFailure(t *testing.T) {
 	viper.Reset()
+	resetAuthLoginFlags(t)
 
 	const (
 		ctxName = "fail-ctx"
@@ -1696,8 +1711,6 @@ func runBrowserLogin(t *testing.T, args ...string) (stderr string, oauthConfig *
 	t.Helper()
 	viper.Reset()
 	resetAuthLoginFlags(t)
-	// The command is shared by every test: leave no flag value behind.
-	t.Cleanup(func() { resetAuthLoginFlags(t) })
 	// Any of these would select the client credentials grant.
 	t.Setenv(envLoginClientID, "")
 	t.Setenv(envLoginClientSecret, "")
@@ -1793,8 +1806,6 @@ func runClientCredentialsLogin(t *testing.T, args ...string) (stderr string, run
 	t.Helper()
 	viper.Reset()
 	resetAuthLoginFlags(t)
-	// The command is shared by every test: leave no flag value behind.
-	t.Cleanup(func() { resetAuthLoginFlags(t) })
 	t.Setenv(config.EnvTokenStorage, "file")
 	setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 	t.Setenv(envLoginClientID, "dt0s02.EXAMPLE")
