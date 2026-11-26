@@ -1738,3 +1738,43 @@ func TestAuthLogin_BothFlagsKeepTheContextsTokenName(t *testing.T) {
 		t.Errorf("stderr lacks %q:\n%s", want, stderr)
 	}
 }
+
+// TestAuthLogin_EmptySafetyLevelIsRejected: an explicitly empty --safety-level
+// (an unset shell variable) used to count as given and mean readwrite-all,
+// which raised a readonly context.
+func TestAuthLogin_EmptySafetyLevelIsRejected(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	configPath := setupAuthTestConfig(t, "other", envURL, "other-oauth")
+	cfg, err := config.LoadFrom(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.SetContextWithOptions("viewer", envURL, "viewer-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadOnly})
+	if err := cfg.SaveTo(configPath); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	gFlags.cfgFile = configPath
+	t.Cleanup(func() { gFlags.cfgFile = "" })
+
+	stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "viewer", "--safety-level", "")
+	if !errors.Is(runErr, errEmptyFlagValue) {
+		t.Fatalf("err = %v, want the empty flag value error\n%s", runErr, stderr)
+	}
+	if want := `invalid argument "" for "--safety-level" flag: must not be empty`; runErr.Error() != want {
+		t.Errorf("err = %q, want %q", runErr, want)
+	}
+	if granted {
+		t.Error("a token was requested")
+	}
+	after, err := config.LoadFrom(configPath)
+	if err != nil {
+		t.Fatalf("load config after: %v", err)
+	}
+	nc, err := after.GetContext("viewer")
+	if err != nil {
+		t.Fatalf("context missing: %v", err)
+	}
+	if nc.Context.SafetyLevel != config.SafetyLevelReadOnly {
+		t.Errorf("safety level = %q, want readonly", nc.Context.SafetyLevel)
+	}
+}

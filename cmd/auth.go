@@ -772,9 +772,7 @@ Non-interactive login (CI/CD):
 
 			// Parse and validate safety level
 			safetyLevel := config.SafetyLevel(safetyLevelStr)
-			if safetyLevelStr == "" {
-				safetyLevel = config.DefaultSafetyLevel
-			} else if !safetyLevel.IsValid() {
+			if !safetyLevel.IsValid() {
 				return fmt.Errorf("invalid safety level: %s (valid values: %v)", safetyLevelStr, config.ValidSafetyLevels())
 			}
 
@@ -957,6 +955,9 @@ Non-interactive login (CI/CD):
 	// Left out, it defaults from the config; an explicitly empty value (an
 	// unset shell variable) must not silently take that default.
 	rejectEmptyFlag(c, "environment")
+	// Given, it replaces the level an existing context stores; an explicitly
+	// empty value must not do that with the default.
+	rejectEmptyFlag(c, "safety-level")
 	return c
 }
 
