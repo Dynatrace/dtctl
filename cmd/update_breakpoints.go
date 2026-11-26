@@ -132,11 +132,14 @@ Examples:
 
 				var sets []map[string][]string
 				var origin string // " from repo scope <name>", or empty
+				notes := ws.changeNotes()
 				if scopeName != "" {
-					if sets, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
+					var entryNotes []string
+					if sets, entryNotes, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
 						return err
 					}
 					origin = " from repo scope " + scopeName
+					notes = append(notes, entryNotes...)
 				} else {
 					parsed, err := parseFilters(filters)
 					if err != nil {
@@ -144,9 +147,11 @@ Examples:
 					}
 					sets = []map[string][]string{parsed}
 				}
+				// Said before the confirmation and before anything is sent.
+				ctx := sayBreakpointWarnings(cmdContext(cmd), notes...)
 
-				if dryRun(cmdContext(cmd)) {
-					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update workspace %s's filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", workspace, origin, filterSetsSummary(sets)))
+				if dryRun(ctx) {
+					return printBreakpointMessage(ctx, "update", fmt.Sprintf("Dry run: would update workspace %s's filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", workspace, origin, filterSetsSummary(sets)))
 				}
 
 				handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
@@ -167,18 +172,18 @@ Examples:
 					}
 				}
 
-				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, sets, workspaceFilterChange{skipConfirm: skipConfirm})
+				cancelled, err := applyWorkspaceFilters(ctx, handler, workspaceID, sets, workspaceFilterChange{skipConfirm: skipConfirm})
 				if err != nil {
 					return err
 				}
 				if cancelled {
-					return printBreakpointMessage(cmdContext(cmd), "update", "Cancelled")
+					return printBreakpointMessage(ctx, "update", "Cancelled")
 				}
 
 				if scopeName != "" {
-					return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace(fmt.Sprintf("Updated Live Debugger workspace filters%s (%s)", origin, filterSetsSummary(sets)), workspace))
+					return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Updated Live Debugger workspace filters%s (%s)", origin, filterSetsSummary(sets)), workspace))
 				}
-				return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace("Updated Live Debugger workspace filters", workspace))
+				return printBreakpointMessage(ctx, "update", inWorkspace("Updated Live Debugger workspace filters", workspace))
 			}
 
 			if len(args) == 0 {
@@ -215,9 +220,10 @@ Examples:
 				return err
 			}
 			workspace := ws.name
-			if dryRun(cmdContext(cmd)) {
+			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
+			if dryRun(ctx) {
 				changes := describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)
-				return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace(fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes), workspace))
+				return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes), workspace))
 			}
 
 			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
@@ -312,7 +318,7 @@ Examples:
 				}
 			}
 
-			return printBreakpointMessage(cmdContext(cmd), "update", inWorkspace(fmt.Sprintf("Updated breakpoint %s (%s)", targetDescription, describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)), workspace))
+			return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Updated breakpoint %s (%s)", targetDescription, describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)), workspace))
 		},
 	}
 	c.Flags().String("condition", "", `Condition expression (e.g. "a==1 && b!='bbb'", "'val' in arr", "x>0 && y<=10")`)

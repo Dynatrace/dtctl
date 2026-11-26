@@ -75,8 +75,10 @@ Examples:
 				return err
 			}
 			workspace := ws.name
+			// Said before the confirmation and before anything is sent.
+			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
 
-			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
+			handler, err := liveDebuggerHandler(ctx, cfg)
 			if err != nil {
 				return err
 			}
@@ -113,7 +115,7 @@ Examples:
 			}
 
 			if deleteAll {
-				return runDeleteAllBreakpointsWithOps(cmdContext(cmd), handler, workspaceID, workspace, rows, yes, verbose, ops)
+				return runDeleteAllBreakpointsWithOps(ctx, handler, workspaceID, workspace, rows, yes, verbose, ops)
 			}
 
 			identifier := args[0]
@@ -122,14 +124,14 @@ Examples:
 				if len(targets) == 0 {
 					return fmt.Errorf("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 				}
-				return runDeleteBreakpointRowsWithOps(cmdContext(cmd), handler, workspaceID, workspace, targets, yes, verbose, ops)
+				return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, targets, yes, verbose, ops)
 			}
 
 			if row, ok := findBreakpointRowByID(rows, identifier); ok {
-				return runDeleteBreakpointRowsWithOps(cmdContext(cmd), handler, workspaceID, workspace, []breakpointRow{row}, yes, verbose, ops)
+				return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, []breakpointRow{row}, yes, verbose, ops)
 			}
 
-			return runDeleteBreakpointRowsWithOps(cmdContext(cmd), handler, workspaceID, workspace, []breakpointRow{{ID: identifier}}, yes, verbose, ops)
+			return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, []breakpointRow{{ID: identifier}}, yes, verbose, ops)
 		},
 	}
 	c.Flags().Bool("all", false, "Delete all breakpoints in the current workspace")

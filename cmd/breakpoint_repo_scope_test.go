@@ -363,7 +363,7 @@ func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
 
 		code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
 		require.Zero(t, code, stderr)
-		require.Equal(t, want+"\n", stderr)
+		require.Equal(t, want+"\n", afterWorkspaceNote(t, stderr, repo+"/checkout"))
 		require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
 		require.Equal(t, "Created breakpoint at A.java:1 (id: dtctl-rule-0001) (workspace "+repo+"/checkout)", breakpointMessage(t, stdout))
 
@@ -382,11 +382,12 @@ func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
 				seed = []string{splitServiceSet, splitWorkloadSet}
 			}
 			srv := newLiveDebuggerStub(t, "readwrite-all", seed...)
-			chdirTestRepo(t, breakpointScope)
+			ws := filepath.Base(chdirTestRepo(t, breakpointScope)) + "/checkout"
 			var env map[string]string
 			switch name {
 			case "every set of the entry":
 				chdirSubdir(t, filepath.Join("services", "split"))
+				ws = filepath.Dir(ws) + "/split"
 			case "the hint turned off":
 				env = map[string]string{noRepoScopeEnv: "1"}
 			case "a floor that hides the flag":
@@ -396,7 +397,7 @@ func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
 
 			code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{Env: env})
 			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-			require.Empty(t, stderr)
+			require.Empty(t, afterWorkspaceNote(t, stderr, ws))
 			require.Empty(t, agentEnvelope(t, stdout).Context.Suggestions)
 			require.Equal(t, []string{"GetOrCreateWorkspaceV2", "CreateRule"}, srv.ops())
 		})
@@ -408,13 +409,13 @@ func TestCreateBreakpoint_HintsAtTheCoveringEntry(t *testing.T) {
 // default to turn off.
 func TestCreateBreakpoint_RepoScopeOff(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all")
-	chdirTestRepo(t, breakpointScope)
+	repo := filepath.Base(chdirTestRepo(t, breakpointScope))
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--agent"}, RunOptions{Env: map[string]string{noRepoScopeEnv: "1"}})
 	require.Equal(t, 2, code)
 	require.Equal(t, mainNoFilters, agentError(t, stdout).Message)
 	require.Equal(t, "validation_error", agentError(t, stdout).Code)
-	require.Empty(t, stderr)
+	require.Empty(t, afterWorkspaceNote(t, stderr, repo+"/checkout"))
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops())
 
 	srv.reset()
@@ -450,10 +451,10 @@ func TestBreakpoint_RepoScopeClusterIsNotSent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newLiveDebuggerStub(t, "readwrite-all")
-			chdirTestRepo(t, scope)
+			repo := filepath.Base(chdirTestRepo(t, scope))
 			code, stdout, stderr := runRepoScoped(append(tc.args, "--plain"), RunOptions{})
 			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-			require.Equal(t, note, stderr)
+			require.Equal(t, note, afterWorkspaceNote(t, stderr, repo+"/checkout"))
 			require.NotContains(t, stdout, "k8s.cluster.uid")
 			if tc.sends {
 				require.JSONEq(t, filterSetsJSON(checkoutSetJSON), srv.sentFilterSets(t))
@@ -468,23 +469,26 @@ func TestBreakpoint_RepoScopeClusterIsNotSent(t *testing.T) {
 // are not among them.
 func TestCreateBreakpoint_NamedRepoScopeSendsEverySet(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all")
-	chdirTestRepo(t, breakpointScope)
+	repo := filepath.Base(chdirTestRepo(t, breakpointScope))
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--repo-scope", "split"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "UpdateWorkspaceV2", "CreateRule"}, srv.ops())
 	require.JSONEq(t, filterSetsJSON(splitWorkloadSet, splitServiceSet), srv.sentFilterSets(t))
-	require.Equal(t, "repo scope split's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label\n", stderr)
+	require.Equal(t, "repo scope split's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label\n"+
+		"repo scope split sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>\n",
+		afterWorkspaceNote(t, stderr, repo+"/split"))
 	require.Contains(t, stdout, "workspace filters set from repo scope split: k8s.namespace.name:payments,k8s.workload.name:split; service.name:split")
 }
 
 func TestBreakpoint_NamedRepoScope(t *testing.T) {
 	srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
-	chdirTestRepo(t, breakpointScope)
+	repo := filepath.Base(chdirTestRepo(t, breakpointScope))
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--repo-scope", "ledger", "--yes"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Empty(t, stderr)
+	require.Equal(t, "repo scope ledger sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>\n",
+		afterWorkspaceNote(t, stderr, repo+"/ledger"))
 	require.JSONEq(t, filterSetsJSON(ledgerSetJSON), srv.sentFilterSets(t), "a named entry replaces filters the workspace has")
 	require.Contains(t, stdout, "workspace filters set from repo scope ledger: service.name:ledger")
 
@@ -535,7 +539,7 @@ func TestCreateBreakpoint_RepoScopeCoversNothingHere(t *testing.T) {
 	require.NotZero(t, code)
 	require.Equal(t, "workspace "+repo+` has no filters, and a breakpoint needs them: no entry covers "docs"; entries here cover services/ledger; pick one with --repo-scope <name>, or pass --filters key:value`,
 		agentError(t, stdout).Message)
-	require.Empty(t, stderr)
+	require.Empty(t, afterWorkspaceNote(t, stderr, repo))
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2"}, srv.ops())
 }
 
@@ -654,8 +658,8 @@ func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
 		stdout string
 		stderr string
 	}{
-		{"create", []string{"create", "breakpoint", "A.java:1", "--plain"}, "(workspace storefront/ledger)", ""},
-		{"update", []string{"update", "breakpoint", "--plain", "--filters", "service.name:ledger", "--yes"}, "(workspace storefront/ledger)", ""},
+		{"create", []string{"create", "breakpoint", "A.java:1", "--plain"}, "(workspace storefront/ledger)", workspaceNote("storefront/ledger") + "\n"},
+		{"update", []string{"update", "breakpoint", "--plain", "--filters", "service.name:ledger", "--yes"}, "(workspace storefront/ledger)", workspaceNote("storefront/ledger") + "\n"},
 		{"get", []string{"get", "breakpoints", "--no-agent"}, "", "workspace: storefront/ledger\n"},
 		{"get --plain", []string{"get", "breakpoints", "--no-agent", "--plain"}, "", "workspace: storefront/ledger\n"},
 	} {

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
-	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
@@ -32,37 +30,45 @@ const (
 	breakpointWorkspaceRepoScopeUsage = "name the workspace after this entry of the repository's .dtctl-repo-scope.yaml, wherever the command runs"
 )
 
-// namedBreakpointFilters is every filter set of the entry --repo-scope names.
-// Every failure is an error, as on query: the caller asked for that entry's
-// filters. resolveRepoScope resolves a name to its entry or fails. The
-// entry's service ids are not among the sets, so a line says they are left
-// out rather than let "every filter set" read as every binding.
-func namedBreakpointFilters(cmd *cobra.Command, cfg *config.Config, name string) ([]map[string][]string, error) {
+// namedBreakpointFilters is every filter set of the entry --repo-scope names,
+// with what the caller says before it sets them (entryFilterNotes). Every
+// failure is an error, as on query: the caller asked for that entry's
+// filters. resolveRepoScope resolves a name to its entry or fails.
+func namedBreakpointFilters(cmd *cobra.Command, cfg *config.Config, name string) (sets []map[string][]string, notes []string, err error) {
 	res, err := resolveRepoScope(cmd, cfg, name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	stderr := currentStderr(cmdContext(cmd))
-	warnRepoScopeFile(stderr, res.Warning)
+	warnRepoScopeFile(currentStderr(cmdContext(cmd)), res.Warning)
 	sets, ok, reason := res.Status.LiveDebuggerFilterSets()
 	if !ok {
-		return nil, &reposcope.InvalidError{Source: "--" + repoScopeFlag, Msg: reason}
+		return nil, nil, &reposcope.InvalidError{Source: "--" + repoScopeFlag, Msg: reason}
 	}
-	if len(res.Status.Entry.Services) > 0 {
-		output.FprintInfo(stderr, "repo scope %s's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label", name)
-	}
-	noteClusterNotSent(stderr, res.Status.Entry)
-	return sets, nil
+	return sets, entryFilterNotes(res.Status.Entry), nil
 }
 
-// noteClusterNotSent says, for an entry that binds a cluster, that the
-// filters set from it do not: a filter set carries the namespace and the
-// workload only, so it is wider than the entry. Every path that sets, or
-// previews setting, filters from an entry calls it.
-func noteClusterNotSent(stderr io.Writer, e *reposcope.Entry) {
-	if e.BindsCluster() {
-		output.FprintInfo(stderr, "repo scope %s binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters", e.Name)
+// entryFilterNotes says how the filters set from e differ from e, one line
+// per difference. The filters are not the entry: they leave out its service
+// ids, its clusters and its filter segments, so they can be wider than the
+// queries the entry narrows, and they carry service.name, which nothing has
+// shown a workspace to honour. Every path that sets, or previews setting,
+// filters from an entry says these before it asks or writes, and an agent
+// gets them in context.warnings (sayBreakpointWarnings).
+func entryFilterNotes(e *reposcope.Entry) []string {
+	var notes []string
+	if len(e.Services) > 0 {
+		notes = append(notes, fmt.Sprintf("repo scope %s's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label", e.Name))
 	}
+	if e.BindsCluster() {
+		notes = append(notes, fmt.Sprintf("repo scope %s binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters", e.Name))
+	}
+	if len(e.Segments) > 0 {
+		notes = append(notes, fmt.Sprintf("repo scope %s's filter segments are not applied: a workspace is filtered by labels and takes no segment, so the filters are wider than the entry's queries", e.Name))
+	}
+	if len(e.ServiceNames) > 0 {
+		notes = append(notes, fmt.Sprintf("repo scope %s sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>", e.Name))
+	}
+	return notes
 }
 
 // coveringEntry is what the repository's scope file says to a create that

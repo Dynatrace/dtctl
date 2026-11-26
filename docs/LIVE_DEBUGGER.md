@@ -94,21 +94,29 @@ workloads), then one for its service names and one for its process group ids
 honour `dt.entity.service`. Only a one-set entry can be pasted into
 `--filters`; `--repo-scope <name>` sends every set.
 
-Filter segments an entry references (`segments` in the scope file) narrow its
-queries and nothing else: a workspace is filtered by labels and cannot take a
-segment, so they are never part of a filter set, and an entry that holds only
-segments renders none.
+Filters set from an entry are not the entry. What they leave out, and what
+they carry unverified, the commands say on every path that sets or previews
+them, before the confirmation and before anything is sent: one line each on
+stderr, and the same lines in `context.warnings` in agent mode.
 
-A workload's cluster (`cluster-uid` in the scope file) is not part of its
-filter set. `k8s.cluster.uid` has not been verified as a workspace label, and a
-label a workspace does not know selects nothing, so it is not sent: a workspace
-set from an entry that binds a cluster includes the same namespace and workload
-in other clusters. `create breakpoint` and `update breakpoint` say so whenever
-they set, or preview setting, filters from such an entry, and
-`repo-scope describe` says it under the sets:
+- **Service ids** are not sent (see above).
+- **A workload's cluster** (`cluster-uid` in the scope file) is not part of
+  its filter set. `k8s.cluster.uid` has not been verified as a workspace
+  label, and a label a workspace does not know selects nothing, so it is not
+  sent: a workspace set from an entry that binds a cluster includes the same
+  namespace and workload in other clusters. `repo-scope describe` says so
+  under the sets too.
+- **Filter segments** an entry references (`segments` in the scope file)
+  narrow its queries and nothing else: a workspace is filtered by labels and
+  cannot take a segment. The filters of an entry with segments are wider than
+  its queries, and an entry that holds only segments renders none.
+- **`service.name`** is sent, and is not verified as a workspace label.
 
 ```text
+repo scope checkout's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label
 repo scope checkout binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters
+repo scope checkout's filter segments are not applied: a workspace is filtered by labels and takes no segment, so the filters are wider than the entry's queries
+repo scope checkout sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>
 ```
 
 - **A named entry.** `--repo-scope <name>` on `create breakpoint` and
@@ -177,6 +185,15 @@ guess one:
   With `--repo-scope <name>` they fail too, since the name asks for the file.
 
 `dtctl repo-scope current` says what is wrong with the file.
+
+`create`, `update` and `delete breakpoint` in a workspace named after the
+repository open with one line, also in `context.warnings`, because two things
+such a workspace relies on are not verified (see
+[What is not verified](#what-is-not-verified)):
+
+```text
+workspace storefront/checkout is named after the repository, so every clone of it names the same one: it is not verified that Live Debugger accepts "/" in a workspace name, nor that a workspace is private to its user
+```
 
 **Breakpoints from before the scope file.** Until a checkout has entries for
 an environment, its breakpoints live in workspaces named after the directories

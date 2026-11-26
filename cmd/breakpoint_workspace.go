@@ -97,6 +97,23 @@ func (w breakpointWorkspace) requireScopeFile() error {
 	return unusableScopeFile(w.unusable, "it decides which Live Debugger workspace this command works in, so nothing was changed")
 }
 
+// changeNotes is what a command that changes something says about the
+// workspace first. A workspace named after the working directory is what it
+// has always been and needs no line. One named after the repository is new,
+// and two things it relies on have not been tried against an environment:
+// that a name may hold the "/" of <repo>/<entry>, and that a workspace
+// belongs to one user, since every clone of the repository now names the
+// same one.
+func (w breakpointWorkspace) changeNotes() []string {
+	switch {
+	case w.scope == nil:
+		return nil
+	case strings.Contains(w.name, "/"):
+		return []string{"workspace " + w.name + ` is named after the repository, so every clone of it names the same one: it is not verified that Live Debugger accepts "/" in a workspace name, nor that a workspace is private to its user`}
+	}
+	return []string{"workspace " + w.name + " is named after the repository, so every clone of it names the same one: it is not verified that a workspace is private to its user"}
+}
+
 // unusableScopeFile is the error of a command that needs the scope file and
 // found one that does not load, ending with what follows from that. unusable
 // is repoScopeFile.unusable's reason, which names the file without its path

@@ -118,12 +118,17 @@ Examples:
 
 			// A named entry is a filter source like --filters, resolved before
 			// any network call.
+			notes := workspace.changeNotes()
 			if scopeName != "" {
-				if filterSets, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
+				var entryNotes []string
+				if filterSets, entryNotes, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
 					return err
 				}
 				filterSummary = filterSetsSummary(filterSets)
+				notes = append(notes, entryNotes...)
 			}
+			// Said before the confirmation and before anything is sent.
+			ctx := sayBreakpointWarnings(cmdContext(cmd), notes...)
 
 			// A preview sends nothing, not even the read that finds the
 			// workspace: asking for a workspace may create it.
@@ -132,7 +137,7 @@ Examples:
 				if filterSets == nil {
 					preview.cov = coveringBreakpointEntry(cmd, workspace)
 				}
-				return printBreakpointMessage(cmdContext(cmd), "create", preview.message())
+				return printBreakpointMessage(ctx, "create", preview.message())
 			}
 
 			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
@@ -168,13 +173,13 @@ Examples:
 					return err
 				}
 				changed = &workspaceFiltersChange{workspace: workspace.name, before: before, after: filterSummary, scopeName: scopeName, location: location}
-				cancelled, err := applyWorkspaceFilters(cmdContext(cmd), handler, workspaceID, filterSets,
+				cancelled, err := applyWorkspaceFilters(ctx, handler, workspaceID, filterSets,
 					workspaceFilterChange{creating: true, skipConfirm: skipConfirm})
 				if err != nil {
 					return err
 				}
 				if cancelled {
-					return printBreakpointMessage(cmdContext(cmd), "create", "Cancelled")
+					return printBreakpointMessage(ctx, "create", "Cancelled")
 				}
 			} else if hint, err = unfilteredCreate(cmd, workspace, workspaceResp, location); err != nil {
 				return err
@@ -211,7 +216,7 @@ Examples:
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
 				suggestions = []string{hint}
 			}
-			return printBreakpointMessageWith(cmdContext(cmd), "create", inWorkspace(msg, workspace.name), suggestions)
+			return printBreakpointMessageWith(ctx, "create", inWorkspace(msg, workspace.name), suggestions)
 		},
 	}
 	c.Flags().String("filters", "", "workspace filters to set before creating the breakpoint (comma-separated key:value pairs)")
