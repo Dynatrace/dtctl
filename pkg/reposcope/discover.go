@@ -232,15 +232,17 @@ func sampledRecordQuery(object, purpose string, values []string, rung samplingRu
 // collected up to discoveryIDLimit, which is what a binding can use.
 func recordDQL(fetch, records string, values []string) string {
 	list := quotedList(values)
-	ids := func(count, collected, field string) string {
-		return fmt.Sprintf("    %s = countDistinct(%s), %s = collectDistinct(%s, maxLength:%d),", count, field, collected, field, discoveryIDLimit)
+	ids := func(count, collected, field, end string) string {
+		return fmt.Sprintf("    %s = countDistinct(%s), %s = collectDistinct(%s, maxLength:%d)%s", count, field, collected, field, discoveryIDLimit, end)
 	}
 	return strings.Join([]string{
 		fetch,
 		fmt.Sprintf("| filter in(%s, array(%s)) or in(%s, array(%s))", fieldWorkload, list, fieldServiceName, list),
-		fmt.Sprintf("| summarize %s,", records),
-		ids(fieldServiceCount, fieldServices, fieldService),
-		ids(fieldProcessGroupCount, fieldProcessGroups, fieldProcessGroup),
+		// Several aggregations are grouped in braces; ungrouped, Grail
+		// answers with a PARAMETERS_SHOULD_BE_GROUPED notification.
+		fmt.Sprintf("| summarize {%s,", records),
+		ids(fieldServiceCount, fieldServices, fieldService, ","),
+		ids(fieldProcessGroupCount, fieldProcessGroups, fieldProcessGroup, "},"),
 		fmt.Sprintf("    by:{%s, %s, %s}", fieldNamespace, fieldWorkload, fieldServiceName),
 		fmt.Sprintf("| sort %s desc", fieldRecords),
 		fmt.Sprintf("| limit %d", discoveryRowLimit),

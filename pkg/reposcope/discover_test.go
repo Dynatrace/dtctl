@@ -111,14 +111,14 @@ func TestPlan(t *testing.T) {
 
 	list := `"checkout", "checkout-service", "checkout.service", "checkout_service", "checkoutservice"`
 	ids := "    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
-		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n" +
+		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
 		"    by:{k8s.namespace.name, k8s.workload.name, service.name}\n"
 	assert.Equal(t, Query{
 		Purpose:    "spans by workload or service name",
 		DataObject: "spans",
 		DQL: "fetch spans, from:now()-24h, scanLimitGBytes:5\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize records = count(),\n" + ids +
+			"| summarize {records = count(),\n" + ids +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[0])
@@ -129,7 +129,7 @@ func TestPlan(t *testing.T) {
 		SamplingRatio: 100000,
 		DQL: "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n" +
 			"| filter in(k8s.workload.name, array(" + list + ")) or in(service.name, array(" + list + "))\n" +
-			"| summarize records = count(),\n" + ids +
+			"| summarize {records = count(),\n" + ids +
 			"| sort records desc\n" +
 			"| limit 200",
 	}, p.Queries[1])

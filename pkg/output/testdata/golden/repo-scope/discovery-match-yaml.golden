@@ -33,9 +33,9 @@ queries:
     dql: |-
       fetch spans, from:now()-24h, scanLimitGBytes:5
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200
@@ -45,9 +45,9 @@ queries:
     dql: |-
       fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200
@@ -59,9 +59,9 @@ queries:
     dql: |-
       fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200
@@ -73,9 +73,9 @@ queries:
     dql: |-
       fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200
@@ -87,9 +87,9 @@ queries:
     dql: |-
       fetch logs, from:now()-24h, scanLimitGBytes:5
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200
@@ -99,9 +99,9 @@ queries:
     dql: |-
       fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200
@@ -113,9 +113,9 @@ queries:
     dql: |-
       fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200
@@ -127,9 +127,9 @@ queries:
     dql: |-
       fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000
       | filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))
-      | summarize records = count(),
+      | summarize {records = count(),
           serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+          processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
           by:{k8s.namespace.name, k8s.workload.name, service.name}
       | sort records desc
       | limit 200

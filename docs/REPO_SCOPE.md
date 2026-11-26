@@ -93,9 +93,9 @@ A run sends at most ten queries: two record queries, three sampled retries of ea
 ```text
 fetch spans, from:now()-24h, scanLimitGBytes:5
 | filter in(k8s.workload.name, array(<values>)) or in(service.name, array(<values>))
-| summarize records = count(),
+| summarize {records = count(),
     serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),
-    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),
+    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},
     by:{k8s.namespace.name, k8s.workload.name, service.name}
 | sort records desc
 | limit 200

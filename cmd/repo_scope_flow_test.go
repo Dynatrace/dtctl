@@ -167,9 +167,9 @@ func TestListingSeesChangedFiles(t *testing.T) {
 func recordQuery(object string) string {
 	return "fetch " + object + ", from:now()-24h, scanLimitGBytes:5\n" +
 		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout"))` + "\n" +
-		"| summarize records = count(),\n" +
+		"| summarize {records = count(),\n" +
 		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:50),\n" +
-		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50),\n" +
+		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:50)},\n" +
 		"    by:{k8s.namespace.name, k8s.workload.name, service.name}\n" +
 		"| sort records desc\n" +
 		"| limit 200"
