@@ -248,8 +248,8 @@ type repoScopedQuery struct {
 	zeroRows bool
 	// scanBounded is set when the fetch stage bounds its own scan.
 	scanBounded bool
-	// scanLifted is set when a scan limit of -1, in the fetch stage or as
-	// the flag's default, removes the limit altogether.
+	// scanLifted is set when a scan limit of -1 in the fetch stage removes
+	// the limit altogether.
 	scanLifted bool
 	// unboundedScan is set when the scope line said nothing bounds the scan
 	// below the environment's default cap, or at all. That is advice given
@@ -663,7 +663,9 @@ func (q *repoScopedQuery) withoutSegments() {
 // query. When neither they (a positive scan limit, a sampling ratio above 1)
 // nor the fetch stage bound the scan, the line says so before anything is
 // sent: a scoped query reads like a cheap one, and the
-// scan cap would otherwise be the first to say it was not.
+// scan cap would otherwise be the first to say it was not. A negative limit
+// among them lifts nothing: only a positive one is sent, so the environment's
+// default cap stands as it does for none.
 func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 	if q.scope == nil {
 		return
@@ -686,7 +688,6 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 		// The fetch stage's own limit wins over the flag's default.
 		if !q.scanBounded && limits != nil && limits.SamplingRatio <= 1 && (q.scanLifted || limits.ScanLimitGbytes <= 0) {
 			q.unboundedScan = true
-			q.scanLifted = q.scanLifted || limits.ScanLimitGbytes < 0
 			clause = "; " + q.scanClause()
 		}
 		output.FprintInfo(q.stderr, "applying repo scope %s to fetch %s: %s%s%s%s",
