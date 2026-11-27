@@ -66,7 +66,7 @@ There is no dedicated `aws`/`azure`/`gcp` resource type in the command catalog. 
 
 Resource commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`, `-v`, ...). Cloud-integration commands add their own noun-specific flags, such as `--name`, `--regions`, `--feature-sets`, `--credentials`, `--role-arn` (AWS), `--type`, `--directory-id`, `--application-id`, `--client-secret`, `--locations` (Azure), and `--service-account-id` (GCP connections), plus `--credentials`, `--locations`, and `--feature-sets` (GCP monitoring). See the examples below for their usage in context.
 
-**Renamed in 1.0.** The camelCase flags and their spelling aliases are gone. An old name fails with `unknown flag: --roleArn (renamed to --role-arn)`.
+**Renamed in 0.48.0 (before 1.0).** From 0.48.0 the camelCase flags and their spelling aliases no longer exist; the old names are not accepted. An old name fails with `unknown flag: --roleArn (renamed to --role-arn)`.
 
 | Before | Now |
 |---|---|

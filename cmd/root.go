@@ -452,20 +452,15 @@ var renamedCloudFlags = map[string]string{
 }
 
 // renamedCloudFlag reports the kebab-case replacement for a removed cloud
-// flag. It only applies below an aws, azure or gcp command, so the same word
-// elsewhere keeps cobra's plain message.
+// flag. It only applies when the current command defines the replacement, so a
+// command that never took the flag (get aws monitoring --featureSets) keeps
+// cobra's plain error instead of a pointer to a flag it also rejects.
 func renamedCloudFlag(cmd *cobra.Command, flag string) (string, bool) {
 	to, ok := renamedCloudFlags[strings.ToLower(flag)]
-	if !ok {
+	if !ok || cmd.Flags().Lookup(to) == nil {
 		return "", false
 	}
-	for c := cmd; c != nil; c = c.Parent() {
-		switch c.Name() {
-		case "aws", "azure", "gcp":
-			return to, true
-		}
-	}
-	return "", false
+	return to, true
 }
 
 // verbSynonyms maps verbs agents guess from other CLIs to the dtctl verb that
