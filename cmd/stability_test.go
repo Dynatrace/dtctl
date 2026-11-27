@@ -100,6 +100,28 @@ func TestStabilityFloorBlocksBelowFloorCommands(t *testing.T) {
 	}
 }
 
+// The stages only narrow, so the one that removed a command answers for it.
+// A command the profile hides and the floor would block too is blocked by
+// the profile: the floor's answer would advise an exception that admits a
+// command the profile still hides.
+func TestStabilityFloorLeavesAProfileMaskedCommandToTheProfile(t *testing.T) {
+	root := newFloorTree()
+	applyProfile(root, &config.Profile{Name: "query", Commands: []string{"query"}}, false)
+	applyStabilityFloor(root, stability.Policy{Floor: stability.Stable})
+
+	err := runTree(t, root, "ingest", "x")
+	var masked *ProfileError
+	if !errors.As(err, &masked) {
+		t.Fatalf("a command hidden by the profile under a stable floor returned %v, want *ProfileError", err)
+	}
+	if masked.Command != "ingest" || masked.Profile != "query" {
+		t.Errorf("unexpected block: %+v", masked)
+	}
+	if detail := errorToDetail(context.Background(), err); detail.Code != "profile_blocked" {
+		t.Errorf("code %q, want profile_blocked", detail.Code)
+	}
+}
+
 func TestStabilityFloorDoesNotLeakArgShape(t *testing.T) {
 	root := newFloorTree()
 	applyStabilityFloor(root, stability.Policy{Floor: stability.Stable})
