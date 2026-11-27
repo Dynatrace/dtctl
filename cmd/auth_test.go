@@ -1555,25 +1555,25 @@ func TestContextsNarrowedByLogin(t *testing.T) {
 	}
 	for _, tt := range tests {
 		peers := contextsSharingToken(cfg, nil, tt.context, "shared", envURL)
-		got := contextsNarrowedByLogin(peers, auth.GetScopesForSafetyLevel(tt.requested))
+		got := peerLabels(contextsNarrowedByLogin(peers, auth.GetScopesForSafetyLevel(tt.requested)))
 		if !slices.Equal(got, tt.want) {
 			t.Errorf("login to %s at %s: got %v, want %v", tt.context, tt.requested, got, tt.want)
 		}
-		if got, want := contextsOnOtherEnvironments(peers), []string{`"neighbour"`}; !slices.Equal(got, want) {
+		if got, want := peerLabels(contextsOnOtherEnvironments(peers)), []string{`"neighbour"`}; !slices.Equal(got, want) {
 			t.Errorf("login to %s: on other environments %v, want %v", tt.context, got, want)
 		}
 	}
 	// Seen from the neighbour's environment, every other context is elsewhere.
 	fromNeighbour := contextsSharingToken(cfg, nil, "neighbour", "shared", otherURL)
-	if got, want := contextsOnOtherEnvironments(fromNeighbour), []string{`"admin"`, `"mine"`, `"ro"`, `"typo"`, `"unset"`, `"writer"`}; !slices.Equal(got, want) {
+	if got, want := peerLabels(contextsOnOtherEnvironments(fromNeighbour)), []string{`"admin"`, `"mine"`, `"ro"`, `"typo"`, `"unset"`, `"writer"`}; !slices.Equal(got, want) {
 		t.Errorf("login to neighbour: on other environments %v, want %v", got, want)
 	}
-	if got := contextsNarrowedByLogin(fromNeighbour, auth.GetScopesForSafetyLevel(config.SafetyLevelReadOnly)); got != nil {
+	if got := contextsNarrowedByLogin(fromNeighbour, auth.GetScopesForSafetyLevel(config.SafetyLevelReadOnly)); len(got) != 0 {
 		t.Errorf("login to neighbour: narrowed %v, want none on its own environment", got)
 	}
 	// The host decides, not the spelling of the URL.
 	spelled := contextsSharingToken(cfg, nil, "ro", "shared", "https://ABC12345.apps.dynatrace.com/")
-	if got, want := contextsOnOtherEnvironments(spelled), []string{`"neighbour"`}; !slices.Equal(got, want) {
+	if got, want := peerLabels(contextsOnOtherEnvironments(spelled)), []string{`"neighbour"`}; !slices.Equal(got, want) {
 		t.Errorf("login with another spelling of the URL: on other environments %v, want %v", got, want)
 	}
 	if got := contextsSharingToken(cfg, nil, "ro", "ro-oauth", envURL); got != nil {
@@ -1582,6 +1582,53 @@ func TestContextsNarrowedByLogin(t *testing.T) {
 	if got := contextsSharingToken(cfg, nil, "fresh", "shared", devTierURL); len(got) != 1 || got[0].label != `"dev"` {
 		t.Errorf("a login in the dev tier: got %v, want only \"dev\"", got)
 	}
+}
+
+// TestWarnSharedTokenHints pins what the hint offers for each mix of contexts
+// in a project directory, where the two ways out differ from elsewhere.
+func TestWarnSharedTokenHints(t *testing.T) {
+	const (
+		envURL    = "https://abc12345.apps.dynatrace.com"
+		viaConfig = "A context of the global config is logged in to from outside this directory, or with --config "
+		boundOnly = "A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment."
+	)
+	project := tokenPeer{label: `"b"`}
+	global := tokenPeer{label: `"prod" (global config)`, global: true}
+
+	tests := []struct {
+		name     string
+		narrowed []tokenPeer
+		path     string
+		want     string
+		unwanted string
+	}{
+		{"a project context only", []tokenPeer{project}, "/home/u/.config/dtctl/config",
+			"Log in to it afterwards to restore its scopes. " + boundOnly, viaConfig},
+		{"a global context", []tokenPeer{global}, "/home/u/.config/dtctl/config",
+			"Log in to it afterwards to restore its scopes. " + viaConfig + "/home/u/.config/dtctl/config. " + boundOnly, ""},
+		{"both, and a path with a space", []tokenPeer{project, global}, "/home/u/Application Support/dtctl/config",
+			"Afterwards, log in to the context whose scopes you need (a login restores only those of its own context). " + viaConfig + "'/home/u/Application Support/dtctl/config'. " + boundOnly, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b strings.Builder
+			warnSharedToken(&b, "prod-oauth", envURL, tt.narrowed, nil, true, tt.path)
+			if !strings.Contains(b.String(), tt.want) {
+				t.Errorf("output lacks %q:\n%s", tt.want, b.String())
+			}
+			if tt.unwanted != "" && strings.Contains(b.String(), tt.unwanted) {
+				t.Errorf("output contains %q:\n%s", tt.unwanted, b.String())
+			}
+		})
+	}
+
+	t.Run("nothing shared, nothing said", func(t *testing.T) {
+		var b strings.Builder
+		warnSharedToken(&b, "prod-oauth", envURL, nil, nil, true, "/x")
+		if b.Len() != 0 {
+			t.Errorf("output: %s", b.String())
+		}
+	})
 }
 
 // TestJoinQuotedNames pins how a list of contexts reads in a sentence.
@@ -2459,7 +2506,8 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 		}
 		for _, want := range []string{
 			`Token "shared-oauth" is also used by "admin" and "writer", whose safety levels request scopes this login does not. The login replaces the token, so those contexts lose them.`,
-			"Log in to one of them afterwards to restore its scopes, or give this context its own token with --token-name.",
+			// A login to "writer" would leave "admin" ten scopes short.
+			"Afterwards, log in to the context whose scopes you need (a login restores only those of its own context), or give this context its own token with --token-name.",
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
@@ -2482,11 +2530,27 @@ func TestAuthLogin_BrowserFlowNamesTheContextsItNarrows(t *testing.T) {
 		}
 		for _, want := range []string{
 			`Token "prod-oauth" is also used by "writer" (global config), whose safety level requests scopes this login does not. The login replaces the token, so that context loses them.`,
-			"Log in to it afterwards to restore its scopes. A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment.",
+			"Log in to it afterwards to restore its scopes. A context of the global config is logged in to from outside this directory, or with --config " + config.DefaultConfigPath() + ". A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment.",
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
 			}
+		}
+
+		// The advised login works from this directory: it reaches the
+		// browser step for the global context, with that context's scopes.
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+		stderr, oauthConfig, runErr := runBrowserLogin(t, "--config", config.DefaultConfigPath(), "--context", "writer")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("the advised login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		if want := auth.GetScopesForSafetyLevel(config.SafetyLevelReadWriteAll); !slices.Equal(oauthConfig.Scopes, want) {
+			t.Errorf("the advised login requests %d scopes, want the %d of readwrite-all", len(oauthConfig.Scopes), len(want))
+		}
+		// Without --config the same login cannot find the context.
+		gFlags.cfgFile = ""
+		if stderr, _, runErr := runBrowserLogin(t, "--context", "writer"); runErr == nil || errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Errorf("a login to the global context from the project directory: err %v\n%s", runErr, stderr)
 		}
 	})
 
