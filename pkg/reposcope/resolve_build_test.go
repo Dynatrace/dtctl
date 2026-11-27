@@ -110,6 +110,48 @@ func TestResolve_LiteralProjectPathNamesOneModule(t *testing.T) {
 	}
 }
 
+// composed outranks its child.
+func TestResolve_ClosestIsDeepestNotLongest(t *testing.T) {
+	prev := foldPathCase
+	t.Cleanup(func() { foldPathCase = prev })
+
+	// U+017F folds to s and is two bytes, so the parent is spelled longer
+	// than the child's whole path.
+	foldPathCase = true
+	parent := Entry{Name: "parent", Path: "ſſſſ", ServiceNames: []string{"p"}}
+	child := Entry{Name: "child", Path: "ssss/a", ServiceNames: []string{"c"}}
+	for _, entries := range [][]Entry{{parent, child}, {child, parent}} {
+		f := &File{Environments: map[string][]Entry{prodHost: entries}}
+		require.Nil(t, f.check())
+		r, err := Resolve(nil, f, prodHost, "ssss/a", "")
+		require.NoError(t, err)
+		require.NotNil(t, r.Entry)
+		assert.Equal(t, "child", r.Entry.Name)
+	}
+
+	// A module directory in decomposed Unicode is longer than the composed
+	// path of an entry below it, on every filesystem.
+	foldPathCase = false
+	for _, letters := range []int{2, 3} {
+		composed, decomposed := strings.Repeat("é", letters), strings.Repeat("é", letters)
+		repo := fstest.MapFS{
+			"settings.gradle":             {Data: []byte("include ':app', ':" + decomposed + "'\n")},
+			"app/build.gradle":            {Data: []byte("dependencies { implementation project(':" + decomposed + "') }\n")},
+			decomposed + "/build.gradle":  {Data: []byte("")},
+			decomposed + "/a/Source.java": {Data: []byte("")},
+		}
+		f := &File{Environments: map[string][]Entry{prodHost: {
+			{Name: "app", Path: "app", ServiceNames: []string{"app"}},
+			{Name: "sub", Path: composed + "/a", ServiceNames: []string{"sub"}},
+		}}}
+		require.Nil(t, f.check())
+		r, err := Resolve(repo, f, prodHost, composed+"/a", "")
+		require.NoError(t, err)
+		require.NotNil(t, r.Entry, "%d letters: %s", letters, r.Reason)
+		assert.Equal(t, "sub", r.Entry.Name, "%d letters", letters)
+	}
+}
+
 // build on every scoped query.
 func TestGradleBuildAt_ManyModules(t *testing.T) {
 	const modules, refs = 500, 40

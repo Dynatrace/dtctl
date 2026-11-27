@@ -212,7 +212,18 @@ func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, 
 // applying; Tied names them.
 func (s *Status) Ambiguous() bool { return len(s.Tied) > 0 }
 
-// closestEntry is the entry with the longest path covering relDir, else the
+// depth is how many segments the path p has, 0 for none. It is how close a
+// path that covers a directory is to it: every such path is a prefix of the
+// directory by whole segments, so the deeper one is the closer. Its length in
+// bytes is not: the same path is longer in another case or composition.
+func depth(p string) int {
+	if p == "" {
+		return 0
+	}
+	return strings.Count(p, "/") + 1
+}
+
+// closestEntry is the entry with the deepest path covering relDir, else the
 // one with no path. An entry the build covers relDir through is as close as
 // relDir's module, whether or not its own path covers relDir from further
 // up: a module inside one deployable's directory that another deployable
@@ -220,7 +231,7 @@ func (s *Status) Ambiguous() bool { return len(s.Tied) > 0 }
 // file order: further deployables whose closure holds that module.
 func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best *Entry, tied []*Entry) {
 	var wide *Entry
-	longest := 0
+	deepest := 0
 	for i := range entries {
 		e := &entries[i]
 		n := 0
@@ -229,16 +240,16 @@ func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best *E
 			continue
 		}
 		if covers(e.Path, relDir) {
-			n = len(e.Path)
+			n = depth(e.Path)
 		}
 		if build.owns(e) {
-			n = max(n, len(build.module))
+			n = max(n, depth(build.module))
 		}
 		switch {
-		case n == 0 || n < longest:
+		case n == 0 || n < deepest:
 			continue
-		case n > longest:
-			best, tied, longest = e, nil, n
+		case n > deepest:
+			best, tied, deepest = e, nil, n
 		default:
 			tied = append(tied, e)
 		}
@@ -289,7 +300,7 @@ func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverag
 	// order a map is walked in.
 	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
 		// b.module(relDir), folding case as covers does.
-		if covers(m, relDir) && len(m) > len(c.module) {
+		if covers(m, relDir) && depth(m) > depth(c.module) {
 			c.module = m
 		}
 		if slices.ContainsFunc(entries, func(e Entry) bool { return samePath(e.Path, m) }) {
