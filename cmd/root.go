@@ -317,10 +317,11 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 			var unknownCmd *suggest.CommandError
 			if errors.As(err, &maskedProfile) || errors.As(err, &maskedUnsupported) ||
 				errors.As(err, &maskedStability) || errors.As(err, &unknownFlag) ||
-				errors.As(err, &unknownCmd) || errors.Is(err, errEmptyFlagValue) {
-				structuredError = hasRawFlag(spanArgs, "--agent") ||
+				errors.As(err, &unknownCmd) || errors.Is(err, errEmptyFlagValue) ||
+				isTimeoutValueError(err) {
+				structuredError = rawBoolFlagEnabled(spanArgs, "--agent") ||
 					hasShortFlagLetter(spanArgs, 'A') ||
-					hasRawFlag(spanArgs, "--plain") ||
+					rawBoolFlagEnabled(spanArgs, "--plain") ||
 					agentModeAutoDetectedFromArgs(cmdContext(root), spanArgs)
 			}
 		}
@@ -395,6 +396,18 @@ func enhanceFlagError(cmd *cobra.Command, err error) error {
 		}
 		flags := collectFlags(cmd)
 		return suggest.ParseFlagError(errStr, flags)
+	}
+
+	// A bad --timeout value: the error already carries the fix.
+	if tv, ok := asTimeoutValueError(err); ok {
+		return tv
+	}
+	// A plain duration --timeout flag (wait query, exec workflow) rejecting a
+	// value such as `60`: same message, same classification.
+	var badValue *pflag.InvalidValueError
+	if errors.As(err, &badValue) && badValue.GetFlag() != nil &&
+		badValue.GetFlag().Name == "timeout" && badValue.GetFlag().Value.Type() == "duration" {
+		return &timeoutValueError{flag: "timeout", value: badValue.GetValue()}
 	}
 
 	// An explicitly empty value for a flag that requires one (see
@@ -985,6 +998,14 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// A bad --timeout value is invalid input, not a timeout.
+	if isTimeoutValueError(err) {
+		return &output.ErrorDetail{
+			Code:    "validation_error",
+			Message: err.Error(),
+		}
+	}
+
 	// A value the command itself found invalid, typed so the code does not
 	// depend on how the message happens to be worded.
 	var invalidInput *invalidInputError
@@ -1351,6 +1372,10 @@ func exitCodeForError(err error) int {
 	}
 
 	if errors.Is(err, errEmptyFlagValue) {
+		return client.ExitUsageError
+	}
+
+	if isTimeoutValueError(err) {
 		return client.ExitUsageError
 	}
 

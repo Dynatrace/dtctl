@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/Dynatrace/dtctl/pkg/aidetect"
@@ -221,6 +222,25 @@ func hasShortFlagLetter(args []string, letter rune) bool {
 		}
 	}
 	return false
+}
+
+// rawBoolFlagEnabled reports whether the unparsed args switch a boolean long
+// flag on: "--flag" or "--flag=<true value>"; "--flag=false" does not. Scanning
+// stops at the "--" terminator, after which everything is a positional.
+func rawBoolFlagEnabled(args []string, flag string) bool {
+	on := false
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == flag {
+			on = true
+		} else if strings.HasPrefix(a, flag+"=") {
+			v, err := strconv.ParseBool(a[len(flag)+1:])
+			on = err != nil || v
+		}
+	}
+	return on
 }
 
 // hasRawFlag reports whether the unparsed args carry the given long flag,

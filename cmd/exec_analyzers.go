@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -73,11 +75,11 @@ Examples:
 
 			// Execute analyzer
 			wait, _ := cmd.Flags().GetBool("wait")
-			timeout, _ := cmd.Flags().GetInt("timeout")
+			timeout, _ := cmd.Flags().GetDuration("timeout")
 
 			var result *analyzer.ExecuteResult
 			if wait {
-				result, err = handler.ExecuteAndWait(cmd.Context(), analyzerName, input, timeout)
+				result, err = handler.ExecuteAndWait(cmd.Context(), analyzerName, input, int(math.Ceil(timeout.Seconds())))
 			} else {
 				result, err = handler.Execute(analyzerName, input, 30)
 			}
@@ -92,7 +94,7 @@ Examples:
 	c.Flags().Bool("validate", false, "validate input without executing")
 	c.Flags().Bool("wait", true, "wait for analyzer execution to complete")
 	stability.MarkFlag(c, "wait", stability.Experimental, pre10Since)
-	c.Flags().Int("timeout", 300, "timeout in seconds when waiting for completion")
+	strictTimeoutFlagVar(c.Flags(), 5*time.Minute, "timeout when waiting for completion (a duration such as 5m; rounded up to whole seconds)")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)
 	c.Flags().String("series", "full", `how to render timeseries embedded in the result (agent mode only):
 full = every datapoint; summary = per-series min/avg/max/p95/last/n and a sparkline;

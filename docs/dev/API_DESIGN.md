@@ -510,7 +510,7 @@ dtctl create slo --from-template <template-id>   # Create from template
 
 # Evaluation
 dtctl exec slo <id>                              # Evaluate SLO now
-dtctl exec slo <id> --timeout 60                 # Custom timeout (seconds)
+dtctl exec slo <id> --timeout 60s                # Custom timeout (duration)
 dtctl exec slo <id> -o json                      # Output as JSON
 ```
 
@@ -924,7 +924,7 @@ dtctl exec analyzer dt.statistics.GenericForecastAnalyzer --query "timeseries av
 # Analyzer execution options
 dtctl exec analyzer <name> -f input.json --validate  # Validate input without executing
 dtctl exec analyzer <name> -f input.json --wait      # Wait for completion (default)
-dtctl exec analyzer <name> -f input.json --timeout 600  # Custom timeout (seconds)
+dtctl exec analyzer <name> -f input.json --timeout 10m  # Custom timeout (duration)
 dtctl exec analyzer <name> -f input.json -o json     # Output result as JSON
 
 # Davis CoPilot Skills
