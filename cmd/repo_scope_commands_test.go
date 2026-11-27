@@ -70,3 +70,19 @@ func TestRepoScopeNamedEntryWithoutAFile(t *testing.T) {
 		require.Equal(t, []string{repoScopeDiscoverHint}, detail.Suggestions, "%q", args)
 	}
 }
+
+// A word after the group that is no subcommand is answered by the group: the
+// root's advice for the word (a synonym of one of its verbs) is not for here.
+func TestRepoScopeUnknownSubcommandIsTheGroups(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, "")
+	for _, word := range []string{"search", "show", "sett"} {
+		code, _, stderr := runRepoScoped([]string{"repo-scope", word}, RunOptions{})
+		require.NotZero(t, code)
+		require.Contains(t, stderr, `unknown command "`+word+`"`, word)
+		require.NotContains(t, stderr, "dtctl query", word)
+		require.NotContains(t, stderr, "dtctl get", word)
+	}
+	_, _, stderr := runRepoScoped([]string{"repo-scope", "sett"}, RunOptions{})
+	require.Contains(t, stderr, "set")
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
 	"github.com/Dynatrace/dtctl/sdk/urls"
 )
 
@@ -68,12 +69,13 @@ Examples:
 `,
 		// A word after the group is a subcommand that does not exist. Cobra
 		// would say so too, and the root would then suggest one of its own
-		// commands for it.
+		// commands for it. So would the root's table of synonyms ("search"
+		// for query), so the closest subcommand is looked up here.
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return nil
 			}
-			return enhanceCommandError(cmd, fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath()))
+			return suggest.ParseCommandError(fmt.Sprintf("unknown command %q for %q", args[0], cmd.CommandPath()), collectSubcommands(cmd))
 		},
 		RunE: listRepoScopes,
 	}
