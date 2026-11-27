@@ -721,29 +721,35 @@ func TestExecProfiling_BadRequestShowsItsDetails(t *testing.T) {
 }
 
 // A 400 on a poll gets no advice about the timeframe or the entity: those
-// went with the submit, which was accepted. It passes through with the status
-// and the agent code a 400 has.
+// went with the submit, which was accepted. It keeps the shape of the other
+// API failures, with advice that is true of a poll, and none of the generic
+// advice for a 400, which is about YAML files and dtctl apply.
 func TestExecProfiling_BadRequestOnAPoll(t *testing.T) {
-	newProfilingPollAPI(t, http.StatusBadRequest, `{"error":{"code":400,"message":"the API's message"}}`)
+	newProfilingPollAPI(t, http.StatusBadRequest, `{"error":{"code":400,"message":"the API's message","details":{"reason":"token malformed"}}}`)
+	const advice = "The environment rejected the request for the result of an analysis it had accepted, so the timeframe and the entity id are not the cause — run the command again"
 
 	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess)
 	require.Equal(t, 1, code)
 	require.Empty(t, stdout)
-	require.Equal(t, "Error: codelevelanalysis: poll (token t1): API error (400): the API's message\n", stderr)
+	lines := strings.SplitN(stderr, "\n", 2)
+	require.True(t, strings.HasPrefix(lines[0], "Error: Failed to run profiling analysis (HTTP 400): the API's message - "), stderr)
+	require.Contains(t, lines[0], "token malformed")
+	require.Equal(t, "\nTroubleshooting suggestions:\n  • "+advice+"\n", lines[1])
 
 	code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--agent")
 	require.Equal(t, 1, code)
 	require.Empty(t, stderr)
 	var env struct {
 		Error struct {
-			Code, Message string
-			Suggestions   []string
+			Code, Message, Operation string
+			StatusCode               int `json:"status_code"`
+			Suggestions              []string
 		}
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &env), stdout)
 	require.Equal(t, "bad_request", env.Error.Code)
-	require.Equal(t, "codelevelanalysis: poll (token t1): API error (400): the API's message", env.Error.Message)
-	for _, s := range env.Error.Suggestions {
-		require.NotContains(t, s, "timeframe")
-	}
+	require.Equal(t, "run profiling analysis", env.Error.Operation)
+	require.Equal(t, 400, env.Error.StatusCode)
+	require.True(t, strings.HasPrefix(env.Error.Message, "the API's message - "), env.Error.Message)
+	require.Equal(t, []string{advice}, env.Error.Suggestions)
 }

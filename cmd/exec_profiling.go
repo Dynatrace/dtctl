@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 	"github.com/Dynatrace/dtctl/pkg/safety"
 	"github.com/Dynatrace/dtctl/pkg/stability"
+	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // profilingSince is the release in which `exec profiling` entered the
@@ -828,6 +831,10 @@ func profilingEmptyNote(reason profiling.EmptyReason, run *profilingRun, state s
 func profilingAPIError(err error) error {
 	f, ok := profiling.ClassifyError(err)
 	if !ok {
+		if apiErr := profilingPollBadRequest(err); apiErr != nil {
+			return profilingDiagnostic(err, apiErr.StatusCode, apiErr.Message, apiErr.Details,
+				"The environment rejected the request for the result of an analysis it had accepted, so the timeframe and the entity id are not the cause — run the command again")
+		}
 		return err
 	}
 	var suggestions []string
@@ -864,15 +871,36 @@ func profilingAPIError(err error) error {
 	default:
 		return err
 	}
+	return profilingDiagnostic(err, f.StatusCode, f.Message, f.Details, suggestions...)
+}
+
+// profilingPollBadRequest is the API's answer when err is a 400 on a poll, and
+// nil otherwise. The package leaves that failure unclassified, since what a
+// 400 means there is not known; passed on as it is, it would get dtctl's
+// generic advice for a 400, which is about YAML files and dtctl apply.
+func profilingPollBadRequest(err error) *httpclient.APIError {
+	var runErr *sdkcla.Error
+	if !errors.As(err, &runErr) || runErr.Phase != sdkcla.PhasePoll {
+		return nil
+	}
+	var apiErr *httpclient.APIError
+	if !errors.As(runErr.Err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return nil
+	}
+	return apiErr
+}
+
+// profilingDiagnostic is an API failure of an analysis with this command's
+// advice for it.
+func profilingDiagnostic(err error, status int, message, details string, suggestions ...string) error {
 	// The details say what was wrong, a violated constraint for one: shown
 	// after the message, as the error itself would show them.
-	message := f.Message
-	if f.Details != "" {
-		message += " - " + f.Details
+	if details != "" {
+		message += " - " + details
 	}
 	return &diagnostic.Error{
 		Operation:   "run profiling analysis",
-		StatusCode:  f.StatusCode,
+		StatusCode:  status,
 		Message:     message,
 		Suggestions: suggestions,
 		Err:         err,
