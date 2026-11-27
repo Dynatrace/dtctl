@@ -605,7 +605,7 @@ Non-interactive login (CI/CD):
 			contextName, _ := cmd.Flags().GetString("context")
 			environment, _ := cmd.Flags().GetString("environment")
 			tokenName, _ := cmd.Flags().GetString("token-name")
-			timeoutStr, _ := cmd.Flags().GetString("timeout")
+			timeout, _ := cmd.Flags().GetDuration("timeout")
 			safetyLevelStr, _ := cmd.Flags().GetString("safety-level")
 			clientID, _ := cmd.Flags().GetString("client-id")
 			clientSecret, _ := cmd.Flags().GetString("client-secret")
@@ -682,12 +682,6 @@ Non-interactive login (CI/CD):
 			// Default token name to context name if not provided
 			if tokenName == "" {
 				tokenName = contextName + "-oauth"
-			}
-
-			// Parse timeout
-			timeout, err := time.ParseDuration(timeoutStr)
-			if err != nil {
-				return fmt.Errorf("invalid timeout: %w", err)
 			}
 
 			// Parse and validate safety level
@@ -853,7 +847,7 @@ Non-interactive login (CI/CD):
 	c.Flags().String("context", "", "name for the context to create or update (defaults to current context)")
 	c.Flags().String("environment", "", "Dynatrace environment URL (defaults to current context's environment)")
 	c.Flags().String("token-name", "", "name for storing the OAuth token (defaults to existing token name or <context>-oauth)")
-	c.Flags().String("timeout", "5m", "timeout for the authentication flow (bounds the browser flow and the client credentials token request)")
+	timeoutFlagVar(c.Flags(), 5*time.Minute, "timeout for the authentication flow (bounds the browser flow and the client credentials token request)")
 	c.Flags().String("safety-level", string(config.DefaultSafetyLevel), "safety level for the context (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)")
 	c.Flags().String("client-id", "", "OAuth client ID for the non-interactive client credentials grant (env: "+envLoginClientID+")")
 	c.Flags().String("client-secret", "", "OAuth client secret for the client credentials grant; prefer the environment variable (env: "+envLoginClientSecret+")")

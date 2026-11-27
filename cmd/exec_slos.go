@@ -31,7 +31,7 @@ Examples:
   dtctl exec slo my-slo-id
 
   # Evaluate with custom timeout (default: 30s)
-  dtctl exec slo my-slo-id --timeout 60
+  dtctl exec slo my-slo-id --timeout 60s
 
   # Output as JSON
   dtctl exec slo my-slo-id -o json
@@ -83,13 +83,13 @@ Examples:
 			}
 
 			// Get timeout from flags
-			timeoutSeconds, _ := cmd.Flags().GetInt("timeout")
-			timeoutMs := timeoutSeconds * 1000
+			timeout, _ := cmd.Flags().GetDuration("timeout")
+			timeoutMs := int(timeout.Milliseconds())
 
 			// Poll for results with exponential backoff
 			fmt.Fprintf(currentStdout(cmdContext(cmd)), "Polling for evaluation results...\n")
 
-			ctx, cancel := context.WithTimeout(cmdContext(cmd), time.Duration(timeoutSeconds)*time.Second)
+			ctx, cancel := context.WithTimeout(cmdContext(cmd), timeout)
 			defer cancel()
 
 			pollInterval := 2 * time.Second
@@ -142,16 +142,13 @@ Examples:
 			}
 		},
 	}
-	c.Flags().Int("timeout", 30, "timeout in seconds when polling for evaluation results")
+	timeoutFlagVar(c.Flags(), 30*time.Second, "timeout when polling for evaluation results (a duration such as 30s)")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c
 }
 
 func init() {
-	// SLO flags
-	// Becomes a duration flag in 1.0; a bare integer errors
-	// (contrib breaking-changes/timeout-duration.md).
 }
 
 // Declared stable: the invocation and output contract of this command is

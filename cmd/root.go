@@ -397,6 +397,11 @@ func enhanceFlagError(cmd *cobra.Command, err error) error {
 		return suggest.ParseFlagError(errStr, flags)
 	}
 
+	// A bad --timeout value: the error already carries the fix.
+	if tv, ok := asTimeoutValueError(err); ok {
+		return tv
+	}
+
 	// An explicitly empty value for a flag that requires one (see
 	// rejectEmptyFlag). pflag names the offending flag in the error it wraps
 	// around errEmptyFlagValue, so the flag comes from the error, not from the

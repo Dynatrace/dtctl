@@ -35,12 +35,7 @@ Dynatrace Account Management console (myaccount.dynatrace.com).`,
   DTCTL_ACCOUNT_UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx dtctl account login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			uuidFlag, _ := cmd.Flags().GetString("account-uuid")
-			timeoutStr, _ := cmd.Flags().GetString("timeout")
-
-			timeout, err := time.ParseDuration(timeoutStr)
-			if err != nil {
-				return fmt.Errorf("invalid timeout: %w", err)
-			}
+			timeout, _ := cmd.Flags().GetDuration("timeout")
 
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -124,7 +119,7 @@ Dynatrace Account Management console (myaccount.dynatrace.com).`,
 		},
 	}
 	c.Flags().String("account-uuid", "", "account UUID (overrides DTCTL_ACCOUNT_UUID and context account-uuid)")
-	c.Flags().String("timeout", "5m", "timeout for the OAuth browser flow")
+	timeoutFlagVar(c.Flags(), 5*time.Minute, "timeout for the OAuth browser flow")
 	return c
 }
 

@@ -227,7 +227,7 @@ Examples:
 	markInputWithoutArgs(c)
 	markArgumentFlag(c, "file") // the query from a file instead of the argument
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	c.Flags().Duration("timeout", 5*time.Minute, "maximum time to wait (0 = unlimited)")
+	timeoutFlagVar(c.Flags(), 5*time.Minute, "maximum time to wait (0 = unlimited)")
 	c.Flags().Int("max-attempts", 0, "maximum number of attempts (0 = unlimited)")
 	c.Flags().Duration("initial-delay", 0, "delay before first query attempt")
 	c.Flags().Duration("min-interval", 1*time.Second, "minimum interval between retries")

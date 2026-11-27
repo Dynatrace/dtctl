@@ -356,7 +356,7 @@ func registerWorkflowExecFlags(cmd *cobra.Command) {
 	cmd.Flags().Var(&singleUseStringValue{value: &inputJSON}, "input", "workflow input as a JSON object")
 	cmd.Flags().StringSlice("params", []string{}, "workflow parameters (key=value)")
 	cmd.Flags().Bool("wait", false, "wait for workflow execution to complete")
-	cmd.Flags().Duration("timeout", 30*time.Minute, "timeout when waiting for completion")
+	timeoutFlagVar(cmd.Flags(), 30*time.Minute, "timeout when waiting for completion")
 	cmd.Flags().Bool("show-results", false, "print the result of each task after execution completes (requires --wait)")
 	_ = cmd.Flags().MarkDeprecated("params", "It targets legacy execution metadata. Workflow input must be provided as a JSON object via --input.")
 	_ = cmd.Flags().MarkHidden("params")
