@@ -32,12 +32,12 @@ const repoScopeShownIDs = 2
 func printRepoScopeCurrent(w io.Writer, s *reposcope.Status) {
 	if s.Entry == nil {
 		// One line, also for a reason that quotes several.
-		fmt.Fprintf(w, "none  (%s)\n", strings.Join(strings.Fields(repoScopeReason(s)), " "))
+		fmt.Fprintf(w, "none  (%s)\n", repoScopeText(strings.Join(strings.Fields(repoScopeReason(s)), " ")))
 		return
 	}
 	how := repoScopeCoverage(s.Entry) + " · " + s.Environment
 	if s.Reason != "" {
-		how += "; " + s.Reason
+		how += "; " + repoScopeText(s.Reason)
 	}
 	if note := repoScopeClusterNote(s.Entry); note != "" {
 		how += "; the cluster " + note
@@ -55,7 +55,7 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	}
 	if s.Entry == nil {
 		kv("Repo scope:", "none")
-		kv("Reason:", repoScopeReason(s))
+		kv("Reason:", repoScopeText(repoScopeReason(s)))
 		kv("Environment:", s.Environment)
 		kv("File:", s.File)
 		kv("Entries:", s.Others...)
@@ -67,7 +67,7 @@ func printRepoScopeDescribe(w io.Writer, s *reposcope.Status) {
 	kv("Path:", repoScopeCoverage(e))
 	kv("Environment:", s.Environment)
 	kv("File:", s.File)
-	kv("Note:", s.Reason)
+	kv("Note:", repoScopeText(s.Reason))
 	kv("Workloads:", workloadNames(e.Workloads)...)
 	kv("Cluster:", repoScopeClusterNote(e))
 	kv("Service names:", e.ServiceNames...)
@@ -345,11 +345,12 @@ func writeRepoScopeCandidates(w io.Writer, r *reposcope.DiscoveryReport) {
 	fmt.Fprintln(w)
 }
 
-// repoScopeText is s as the terminal output shows text an environment sent:
-// a cluster, workload or service name is whatever the telemetry carries. A
-// control character in it (a newline, a tab, an escape sequence) would break
-// the table or act on the terminal beside a line meant to be pasted, so each
-// is shown as U+FFFD.
+// repoScopeText is s as the terminal output shows text dtctl did not write:
+// a cluster, workload or service name is whatever the telemetry carries, and
+// a reason or a warning is written from a committed file and from directory
+// names. A control character in it (a newline, a tab, an escape sequence)
+// would break the table or act on the terminal beside a line meant to be
+// pasted, so each is shown as U+FFFD.
 func repoScopeText(s string) string {
 	return reposcope.Shown(s)
 }

@@ -23,7 +23,7 @@ func TestRepoScopeAgentSetAndHumanDeleteLastEntry(t *testing.T) {
 	require.True(t, status.Linked)
 	require.Equal(t, "checkout", status.Entry.Name)
 	require.Equal(t, "set", response.Context.Verb)
-	require.Contains(t, response.Context.Suggestions, "dtctl repo-scope current")
+	require.Contains(t, response.Context.Suggestions, "dtctl repo-scope describe checkout --context c")
 	require.Equal(t, status.Entry, &loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[0])
 	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "delete", "checkout"}, RunOptions{})
 	require.Zero(t, code, stderr)

@@ -87,7 +87,12 @@ func TestMainHelperRewritesScopeFile(t *testing.T) {
 	if os.Getenv(scopeFileRewriteEnv) == "" {
 		t.Skip("run by TestMainGuardsTheCheckoutScopeFile")
 	}
-	require.NoError(t, os.WriteFile(filepath.Join("..", reposcope.FileName), []byte("environments: {}\n"), 0o644))
+	file := filepath.Join("..", reposcope.FileName)
+	if os.Getenv(scopeFileRewriteEnv) == "remove" {
+		require.NoError(t, os.Remove(file))
+		return
+	}
+	require.NoError(t, os.WriteFile(file, []byte("environments: {}\n"), 0o644))
 }
 
 // A maintainer's own scope file in the checkout does not fail the run; a run
@@ -118,5 +123,17 @@ func TestMainGuardsTheCheckoutScopeFile(t *testing.T) {
 
 	code, out = run("^TestMainHelperRewritesScopeFile$", scopeFileRewriteEnv+"=1")
 	require.NotZero(t, code, out)
-	require.Regexp(t, `FAIL: the tests changed \S*`+regexp.QuoteMeta(string(filepath.Separator)+reposcope.FileName)+` \(sha256:\w+ before, sha256:\w+ after\)`, out)
+	changed := `FAIL: the tests changed \S*` + regexp.QuoteMeta(string(filepath.Separator)+reposcope.FileName)
+	require.Regexp(t, changed+` \(sha256:\w+ before, sha256:\w+ after\)`, out)
+
+	// So does one that removes it, and one that writes it where there was
+	// none.
+	code, out = run("^TestMainHelperRewritesScopeFile$", scopeFileRewriteEnv+"=remove")
+	require.NotZero(t, code, out)
+	require.Regexp(t, changed+` \(sha256:\w+ before, absent after\)`, out)
+	require.NoFileExists(t, filepath.Join(root, reposcope.FileName))
+
+	code, out = run("^TestMainHelperRewritesScopeFile$", scopeFileRewriteEnv+"=1")
+	require.NotZero(t, code, out)
+	require.Regexp(t, changed+` \(absent before, sha256:\w+ after\)`, out)
 }

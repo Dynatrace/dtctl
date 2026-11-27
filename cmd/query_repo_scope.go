@@ -195,7 +195,7 @@ func resolveRepoScope(cmd *cobra.Command, cfg *config.Config, name string) (*rep
 // not know, for every command that reads it.
 func warnRepoScopeFile(w io.Writer, warning string) {
 	if warning != "" {
-		output.FprintWarning(w, "%s: %s", reposcope.FileName, warning)
+		output.FprintWarning(w, "%s: %s", reposcope.FileName, repoScopeText(warning))
 	}
 }
 
@@ -668,11 +668,11 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 		return
 	case with != "":
 		output.FprintWarning(q.stderr, "repo scope %s: its filter was not inserted: %s; its segments %s still apply%s",
-			s.Name, q.refusedReason, q.segmentList(), q.ignoreHint("ignore them"))
+			s.Name, repoScopeText(q.refusedReason), q.segmentList(), q.ignoreHint("ignore them"))
 		return
 	}
 	if s.Code == repoScopeUserSegment {
-		output.FprintInfo(q.stderr, "repo scope %s not applied: %s%s", s.Name, q.notApplied, q.ignoreHint("silence this"))
+		output.FprintInfo(q.stderr, "repo scope %s not applied: %s%s", s.Name, repoScopeText(q.notApplied), q.ignoreHint("silence this"))
 		return
 	}
 	label := "repo scope"
@@ -686,7 +686,7 @@ func (q *repoScopedQuery) announce(limits *config.QueryLimits) {
 		runs = "the query runs as typed, with its own filter and none inserted"
 	}
 	output.FprintWarning(q.stderr, "%s not applied: %s; %s%s",
-		label, q.notApplied, runs, q.ignoreHint("silence this"))
+		label, repoScopeText(q.notApplied), runs, q.ignoreHint("silence this"))
 }
 
 // onResult is the executor's OnResult hook. A scoped query that returns

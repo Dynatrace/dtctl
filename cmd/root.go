@@ -316,14 +316,9 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 			var maskedStability *StabilityError
 			var unknownFlag *suggest.FlagError
 			var unknownCmd *suggest.CommandError
-			// A repo-scope flag that refuses its value while it is parsed
-			// (a second --namespace of `repo-scope set`) is a flag error
-			// like the others.
-			var repoScopeInvalid *reposcope.InvalidError
 			if errors.As(err, &maskedProfile) || errors.As(err, &maskedUnsupported) ||
 				errors.As(err, &maskedStability) || errors.As(err, &unknownFlag) ||
-				errors.As(err, &unknownCmd) || errors.Is(err, errEmptyFlagValue) ||
-				errors.As(err, &repoScopeInvalid) {
+				errors.As(err, &unknownCmd) || errors.Is(err, errEmptyFlagValue) {
 				structuredError = hasRawFlag(spanArgs, "--agent") ||
 					hasShortFlagLetter(spanArgs, 'A') ||
 					hasRawFlag(spanArgs, "--plain") ||

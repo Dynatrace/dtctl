@@ -22,10 +22,12 @@ const FileName = ".dtctl-repo-scope.yaml"
 // empty apiVersion means the same thing.
 const apiVersion = "v1"
 
-// File is the on-disk document. Environments is keyed by environment host
-// (urls.Host of a context's environment URL): context names are local to a
-// machine, hosts are not, which is the same reasoning the config contract
-// applies to token bindings.
+// File is the on-disk document. Environments is keyed by environment host:
+// urls.Host of a context's environment URL, without the dot that ends a
+// fully qualified name, which urls.Host keeps and no key of the file may
+// carry. Resolve looks up the host it is given as it is, so a caller trims
+// the dot. Context names are local to a machine, hosts are not, which is the
+// same reasoning the config contract applies to token bindings.
 type File struct {
 	APIVersion   string
 	Environments map[string][]Entry
@@ -160,6 +162,14 @@ const maxSegmentValueRunes = 255
 // StatefulSet, …) is a DNS subdomain, so "checkout.v2" is a valid one.
 const maxDNSSubdomain = 253
 
+// maxKeyBytes bounds a key of the file. It is the longest any key the format
+// reads can be: an environment's host, and an annotation's key.
+const maxKeyBytes = max(maxDNSSubdomain, maxAnnotationKeyBytes)
+
+// maxMessageBytes bounds what a file can make dtctl say about it: a refusal
+// quotes the value it refuses, and a value can be as long as the file.
+const maxMessageBytes = 2048
+
 // maxServiceNameRunes bounds a service name; Dynatrace stores longer ones
 // truncated, so a longer binding could never match.
 const maxServiceNameRunes = 255
@@ -197,6 +207,10 @@ func (f *File) check() *InvalidError {
 // validateHost checks one environment's key and entries.
 func (f *File) validateHost(host string) *InvalidError {
 	if canonical := canonicalHost(host); canonical != host {
+		// Nothing to advise when what is left is no host either.
+		if len(canonical) > maxDNSSubdomain || !dnsSubdomainRe.MatchString(canonical) {
+			return invalid(fmt.Sprintf("environment %q is not a host name", host))
+		}
 		msg := fmt.Sprintf("environment %q must be written as the bare host %q", host, canonical)
 		if _, taken := f.Environments[canonical]; taken {
 			msg = fmt.Sprintf("environments %q and %q name the same host", host, canonical)
@@ -293,6 +307,18 @@ func (e *Entry) validate() *InvalidError {
 	// cluster (true) or without one.
 	bound := map[Workload]bool{}
 	for i, w := range e.Workloads {
+		// A workload's own fields first: the two checks after them name the
+		// workload, and a message quotes no value that has not passed its
+		// pattern.
+		if w.ClusterUID != "" && !clusterUIDRe.MatchString(w.ClusterUID) {
+			return invalid(fmt.Sprintf("workloads[%d] cluster-uid %q is not a Kubernetes cluster uid (a lowercase UUID, the value of %s)", i, w.ClusterUID, fieldClusterUID))
+		}
+		if !dnsLabelRe.MatchString(w.Namespace) {
+			return invalid(fmt.Sprintf("workloads[%d] namespace %q is not a Kubernetes namespace name", i, w.Namespace))
+		}
+		if len(w.Name) > maxDNSSubdomain || !dnsSubdomainRe.MatchString(w.Name) {
+			return invalid(fmt.Sprintf("workloads[%d] name %q is not a Kubernetes workload name", i, w.Name))
+		}
 		if workloads[w] {
 			return invalid(fmt.Sprintf("workloads[%d] %s is listed twice", i, w))
 		}
@@ -305,15 +331,6 @@ func (e *Entry) validate() *InvalidError {
 			return invalid(fmt.Sprintf("workloads[%d] %s is listed with and without a cluster; without one it selects the workload in every cluster", i, w))
 		}
 		bound[anywhere] = w.ClusterUID != ""
-		if w.ClusterUID != "" && !clusterUIDRe.MatchString(w.ClusterUID) {
-			return invalid(fmt.Sprintf("workloads[%d] cluster-uid %q is not a Kubernetes cluster uid (a lowercase UUID, the value of %s)", i, w.ClusterUID, fieldClusterUID))
-		}
-		if !dnsLabelRe.MatchString(w.Namespace) {
-			return invalid(fmt.Sprintf("workloads[%d] namespace %q is not a Kubernetes namespace name", i, w.Namespace))
-		}
-		if len(w.Name) > maxDNSSubdomain || !dnsSubdomainRe.MatchString(w.Name) {
-			return invalid(fmt.Sprintf("workloads[%d] name %q is not a Kubernetes workload name", i, w.Name))
-		}
 	}
 	if err := e.validateSegments(); err != nil {
 		return err
@@ -523,6 +540,11 @@ func serviceNameProblem(name string) string {
 		return fmt.Sprintf("is longer than %d characters", maxServiceNameRunes)
 	case strings.ContainsAny(name, `"\`):
 		return `must not contain " or \`
+	case strings.TrimSpace(name) != name:
+		// A record's service.name is compared whole, so a padded name is
+		// either a slip or a name no other spelling of the binding (a flag,
+		// a Live Debugger filter) can carry.
+		return "must not start or end with a space"
 	}
 	if !printable(name) {
 		return "must not contain control or non-printing characters"
@@ -531,7 +553,7 @@ func serviceNameProblem(name string) string {
 }
 
 // canonicalHost is the form a host key must already have: lowercase, with no
-// scheme, path, port or trailing dot.
+// scheme, user, path, port or trailing dot.
 func canonicalHost(key string) string {
 	h := strings.ToLower(strings.TrimSpace(key))
 	if i := strings.Index(h, "://"); i >= 0 {
@@ -539,6 +561,9 @@ func canonicalHost(key string) string {
 	}
 	if i := strings.IndexAny(h, "/?#"); i >= 0 {
 		h = h[:i]
+	}
+	if i := strings.LastIndex(h, "@"); i >= 0 {
+		h = h[i+1:]
 	}
 	if host, _, err := net.SplitHostPort(h); err == nil {
 		h = host

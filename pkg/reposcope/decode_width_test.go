@@ -87,6 +87,15 @@ func requireNothingWider(t failer, doc string, f *File) {
 			keys := keysOf(t, written.Content[j], entryKeys, doc)
 			where := fmt.Sprintf("entry %q on line %d\n%s", e.Name, written.Content[j].Line, doc)
 
+			// What an entry is called and what it binds are the text's own
+			// values, in the text's order: a reader that answered with other
+			// ones would narrow a query to somebody else's service.
+			require.Equal(t, valueOf(keys["name"]), e.Name, where)
+			for key, read := range map[string][]string{"service-names": e.ServiceNames, "process-groups": e.ProcessGroups, "services": e.Services} {
+				require.Equalf(t, keys[key] != nil, len(read) > 0, "%s is written exactly when the entry has some: %s", key, where)
+				require.Truef(t, slices.Equal(valuesOf(keys[key]), read), "%s: read %q: %s", key, read, where)
+			}
+
 			path, hasPath := keys["path"]
 			require.Equal(t, hasPath, e.Path != "", "a path is written exactly when the entry has one: %s", where)
 			if hasPath {
@@ -94,9 +103,10 @@ func requireNothingWider(t failer, doc string, f *File) {
 			}
 
 			workloads := keys["workloads"]
-			require.Equal(t, workloads != nil && len(workloads.Content) > 0, len(e.Workloads) > 0, where)
+			require.Equal(t, workloads != nil, len(e.Workloads) > 0, "workloads are written exactly when the entry has some: %s", where)
 			for k, w := range e.Workloads {
 				wk := keysOf(t, workloads.Content[k], workloadKeys, doc)
+				require.Equal(t, Workload{ClusterUID: w.ClusterUID, Namespace: valueOf(wk["namespace"]), Name: valueOf(wk["name"])}, w, where)
 				cluster, hasCluster := wk["cluster-uid"]
 				require.Equal(t, hasCluster, w.ClusterUID != "", "a cluster is written exactly when the workload has one: %s", where)
 				if hasCluster {
@@ -109,6 +119,7 @@ func requireNothingWider(t failer, doc string, f *File) {
 			for k, s := range e.Segments {
 				require.Len(t, e.Segments, len(segments.Content), where)
 				sk := keysOf(t, segments.Content[k], segmentKeys, doc)
+				require.Equal(t, valueOf(sk["id"]), s.ID, where)
 				variables, hasVariables := sk["variables"]
 				require.Equal(t, hasVariables, len(s.Variables) > 0, "variables are written exactly when the segment has some: %s", where)
 				if !hasVariables {
@@ -126,6 +137,26 @@ func requireNothingWider(t failer, doc string, f *File) {
 			}
 		}
 	}
+}
+
+// valueOf is the text of a scalar the document writes, "" for none.
+func valueOf(n *yaml.Node) string {
+	if n == nil {
+		return ""
+	}
+	return n.Value
+}
+
+// valuesOf are the items of a list the document writes, in its order.
+func valuesOf(n *yaml.Node) []string {
+	if n == nil {
+		return nil
+	}
+	var out []string
+	for _, item := range n.Content {
+		out = append(out, item.Value)
+	}
+	return out
 }
 
 // requireWrittenLoads holds a file that loaded to what Save makes of it: the
@@ -165,6 +196,24 @@ func TestRequireNothingWider_SeesAWiderRead(t *testing.T) {
 		"empty variables read as none": {
 			scopeDoc("name: checkout", "segments: [{id: Ab3dEf9hIjk, variables: {}}]"),
 			entry(Entry{Name: "checkout", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}})},
+		"an empty binding list read as an entry of segments alone": {
+			scopeDoc("name: checkout", "service-names: []", "segments: [{id: Ab3dEf9hIjk}]"),
+			entry(Entry{Name: "checkout", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}})},
+		"another service than the one written": {
+			scopeDoc("name: checkout", "service-names: [checkout]"),
+			entry(Entry{Name: "checkout", ServiceNames: []string{"ledger"}})},
+		"another entity than the one written": {
+			scopeDoc("name: checkout", "services: ["+svcID+"]"),
+			entry(Entry{Name: "checkout", Services: []string{"SERVICE-0000000000000000"}})},
+		"another workload than the one written": {
+			scopeDoc("name: checkout", "workloads: [{namespace: payments, name: checkout}]"),
+			entry(Entry{Name: "checkout", Workloads: []Workload{{Namespace: "payments", Name: "ledger"}}})},
+		"another segment than the one written": {
+			scopeDoc("name: checkout", "segments: [{id: Ab3dEf9hIjk}]"),
+			entry(Entry{Name: "checkout", Segments: []Segment{{ID: "Zz3dEf9hIjk"}}})},
+		"another name than the one written": {
+			scopeDoc("name: checkout", "service-names: [checkout]"),
+			entry(Entry{Name: "ledger", ServiceNames: []string{"checkout"}})},
 		"a dropped entry": {
 			scopeDoc("name: checkout", "service-names: [checkout]"),
 			&File{Environments: map[string][]Entry{prodHost: {}}}},
@@ -202,25 +251,35 @@ func TestDecode_NoKeyIsReadEmpty(t *testing.T) {
 		return scopeDoc(lines...)
 	}
 	for name, doc := range map[string]string{
-		"name":            with(0, `name: ""`),
-		"path":            with(1, `path: ""`),
-		"cluster-uid":     with(2, `workloads: [{cluster-uid: "", namespace: payments, name: checkout}]`),
-		"namespace":       with(2, `workloads: [{namespace: "", name: checkout}]`),
-		"workload name":   with(2, `workloads: [{namespace: payments, name: ""}]`),
-		"service name":    with(3, `service-names: [""]`),
-		"process group":   with(4, `process-groups: [""]`),
-		"service":         with(5, `services: [""]`),
-		"segments":        with(6, `segments: []`),
-		"segment":         with(6, `segments: [{}]`),
-		"segment id":      with(6, `segments: [{id: ""}]`),
-		"variables":       with(6, `segments: [{id: Ab3dEf9hIjk, variables: {}}]`),
-		"variable name":   with(6, `segments: [{id: Ab3dEf9hIjk, variables: {"": [prod]}}]`),
-		"variable values": with(6, `segments: [{id: Ab3dEf9hIjk, variables: {env: []}}]`),
-		"variable value":  with(6, `segments: [{id: Ab3dEf9hIjk, variables: {env: [""]}}]`),
-		"workload":        with(2, `workloads: [{}]`),
-		"entry":           "environments:\n  " + prodHost + ":\n    - {}\n",
-		"environment":     "environments:\n  " + prodHost + ": []\n",
-		"host":            "environments:\n  \"\":\n    - name: checkout\n      service-names: [checkout]\n",
+		"name":           with(0, `name: ""`),
+		"path":           with(1, `path: ""`),
+		"cluster-uid":    with(2, `workloads: [{cluster-uid: "", namespace: payments, name: checkout}]`),
+		"namespace":      with(2, `workloads: [{namespace: "", name: checkout}]`),
+		"workload name":  with(2, `workloads: [{namespace: payments, name: ""}]`),
+		"workloads":      with(2, `workloads: []`),
+		"service names":  with(3, `service-names: []`),
+		"process groups": with(4, `process-groups: []`),
+		"services":       with(5, `services: []`),
+		// Beside segments an empty list would be the entry's last binding, and
+		// read as left out it makes the entry "everything in the segment".
+		"workloads, the only binding":      scopeDoc("name: checkout", "workloads: []", "segments: [{id: Ab3dEf9hIjk}]"),
+		"service names, the only binding":  scopeDoc("name: checkout", "service-names: []", "segments: [{id: Ab3dEf9hIjk}]"),
+		"process groups, the only binding": scopeDoc("name: checkout", "process-groups: []", "segments: [{id: Ab3dEf9hIjk}]"),
+		"services, the only binding":       scopeDoc("name: checkout", "services: []", "segments: [{id: Ab3dEf9hIjk}]"),
+		"service name":                     with(3, `service-names: [""]`),
+		"process group":                    with(4, `process-groups: [""]`),
+		"service":                          with(5, `services: [""]`),
+		"segments":                         with(6, `segments: []`),
+		"segment":                          with(6, `segments: [{}]`),
+		"segment id":                       with(6, `segments: [{id: ""}]`),
+		"variables":                        with(6, `segments: [{id: Ab3dEf9hIjk, variables: {}}]`),
+		"variable name":                    with(6, `segments: [{id: Ab3dEf9hIjk, variables: {"": [prod]}}]`),
+		"variable values":                  with(6, `segments: [{id: Ab3dEf9hIjk, variables: {env: []}}]`),
+		"variable value":                   with(6, `segments: [{id: Ab3dEf9hIjk, variables: {env: [""]}}]`),
+		"workload":                         with(2, `workloads: [{}]`),
+		"entry":                            "environments:\n  " + prodHost + ":\n    - {}\n",
+		"environment":                      "environments:\n  " + prodHost + ": []\n",
+		"host":                             "environments:\n  \"\":\n    - name: checkout\n      service-names: [checkout]\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, err := decode([]byte(doc))

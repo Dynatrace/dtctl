@@ -88,19 +88,20 @@ func TestResolve(t *testing.T) {
 		{code: StatusLinked, selected: SelectedByDirectory, name: "a Gradle deployable", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy/src",
 			entry: "webproxy", others: []string{"admin"}},
 		{code: StatusLinked, selected: SelectedByBuild, name: "a library one deployable depends on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-api/src",
-			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-api", others: []string{"admin"}},
+			entry: "webproxy", reason: "covered through the Gradle build: \"webproxy\" depends on \"webproxy-api\"", others: []string{"admin"}},
 		{code: StatusAmbiguousEntry, name: "a library two deployables depend on", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core/src/main/kotlin",
 			reason: "covered by entries webproxy and admin", others: []string{"admin", "webproxy"}, ambiguous: true},
 		{code: StatusLinked, selected: SelectedByName, name: "a library two deployables depend on, selected by name", repo: gradle, file: gradleFile(), host: prodHost, dir: "webproxy-core",
-			pick: "admin", entry: "admin", reason: "covered through the Gradle build: admin depends on webproxy-core", others: []string{"webproxy"}},
+			pick: "admin", entry: "admin", reason: "covered through the Gradle build: \"admin\" depends on \"webproxy-core\"", others: []string{"webproxy"}},
 		{code: StatusLinked, selected: SelectedByBuild, name: "a library only an entry's deployable is known to depend on", repo: gradle, file: onlyWebproxy, host: prodHost, dir: "webproxy-core",
-			entry: "webproxy", reason: "covered through the Gradle build: webproxy depends on webproxy-core"},
+			entry: "webproxy", reason: "covered through the Gradle build: \"webproxy\" depends on \"webproxy-core\""},
 		{code: StatusNoEntry, name: "the settings directory", repo: gradle, file: gradleFile(), host: prodHost, dir: ".",
 			reason: `no entry covers "."; entries here cover admin, webproxy`, others: []string{"admin", "webproxy"}},
 		{code: StatusLinked, selected: SelectedByName, name: "selected by name outside its build closure", repo: gradle, file: gradleFile(), host: prodHost, dir: "admin", pick: "webproxy",
 			entry: "webproxy", reason: `selected by name; its path "webproxy" does not cover "admin"`, others: []string{"admin"}},
 		{code: StatusNoEntry, name: "a build file that does not read", repo: symlinked, file: gradleFile(), host: prodHost, dir: "webproxy-api",
-			reason: `no entry covers "webproxy-api"; entries here cover admin, webproxy`, others: []string{"admin", "webproxy"}},
+			reason: `no entry covers "webproxy-api"; entries here cover admin, webproxy; the Gradle build at "." was not read whole ("webproxy/build.gradle.kts" was not read), so no entry is selected through it`,
+			others: []string{"admin", "webproxy"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -301,6 +302,10 @@ func TestResolve_StatusIsACopy(t *testing.T) {
 	require.NoError(t, err)
 	r.Entry.ServiceNames[0] = "cart"
 	r.Entry.Workloads[0].Name = "cart"
+	require.NotEmpty(t, r.Entry.ProcessGroups)
+	require.NotEmpty(t, r.Entry.Services)
+	r.Entry.ProcessGroups[0] = "PROCESS_GROUP-0000000000000000"
+	r.Entry.Services[0] = "SERVICE-0000000000000000"
 	r.Entry.Segments[0].Variables["env"][0] = "stage"
 	r.Entry.Segments[0].Variables["more"] = []string{"x"}
 	want := exampleFile()
@@ -310,6 +315,8 @@ func TestResolve_StatusIsACopy(t *testing.T) {
 	// Entries hands out a copy too.
 	entries := f.Entries(prodHost)
 	entries[0].ServiceNames[0] = "cart"
+	entries[0].ProcessGroups[0] = "PROCESS_GROUP-0000000000000000"
+	entries[0].Services[0] = "SERVICE-0000000000000000"
 	entries[1] = Entry{}
 	assert.Equal(t, want, f)
 	assert.Nil(t, f.Entries(stgHost+".invalid"))
@@ -443,6 +450,6 @@ func TestResolve_ModuleChoiceIsStable(t *testing.T) {
 	for range 200 {
 		r, err := Resolve(repo, f, prodHost, "lib/src", "")
 		require.NoError(t, err)
-		require.Equal(t, "covered through the Gradle build: app depends on Lib", r.Reason)
+		require.Equal(t, "covered through the Gradle build: \"app\" depends on \"Lib\"", r.Reason)
 	}
 }

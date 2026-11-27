@@ -62,6 +62,42 @@ func repoScopeStatus(dir string) reposcope.Status {
 	return *s
 }
 
+// repoScopeStatusTie is the status resolved in a library two deployables
+// depend on, each with an entry: neither is closer.
+func repoScopeStatusTie() reposcope.Status {
+	uses := &fstest.MapFile{Data: []byte(`dependencies { implementation(project(":lib")) }`)}
+	repo := fstest.MapFS{
+		"settings.gradle":       {Data: []byte("include ':checkout', ':ledger', ':lib'\n")},
+		"checkout/build.gradle": uses,
+		"ledger/build.gradle":   uses,
+		"lib/build.gradle":      {Data: []byte("")},
+	}
+	f := &reposcope.File{Environments: map[string][]reposcope.Entry{repoScopeHost: {
+		{Name: "checkout", Path: "checkout", ServiceNames: []string{"checkout"}},
+		{Name: "ledger", Path: "ledger", ServiceNames: []string{"ledger"}},
+	}}}
+	s, err := reposcope.Resolve(repo, f, repoScopeHost, "lib", "")
+	if err != nil {
+		panic(err)
+	}
+	return *s
+}
+
+// repoScopeStatusAnnotated is the status of an entry that carries notes and
+// names its workload's cluster.
+func repoScopeStatusAnnotated() reposcope.Status {
+	f := &reposcope.File{Environments: map[string][]reposcope.Entry{repoScopeHost: {{
+		Name:        "checkout",
+		Workloads:   []reposcope.Workload{{ClusterUID: repoScopeCluster, Namespace: "payments", Name: "checkout"}},
+		Annotations: map[string]string{"example.invalid/owner": "team-payments", "note": "moved from the monolith"},
+	}}}}
+	s, err := reposcope.Resolve(fstest.MapFS{}, f, repoScopeHost, ".", "")
+	if err != nil {
+		panic(err)
+	}
+	return *s
+}
+
 // repoScopeRunner answers discovery's queries from canned results, by the
 // data object a query fetches, each object's answers in the order given: a
 // record query's first, then its sampled retries'. A query with no answer
@@ -211,6 +247,8 @@ func TestGolden_RepoScope(t *testing.T) {
 	}{
 		"status-linked":       {repoScopeStatusLinked(), all},
 		"status-segments":     {repoScopeStatus("services/ledger"), all},
+		"status-tie":          {repoScopeStatusTie(), all},
+		"status-annotated":    {repoScopeStatusAnnotated(), all},
 		"status-unlinked":     {reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, all},
 		"discovery-match":     {repoScopeDiscoveryMatch(), all},
 		"discovery-none":      {repoScopeDiscoveryNone(), []string{"json"}},

@@ -22,12 +22,12 @@ const fileHeader = "# dtctl repo scope: links this repository to the Dynatrace e
 // never be wider than the file says. So the document is parsed into nodes and
 // read key by key, and nothing in it is read past: a value left empty, a key
 // given twice, a key that is not a plain string and a value of another shape
-// each fail the read, naming the line. Under a key that narrows an entry, a
-// value written empty ("", [] or {}) is a value left empty: read as the key
-// left out, it would give the widest meaning the key has (see written). An
-// anchor, an alias or a merge key
-// fails it too: a committed data file needs none, and each is a way to make a
-// line mean something other than what it shows.
+// each fail the read, naming the line. Under a key that narrows an entry, and
+// under a list of bindings, a value written empty ("", [] or {}) is a value
+// left empty: read as the key left out, it would give the widest meaning the
+// key has (see written). An anchor, an alias or a merge key fails it too: a
+// committed data file needs none, and each is a way to make a line mean
+// something other than what it shows.
 //
 // A key this dtctl does not know is a typo or a newer dtctl's key, and the
 // two look the same here. Where it sits decides what it does to the read.
@@ -50,6 +50,26 @@ const fileHeader = "# dtctl repo scope: links this repository to the Dynatrace e
 // which a generator or a concatenation leaves after a trailing '---',
 // carries nothing to drop.
 func decode(data []byte) (*File, *InvalidError) {
+	f, err := read(data)
+	if err != nil {
+		err.Msg = bounded(err.Msg)
+	}
+	return f, err
+}
+
+// bounded is msg cut to maxMessageBytes. The file is as long as 1 MiB and a
+// refusal quotes what it refuses, so without a bound one line of a clone
+// decides how much every command run in it prints.
+func bounded(msg string) string {
+	if len(msg) <= maxMessageBytes {
+		return msg
+	}
+	const cut = "… (cut short)"
+	return strings.ToValidUTF8(msg[:maxMessageBytes-len(cut)], "") + cut
+}
+
+// read is decode without the bound on what it says.
+func read(data []byte) (*File, *InvalidError) {
 	f := &File{}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return f, nil
@@ -75,6 +95,12 @@ func decode(data []byte) (*File, *InvalidError) {
 	r := &reader{}
 	if err := r.document(root, f); err != nil {
 		return nil, err
+	}
+	if _, has := mappingValue(root, "environments"); !has && len(f.unknown) > 0 {
+		// The keys would be a warning on the queries the entries scope, and
+		// there are none: nothing would ever say that the file is not read.
+		return nil, invalid(`holds no "environments" key, so nothing in it is applied; `+unknownKeys(f.unknown),
+			"write the environments under the key environments")
 	}
 	if len(r.narrowing) > 0 {
 		them := "them"
@@ -104,7 +130,15 @@ func otherVersion(root *yaml.Node) *InvalidError {
 	}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		k, v := root.Content[i], root.Content[i+1]
-		if k.Value == "apiVersion" && k.Kind == yaml.ScalarNode && v.Kind == yaml.ScalarNode && v.Value != "" && !isNull(v) && v.Value != apiVersion {
+		// A tagged key or value is refused as such (see plainNodes), not
+		// read as the version it spells.
+		if k.Value != "apiVersion" || k.Kind != yaml.ScalarNode || v.Kind != yaml.ScalarNode || tagged(k) || tagged(v) {
+			continue
+		}
+		if v.Value != apiVersion && strings.EqualFold(v.Value, apiVersion) {
+			return invalid(fmt.Sprintf("apiVersion %q on line %d must be written %q", v.Value, k.Line, apiVersion))
+		}
+		if v.Value != "" && !isNull(v) && v.Value != apiVersion {
 			return invalid(fmt.Sprintf("apiVersion %q on line %d is not supported (this dtctl reads %q)", v.Value, k.Line, apiVersion),
 				"upgrade dtctl to read this file")
 		}
@@ -132,19 +166,45 @@ func onlyDocument(stream *yaml.Decoder) *InvalidError {
 }
 
 // emptyDocument reports a document that holds no value: nothing at all, or
-// an explicit null.
+// a null as it is written, without an anchor or a tag that would make it
+// something to keep.
 func emptyDocument(doc *yaml.Node) bool {
 	for _, n := range doc.Content {
-		if !isNull(n) {
+		if !isNull(n) || n.Anchor != "" || tagged(n) {
 			return false
 		}
 	}
 	return true
 }
 
-// plainNodes refuses an anchor or a merge key anywhere under n. An alias
-// needs an anchor before it, so refusing the anchor refuses both.
+// tagged reports a node written with a tag of its own (!!str, !custom).
+func tagged(n *yaml.Node) bool {
+	return n.Style&yaml.TaggedStyle != 0
+}
+
+// mappingValue is the value under key in the mapping n.
+func mappingValue(n *yaml.Node, key string) (*yaml.Node, bool) {
+	if n.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Kind == yaml.ScalarNode && n.Content[i].Value == key {
+			return n.Content[i+1], true
+		}
+	}
+	return nil, false
+}
+
+// plainNodes refuses an anchor, a merge key or an explicit tag anywhere under
+// n, keys included. An alias needs an anchor before it, so refusing the anchor
+// refuses both. A tag says a value is something other than the text its line
+// shows (!!binary), or is ignored and so says nothing (!!int abc); every value
+// of the format is read as its spelling, so no tag is needed.
 func plainNodes(n *yaml.Node) *InvalidError {
+	if tagged(n) {
+		return invalid(fmt.Sprintf("the tag %s on line %d is not accepted", n.ShortTag(), n.Line),
+			"write the value without a tag; it is read as the text the line shows")
+	}
 	if n.Anchor != "" {
 		return invalid(fmt.Sprintf("the anchor &%s on line %d is not accepted, nor is an alias of it", n.Anchor, n.Line),
 			"write each value out where it is used")
@@ -171,13 +231,24 @@ func isNull(n *yaml.Node) bool {
 type place struct {
 	what string
 	line int
+	// index is the item's position in the list what names, for the place
+	// of an item. The text is put together only when a message needs it: a
+	// list can hold as many items as the file has bytes for, and what can be
+	// as long as a key.
+	index   int
+	indexed bool
 }
 
-func (p place) String() string { return fmt.Sprintf("%s on line %d", p.what, p.line) }
+func (p place) String() string {
+	if p.indexed {
+		return fmt.Sprintf("%s[%d] on line %d", p.what, p.index, p.line)
+	}
+	return fmt.Sprintf("%s on line %d", p.what, p.line)
+}
 
 // item is the place of the i-th item of the list at p.
 func (p place) item(i int, n *yaml.Node) place {
-	return place{fmt.Sprintf("%s[%d]", p.what, i), n.Line}
+	return place{what: p.what, line: n.Line, index: i, indexed: true}
 }
 
 // noValue refuses a null. A key left empty is a line somebody has not
@@ -191,8 +262,13 @@ func noValue(p place) *InvalidError {
 // of these keys means its widest when it is left out (the whole repository,
 // every cluster, no segment, a segment as it stands), so an empty value read
 // as "left out" would turn an unfinished constraint into none. Save never
-// writes one: it leaves the key out. A list of bindings may be empty, since
-// bindings are alternatives and one fewer selects no more.
+// writes one: it leaves the key out.
+//
+// A list of bindings is held to the same rule. Bindings are alternatives, so
+// one list fewer selects no more, but that stops being true of the last one:
+// beside segments, an entry whose only list of bindings is written empty would
+// read as an entry of segments alone, which is everything in the segment.
+// Refusing the empty list wherever it stands is the rule that needs no "last".
 func written(n *yaml.Node, p place) *InvalidError {
 	switch n.Kind {
 	case yaml.ScalarNode:
@@ -230,7 +306,9 @@ type reader struct {
 }
 
 // mapping calls each for every key of the mapping n, with the key's node and
-// its value's. A key is a plain string, given once.
+// its value's. A key is a plain string, given once, and no longer than a key
+// of the format can be: YAML bounds a key written "key:" and not one written
+// "? key", and a key is repeated in what is said about everything under it.
 func (r *reader) mapping(n *yaml.Node, p place, each func(key string, k, v *yaml.Node) *InvalidError) *InvalidError {
 	switch {
 	case isNull(n):
@@ -243,6 +321,9 @@ func (r *reader) mapping(n *yaml.Node, p place, each func(key string, k, v *yaml
 		k, v := n.Content[i], n.Content[i+1]
 		if k.Kind != yaml.ScalarNode || isNull(k) {
 			return invalid(fmt.Sprintf("the key on line %d must be a plain string", k.Line))
+		}
+		if len(k.Value) > maxKeyBytes {
+			return invalid(fmt.Sprintf("the key on line %d is longer than %d bytes, which no key of the format is", k.Line, maxKeyBytes))
 		}
 		if first, twice := lines[k.Value]; twice {
 			return invalid(fmt.Sprintf("key %q on line %d is already given on line %d", k.Value, k.Line, first))
@@ -263,10 +344,16 @@ func text(n *yaml.Node, p place) (string, *InvalidError) {
 		return "", noValue(p)
 	case n.Kind != yaml.ScalarNode:
 		return "", wrongShape(p, "a single value")
-	case n.ShortTag() == "!!binary":
-		return "", invalid(p.String() + " must be plain text, not !!binary data")
 	}
 	return n.Value, nil
+}
+
+// writtenItems reads the list at p, which must hold an item (see written).
+func writtenItems[T any](n *yaml.Node, p place, read func(*yaml.Node, place) (T, *InvalidError)) ([]T, *InvalidError) {
+	if err := written(n, p); err != nil {
+		return nil, err
+	}
+	return items(n, p, read)
 }
 
 // items reads the list at p, each item through read.
@@ -292,8 +379,8 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 	if isNull(n) {
 		return nil
 	}
-	return r.mapping(n, place{"the document", n.Line}, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+	return r.mapping(n, place{what: "the document", line: n.Line}, func(key string, k, v *yaml.Node) (err *InvalidError) {
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "apiVersion":
 			// Left out, the version is v1; written, it says which.
@@ -303,10 +390,17 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 		case "environments":
 			f.Environments = map[string][]Entry{}
 			err = r.mapping(v, p, func(host string, k, v *yaml.Node) (err *InvalidError) {
-				f.Environments[host], err = items(v, place{fmt.Sprintf("environment %q", host), k.Line}, r.entry)
+				f.Environments[host], err = items(v, place{what: fmt.Sprintf("environment %q", host), line: k.Line}, r.entry)
 				return err
 			})
 		default:
+			// One of the two keys in another case is a slip, and read past
+			// it hides the entries or the version.
+			for _, known := range []string{"apiVersion", "environments"} {
+				if strings.EqualFold(key, known) {
+					return invalid(fmt.Sprintf("key %q on line %d must be written %q", key, k.Line, known))
+				}
+			}
 			f.unknown = append(f.unknown, fmt.Sprintf("%q on line %d", key, k.Line))
 		}
 		return err
@@ -314,32 +408,30 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 }
 
 func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
-	p.what = "entry" // its line says which
+	p = place{what: "entry", line: p.line} // its line says which
 	err = r.mapping(n, p, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "name":
 			e.Name, err = text(v, p)
 		case "path":
 			e.Path, err = constraint(v, p)
 		case "workloads":
-			e.Workloads, err = items(v, p, r.workload)
+			e.Workloads, err = writtenItems(v, p, r.workload)
 		case "service-names":
-			e.ServiceNames, err = items(v, p, text)
+			e.ServiceNames, err = writtenItems(v, p, text)
 		case "process-groups":
-			e.ProcessGroups, err = items(v, p, text)
+			e.ProcessGroups, err = writtenItems(v, p, text)
 		case "services":
-			e.Services, err = items(v, p, text)
+			e.Services, err = writtenItems(v, p, text)
 		case "segments":
-			if err = written(v, p); err == nil {
-				e.Segments, err = items(v, p, r.segment)
-			}
+			e.Segments, err = writtenItems(v, p, r.segment)
 		case "annotations":
 			err = r.mapping(v, p, func(name string, k, v *yaml.Node) (err *InvalidError) {
 				if e.Annotations == nil {
 					e.Annotations = map[string]string{}
 				}
-				e.Annotations[name], err = text(v, place{fmt.Sprintf("annotation %q", name), k.Line})
+				e.Annotations[name], err = text(v, place{what: fmt.Sprintf("annotation %q", name), line: k.Line})
 				return err
 			})
 		default:
@@ -352,7 +444,7 @@ func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
 
 func (r *reader) workload(n *yaml.Node, p place) (w Workload, err *InvalidError) {
 	err = r.mapping(n, p, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "cluster-uid":
 			w.ClusterUID, err = constraint(v, p)
@@ -370,7 +462,7 @@ func (r *reader) workload(n *yaml.Node, p place) (w Workload, err *InvalidError)
 
 func (r *reader) segment(n *yaml.Node, p place) (s Segment, err *InvalidError) {
 	err = r.mapping(n, p, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "id":
 			s.ID, err = text(v, p)
@@ -380,7 +472,7 @@ func (r *reader) segment(n *yaml.Node, p place) (s Segment, err *InvalidError) {
 			}
 			s.Variables = map[string][]string{}
 			err = r.mapping(v, p, func(name string, k, v *yaml.Node) (err *InvalidError) {
-				s.Variables[name], err = items(v, place{fmt.Sprintf("variable %q", name), k.Line}, text)
+				s.Variables[name], err = items(v, place{what: fmt.Sprintf("variable %q", name), line: k.Line}, text)
 				return err
 			})
 		default:
@@ -403,16 +495,24 @@ func (f *File) Warning() string {
 	if len(f.unknown) == 0 {
 		return ""
 	}
-	return unknownKeys(f.unknown)
+	return bounded(unknownKeys(f.unknown))
 }
 
-// unknownKeys names keys this dtctl does not know, each as decode found it.
+// maxNamedKeys is how many unknown keys a message names before it counts.
+const maxNamedKeys = 5
+
+// unknownKeys names keys this dtctl does not know, each as decode found it:
+// the first few, then how many more there are.
 func unknownKeys(keys []string) string {
 	noun := "key"
 	if len(keys) > 1 {
 		noun = "keys"
 	}
-	return fmt.Sprintf("unknown %s %s (a typo, or written by a newer dtctl)", noun, strings.Join(keys, ", "))
+	more := ""
+	if n := len(keys) - maxNamedKeys; n > 0 {
+		keys, more = keys[:maxNamedKeys], fmt.Sprintf(" and %d more", n)
+	}
+	return fmt.Sprintf("unknown %s %s%s (a typo, or written by a newer dtctl)", noun, strings.Join(keys, ", "), more)
 }
 
 // The file's own spelling: kebab-case keys, where Entry and Workload carry

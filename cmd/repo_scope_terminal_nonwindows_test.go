@@ -1,11 +1,17 @@
+//go:build !windows
+
 package cmd
 
+// The tests here make directories named with control characters, which
+// Windows does not allow in a file name. What they assert about printed text
+// that needs no such directory is in repo_scope_shown_test.go.
+
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode"
 
 	"github.com/stretchr/testify/require"
 
@@ -17,17 +23,6 @@ import (
 // clears a terminal, a bell and a carriage return that overwrites the line it
 // is printed on.
 const hostileName = "svc\x1b[31mRED\a\rdone"
-
-// expectTerminalSafe fails when text holds a control character other than
-// the line feeds that end its lines.
-func expectTerminalSafe(t *testing.T, text string, args []string) {
-	t.Helper()
-	if i := strings.IndexFunc(text, func(r rune) bool { return r != '\n' && unicode.IsControl(r) }); i >= 0 {
-		line := text[strings.LastIndexByte(text[:i], '\n')+1:]
-		line, _, _ = strings.Cut(line, "\n")
-		t.Errorf("%q prints a control character: %q", args, line)
-	}
-}
 
 // chdirHostileRepo makes a repository whose checkout directory and one
 // subdirectory are both named hostileName, holding files and optionally a
@@ -186,26 +181,27 @@ func TestBreakpointWorkspaceIsSentAsNamedAndShownSafe(t *testing.T) {
 	}
 }
 
-// Outside a repository the refusal names no path: the message travels in an
-// agent envelope and in logs, and the path is this machine's.
-func TestRepoScopeOutsideARepositoryNamesNoPath(t *testing.T) {
-	const want = "repo scope: the working directory is not inside a git repository: a repo scope lives in .dtctl-repo-scope.yaml at the repository root"
+// An entry that covers a directory through the Gradle build says which module
+// the directory is, and a module is named by its directory, which is whatever
+// a clone carries.
+func TestRepoScopeBuildReasonHoldsControlCharacters(t *testing.T) {
+	const module = "li\x1b[31mb"
 	for _, args := range [][]string{
-		{"query", "fetch logs", "--repo-scope", "x"}, {"verify", "query", "fetch logs", "--repo-scope", "x"},
-		{"repo-scope", "list"}, {"repo-scope", "discover"}, {"repo-scope", "set", "x", "--service-name", "x"}, {"repo-scope", "delete", "x"},
-		{"create", "breakpoint", "A.java:1", "--repo-scope", "x"},
+		{"repo-scope", "current"}, {"repo-scope", "describe"}, {"repo-scope", "list"},
+		{"query", "fetch logs"}, {"verify", "query", "fetch logs"},
 	} {
-		newLiveDebuggerStub(t, "readwrite-all")
-		dir := t.TempDir()
-		t.Chdir(dir)
-		code, stdout, stderr := runRepoScoped(args, RunOptions{})
-		require.NotZero(t, code, "%q", args)
-		require.Equal(t, "Error: "+want+"\n", strings.SplitAfter(stderr, "\n")[0], "%q", args)
-		require.NotContains(t, stdout+stderr, filepath.Base(dir), "%q", args)
-
-		code, stdout, _ = runRepoScoped(append(args, "--agent"), RunOptions{})
-		require.NotZero(t, code, "%q", args)
-		require.Equal(t, want, agentError(t, stdout).Message, "%q", args)
-		require.NotContains(t, stdout, filepath.Base(dir), "%q", args)
+		newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+		repo := chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: app\n      path: app-a\n      service-names: [app]\n")
+		writeRepoFiles(t, repo, map[string]string{
+			"settings.gradle":        "include 'app-a', '" + module + "'\n",
+			"app-a/build.gradle":     "dependencies { implementation project(':" + module + "') }\n",
+			module + "/build.gradle": "",
+		})
+		t.Chdir(filepath.Join(repo, module))
+		_, stdout, stderr := runRepoScoped(args, RunOptions{})
+		expectTerminalSafe(t, stdout+stderr, args)
+		if args[1] == "current" {
+			require.Equal(t, "app  (app-a · 127.0.0.1; covered through the Gradle build: \"app-a\" depends on \"li\\x1b[31mb\")\n", stdout)
+		}
 	}
 }

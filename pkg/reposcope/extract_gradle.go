@@ -1,7 +1,9 @@
 package reposcope
 
 import (
+	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -50,6 +52,13 @@ type gradleBuild struct {
 	dir        string
 	modules    map[string][]string
 	deployable map[string]bool
+	// byWords is accessed's index, nil until asked for. Every module is
+	// known by then: gradleBuildAt reads the references last.
+	byWords map[string][]string
+	// partial says why the build was not read whole, "" when it was. It is
+	// set by gradleBuildAt only: what a module depends on is then not known
+	// for every module, so neither is which deployables a module belongs to.
+	partial string
 }
 
 // gradleBuilds are a repository's builds, by the directory of their settings
@@ -182,30 +191,55 @@ func (b *gradleBuild) module(dir string) string {
 	return ""
 }
 
-// references are the modules a build file names, each once. A reference is
-// matched to a module by its words, so projects.fooBar is foo-bar.
+// references are the modules a build file names, each once. A literal
+// project(":billing-api") names the module at that path and no other: read
+// by its words it would name a sibling billing_api as well, and hand it to a
+// deployable that does not depend on it. A type-safe accessor is matched by
+// its words, since projects.billingApi is how Gradle spells billing-api.
 func (b *gradleBuild) references(text string) []string {
 	text = gradleTestDepRe.ReplaceAllString(gradleText(text), "")
-	var refs [][]string
+	found := map[string]bool{}
 	for _, m := range gradleProjectRe.FindAllStringSubmatch(text, -1) {
-		refs = append(refs, strings.FieldsFunc(m[1], func(r rune) bool { return r == ':' }))
-	}
-	for _, m := range gradleAccessorRe.FindAllStringSubmatch(text, -1) {
-		refs = append(refs, strings.Split(m[1], "."))
-	}
-	var out []string
-	for m := range b.modules {
-		rel := strings.Split(strings.TrimPrefix(m, b.dir+"/"), "/")
-		if slices.ContainsFunc(refs, func(ref []string) bool { return slices.EqualFunc(ref, rel, sameWords) }) {
-			out = append(out, m)
+		module := path.Join(b.dir, strings.ReplaceAll(strings.Trim(m[1], ":"), ":", "/"))
+		if _, ok := b.modules[module]; ok {
+			found[module] = true
 		}
 	}
-	slices.Sort(out)
-	return out
+	for _, m := range gradleAccessorRe.FindAllStringSubmatch(text, -1) {
+		for _, module := range b.accessed()[wordsKey(strings.Split(m[1], "."))] {
+			found[module] = true
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return sortedKeys(found)
 }
 
-func sameWords(a, b string) bool {
-	return slices.Equal(splitWords(a), splitWords(b))
+// accessed are the build's modules by the words of their path, the form a
+// type-safe accessor names one in. It is put together once for the build's
+// modules as they stand: every build file of a build asks it, and comparing
+// each reference with each module made reading a build quadratic in its
+// modules, on every scoped query.
+func (b *gradleBuild) accessed() map[string][]string {
+	if b.byWords == nil {
+		b.byWords = make(map[string][]string, len(b.modules))
+		for _, m := range slices.Sorted(maps.Keys(b.modules)) {
+			key := wordsKey(strings.Split(strings.TrimPrefix(m, b.dir+"/"), "/"))
+			b.byWords[key] = append(b.byWords[key], m)
+		}
+	}
+	return b.byWords
+}
+
+// wordsKey is the words of a path's segments, the same for two paths an
+// accessor cannot tell apart.
+func wordsKey(segments []string) string {
+	parts := make([]string, len(segments))
+	for i, s := range segments {
+		parts[i] = strings.Join(splitWords(s), "\x00")
+	}
+	return strings.Join(parts, "/")
 }
 
 // gradleText is a Gradle file without its whole-line comments.
@@ -278,6 +312,13 @@ func (b *gradleBuild) owners(m string) []string {
 // a walk, and the walk it does starts at the build's own directory, never at
 // the repository root: resolving an entry calls this on every scoped query.
 // Nothing is deployed in it: the caller says what is.
+//
+// The build's partial says whether it was read whole. It was not when the
+// walk stopped at its file limit, when a build file it listed could not be
+// read, or when a module the settings include has a build file the walk did
+// not list (the module lies deeper than the walk goes, or in a directory it
+// skips). The last is asked of the filesystem, module by module, so it does
+// not depend on how the walk bounds itself.
 func gradleBuildAt(fsys fs.FS, dir string) *gradleBuild {
 	root := dir
 	for ; !slices.ContainsFunc(gradleSettingsFiles, func(f string) bool {
@@ -291,15 +332,58 @@ func gradleBuildAt(fsys fs.FS, dir string) *gradleBuild {
 	if inSkippedDir(root) {
 		return nil
 	}
-	files, _, err := listSources(fsys, root, dir, func(f string) bool { return isGradleFile(path.Base(f)) })
+	files, capped, err := listSources(fsys, root, dir, func(f string) bool { return isGradleFile(path.Base(f)) })
 	if err != nil {
 		return nil
 	}
+	partial := ""
+	if capped {
+		partial = fmt.Sprintf("it holds more than %d build files", maxFiles)
+	}
 	text := map[string]string{}
 	for _, f := range files {
-		if data, err := readSource(fsys, f); err == nil {
-			text[f] = string(data)
+		data, err := readSource(fsys, f)
+		if err != nil {
+			if partial == "" {
+				partial = fmt.Sprintf("%q could not be read", f)
+			}
+			continue
+		}
+		text[f] = string(data)
+	}
+	b := readGradleBuilds(files, text, nil).of(dir)
+	if b == nil {
+		if partial == "" {
+			return nil
+		}
+		// The settings file is there and the walk did not get to it: a
+		// build of which nothing is known, which is not the same as none.
+		b = &gradleBuild{dir: root, modules: map[string][]string{}, deployable: map[string]bool{}}
+	}
+	if partial == "" {
+		partial = b.unlistedBuildFile(fsys, files)
+	}
+	b.partial = partial
+	return b
+}
+
+// unlistedBuildFile names why the build is not read whole when a module has a
+// build file that is not among files, the ones the walk listed, or returns "".
+func (b *gradleBuild) unlistedBuildFile(fsys fs.FS, files []string) string {
+	listed := make(map[string]bool, len(files))
+	for _, f := range files {
+		listed[f] = true
+	}
+	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
+		for _, name := range gradleBuildFiles {
+			f := path.Join(m, name)
+			if listed[f] {
+				continue
+			}
+			if _, err := fs.Stat(fsys, f); err == nil {
+				return fmt.Sprintf("%q was not read", f)
+			}
 		}
 	}
-	return readGradleBuilds(files, text, nil).of(dir)
+	return ""
 }

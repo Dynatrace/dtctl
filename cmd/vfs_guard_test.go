@@ -106,6 +106,7 @@ var hostFileAccessCalls = []string{
 	"os.Create(",
 	"os.ReadDir(",
 	"os.DirFS(",
+	"os.OpenRoot(",
 	"os.CreateTemp(",
 	"os.Lstat(",
 	`"/dev/stdin"`,

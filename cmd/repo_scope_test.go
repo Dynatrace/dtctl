@@ -338,11 +338,14 @@ func TestRepoScopeSetPathIsADirectoryOfTheRepository(t *testing.T) {
 	}
 
 	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "billing", "--service-name", "billing", "--path", "services/billing"}, RunOptions{})
-	if code != 0 {
+	if _, err := os.Stat(filepath.Join(repo, "services", "billing")); err != nil {
 		// A volume that tells the two spellings apart has no such directory.
+		require.Equal(t, client.ExitUsageError, code)
 		require.Contains(t, stderr, "is not a directory of this repository")
+		require.Equal(t, before, readScopeFile(t, repo))
 		return
 	}
+	require.Zero(t, code, stderr)
 	require.Equal(t, "services/Billing", loadScopeFile(t, repo).Entries(repoScopeTestEnvHost)[2].Path)
 }
 
@@ -588,7 +591,7 @@ func TestRepoScopeSetValidatesBeforeWriting(t *testing.T) {
 func TestRepoScopeSetFlagsRejectEmptyValues(t *testing.T) {
 	localRepoScopeConfig(t)
 	chdirTestRepo(t, "")
-	for _, flag := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "path"} {
+	for _, flag := range []string{"service", "process-group", "service-name", "cluster-uid", "namespace", "workload", "path", "segment"} {
 		code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "checkout", "--service-name", "checkout", "--" + flag, " "}, RunOptions{})
 		require.Equal(t, client.ExitUsageError, code, "--%s: %s", flag, stderr)
 	}
@@ -664,7 +667,7 @@ func TestRepoScopeDelete(t *testing.T) {
 	require.Zero(t, code)
 	var deleted repoScopeDeleted
 	agentResult(t, stdout, &deleted)
-	require.Equal(t, repoScopeDeleted{Deleted: true, Name: "ledger", File: reposcope.FileName, Environment: repoScopeTestEnvHost}, deleted)
+	require.Equal(t, repoScopeDeleted{Deleted: true, Name: "ledger", File: reposcope.FileName, Environment: repoScopeTestEnvHost, FileRemoved: true}, deleted)
 	_, err := os.Stat(filepath.Join(repo, reposcope.FileName))
 	require.ErrorIs(t, err, os.ErrNotExist)
 }

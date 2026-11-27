@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // scopeDoc renders a one-entry document for prodHost from the entry's lines.
@@ -36,7 +37,7 @@ func TestDecode_MalformedIsRefused(t *testing.T) {
 		{"an empty path", scopeDoc("name: checkout", `path: ""`, "service-names: [checkout]"),
 			"path on line 4 has no value"},
 		{"an empty path under a tag", scopeDoc("name: checkout", `path: !!str ""`, "service-names: [checkout]"),
-			"path on line 4 has no value"},
+			"the tag !!str on line 4 is not accepted"},
 		{"an empty block for a path", scopeDoc("name: checkout", "path: |", "service-names: [checkout]"),
 			"path on line 4 has no value"},
 		{"an empty cluster uid", scopeDoc("name: checkout", "workloads:", "  - cluster-uid: ''", "    namespace: payments", "    name: checkout"),
@@ -94,8 +95,6 @@ func TestDecode_MalformedIsRefused(t *testing.T) {
 			"the merge key << on line 5 is not accepted"},
 		{"a merge key of the document", "<<: {environments: {" + prodHost + ": [{name: checkout, service-names: [checkout]}]}}\n",
 			"the merge key << on line 1 is not accepted"},
-		{"binary data", scopeDoc("name: !!binary Y2hlY2tvdXQ=", "service-names: [checkout]"),
-			"name on line 3 must be plain text, not !!binary data"},
 
 		{"a list for the document", "- environments\n", "does not match the repo scope schema: the document on line 1 must be a mapping"},
 		{"a list for environments", "environments: [" + prodHost + "]\n",
@@ -178,13 +177,23 @@ func hostileFiles() map[string][]byte {
 		aliases = append(aliases, "*a,"...)
 	}
 	aliases = append(aliases, "]\n"...)
+	// YAML bounds an implicit key at 1,024 bytes and an explicit one ("? key")
+	// not at all, so a key can be as long as the file allows, and whatever
+	// the reader does once per item under it is done with all of it.
+	longKey := strings.Repeat("k", size/2)
+	values := "[" + strings.TrimSuffix(strings.Repeat("a,", size/5), ",") + "]"
+	variable := "environments:\n  " + prodHost + ":\n    - name: checkout\n      segments:\n        - id: Ab3dEf9hIjk\n" +
+		"          variables:\n            ? " + longKey + "\n            : " + values + "\n"
+	host := "environments:\n  ? " + strings.Repeat("k", size/10) + "\n  :\n" + strings.Repeat("    - {}\n", size/50)
 	return map[string][]byte{
-		"one wide mapping":          wide,
-		"unknown document keys":     keys,
-		"aliases of one anchor":     aliases,
-		"documents after the first": []byte(scopeDoc("name: checkout", "service-names: [checkout]") + strings.Repeat("---\n", size/4)),
-		"nested lists":              []byte("environments: " + strings.Repeat("[", size/2) + strings.Repeat("]", size/2) + "\n"),
-		"one long key":              []byte(strings.Repeat("k", size) + ": 1\n"),
+		"a long variable name over many values": []byte(variable),
+		"a long host over many entries":         []byte(host),
+		"one wide mapping":                      wide,
+		"unknown document keys":                 keys,
+		"aliases of one anchor":                 aliases,
+		"documents after the first":             []byte(scopeDoc("name: checkout", "service-names: [checkout]") + strings.Repeat("---\n", size/4)),
+		"nested lists":                          []byte("environments: " + strings.Repeat("[", size/2) + strings.Repeat("]", size/2) + "\n"),
+		"one long key":                          []byte(strings.Repeat("k", size) + ": 1\n"),
 	}
 }
 
@@ -200,6 +209,48 @@ func TestDecode_HostileFileIsAnsweredAtOnce(t *testing.T) {
 			assert.Less(t, time.Since(start), 5*time.Second)
 		})
 	}
+}
+
+// No key of the format is longer than a host or an annotation key, and a
+// longer one is refused by its line, without being quoted.
+func TestDecode_RefusesAKeyLongerThanTheFormatHas(t *testing.T) {
+	long := strings.Repeat("k", maxKeyBytes+1)
+	for name, doc := range map[string]string{
+		"a document key":  long + ": 1\n" + scopeDoc("name: checkout", "service-names: [checkout]"),
+		"an environment":  "environments:\n  " + long + ":\n    - name: checkout\n      service-names: [checkout]\n",
+		"an entry key":    scopeDoc("name: checkout", "service-names: [checkout]", long+": 1"),
+		"a workload key":  scopeDoc("name: checkout", "workloads: [{namespace: payments, name: checkout, "+long+": 1}]"),
+		"a variable name": scopeDoc("name: checkout", "segments: [{id: Ab3dEf9hIjk, variables: {"+long+": [a]}}]"),
+		"an annotation":   scopeDoc("name: checkout", "service-names: [checkout]", "annotations: {"+long+": a}"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decode([]byte(doc))
+			require.NotNil(t, err)
+			assert.Regexp(t, `^the key on line \d+ is longer than 253 bytes, which no key of the format is$`, err.Msg)
+		})
+	}
+	_, err := decode([]byte(scopeDoc("name: checkout", "service-names: [checkout]", "annotations: {"+long[1:]+": a}")))
+	require.Nil(t, err, "a key of the longest length loads")
+}
+
+// Reading an item costs nothing that grows with the key it sits under: where
+// the item is, is put into words only for a message. The list here is read
+// with the one allocation of its result.
+func TestItems_DescribeAnItemOnlyForAMessage(t *testing.T) {
+	var list yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("["+strings.TrimSuffix(strings.Repeat("a,", 1000), ",")+"]"), &list))
+	at := place{what: "variable " + strings.Repeat("k", maxKeyBytes), line: 1}
+	allocs := testing.AllocsPerRun(10, func() {
+		values, err := items(list.Content[0], at, text)
+		if err != nil || len(values) != 1000 {
+			t.Fatalf("read %d values: %v", len(values), err)
+		}
+	})
+	assert.LessOrEqual(t, allocs, 2.0)
+
+	_, err := items(list.Content[0], at, func(n *yaml.Node, p place) (string, *InvalidError) { return "", noValue(p) })
+	require.NotNil(t, err)
+	assert.Equal(t, at.what+"[0] on line 1 has no value", err.Msg)
 }
 
 func BenchmarkDecode_Hostile(b *testing.B) {
@@ -258,4 +309,89 @@ func TestFileTypesCarryEveryField(t *testing.T) {
 	assert.Contains(t, string(data), "service-names:")
 	assert.Contains(t, string(data), "process-groups:")
 	assert.NotRegexp(t, `(?m)^[ -]*[A-Za-z-]*[a-z][A-Z][A-Za-z]*:`, strings.SplitN(string(data), "apiVersion: v1\n", 2)[1], "a camelCase key in the file")
+}
+
+// A key of the document that is one of the format's two but for its case can
+// only be a slip, and read past it leaves a file whose entries are not there
+// or whose version is not looked at.
+func TestDecode_RefusesADocumentKeyInAnotherCase(t *testing.T) {
+	entries := "  " + prodHost + ":\n    - name: checkout\n      service-names: [checkout]\n"
+	for doc, msg := range map[string]string{
+		"Environments:\n" + entries:                               `key "Environments" on line 1 must be written "environments"`,
+		"apiversion: v2\nenvironments:\n" + entries:               `key "apiversion" on line 1 must be written "apiVersion"`,
+		"ENVIRONMENTS:\n" + entries + "environments:\n" + entries: `key "ENVIRONMENTS" on line 1 must be written "environments"`,
+		"apiVersion: V1\nenvironments:\n" + entries:               `apiVersion "V1" on line 1 must be written "v1"`,
+		"environment:\n" + entries:                                `holds no "environments" key, so nothing in it is applied; unknown key "environment" on line 1 (a typo, or written by a newer dtctl)`,
+		"kind: RepoScope\n":                                       `holds no "environments" key, so nothing in it is applied; unknown key "kind" on line 1`,
+	} {
+		_, err := decode([]byte(doc))
+		require.NotNil(t, err, doc)
+		assert.Contains(t, err.Msg, msg)
+	}
+	// The version alone, and a key beside the environments, still load.
+	for _, doc := range []string{"apiVersion: v1\n", "kind: RepoScope\nenvironments:\n" + entries, "environments: {}\n"} {
+		_, err := decode([]byte(doc))
+		assert.Nil(t, err, doc)
+	}
+}
+
+// A value is read as the text its line shows, and a tag is a way to say it is
+// something else. None is accepted, on a value, on a key, on the document or
+// on what follows it.
+func TestDecode_RefusesAnExplicitTag(t *testing.T) {
+	for name, tt := range map[string]struct{ doc, msg string }{
+		"an item":                      {scopeDoc("name: checkout", "service-names: [!!int abc]"), "the tag !!int on line 4 is not accepted"},
+		"a tag of its own":             {scopeDoc("name: checkout", "service-names: [!foo abc]"), "the tag !foo on line 4 is not accepted"},
+		"a string said to be one":      {scopeDoc("name: checkout", "service-names: [!!str 5]"), "the tag !!str on line 4 is not accepted"},
+		"a path":                       {scopeDoc("name: checkout", "path: !!float a", "service-names: [checkout]"), "the tag !!float on line 4 is not accepted"},
+		"a key":                        {scopeDoc("!!binary bmFtZQ==: checkout", "service-names: [checkout]"), "the tag !!binary on line 3 is not accepted"},
+		"a value in binary":            {scopeDoc("name: !!binary Y2hlY2tvdXQ=", "service-names: [checkout]"), "the tag !!binary on line 3 is not accepted"},
+		"a version in binary":          {"apiVersion: !!binary djI=\n" + scopeDoc("name: checkout", "service-names: [checkout]"), "the tag !!binary on line 1 is not accepted"},
+		"the document":                 {"!!null whatever\n", "the tag !!null on line 1 is not accepted"},
+		"a list":                       {scopeDoc("name: checkout", "service-names: !!seq [checkout]"), "the tag !!seq on line 4 is not accepted"},
+		"a second document":            {scopeDoc("name: checkout", "service-names: [checkout]") + "--- !!null \"environments: {}\"\n", "holds more than one YAML document"},
+		"an anchor after the document": {scopeDoc("name: checkout", "service-names: [checkout]") + "--- &a\n", "holds more than one YAML document"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := decode([]byte(tt.doc))
+			require.NotNil(t, err, "loaded as %+v", f)
+			assert.Equal(t, tt.msg, err.Msg)
+		})
+	}
+}
+
+// What a file makes dtctl say is bounded like what it makes dtctl do: a
+// warning is printed by every scoped query and travels in its envelope.
+func TestDecode_HostileFileGetsAShortAnswer(t *testing.T) {
+	const size = 1_000_000
+	valid := scopeDoc("name: checkout", "service-names: [checkout]")
+	keys := []byte(valid)
+	for i := 0; len(keys) < size; i++ {
+		keys = fmt.Appendf(keys, "%s%d: 1\n", strings.Repeat("k", 200), i)
+	}
+	f, err := decode(keys)
+	require.Nil(t, err)
+	assert.Less(t, len(f.Warning()), maxMessageBytes+1)
+	assert.Regexp(t, `^unknown keys "k+0" on line 5, .* and \d+ more \(a typo, or written by a newer dtctl\)$`, f.Warning())
+
+	entryKeys := []byte(valid)
+	for i := 0; len(entryKeys) < size; i++ {
+		entryKeys = fmt.Appendf(entryKeys, "      %s%d: 1\n", strings.Repeat("k", 200), i)
+	}
+	long := strings.Repeat("v", size)
+	for name, data := range map[string][]byte{
+		"unknown entry keys": entryKeys,
+		"a long version":     []byte("apiVersion: " + long + "\n"),
+		"a long anchor":      []byte("environments: &" + long + " {}\n"),
+		"a long tag":         []byte("environments: !" + long + " {}\n"),
+		"a long name":        []byte(scopeDoc("name: "+long, "service-names: [checkout]")),
+		"a long service":     []byte(scopeDoc("name: checkout", "service-names: ["+long+"]")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.LessOrEqual(t, len(data), maxFileBytes)
+			_, err := decode(data)
+			require.NotNil(t, err)
+			assert.Less(t, len(err.Msg), maxMessageBytes+1)
+		})
+	}
 }

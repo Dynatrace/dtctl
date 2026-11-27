@@ -191,6 +191,10 @@ func TestEngineNeverAppliesARepoScope(t *testing.T) {
 // masks what is below it too, and its answer would advise lowering a floor
 // that then answers that the command is unsupported.
 func TestEngineUnsupportedCommandsSaySoAtEveryFloor(t *testing.T) {
+	// The development-tier commands of the list. Any other name that reads
+	// as unknown has lost its registration, and with it the answer this
+	// test is about.
+	unregistered := map[string]bool{"account": true, "serve": true}
 	for name := range engine.UnsupportedCommands() {
 		for _, floor := range []string{"", "experimental"} {
 			res, err := engine.Execute(context.Background(), engine.Request{
@@ -203,7 +207,7 @@ func TestEngineUnsupportedCommandsSaySoAtEveryFloor(t *testing.T) {
 			require.NotZero(t, res.ExitCode)
 			// A development command is not registered at all, and reads as
 			// any other name dtctl does not know.
-			if strings.Contains(string(res.Stdout), `"code":"unknown_command"`) {
+			if unregistered[name] && strings.Contains(string(res.Stdout), `"code":"unknown_command"`) {
 				continue
 			}
 			require.Contains(t, string(res.Stdout), `"code":"unsupported_in_service"`, "%s at floor %q", name, floor)

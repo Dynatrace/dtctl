@@ -37,6 +37,9 @@ func TestRepoScopeStatusFormats(t *testing.T) {
 			code, stdout, stderr := runRepoScoped([]string{"repo-scope", verb, "-o", format}, RunOptions{})
 			require.Zero(t, code, stderr)
 			require.Contains(t, stdout, "selected", "%s -o %s prints the value", verb, format)
+			if format == "toon" {
+				testutil.AssertGolden(t, "repo-scope/"+verb+"-toon", stdout)
+			}
 		}
 	}
 }

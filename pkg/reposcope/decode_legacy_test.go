@@ -108,7 +108,11 @@ var stricter = regexp.MustCompile(strings.Join([]string{
 	`^the anchor &`,
 	`^the merge key << `,
 	`^the key on line \d+ must be a plain string$`,
-	`!!binary data$`,
+	`^the key on line \d+ is longer than \d+ bytes, which no key of the format is$`,
+	`^the tag \S+ on line \d+ is not accepted$`,
+	`^key "[^"]+" on line \d+ must be written "(apiVersion|environments)"$`,
+	`^apiVersion "[^"]+" on line \d+ must be written "v1"$`,
+	`^holds no "environments" key, so nothing in it is applied; unknown keys? `,
 	`^holds more than one '---' after its document$`,
 	// A key the legacy reader's pattern could not see: empty, or of more
 	// than one line.
@@ -141,6 +145,17 @@ func compareWithLegacy(t *testing.T, doc string) (bothRead bool) {
 			}
 		}
 		got.unknown = seen
+		// "annotations: {}" is no annotations to either reader; one says so
+		// with an empty map and the other with none.
+		for _, f := range []*File{old, got} {
+			for _, entries := range f.Environments {
+				for i := range entries {
+					if len(entries[i].Annotations) == 0 {
+						entries[i].Annotations = nil
+					}
+				}
+			}
+		}
 		require.Equal(t, old, got, "read differently:\n%s", doc)
 		return true
 	case oldErr == nil:
@@ -156,6 +171,9 @@ func TestDecode_ReadsWhatTheLegacyReaderRead(t *testing.T) {
 		for _, name := range []string{"example.yaml", "newer-dtctl.yaml"} {
 			assert.True(t, compareWithLegacy(t, string(readFixture(t, name))), name)
 		}
+		// No annotations, written as an empty map: one reader keeps the
+		// map and the other does not, and both mean the same.
+		assert.True(t, compareWithLegacy(t, "environments:\n  "+prodHost+":\n    - name: checkout\n      service-names: [checkout]\n      annotations: {}\n"))
 	})
 	// Files as people and generators write them: block and flow style, every
 	// quoting, comments, numbers and booleans where text is meant, keys in
@@ -214,6 +232,7 @@ func FuzzDecode(f *testing.F) {
 	for range 40 {
 		f.Add(edit(rng, randomScopeDoc(rng)))
 	}
+	f.Add("environments:\n  " + prodHost + ":\n    - name: checkout\n      service-names: [checkout]\n      annotations: {}\n")
 	f.Add("a: &a [b]\n<<: *a\n")
 	f.Add("? [a, b]\n: c\n---\n---\n")
 	f.Add("environments:\n  " + prodHost + ":\n    - name: checkout\n      path: \"\"\n      service-names: [checkout]\n")

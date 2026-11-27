@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"path"
 	"runtime"
 	"slices"
 	"sort"
@@ -83,8 +84,6 @@ type Status struct {
 	// describe and the breakpoint commands read it through
 	// LiveDebuggerFilterSets.
 	LiveDebuggerFilters []map[string][]string `json:"liveDebuggerFilters,omitempty" yaml:"liveDebuggerFilters,omitempty"`
-	// liveDebuggerReason says why an entry renders no filter sets.
-	liveDebuggerReason string
 	// Reason explains a nil Entry, an entry chosen by name that does not
 	// cover Dir, or one that covers it through a Gradle build. It is for a
 	// person; a program reads Code, Selected and Tied.
@@ -109,14 +108,17 @@ type Status struct {
 // entries that cover relDir as closely (see Ambiguous).
 //
 // relDir is Location.RelDir: a clean, slash-separated path relative to the
-// repository root, "." at the root. Anything else is an *InvalidError. repo
-// may be nil for a caller with no repository to read; no build is read then.
+// repository root, "." at the root. Anything else is an *InvalidError. It need
+// not be UTF-8: a directory name is whatever the filesystem holds, and the
+// entry that covers such a directory applies there like anywhere. repo may be
+// nil for a caller with no repository to read; no build is read then, nor for
+// a directory an fs.FS cannot name.
 //
 // Path comparison folds case on darwin and windows and is exact elsewhere.
 // The Status holds a copy of the entry, so it stays the answer it was when f
 // changes.
 func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
-	if !fs.ValidPath(relDir) {
+	if !cleanRelative(relDir) {
 		return nil, &InvalidError{Source: fmt.Sprintf("directory %q", relDir), Msg: "is not a clean path relative to the repository root"}
 	}
 	s := &Status{File: FileName, Environment: host, Dir: relDir, Warning: f.Warning(), Hosts: f.Hosts()}
@@ -140,6 +142,9 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		return s, nil
 	default:
 		var tied []*Entry
+		// Said whatever is selected instead: an entry that covers the
+		// directory by its path, the repository's, or none.
+		s.Reason = build().partial
 		if entry, tied = closestEntry(entries, relDir, build()); tied != nil {
 			s.Tied = []string{entry.Name}
 			for _, e := range tied {
@@ -154,6 +159,9 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		if s.Code == "" {
 			s.Code = StatusNoEntry
 			s.Reason = fmt.Sprintf("no entry covers %q; entries here cover %s", relDir, strings.Join(entryPaths(entries), ", "))
+			if partial := build().partial; partial != "" {
+				s.Reason += "; " + partial
+			}
 		}
 		s.Others = othersThan(entries, "")
 		return s, nil
@@ -167,7 +175,9 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 			if name == "" {
 				s.Selected = SelectedByBuild
 			}
-			s.Reason = fmt.Sprintf("covered through the Gradle build: %s depends on %s", entry.Path, build.module)
+			// The module is a directory's name, which is whatever a clone
+			// carries: quoted, like every path a reason names.
+			s.Reason = fmt.Sprintf("covered through the Gradle build: %q depends on %q", entry.Path, build.module)
 		} else {
 			s.Reason = fmt.Sprintf("selected by name; its path %q does not cover %q", entry.Path, relDir)
 		}
@@ -183,13 +193,21 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 			s.Filters[object] = filter.Expr
 		}
 	}
-	s.LiveDebuggerFilters, _, s.liveDebuggerReason = LiveDebuggerFilters(s.Entry)
+	s.LiveDebuggerFilters, _, _ = LiveDebuggerFilters(s.Entry)
 	return s, nil
+}
+
+// cleanRelative reports whether dir is "." or a clean, slash-separated path
+// that stays below the directory it is relative to. It is fs.ValidPath
+// without the demand for UTF-8.
+func cleanRelative(dir string) bool {
+	return dir == "." || (dir != "" && path.Clean(dir) == dir && !path.IsAbs(dir) && dir != ".." && !strings.HasPrefix(dir, "../"))
 }
 
 // LiveDebuggerFilterSets is the entry's LiveDebuggerFilters, or, when it
 // renders none, ok false and the reason. A Status without an entry renders
-// none either.
+// none either. The reason is rendered from the entry, so a Status read back
+// from what a command printed gives it too.
 func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, reason string) {
 	switch {
 	case len(s.LiveDebuggerFilters) > 0:
@@ -197,14 +215,26 @@ func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, 
 	case s.Entry == nil:
 		return nil, false, s.Reason
 	}
-	return nil, false, s.liveDebuggerReason
+	_, _, reason = LiveDebuggerFilters(s.Entry)
+	return nil, false, reason
 }
 
 // Ambiguous reports whether several entries cover Dir as closely, none
 // applying; Tied names them.
 func (s *Status) Ambiguous() bool { return len(s.Tied) > 0 }
 
-// closestEntry is the entry with the longest path covering relDir, else the
+// depth is how many segments the path p has, 0 for none. It is how close a
+// path that covers a directory is to it: every such path is a prefix of the
+// directory by whole segments, so the deeper one is the closer. Its length in
+// bytes is not: the same path is longer in another case or composition.
+func depth(p string) int {
+	if p == "" {
+		return 0
+	}
+	return strings.Count(p, "/") + 1
+}
+
+// closestEntry is the entry with the deepest path covering relDir, else the
 // one with no path. An entry the build covers relDir through is as close as
 // relDir's module, whether or not its own path covers relDir from further
 // up: a module inside one deployable's directory that another deployable
@@ -212,7 +242,7 @@ func (s *Status) Ambiguous() bool { return len(s.Tied) > 0 }
 // file order: further deployables whose closure holds that module.
 func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best *Entry, tied []*Entry) {
 	var wide *Entry
-	longest := 0
+	deepest := 0
 	for i := range entries {
 		e := &entries[i]
 		n := 0
@@ -221,16 +251,16 @@ func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best *E
 			continue
 		}
 		if covers(e.Path, relDir) {
-			n = len(e.Path)
+			n = depth(e.Path)
 		}
 		if build.owns(e) {
-			n = max(n, len(build.module))
+			n = max(n, depth(build.module))
 		}
 		switch {
-		case n == 0 || n < longest:
+		case n == 0 || n < deepest:
 			continue
-		case n > longest:
-			best, tied, longest = e, nil, n
+		case n > deepest:
+			best, tied, deepest = e, nil, n
 		default:
 			tied = append(tied, e)
 		}
@@ -257,15 +287,23 @@ func joinAnd(words []string) string {
 type gradleCoverage struct {
 	module string
 	owners []string
+	// partial says that the build was not read whole, and why: it then
+	// covers nothing, since a deployable that was not read may hold the
+	// module as well. It names the build's directory.
+	partial string
 }
 
 func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverage {
 	var c gradleCoverage
-	if repo == nil || !slices.ContainsFunc(entries, func(e Entry) bool { return e.Path != "" }) {
+	if repo == nil || !fs.ValidPath(relDir) || !slices.ContainsFunc(entries, func(e Entry) bool { return e.Path != "" }) {
 		return c
 	}
 	b := gradleBuildAt(repo, relDir)
 	if b == nil {
+		return c
+	}
+	if b.partial != "" {
+		c.partial = fmt.Sprintf("the Gradle build at %q was not read whole (%s), so no entry is selected through it", b.dir, b.partial)
 		return c
 	}
 	// Sorted: two module directories that differ only in case cover relDir
@@ -273,15 +311,25 @@ func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverag
 	// order a map is walked in.
 	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
 		// b.module(relDir), folding case as covers does.
-		if covers(m, relDir) && len(m) > len(c.module) {
+		if covers(m, relDir) && depth(m) > depth(c.module) {
 			c.module = m
 		}
 		if slices.ContainsFunc(entries, func(e Entry) bool { return samePath(e.Path, m) }) {
 			b.deployable[m] = true
 		}
 	}
-	if c.module != "" {
-		c.owners = b.owners(c.module)
+	// Two modules whose directories differ only in case are one directory
+	// where case is folded, and a build file names either: the directory
+	// belongs to the deployables that depend on any of them.
+	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
+		if c.module == "" || !samePath(m, c.module) {
+			continue
+		}
+		for _, owner := range b.owners(m) {
+			if !slices.Contains(c.owners, owner) {
+				c.owners = append(c.owners, owner)
+			}
+		}
 	}
 	return c
 }

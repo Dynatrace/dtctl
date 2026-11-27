@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
 	"github.com/Dynatrace/dtctl/sdk/urls"
 )
 
@@ -46,9 +48,10 @@ func newRepoScopeCmd() *cobra.Command {
 The link is .dtctl-repo-scope.yaml at the repository root: per environment, the
 Kubernetes workloads, service names, process groups and services that run the
 repository's code, and the filter segments to query under. Inside a linked
-repository 'dtctl query', 'wait query' and 'verify query' narrow 'fetch logs'
-and 'fetch spans' to them and say so on stderr. Commit the file to share it.
-Nothing here writes to Dynatrace.
+repository 'dtctl query' narrows 'fetch logs' and 'fetch spans' to them and
+says so on stderr; 'verify query' and 'wait query' do so only under
+--repo-scope <name>. Commit the file to share it. Nothing here writes to
+Dynatrace.
 
 When called without a subcommand, lists the entries for the current context's
 environment.
@@ -68,12 +71,13 @@ Examples:
 `,
 		// A word after the group is a subcommand that does not exist. Cobra
 		// would say so too, and the root would then suggest one of its own
-		// commands for it.
+		// commands for it. So would the root's table of synonyms ("search"
+		// for query), so the closest subcommand is looked up here.
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return nil
 			}
-			return enhanceCommandError(cmd, fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath()))
+			return suggest.ParseCommandError(fmt.Sprintf("unknown command %q for %q", args[0], cmd.CommandPath()), collectSubcommands(cmd))
 		},
 		RunE: listRepoScopes,
 	}
@@ -92,9 +96,9 @@ func newRepoScopeSetCmd() *cobra.Command {
 		services      []string
 		processGroups []string
 		serviceNames  []string
-		clusterUID    string
+		clusterUIDs   []string
 		segments      []string
-		namespace     string
+		namespaces    []string
 		workloads     []string
 		entryPaths    []string
 	)
@@ -105,7 +109,8 @@ func newRepoScopeSetCmd() *cobra.Command {
 
 Writes the named entry to .dtctl-repo-scope.yaml at the repository root, under
 the current context's environment host. 'set' replaces the whole entry, so pass
-every binding it should keep. Every value is checked before anything is
+every binding it should keep; the entry's annotations, which no flag writes,
+are kept. Every value is checked before anything is
 written, and the new file is renamed over the old one, so a reader never sees
 half of it. Nothing is sent to Dynatrace.
 
@@ -140,6 +145,35 @@ Examples:
 			}
 			if len(entryPaths) == 1 {
 				entry.Path = path.Clean(filepath.ToSlash(entryPaths[0]))
+				if entry.Path == "." {
+					return &reposcope.InvalidError{
+						Source:      "--path",
+						Msg:         `"." is the repository root, which an entry without a path covers`,
+						Suggestions: []string{"leave --path out for an entry that covers the whole repository"},
+					}
+				}
+			}
+			// Each qualifies every --workload of the command, so a second
+			// value is refused: taking the last one would rebind the
+			// workloads named before it. Refused here and not while the
+			// flags are parsed, so that the refusal is reported in the mode
+			// the whole command line asks for.
+			var namespace, clusterUID string
+			for _, qualifier := range []struct {
+				flag   string
+				values []string
+				value  *string
+			}{{"namespace", namespaces, &namespace}, {"cluster-uid", clusterUIDs, &clusterUID}} {
+				if len(qualifier.values) > 1 {
+					return &reposcope.InvalidError{
+						Source:      "repo-scope set",
+						Msg:         fmt.Sprintf("--%s takes one value, for every --workload of the command", qualifier.flag),
+						Suggestions: []string{"an entry whose workloads differ in it is written in " + reposcope.FileName + " by hand"},
+					}
+				}
+				if len(qualifier.values) == 1 {
+					*qualifier.value = qualifier.values[0]
+				}
 			}
 			// Said here rather than by a flag group, whose error carries
 			// neither the usage exit code nor a code an agent can read.
@@ -174,8 +208,8 @@ Examples:
 	c.Flags().StringArrayVar(&services, "service", nil, "service id, SERVICE-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&processGroups, "process-group", nil, "process group id, PROCESS_GROUP-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&serviceNames, "service-name", nil, "OpenTelemetry service.name (repeatable)")
-	c.Flags().Var(&repoScopeWorkloadQualifier{singleUseStringValue{value: &clusterUID}, "cluster-uid"}, "cluster-uid", "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
-	c.Flags().Var(&repoScopeWorkloadQualifier{singleUseStringValue{value: &namespace}, "namespace"}, "namespace", "Kubernetes namespace of the --workload names")
+	c.Flags().StringArrayVar(&clusterUIDs, "cluster-uid", nil, "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
+	c.Flags().StringArrayVar(&namespaces, "namespace", nil, "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
 	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
 	c.Flags().StringArrayVar(&segments, "segment", nil, `existing filter segment a query under the entry also sends, by the id 'dtctl get segments' lists (repeatable, max 10)
@@ -184,26 +218,6 @@ bind its variables inline: "ID?var=val&var2=val1,val2"`)
 		rejectEmptyFlag(c, name)
 	}
 	return c
-}
-
-// repoScopeWorkloadQualifier is the value of set's --namespace and
-// --cluster-uid. Each qualifies every --workload of the command, so a second
-// value is refused: taking the last one would rebind the workloads named
-// before it.
-type repoScopeWorkloadQualifier struct {
-	singleUseStringValue
-	flag string
-}
-
-func (v *repoScopeWorkloadQualifier) Set(value string) error {
-	if v.set {
-		return &reposcope.InvalidError{
-			Source:      "repo-scope set",
-			Msg:         fmt.Sprintf("--%s takes one value, for every --workload of the command", v.flag),
-			Suggestions: []string{"an entry whose workloads differ in it is written in " + reposcope.FileName + " by hand"},
-		}
-	}
-	return v.singleUseStringValue.Set(value)
 }
 
 var repoScopeCurrentCmd = newRepoScopeCurrentCmd()
@@ -318,6 +332,9 @@ type repoScopeFile struct {
 	loc  reposcope.Location
 	host string
 	file *reposcope.File
+	// selectors are the global flags that pick the config and the context
+	// the file was read for (see repoScopeSelectors).
+	selectors []string
 }
 
 // openRepoScope reads the scope file. A missing file reads as an empty one,
@@ -331,7 +348,11 @@ func openRepoScope(ctx context.Context, cfg *config.Config) (*repoScopeFile, err
 		return nil, err
 	}
 	loc, err := repoScopeLocation(ctx)
-	return loadRepoScope(host, loc, err)
+	s, err := loadRepoScope(host, loc, err)
+	if s != nil {
+		s.selectors = repoScopeSelectors(ctx, cfg)
+	}
+	return s, err
 }
 
 // loadRepoScope reads the file at loc for host. located is why loc could not
@@ -339,23 +360,58 @@ func openRepoScope(ctx context.Context, cfg *config.Config) (*repoScopeFile, err
 // inspected, which is an unusable file like one that does not load: the
 // scope is returned beside the error, so a caller that warns about those and
 // carries on does so here too. Without one there is no file to speak of.
+//
+// An error about the file names it as the repository does (see named).
 func loadRepoScope(host string, loc reposcope.Location, located error) (*repoScopeFile, error) {
 	if located != nil && loc.Path == "" {
 		return nil, located
 	}
 	s := &repoScopeFile{loc: loc, host: host}
 	if located != nil {
-		return s, located
+		return s, s.named(located)
 	}
 	var err error
 	s.file, err = reposcope.Load(loc)
-	return s, err
+	return s, s.named(err)
 }
+
+// named is an error of reading or writing the scope file, with the file named
+// as the repository names it. reposcope names it by its path on this machine,
+// home directory included, and the message is printed beside a query's
+// output, travels in the agent envelope and ends up in logs. The error stays
+// what it was for whoever asks its type.
+func (s *repoScopeFile) named(err error) error {
+	if err == nil {
+		return nil
+	}
+	if invalid, ok := err.(*reposcope.InvalidError); ok {
+		renamed := *invalid
+		renamed.Source = strings.ReplaceAll(invalid.Source, s.loc.Path, reposcope.FileName)
+		return &renamed
+	}
+	msg := strings.ReplaceAll(err.Error(), reposcope.Shown(s.loc.Path), reposcope.FileName)
+	if msg == err.Error() {
+		return err
+	}
+	return namedError{msg: msg, err: err}
+}
+
+// namedError is an error whose message names the scope file without its path.
+type namedError struct {
+	msg string
+	err error
+}
+
+func (e namedError) Error() string { return e.msg }
+func (e namedError) Unwrap() error { return e.err }
 
 // resolve picks the entry named, or the one covering the working directory.
 func (s *repoScopeFile) resolve(name string) (*reposcope.Status, error) {
 	if !s.loc.Exists && name == "" {
 		return &reposcope.Status{Code: reposcope.StatusNoFile, Environment: s.host, Dir: s.loc.RelDir, Reason: repoScopeNoFileReason}, nil
+	}
+	if !s.loc.Exists && s.file.Empty() {
+		return nil, &reposcope.NotFoundError{Name: name, Host: s.host, NoFile: true}
 	}
 	return reposcope.Resolve(reposcope.RepoFS(s.loc), s.file, s.host, s.loc.RelDir, name)
 }
@@ -409,11 +465,9 @@ func repoScopeStatus(ctx context.Context, name string) (status *reposcope.Status
 }
 
 // unusable is why the file did not load, for a command that reports it and
-// carries on. The error names the file by its path on this machine; the
-// reason names it as the repository does, since it is printed beside the
-// query's own output and travels in the agent envelope.
+// carries on. It names the file as the repository does (see named).
 func (s *repoScopeFile) unusable(err error) string {
-	return strings.ReplaceAll(err.Error(), reposcope.Shown(s.loc.Path), reposcope.FileName)
+	return s.named(err).Error()
 }
 
 // repoScopeReason is a Status's reason as a command prints it: where no
@@ -434,7 +488,7 @@ func showRepoScope(cmd *cobra.Command, verb, name string) error {
 	// A Status is one value. A format that prints rows would print its
 	// address, or a row of its fields.
 	format := outputFormat(ctx)
-	terminal := format == "" || format == "table" || format == "wide"
+	terminal := format == "" || format == "table" || format == "wide" || format == output.FormatAuto
 	if !terminal && !slices.Contains([]string{"json", "yaml", "yml", "toon"}, format) {
 		return &reposcope.InvalidError{Source: "-o " + format,
 			Msg: fmt.Sprintf("repo-scope %s prints one entry, not rows; use -o table, -o json, -o yaml or -o toon", verb)}
@@ -466,8 +520,15 @@ func repoScopeStatusSuggestions(s *reposcope.Status, advice []string) []string {
 	case reposcope.StatusLinked:
 		// Only the entry in effect here narrows the queries run here. One
 		// asked for by name may cover another directory.
-		if s.Selected == reposcope.SelectedByName {
+		// An entry of segments alone inserts no filter: its segments are
+		// what a query is sent with.
+		switch byName, narrows := s.Selected == reposcope.SelectedByName, len(s.Filters) > 0; {
+		case byName && narrows:
 			return []string{fmt.Sprintf("pass --%s %s to 'dtctl query' to narrow fetch logs and fetch spans to this entry from any directory", repoScopeFlag, s.Entry.Name)}
+		case byName:
+			return []string{fmt.Sprintf("pass --%s %s to 'dtctl query' to send the entry's filter segments with a query from any directory", repoScopeFlag, s.Entry.Name)}
+		case !narrows:
+			return []string{fmt.Sprintf("'dtctl query' sends the filter segments of %q with every query here; add --%s to run a query without them", s.Entry.Name, noRepoScopeFlag)}
 		}
 		return []string{fmt.Sprintf("'dtctl query' narrows fetch logs and fetch spans to %q here; add --%s to run a query unscoped", s.Entry.Name, noRepoScopeFlag)}
 	case reposcope.StatusNotARepository:
@@ -539,6 +600,13 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 			return &reposcope.InvalidError{Source: "--path", Msg: err.Error(),
 				Suggestions: []string{"name the directory relative to the repository root, e.g. services/checkout"}}
 		}
+		// Nor would a path inside a checkout of its own: the walk up from a
+		// directory there stops at the inner .git, and never reads this file.
+		if inner := nestedCheckout(reposcope.RepoFS(scope.loc), dir); inner != "" {
+			return &reposcope.InvalidError{Source: "--path",
+				Msg:         fmt.Sprintf("%q is in the checkout at %q, which has a .git of its own, so no query run there reads this repository's %s", dir, inner, reposcope.FileName),
+				Suggestions: []string{"run 'dtctl repo-scope set' inside " + inner + " to link that checkout"}}
+		}
 		entry.Path = norm.NFC.String(dir)
 	}
 	// set replaces the bindings of an entry. Its annotations are not among
@@ -550,7 +618,7 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 	}
 	scope.file.Upsert(scope.host, entry)
 	if err := reposcope.Save(scope.loc, scope.file); err != nil {
-		return err
+		return scope.named(err)
 	}
 
 	if agentMode(ctx) {
@@ -560,7 +628,14 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 		}
 		printer := newPrinterCtx(ctx)
 		if ap := enrichAgent(printer, "set", "repo-scope"); ap != nil {
-			ap.SetSuggestions([]string{"dtctl repo-scope current", "dtctl query 'fetch logs | limit 20'"})
+			// About the entry just saved, in the environment it was saved
+			// for: `current` and a bare query answer for the working
+			// directory and the current context, which may be others.
+			selectors := strings.Join(append([]string{""}, scope.selectors...), " ")
+			ap.SetSuggestions([]string{
+				"dtctl repo-scope describe " + entry.Name + selectors,
+				fmt.Sprintf("dtctl query 'fetch logs | limit 20' --%s %s%s", repoScopeFlag, entry.Name, selectors),
+			})
 		}
 		return printer.Print(status)
 	}
@@ -575,6 +650,9 @@ type repoScopeDeleted struct {
 	Name        string `json:"name"`
 	File        string `json:"file"`
 	Environment string `json:"environment"`
+	// FileRemoved says the entry was the file's last, and the file went
+	// with it.
+	FileRemoved bool `json:"fileRemoved"`
 }
 
 // deleteRepoScope removes the named entry for the current context's
@@ -586,16 +664,16 @@ func deleteRepoScope(cmd *cobra.Command, name string) error {
 		return err
 	}
 	if !scope.file.Remove(scope.host, name) {
-		return &reposcope.NotFoundError{Name: name, Host: scope.host, Known: scope.file.Names(scope.host)}
+		return &reposcope.NotFoundError{Name: name, Host: scope.host, Known: scope.file.Names(scope.host), NoFile: !scope.loc.Exists}
 	}
 	if err := reposcope.Save(scope.loc, scope.file); err != nil {
-		return err
+		return scope.named(err)
 	}
 
 	if agentMode(ctx) {
 		printer := newPrinterCtx(ctx)
 		enrichAgent(printer, "delete", "repo-scope")
-		return printer.Print(repoScopeDeleted{Deleted: true, Name: name, File: reposcope.FileName, Environment: scope.host})
+		return printer.Print(repoScopeDeleted{Deleted: true, Name: name, File: reposcope.FileName, Environment: scope.host, FileRemoved: scope.file.Empty()})
 	}
 	output.FprintSuccess(currentStderr(ctx), "Repo scope %q deleted for %s", name, scope.host)
 	if scope.file.Empty() {
@@ -607,6 +685,12 @@ func deleteRepoScope(cmd *cobra.Command, name string) error {
 // listRepoScopes is `repo-scope list`, and `repo-scope` on its own.
 func listRepoScopes(cmd *cobra.Command, _ []string) error {
 	ctx := cmdContext(cmd)
+	// Entries are rows or values. A format that draws a chart of numbers, or
+	// one the printer does not know and reads as a table, prints neither.
+	if format := outputFormat(ctx); !slices.Contains([]string{"", "table", "wide", "csv", "json", "jsonl", "yaml", "yml", "toon", output.FormatAuto}, format) {
+		return &reposcope.InvalidError{Source: "-o " + format,
+			Msg: "repo-scope list prints entries; use -o table, -o wide, -o csv, -o json, -o jsonl, -o yaml or -o toon"}
+	}
 	scope, err := openRepoScopeForEdit(ctx)
 	if err != nil {
 		return err
@@ -637,6 +721,18 @@ func listRepoScopes(cmd *cobra.Command, _ []string) error {
 		entries = []reposcope.Entry{}
 	}
 	return printer.PrintList(entries)
+}
+
+// nestedCheckout is the directory at or above dir, below the repository
+// root, that holds a .git of its own (a submodule, a vendored clone), or "".
+func nestedCheckout(repo fs.FS, dir string) string {
+	inner := ""
+	for d := dir; d != "."; d = path.Dir(d) {
+		if _, err := fs.Stat(repo, path.Join(d, ".git")); err == nil {
+			inner = d
+		}
+	}
+	return inner
 }
 
 // emptyReason says why the current environment has no entries.
