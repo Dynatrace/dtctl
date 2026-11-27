@@ -1,0 +1,9 @@
+code: ambiguous_entry
+dir: lib
+environment: abc12345.apps.dynatrace.com
+file: .dtctl-repo-scope.yaml
+hosts[1]: abc12345.apps.dynatrace.com
+linked: false
+others[2]: checkout,ledger
+reason: covered by entries checkout and ledger
+tied[2]: checkout,ledger
