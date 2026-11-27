@@ -229,3 +229,14 @@ func TestWorkflowExecutor_Execute_FallsBackToRawErrorBody(t *testing.T) {
 		t.Fatalf("Execute() error = %v, want an *APIError with the body in Details", err)
 	}
 }
+
+func TestFormatWorkflowAPIErrorCapsTheBody(t *testing.T) {
+	err := formatWorkflowAPIError("workflow execution failed", 502, strings.Repeat("x", 5000))
+	var apiErr *httpclient.APIError
+	if !errors.As(err, &apiErr) || len(apiErr.Details) > httpclient.MaxBodyDetails+len("... (truncated)") {
+		t.Fatalf("Details not capped: %v", err)
+	}
+	if len(err.Error()) > 200 {
+		t.Errorf("Error() carries the body: %d bytes", len(err.Error()))
+	}
+}

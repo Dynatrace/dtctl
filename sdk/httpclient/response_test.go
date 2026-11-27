@@ -1,10 +1,13 @@
 package httpclient
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -157,8 +160,8 @@ func TestCheckResponse(t *testing.T) {
 			if tt.wantDetl != "" && apiErr.Details != tt.wantDetl {
 				t.Errorf("Details = %q, want %q", apiErr.Details, tt.wantDetl)
 			}
-			if tt.name == "null details yield no detail" && apiErr.Details != "" {
-				t.Errorf("Details = %q, want empty", apiErr.Details)
+			if tt.name == "null details yield no detail" && apiErr.Details != tt.body {
+				t.Errorf("Details = %q, want the raw body", apiErr.Details)
 			}
 			if tt.name == "unparseable body kept as details" && !strings.Contains(apiErr.Details, "not json") {
 				t.Errorf("Details = %q, want to contain raw body", apiErr.Details)
@@ -189,5 +192,52 @@ func TestCheckResponse_ErrorOmitsBody(t *testing.T) {
 				t.Errorf("Details = %q, want the body", apiErr.Details)
 			}
 		})
+	}
+}
+
+func TestCheckResponse_SiblingConstraintViolations(t *testing.T) {
+	body := `{"error":{"code":400,"message":"Constraints violated.","constraintViolations":[{"path":"scope","message":"is required"},{"message":"bad value"}]}}`
+	apiErr := CheckResponse(respFor(t, 400, body)).(*APIError)
+	if apiErr.Message != "Constraints violated." {
+		t.Errorf("Message = %q", apiErr.Message)
+	}
+	if apiErr.Details != "scope: is required; bad value" {
+		t.Errorf("Details = %q", apiErr.Details)
+	}
+	if strings.Contains(apiErr.Error(), "scope") {
+		t.Errorf("Error() leaks details: %q", apiErr.Error())
+	}
+}
+
+func TestCheckResponse_RawBodyKeptWhenNothingParsed(t *testing.T) {
+	body := `{"error":{"message":"Nope.","extra":{"a":1}}}`
+	apiErr := CheckResponse(respFor(t, 400, body)).(*APIError)
+	if apiErr.Details != body {
+		t.Errorf("Details = %q, want raw body", apiErr.Details)
+	}
+	long := strings.Repeat("y", 3000)
+	apiErr = CheckResponse(respFor(t, 500, `{"error":{"message":"m","extra":"`+long+`"}}`)).(*APIError)
+	if len(apiErr.Details) > MaxBodyDetails+len("... (truncated)") {
+		t.Errorf("Details not capped: %d bytes", len(apiErr.Details))
+	}
+}
+
+func TestTruncateBodyAndErrorText(t *testing.T) {
+	if got := TruncateBody("short"); got != "short" {
+		t.Errorf("got %q", got)
+	}
+	got := TruncateBody(strings.Repeat("é", 800)) // 1600 bytes, multi-byte
+	if !strings.HasSuffix(got, "... (truncated)") || !utf8.ValidString(got) {
+		t.Errorf("bad truncation: valid=%v", utf8.ValidString(got))
+	}
+	e := fmt.Errorf("op: %w", NewAPIError(400, "bad", "the body"))
+	if ErrorText(e) != "op: API error (400): bad - the body" {
+		t.Errorf("ErrorText = %q", ErrorText(e))
+	}
+	if ErrorText(errors.New("x")) != "x" || ErrorText(nil) != "" {
+		t.Error("plain errors must pass through")
+	}
+	if a := NewAPIErrorFromBody(502, strings.Repeat("z", 2000)); a.Message != "Bad Gateway" || len(a.Details) > MaxBodyDetails+20 {
+		t.Errorf("NewAPIErrorFromBody = %+v", a)
 	}
 }

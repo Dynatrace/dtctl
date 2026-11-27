@@ -660,7 +660,7 @@ func runUnshareDocument(cmd *cobra.Command, args []string) error {
 			if err := handler.RemoveDirectShareRecipients(share.ID, recipientIDs); err != nil {
 				// Log but continue - recipient might not be in this share
 				if verbosity(cmdContext(cmd)) > 0 {
-					output.FprintInfo(currentStderr(cmdContext(cmd)), "Note: could not remove from share %s: %v", share.ID, err)
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "Note: could not remove from share %s: %s", share.ID, errorText(err))
 				}
 				continue
 			}

@@ -186,7 +186,7 @@ func printDryRunAnomalyDetector(cmd *cobra.Command, body map[string]any, invalid
 	}
 
 	if skipped != nil {
-		report.Detail("schema_validation", "skipped: %v", skipped)
+		report.Detail("schema_validation", "skipped: %s", errorText(skipped))
 	} else {
 		report.Detail("schema_validation", "passed")
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -132,7 +131,7 @@ func formatWorkflowAPIError(prefix string, statusCode int, body string) error {
 	}
 
 	// The body is kept in APIError.Details, not in the message.
-	return fmt.Errorf("%s: %w", prefix, httpclient.NewAPIError(statusCode, http.StatusText(statusCode), body))
+	return fmt.Errorf("%s: %w", prefix, httpclient.NewAPIErrorFromBody(statusCode, body))
 }
 
 // WaitOptions configures the wait behavior

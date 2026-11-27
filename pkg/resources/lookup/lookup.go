@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -537,7 +536,7 @@ func handleUploadError(statusCode int, body string, path string) error {
 // bodyError carries a response body in APIError.Details so it stays out of the
 // message; dtctl's error rendering shows it.
 func bodyError(statusCode int, body string) error {
-	return httpclient.NewAPIError(statusCode, http.StatusText(statusCode), body)
+	return httpclient.NewAPIErrorFromBody(statusCode, body)
 }
 
 // handleDeleteError formats delete errors with user-friendly messages

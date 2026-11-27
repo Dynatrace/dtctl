@@ -81,7 +81,7 @@ Examples:
 
 			updated, err := handler.Update(existing.ObjectID, value)
 			if err != nil {
-				if strings.Contains(err.Error(), "GCP authentication failed") {
+				if isGCPAuthFailure(err) {
 					return fmt.Errorf("%w\nIAM Policy update can take a couple of minutes before it becomes active, please retry in a moment", err)
 				}
 				return err

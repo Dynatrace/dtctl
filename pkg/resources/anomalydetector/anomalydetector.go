@@ -681,7 +681,7 @@ func settingsValidationError(body []byte) error {
 	if detail := describeSettingsError(body); detail != "" {
 		return fmt.Errorf("%s", detail)
 	}
-	return fmt.Errorf("invalid anomaly detector: %w", httpclient.NewAPIError(http.StatusBadRequest, http.StatusText(http.StatusBadRequest), string(body)))
+	return fmt.Errorf("invalid anomaly detector: %w", httpclient.NewAPIErrorFromBody(http.StatusBadRequest, string(body)))
 }
 
 // flattenedToAPIValue converts the human-friendly YAML format into the API's value shape.

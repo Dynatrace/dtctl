@@ -3,7 +3,6 @@ package anomalydetector
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"regexp"
 	"strings"
 
@@ -269,8 +268,8 @@ func interpretValidationResponse(status int, body []byte) error {
 		if detail := describeSettingsError(body); detail != "" {
 			return fmt.Errorf("%s", detail)
 		}
-		return fmt.Errorf("invalid anomaly detector: %w", httpclient.NewAPIError(status, http.StatusText(status), string(body)))
+		return fmt.Errorf("invalid anomaly detector: %w", httpclient.NewAPIErrorFromBody(status, string(body)))
 	default:
-		return &ValidationUnavailableError{Err: httpclient.NewAPIError(status, http.StatusText(status), string(body))}
+		return &ValidationUnavailableError{Err: httpclient.NewAPIErrorFromBody(status, string(body))}
 	}
 }

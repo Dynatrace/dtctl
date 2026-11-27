@@ -388,7 +388,7 @@ func ensureEnvironmentShareForResults(ctx context.Context, c *client.Client, res
 			continue
 		}
 		if err := shareAppliedDocument(handler, base.ID, access); err != nil {
-			output.FprintWarning(currentStderr(ctx), "failed to share %s %q with environment: %v", base.ResourceType, base.ID, err)
+			output.FprintWarning(currentStderr(ctx), "failed to share %s %q with environment: %s", base.ResourceType, base.ID, errorText(err))
 			errs = append(errs, fmt.Errorf("document %q: %w", base.ID, err))
 			continue
 		}

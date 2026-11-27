@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"errors"
-	"strings"
 
 	"github.com/Dynatrace/dtctl/pkg/diagnostic"
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
@@ -20,14 +19,9 @@ func errorText(err error) string {
 	if err == nil {
 		return ""
 	}
-	text := err.Error()
 	var diagErr *diagnostic.Error
 	if errors.As(err, &diagErr) {
-		return text
+		return err.Error()
 	}
-	var apiErr *httpclient.APIError
-	if errors.As(err, &apiErr) && apiErr.Details != "" && !strings.Contains(text, apiErr.Details) {
-		return text + " - " + apiErr.Details
-	}
-	return text
+	return httpclient.ErrorText(err)
 }
