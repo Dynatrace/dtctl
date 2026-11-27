@@ -121,7 +121,7 @@ Examples:
 			notes := workspace.changeNotes()
 			var entryNotes []string
 			if scopeName != "" {
-				if filterSets, entryNotes, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
+				if filterSets, entryNotes, err = namedBreakpointFilters(workspace); err != nil {
 					return err
 				}
 				filterSummary = filterSetsSummary(filterSets)

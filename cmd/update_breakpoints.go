@@ -153,7 +153,7 @@ Examples:
 				notes := ws.changeNotes()
 				if scopeName != "" {
 					var entryNotes []string
-					if sets, entryNotes, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
+					if sets, entryNotes, err = namedBreakpointFilters(ws); err != nil {
 						return err
 					}
 					origin = " from repo scope " + scopeName

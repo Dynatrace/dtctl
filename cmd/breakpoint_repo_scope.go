@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
@@ -30,20 +29,19 @@ const (
 	breakpointWorkspaceRepoScopeUsage = "name the workspace after this entry of the repository's .dtctl-repo-scope.yaml, wherever the command runs"
 )
 
-// namedBreakpointFilters is every filter set of the entry --repo-scope names,
-// with what the caller says before it sets them (entryFilterNotes). Every
-// failure is an error, as on query: the caller asked for that entry's
-// filters. resolveRepoScope resolves a name to its entry or fails.
-func namedBreakpointFilters(cmd *cobra.Command, cfg *config.Config, name string) (sets []map[string][]string, notes []string, err error) {
-	res, err := resolveRepoScope(cmd, cfg, name)
-	if err != nil {
-		return nil, nil, err
-	}
-	sets, ok, reason := res.Status.LiveDebuggerFilterSets()
+// namedBreakpointFilters is every filter set of the entry --repo-scope
+// named, with what the caller says before it sets them (entryFilterNotes).
+// The entry is the one the workspace was named after: the scope file is read
+// once per invocation, so the filters and the workspace cannot come from two
+// states of it. An entry that renders no filter set is an error, as on
+// query: the caller asked for that entry's filters, and sending none would
+// clear the workspace's.
+func namedBreakpointFilters(workspace breakpointWorkspace) (sets []map[string][]string, notes []string, err error) {
+	sets, ok, reason := workspace.scope.LiveDebuggerFilterSets()
 	if !ok {
 		return nil, nil, &reposcope.InvalidError{Source: "--" + repoScopeFlag, Msg: reason}
 	}
-	return sets, entryFilterNotes(res.Status.Entry), nil
+	return sets, entryFilterNotes(workspace.scope.Entry), nil
 }
 
 // entryFilterNotes says how the filters set from e differ from e, one line
