@@ -202,5 +202,7 @@ token and in the IAM policy. Both are part of dtctl's OAuth scope set, so after
 
 An analysis is expensive server-side, so an environment limits how many run at
 once and answers the rest with `429 Too Many Requests`. dtctl waits and submits
-again (honoring `Retry-After` when the server sends one) a few times before it
-gives up with a 429 error. Avoid running many analyses in parallel.
+again a few times before it gives up with a 429 error. That wait honors
+`Retry-After` when the server sends one; the HTTP client's own quick retries of
+each attempt, a few within seconds, do not. Avoid running many analyses in
+parallel.
