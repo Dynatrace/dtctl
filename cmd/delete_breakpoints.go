@@ -76,7 +76,7 @@ Examples:
 			}
 			workspace := ws.shown()
 			// Said before the confirmation and before anything is sent.
-			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
+			ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), ws.changeNotes()...)
 
 			handler, err := liveDebuggerHandler(ctx, cfg)
 			if err != nil {

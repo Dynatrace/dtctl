@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -213,6 +214,49 @@ func TestUpdateBreakpoint_DryRunNeedsItsContext(t *testing.T) {
 		require.Contains(t, agentError(t, stdout).Message, `"nope"`)
 		require.Empty(t, srv.ops())
 	}
+}
+
+// A dry run names the workspace the real run would work in, which the
+// context's environment decides. A context that does not exist, or one
+// without an environment, fails it as it fails the real run, rather than
+// previewing the working directory's workspace: with a scope file, without
+// one, and with one that does not load, whose refusal it must not skip.
+func TestBreakpoint_DryRunNeedsItsEnvironment(t *testing.T) {
+	for _, argv := range [][]string{
+		{"create", "breakpoint", "A.java:1"},
+		{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:web"},
+		{"update", "breakpoint", "--filters", "k8s.namespace.name:web"},
+		{"update", "breakpoint", "dtctl-rule-0001", "--enabled=false"},
+	} {
+		for name, scope := range map[string]string{"linked": breakpointScope, "no file": "", "broken file": brokenScope} {
+			t.Run(strings.Join(argv, " ")+"/"+name, func(t *testing.T) {
+				srv := newLiveDebuggerStub(t, "readwrite-all")
+				chdirTestRepo(t, scope)
+
+				code, stdout, _ := runRepoScoped(append(slices.Clone(argv), "--agent", "--dry-run", "--context", "nope"), RunOptions{})
+				require.NotZero(t, code, stdout)
+				require.Contains(t, agentError(t, stdout).Message, `"nope"`)
+
+				writeIsolatedConfig(t, safetyLevelConfig(`""`, "readwrite-all"))
+				code, stdout, _ = runRepoScoped(append(slices.Clone(argv), "--agent", "--dry-run"), RunOptions{})
+				require.NotZero(t, code, stdout)
+				require.Equal(t, `context "c" has no environment URL, and a Live Debugger workspace is one environment's`, agentError(t, stdout).Message)
+				require.Empty(t, srv.ops())
+			})
+		}
+	}
+}
+
+// Without any config a create's dry run still says what it would do, naming
+// no workspace: a preview never newly requires a config.
+func TestCreateBreakpoint_DryRunNeedsNoConfig(t *testing.T) {
+	writeIsolatedConfig(t, "")
+	t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	chdirTestRepo(t, breakpointScope)
+
+	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "Dry run: would create breakpoint at A.java:1", breakpointMessage(t, stdout))
 }
 
 // "--enabled false" with no identifier before it leaves the flag bare and

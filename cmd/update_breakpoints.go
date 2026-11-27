@@ -166,7 +166,7 @@ Examples:
 					sets = []map[string][]string{parsed}
 				}
 				// Said before the confirmation and before anything is sent.
-				ctx := sayBreakpointWarnings(cmdContext(cmd), notes...)
+				ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), notes...)
 
 				if dryRun(ctx) {
 					return printBreakpointMessage(ctx, "update", fmt.Sprintf("Dry run: would update workspace %s's filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", workspace, origin, filterSetsSummary(sets)))
@@ -238,7 +238,7 @@ Examples:
 				return err
 			}
 			workspace := ws.shown()
-			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
+			ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), ws.changeNotes()...)
 			if dryRun(ctx) {
 				changes := describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)
 				return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes), workspace))

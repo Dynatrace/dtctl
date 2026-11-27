@@ -128,7 +128,7 @@ Examples:
 				notes = append(notes, entryNotes...)
 			}
 			// Said before the confirmation and before anything is sent.
-			ctx := sayBreakpointWarnings(cmdContext(cmd), notes...)
+			ctx := sayBreakpointWarnings(workspace.warnScopeFile(cmdContext(cmd)), notes...)
 
 			// A preview sends nothing, not even the read that finds the
 			// workspace: asking for a workspace may create it.

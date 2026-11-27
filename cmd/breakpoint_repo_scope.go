@@ -39,7 +39,6 @@ func namedBreakpointFilters(cmd *cobra.Command, cfg *config.Config, name string)
 	if err != nil {
 		return nil, nil, err
 	}
-	warnRepoScopeFile(currentStderr(cmdContext(cmd)), res.Warning)
 	sets, ok, reason := res.Status.LiveDebuggerFilterSets()
 	if !ok {
 		return nil, nil, &reposcope.InvalidError{Source: "--" + repoScopeFlag, Msg: reason}
@@ -94,7 +93,6 @@ func coveringBreakpointEntry(cmd *cobra.Command, workspace breakpointWorkspace) 
 	if status == nil || truthyEnv(ctx, noRepoScopeEnv) || !repoScopeAdmitted(cmd, repoScopeFlag) {
 		return coveringEntry{}
 	}
-	warnRepoScopeFile(currentStderr(ctx), status.Warning)
 	if status.Entry == nil {
 		return coveringEntry{skipped: repoScopeReason(status)}
 	}

@@ -683,8 +683,8 @@ func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
 		stdout string
 		stderr string
 	}{
-		{"create", []string{"create", "breakpoint", "A.java:1", "--plain"}, "(workspace storefront/ledger)", workspaceNote("storefront/ledger") + "\n"},
-		{"update", []string{"update", "breakpoint", "--plain", "--filters", "service.name:ledger", "--yes"}, "(workspace storefront/ledger)", workspaceNote("storefront/ledger") + "\n"},
+		{"create", []string{"create", "breakpoint", "A.java:1", "--plain"}, "(workspace storefront/ledger)", originWorkspaceNote("storefront/ledger") + "\n"},
+		{"update", []string{"update", "breakpoint", "--plain", "--filters", "service.name:ledger", "--yes"}, "(workspace storefront/ledger)", originWorkspaceNote("storefront/ledger") + "\n"},
 		{"get", []string{"get", "breakpoints", "--no-agent"}, "", "workspace: storefront/ledger\n"},
 		{"get --plain", []string{"get", "breakpoints", "--no-agent", "--plain"}, "", "workspace: storefront/ledger\n"},
 	} {
