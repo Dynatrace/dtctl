@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,7 +40,9 @@ func TestWaitQuery_ScopesOnlyUnderAName(t *testing.T) {
 		{name: "a covering entry is named in one line", query: repoScopeTypedQuery, hint: hint},
 		{name: "not under --quiet", query: repoScopeTypedQuery, args: []string{"--quiet"}},
 		{name: "not where repo scopes are turned off", query: repoScopeTypedQuery, env: map[string]string{noRepoScopeEnv: "1"}},
-		{name: "an entry that sends only its segments", query: "timeseries avg(dt.host.cpu.usage)", hint: hint},
+		// Named, this entry's filter cannot be inserted into a timeseries
+		// and the wait is refused, so the line would advise a dead end.
+		{name: "not for a query the named entry refuses", query: "timeseries avg(dt.host.cpu.usage)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
@@ -60,6 +63,32 @@ func TestWaitQuery_ScopesOnlyUnderAName(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("the command the line names is one that runs", func(t *testing.T) {
+		const timeseries = "timeseries avg(dt.host.cpu.usage)"
+		srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+		repo := chdirTestRepo(t, segmentScope)
+		writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
+		t.Chdir(filepath.Join(repo, "tools"))
+
+		code, _, stderr := runRepoScoped(wait(timeseries), RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Contains(t, stderr, "wait query applies a scope only when it is named, with --repo-scope tools\n")
+		require.Equal(t, []string{"POST /platform/storage/query/v1/query:execute query=" + timeseries}, srv.requestLog())
+
+		srv = segmentRecorder(t, answer(http.StatusOK, oneRecord))
+		code, _, stderr = runRepoScoped(wait(timeseries, "--repo-scope", "tools"), RunOptions{})
+		require.Zero(t, code, stderr)
+		body, _ := srv.executed(t)
+		require.Contains(t, body, `"filterSegments":[{"id":"plain-1"}]`)
+
+		// The entry the line stayed silent about is refused when named.
+		srv = segmentRecorder(t, answer(http.StatusOK, oneRecord))
+		code, _, stderr = runRepoScoped(wait(timeseries, "--repo-scope", "checkout"), RunOptions{})
+		require.NotZero(t, code)
+		require.Contains(t, stderr, "not_fetch")
+		require.Empty(t, srv.requests())
+	})
 
 	t.Run("an entry that cannot narrow the query says nothing", func(t *testing.T) {
 		srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))

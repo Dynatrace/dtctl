@@ -461,7 +461,8 @@ func (q *repoScopedQuery) changedRequest() bool {
 // empty everywhere else, so the command says nothing a caller did not see
 // before repo scopes existed: where the user turned them off, where the
 // stability floor hides the flag the line names, outside a linked repository,
-// and for a file or an entry that offers this query nothing.
+// for a file or an entry that offers this query nothing, and for an entry
+// that, named, would refuse it.
 func repoScopeHint(cmd *cobra.Command, cfg *config.Config, query string) string {
 	ctx := cmdContext(cmd)
 	if name, _ := cmd.Flags().GetString(repoScopeFlag); name != "" || truthyEnv(ctx, noRepoScopeEnv) || !repoScopeAdmitted(cmd, repoScopeFlag) {
@@ -475,9 +476,10 @@ func repoScopeHint(cmd *cobra.Command, cfg *config.Config, query string) string 
 	if err != nil || status.Entry == nil {
 		return ""
 	}
+	// The line names a command, so it is printed only for one that runs:
+	// named, an entry whose filter cannot be inserted is an error.
 	would := &repoScopedQuery{Query: query, typed: query}
-	would.rewrite(status)
-	if !would.changedRequest() {
+	if refused := would.rewrite(status); slices.Contains(repoScopeRefusals, refused) || !would.changedRequest() {
 		return ""
 	}
 	return fmt.Sprintf("repo scope %s covers this directory and is not applied: %s applies a scope only when it is named, with --%s %s",
