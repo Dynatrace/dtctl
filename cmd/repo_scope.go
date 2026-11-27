@@ -366,6 +366,9 @@ func (s *repoScopeFile) resolve(name string) (*reposcope.Status, error) {
 	if !s.loc.Exists && name == "" {
 		return &reposcope.Status{Code: reposcope.StatusNoFile, Environment: s.host, Dir: s.loc.RelDir, Reason: repoScopeNoFileReason}, nil
 	}
+	if !s.loc.Exists && s.file.Empty() {
+		return nil, &reposcope.NotFoundError{Name: name, Host: s.host, NoFile: true}
+	}
 	return reposcope.Resolve(reposcope.RepoFS(s.loc), s.file, s.host, s.loc.RelDir, name)
 }
 
@@ -595,7 +598,7 @@ func deleteRepoScope(cmd *cobra.Command, name string) error {
 		return err
 	}
 	if !scope.file.Remove(scope.host, name) {
-		return &reposcope.NotFoundError{Name: name, Host: scope.host, Known: scope.file.Names(scope.host)}
+		return &reposcope.NotFoundError{Name: name, Host: scope.host, Known: scope.file.Names(scope.host), NoFile: !scope.loc.Exists}
 	}
 	if err := reposcope.Save(scope.loc, scope.file); err != nil {
 		return err

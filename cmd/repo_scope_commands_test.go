@@ -45,3 +45,28 @@ func TestRepoScopeSetRefusesTheRootAsAPath(t *testing.T) {
 	require.Equal(t, []string{"leave --path out for an entry that covers the whole repository"}, detail.Suggestions)
 	require.NoFileExists(t, filepath.Join(repo, reposcope.FileName))
 }
+
+// Without a scope file there is no entry to find and no file to name: the
+// answer says that the repository has none, and how to get one.
+func TestRepoScopeNamedEntryWithoutAFile(t *testing.T) {
+	const want = `repo scope "ledger" not found: this repository has no ` + reposcope.FileName + ` ('dtctl repo-scope set' writes one)`
+	for _, args := range [][]string{
+		{"repo-scope", "describe", "ledger"}, {"repo-scope", "delete", "ledger"},
+		{"query", "fetch logs", "--repo-scope", "ledger"}, {"verify", "query", "fetch logs", "--repo-scope", "ledger"},
+		{"create", "breakpoint", "A.java:1", "--repo-scope", "ledger"},
+	} {
+		newLiveDebuggerStub(t, "readwrite-all")
+		optInRepoScope(t)
+		chdirTestRepo(t, "")
+		code, _, stderr := runRepoScoped(args, RunOptions{})
+		require.Equal(t, client.ExitNotFoundError, code, "%q", args)
+		require.Equal(t, "Error: "+want+"\n", strings.SplitAfter(stderr, "\n")[0], "%q", args)
+
+		code, stdout, _ := runRepoScoped(append(args, "--agent"), RunOptions{})
+		require.Equal(t, client.ExitNotFoundError, code, "%q", args)
+		detail := agentError(t, stdout)
+		require.Equal(t, "not_found", detail.Code)
+		require.Equal(t, want, detail.Message, "%q", args)
+		require.Equal(t, []string{repoScopeDiscoverHint}, detail.Suggestions, "%q", args)
+	}
+}
