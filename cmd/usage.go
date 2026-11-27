@@ -111,7 +111,7 @@ scripts and agents consume.`,
 
   # Clear the tally for the current context
   dtctl usage reset`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUsage(cmdContext(cmd), allContexts, time.Now())
 		},
@@ -146,7 +146,7 @@ configured; to stop recording, run:
 
   # Delete the whole usage file, without prompting
   dtctl usage reset --all-contexts --yes`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUsageReset(cmdContext(cmd), allContexts, yes)
 		},

@@ -43,7 +43,7 @@ Examples:
   # List only my dashboards
   dtctl get dashboards --mine
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
 				return err
@@ -124,7 +124,7 @@ Examples:
   # List only my notebooks
   dtctl get notebooks --mine
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
 				return err
@@ -210,7 +210,7 @@ Examples:
   # Output as JSON
   dtctl get trash -o json
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -295,7 +295,7 @@ Examples:
   # Delete without confirmation
   dtctl delete dashboard "Production Dashboard" -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -376,7 +376,7 @@ Examples:
   # Delete without confirmation
   dtctl delete notebook "Analysis Notebook" -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -459,7 +459,7 @@ Examples:
   # Permanently delete multiple documents
   dtctl delete trash <id1> <id2> <id3> --permanent -y
 `,
-		Args: cobra.MinimumNArgs(1),
+		Args: minimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check for --permanent flag before setup (no API call needed)
 			permanent, _ := cmd.Flags().GetBool("permanent")
@@ -578,7 +578,7 @@ Examples:
   # Output as JSON
   dtctl get documents -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "type", "types", "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
 				return err
@@ -685,7 +685,7 @@ Examples:
   # Delete without confirmation
   dtctl delete document "My Launchpad" -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

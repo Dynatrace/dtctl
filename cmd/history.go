@@ -47,7 +47,7 @@ Examples:
   # Output as JSON
   dtctl history workflow "My Workflow" -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -107,7 +107,7 @@ Examples:
   # Output as JSON
   dtctl history dashboard "Production Dashboard" -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -170,7 +170,7 @@ Examples:
   # Output as JSON
   dtctl history notebook "Analysis Notebook" -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -235,7 +235,7 @@ Examples:
   # Output as JSON
   dtctl history document "My Launchpad" -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

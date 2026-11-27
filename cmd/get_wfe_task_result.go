@@ -24,7 +24,7 @@ task (e.g. the object from a JavaScript task's default export function).`,
 		Example: `  # Get the return value of a specific task
   dtctl get wfe-task-result <execution-id> --task <task-name>
   dtctl get wfe-task-result <execution-id> -t <task-name> -o json`,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			executionID := args[0]
 

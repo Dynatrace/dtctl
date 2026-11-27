@@ -172,7 +172,7 @@ Examples:
   dtctl share document my-launchpad-id --environment link,public --access read-write
 `,
 		Aliases: []string{"doc"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE:    runShareDocument,
 	}
 	stability.MarkStable(c)
@@ -242,7 +242,7 @@ Examples:
   dtctl unshare document my-launchpad-id --all --environment link
 `,
 		Aliases: []string{"doc"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE:    runUnshareDocument,
 	}
 	stability.MarkStable(c)
@@ -258,7 +258,7 @@ func newShareNotebookCmd() *cobra.Command {
 		Use:     "notebook <notebook-id> --user <user-id> | --group <group-id> | --environment link,public",
 		Short:   "Share a notebook with users, groups, or the environment",
 		Aliases: []string{"nb"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE:    runShareDocument,
 	}
 	stability.MarkStable(c)
@@ -274,7 +274,7 @@ func newShareDashboardCmd() *cobra.Command {
 		Use:     "dashboard <dashboard-id> --user <user-id> | --group <group-id> | --environment link,public",
 		Short:   "Share a dashboard with users, groups, or the environment",
 		Aliases: []string{"db"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE:    runShareDocument,
 	}
 	stability.MarkStable(c)
@@ -290,7 +290,7 @@ func newUnshareNotebookCmd() *cobra.Command {
 		Use:     "notebook <notebook-id> [--user <user-id>] [--group <group-id>] [--all] [--environment link,public]",
 		Short:   "Remove sharing from a notebook",
 		Aliases: []string{"nb"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE:    runUnshareDocument,
 	}
 	stability.MarkStable(c)
@@ -306,7 +306,7 @@ func newUnshareDashboardCmd() *cobra.Command {
 		Use:     "dashboard <dashboard-id> [--user <user-id>] [--group <group-id>] [--all] [--environment link,public]",
 		Short:   "Remove sharing from a dashboard",
 		Aliases: []string{"db"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE:    runUnshareDocument,
 	}
 	stability.MarkStable(c)

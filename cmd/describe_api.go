@@ -56,7 +56,7 @@ Examples:
   # The unprojected specification (large — spills to a file in agent mode)
   dtctl describe api document --raw
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

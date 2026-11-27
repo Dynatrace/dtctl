@@ -48,7 +48,7 @@ Examples:
   dtctl edit gcp monitoring <id>
   dtctl edit gcp monitoring --name "my-gcp-monitoring"
   dtctl edit gcp monitoring --name "my-gcp-monitoring" --format=json`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && editGCPMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")

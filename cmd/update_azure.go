@@ -42,7 +42,7 @@ func newUpdateAzureConnectionCmd() *cobra.Command {
 Examples:
   dtctl update azure connection --name "siwek" --directoryId "XYZ" --applicationId "ZUZ"
   dtctl update azure connection <id> --directoryId "XYZ" --applicationId "ZUZ"`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if updateAzureConnectionDirectoryID == "" && updateAzureConnectionApplicationID == "" && updateAzureConnectionClientSecret == "" {
 				return fmt.Errorf("at least one of --directoryId, --applicationId, or --clientSecret is required")
@@ -169,7 +169,7 @@ Examples:
   dtctl update azure monitoring --name "siwek" --locationFiltering "eastus,westeurope"
   dtctl update azure monitoring --name "siwek" --featureSets "microsoft_compute.virtualmachines_essential,microsoft_web.sites_functionapp_essential"
   dtctl update azure monitoring <id> --locationFiltering "eastus,westeurope"`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(updateAzureMonitoringConfigLocationFiltering) == "" &&
 				strings.TrimSpace(updateAzureMonitoringConfigFeatureSets) == "" {

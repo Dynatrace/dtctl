@@ -44,7 +44,7 @@ Examples:
 
   # Use in agent mode
   dtctl translate lql-to-dql 'log.source="snmptraps"' -A`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath, _ := cmd.Flags().GetString("file")
 

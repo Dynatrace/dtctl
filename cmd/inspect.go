@@ -96,7 +96,7 @@ your preferred local analytics tooling.`,
 		// At most one positional <file>. --list takes none; every primitive takes one.
 		// The exact requirement is enforced in RunE so usage errors share the typed
 		// inspect_bad_flags envelope rather than cobra's generic arg error.
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --list is a directory-scoped enumeration, not a file primitive: it takes
 			// no <file> and stands alone.

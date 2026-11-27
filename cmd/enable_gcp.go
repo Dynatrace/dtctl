@@ -53,7 +53,7 @@ Examples:
   dtctl enable gcp monitoring --name "my-gcp-monitoring" --serviceAccountId "sa@project.iam.gserviceaccount.com"
   dtctl enable gcp monitoring <id> --serviceAccountId "sa@project.iam.gserviceaccount.com"
   dtctl enable gcp monitoring --name "my-gcp-monitoring"`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Early flag validation — before any auth/network calls
 			if len(args) == 0 && enableGCPMonitoringName == "" {

@@ -110,19 +110,12 @@ Examples:
     exit 1
   fi
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputFmt, _ := cmd.Flags().GetString("output")
 			if !isSupportedVerifyOutputFormat(outputFmt) {
 				return fmt.Errorf("unsupported output format %q for verify query (supported: json, yaml, toon)", outputFmt)
 			}
-
-			_, c, err := setupClient(cmdContext(cmd))
-			if err != nil {
-				return err
-			}
-
-			executor := newDQLExecutor(cmdContext(cmd), c)
 
 			queryFile, _ := cmd.Flags().GetString("file")
 			setFlags, _ := cmd.Flags().GetStringArray("set")
@@ -146,6 +139,13 @@ Examples:
 
 				query = rendered
 			}
+
+			_, c, err := setupClient(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+
+			executor := newDQLExecutor(cmdContext(cmd), c)
 
 			// Get verify options
 			canonical, _ := cmd.Flags().GetBool("canonical")

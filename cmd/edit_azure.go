@@ -47,7 +47,7 @@ Examples:
   dtctl edit azure monitoring <id>
   dtctl edit azure monitoring --name "my-azure-monitoring"
   dtctl edit azure monitoring --name "my-azure-monitoring" --format=json`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && editAzureMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")

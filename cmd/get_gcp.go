@@ -50,7 +50,7 @@ func newGetGCPConnectionCmd() *cobra.Command {
 		Aliases: []string{"connection"},
 		Short:   "Get GCP connections",
 		Long:    `Get one or more GCP connections (authentication credentials).`,
-		Args:    cobra.MaximumNArgs(1),
+		Args:    maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -106,7 +106,7 @@ func newGetGCPConnectionPrincipalCmd() *cobra.Command {
 		Use:   "principal",
 		Short: "Get Dynatrace GCP principal",
 		Long:  `Get the Dynatrace-managed GCP principal used as consumer in GCP connection impersonation setup.`,
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -138,7 +138,7 @@ func newGetGCPMonitoringConfigCmd() *cobra.Command {
 		Aliases: []string{"monitoring-config", "monitoring-configs"},
 		Short:   "Get GCP monitoring configurations",
 		Long:    `Get one or more GCP monitoring configurations.`,
-		Args:    cobra.MaximumNArgs(1),
+		Args:    maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -184,7 +184,7 @@ func newGetGCPMonitoringConfigLocationsCmd() *cobra.Command {
 		Aliases: []string{"monitoring-location"},
 		Short:   "Get available GCP monitoring config locations",
 		Long:    `Get available Google Cloud regions for monitoring configuration based on the latest extension schema.`,
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -213,7 +213,7 @@ func newGetGCPMonitoringConfigFeatureSetsCmd() *cobra.Command {
 		Aliases: []string{"monitoring-feature-set"},
 		Short:   "Get available GCP monitoring config feature sets",
 		Long:    `Get available FeatureSetsType values for GCP monitoring configuration based on the latest extension schema.`,
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

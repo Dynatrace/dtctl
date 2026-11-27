@@ -37,7 +37,7 @@ Examples:
   # Wide output (shows resumable status)
   dtctl get functions -o wide
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "app"); err != nil {
 				return err

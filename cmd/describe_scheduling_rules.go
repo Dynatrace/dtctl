@@ -28,7 +28,7 @@ Examples:
   dtctl describe scheduling-rule <scheduling-rule-id>
   dtctl describe sr <scheduling-rule-id>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 

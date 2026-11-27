@@ -35,7 +35,7 @@ Examples:
   # Output as JSON
   dtctl describe anomaly-detector <object-id> -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

@@ -32,7 +32,7 @@ Examples:
   # Output as JSON
   dtctl get extensions -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "name"); err != nil {
 				return err

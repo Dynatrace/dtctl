@@ -24,7 +24,7 @@ Examples:
   # Describe a user by UUID
   dtctl describe user <user-uuid>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			userUUID := args[0]
 
@@ -82,7 +82,7 @@ Examples:
   dtctl get groups
   dtctl describe group <group-uuid>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			groupUUID := args[0]
 

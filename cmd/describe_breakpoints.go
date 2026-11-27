@@ -30,7 +30,7 @@ Examples:
   # Describe all breakpoints at a source location
   dtctl describe breakpoint OrderController.java:306
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDescribeBreakpoint(cmd, args[0])
 		},

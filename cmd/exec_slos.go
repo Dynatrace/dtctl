@@ -39,7 +39,7 @@ Examples:
   # Output as YAML
   dtctl exec slo my-slo-id -o yaml
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sloID := args[0]
 

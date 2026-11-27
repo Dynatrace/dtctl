@@ -29,7 +29,7 @@ Examples:
   dtctl describe segment <uid>
   dtctl describe seg <uid>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			uid := args[0]
 

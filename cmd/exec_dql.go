@@ -37,7 +37,7 @@ Examples:
   # Output as JSON (use 'dtctl query -o json' instead)
   dtctl query "fetch logs" -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show deprecation warning
 			output.FprintWarning(currentStderr(cmdContext(cmd)), "'dtctl exec dql' is deprecated. Use 'dtctl query' instead.")

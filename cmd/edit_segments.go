@@ -38,7 +38,7 @@ Examples:
   # Edit a segment in JSON
   dtctl edit segment <uid> --format=json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			uid := args[0]
 

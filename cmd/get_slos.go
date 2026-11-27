@@ -35,7 +35,7 @@ Examples:
   # Output as JSON
   dtctl get slos -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "filter"); err != nil {
 				return err
@@ -102,7 +102,7 @@ Examples:
   # Output as JSON
   dtctl get slo-templates -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "filter"); err != nil {
 				return err
@@ -156,7 +156,7 @@ Examples:
   # Delete without confirmation
   dtctl delete slo <slo-id> -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sloID := args[0]
 

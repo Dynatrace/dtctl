@@ -40,6 +40,9 @@ Examples:
   dtctl exec copilot "List top errors" --instruction "Answer in bullet points"
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "file"); err != nil {
+				return err
+			}
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
 				return err
@@ -140,8 +143,11 @@ Examples:
   # Output as JSON (includes messageToken for feedback)
   dtctl exec copilot nl2dql "find hosts with high CPU" -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "file"); err != nil {
+				return err
+			}
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
 				return err
@@ -208,8 +214,11 @@ Examples:
   # Output as JSON
   dtctl exec copilot dql2nl "fetch logs | limit 10" -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "file"); err != nil {
+				return err
+			}
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
 				return err
@@ -280,7 +289,7 @@ Examples:
   # Output as JSON
   dtctl exec copilot document-search "kubernetes" --collections notebooks -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {

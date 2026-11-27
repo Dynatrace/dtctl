@@ -44,7 +44,7 @@ Examples:
   dtctl open intent dynatrace.distributedtracing/view-trace \\
     --data trace_id=abc123 --browser
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if openIntentData == "" && openIntentDataFile == "" {
 				return fmt.Errorf("either --data or --data-file must be specified")

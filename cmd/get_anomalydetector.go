@@ -41,7 +41,7 @@ Examples:
   # Wide output with object IDs
   dtctl get anomaly-detectors -o wide
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "enabled"); err != nil {
 				return err
@@ -124,7 +124,7 @@ Examples:
   # Delete without confirmation
   dtctl delete anomaly-detector <object-id> -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

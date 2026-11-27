@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 	"net"
 	"os"
 	"regexp"
@@ -988,7 +989,8 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 	// A value the command itself found invalid, typed so the code does not
 	// depend on how the message happens to be worded.
 	var invalidInput *invalidInputError
-	if errors.As(err, &invalidInput) {
+	var templateVar *template.VariableError
+	if errors.As(err, &invalidInput) || errors.As(err, &templateVar) {
 		return &output.ErrorDetail{
 			Code:    "validation_error",
 			Message: err.Error(),
@@ -1357,7 +1359,8 @@ func exitCodeForError(err error) int {
 	// A bad value the caller passed: the same exit as any other usage error,
 	// to match the validation_error code agent mode reports for it.
 	var invalidInput *invalidInputError
-	if errors.As(err, &invalidInput) {
+	var templateVar *template.VariableError
+	if errors.As(err, &invalidInput) || errors.As(err, &templateVar) {
 		return client.ExitUsageError
 	}
 

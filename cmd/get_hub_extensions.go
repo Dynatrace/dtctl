@@ -30,7 +30,7 @@ Examples:
   # Output as JSON
   dtctl get hub-extensions -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "filter"); err != nil {
 				return err
@@ -98,7 +98,7 @@ Examples:
   # Output as JSON
   dtctl get hub-extension-releases my-extension-id -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 

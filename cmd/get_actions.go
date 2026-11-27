@@ -68,7 +68,7 @@ Examples:
   # Wide output (adds description, stateful and approval flags)
   dtctl get actions -o wide
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateGetActionsInput(cmd, args); err != nil {
 				return err

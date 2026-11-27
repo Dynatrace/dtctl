@@ -36,7 +36,7 @@ Examples:
   # Edit by title
   dtctl edit anomaly-detector "High CPU on production hosts"
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

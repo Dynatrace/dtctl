@@ -34,7 +34,7 @@ Examples:
   dtctl create edgeconnect --name my-edgeconnect --host-patterns "*.example.com" --dry-run
 `,
 		Aliases: []string{"ec"},
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 			name, _ := cmd.Flags().GetString("name")

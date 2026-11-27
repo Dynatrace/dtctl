@@ -61,9 +61,9 @@ Examples:
   # List only my workflows
   dtctl get workflows --mine
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectFiltersWithID(cmd, args, "mine", "filter", "type"); err != nil {
+			if err := rejectFiltersWithID(cmd, args, "mine", "filter", "type", "limit"); err != nil {
 				return err
 			}
 			workflowType, err := enumFlagValue(cmd, "type", workflowTypes)
@@ -197,7 +197,7 @@ Examples:
   # Output as JSON
   dtctl get wfe -o json
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "workflow", "state", "trigger", "started-since", "started-until", "limit"); err != nil {
 				return err
@@ -309,7 +309,7 @@ Examples:
   # Delete without confirmation
   dtctl delete workflow "My Workflow" -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

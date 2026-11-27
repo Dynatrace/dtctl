@@ -114,7 +114,7 @@ func newConfigViewCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "view",
 		Short: "Display the current configuration",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -158,7 +158,7 @@ Note that once a .dtctl.yaml exists, config writes target it rather than your
 global config. Pass --global to 'config set-context' / 'config set-credentials'
 to create the global binding this file needs.
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check if .dtctl.yaml already exists
 			configPath := config.LocalConfigName
@@ -259,7 +259,7 @@ Examples:
   # List contexts with descriptions
   dtctl config get-contexts -o wide
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return listContexts(cmdContext(cmd))
 		},
@@ -275,7 +275,7 @@ func newConfigCurrentContextCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "current-context",
 		Short: "Display the current context",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -296,7 +296,7 @@ func newConfigUseContextCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "use-context <context-name>",
 		Short: "Switch to a different context",
-		Args:  cobra.ExactArgs(1),
+		Args:  exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return useContext(cmdContext(cmd), args[0])
 		},
@@ -349,7 +349,7 @@ Examples:
   # scan (off by default; see 'dtctl usage')
   dtctl config set-context prod-viewer --usage-tracking
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return setContext(cmdContext(cmd), args[0], contextSettingsFromFlags(cmd))
 		},
@@ -366,7 +366,7 @@ func newConfigSetCredentialsCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "set-credentials <name>",
 		Short: "Set credentials in the config",
-		Args:  cobra.ExactArgs(1),
+		Args:  exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			token, _ := cmd.Flags().GetString("token")
@@ -436,7 +436,7 @@ Examples:
   # Check what a teardown script would remove, without removing it
   dtctl config delete-credentials incident-token --dry-run
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
@@ -526,7 +526,7 @@ Supported keys:
     (value: on/off). Development features are unfinished, carry no stability
     guarantees, and are not registered at all until enabled. Run
     'dtctl config list-development' to see them.`,
-		Args: cobra.ExactArgs(2),
+		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := args[0]
 			value := args[1]
@@ -575,7 +575,7 @@ This command moves tokens stored in ~/.config/dtctl/config to:
   - Windows: Credential Manager
 
 After migration, tokens are removed from the config file and stored securely.`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !config.IsKeyringAvailable() {
 				return fmt.Errorf("keyring not available on this system. Tokens will remain in config file")
@@ -625,7 +625,7 @@ Examples:
   # Describe a specific context
   dtctl config describe-context production
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return describeContext(cmdContext(cmd), args[0])
 		},
@@ -658,7 +658,7 @@ Examples:
   # Delete a context and the credential it references
   dtctl config delete-context staging --delete-credentials
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteCredential, _ := cmd.Flags().GetBool("delete-credentials")
 			return deleteContext(cmd, args[0], deleteCredential)

@@ -65,7 +65,7 @@ Examples:
   # Describe a dashboard by name
   dtctl describe dashboard "Production Dashboard"
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -118,7 +118,7 @@ Examples:
   # Describe a notebook by name
   dtctl describe notebook "Analysis Notebook"
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -172,7 +172,7 @@ Examples:
   # Describe a document by name
   dtctl describe document "My Launchpad"
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -216,7 +216,7 @@ Examples:
   # Describe a trashed document by ID
   dtctl describe trash <document-id>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			documentID := args[0]
 

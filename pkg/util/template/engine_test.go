@@ -483,6 +483,12 @@ func TestRenderTemplate_RejectsUnusableVariables(t *testing.T) {
 		{"default as function call", `{{default "1h" .t}}`, map[string]interface{}{}, ""},
 		{"default does not excuse an unused --set", `{{.t | default "1h"}}`, map[string]interface{}{"u": "1"}, `"u"`},
 		{"variable read only in a condition counts as used", `{{if .on}}x{{end}}`, map[string]interface{}{"on": "1"}, ""},
+		{"index reads the root map", `{{index . "host-name"}}`, map[string]interface{}{"host-name": "p"}, ""},
+		{"index with a missing key", `{{index $ "k"}}`, map[string]interface{}{}, `"k"`},
+		{"root ref inside range counts", `{{range .items}}{{$.env}}{{end}}`, map[string]interface{}{"items": []string{"a"}, "env": "p"}, ""},
+		{"root ref inside range, missing", `{{range .items}}{{$.env}}{{end}}`, map[string]interface{}{"items": []string{"a"}}, `"env"`},
+		{"root ref inside with else", `{{with .a}}x{{else}}{{.b}}{{end}}`, map[string]interface{}{"a": "1"}, `"b"`},
+		{"default once, bare once is required", `{{.t | default "1h"}} {{.t}}`, map[string]interface{}{}, `"t"`},
 		{"variable read inside range body is not a variable", `{{range .items}}{{.name}}{{end}}`, map[string]interface{}{"items": []map[string]string{{"name": "a"}}}, ""},
 	}
 	for _, tt := range tests {

@@ -137,7 +137,7 @@ func newDescribeAzureConnectionCmd() *cobra.Command {
 		Use:     "connection <id>",
 		Aliases: []string{"connections", "azconn"},
 		Short:   "Show details of an Azure connection (credential)",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -189,7 +189,7 @@ func newDescribeAzureMonitoringConfigCmd() *cobra.Command {
 		Use:     "monitoring <id-or-name>",
 		Aliases: []string{"monitoring-config", "monitoring-configs", "azmon"},
 		Short:   "Show details of an Azure monitoring configuration",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

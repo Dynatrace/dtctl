@@ -53,7 +53,7 @@ Examples:
   # Restore without confirmation
   dtctl restore workflow "My Workflow" 3 --yes
 `,
-		Args: cobra.ExactArgs(2),
+		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 			version, err := strconv.Atoi(args[1])
@@ -144,7 +144,7 @@ Examples:
   # Restore without confirmation
   dtctl restore dashboard "Production Dashboard" 3 --yes
 `,
-		Args: cobra.ExactArgs(2),
+		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 			version, err := strconv.Atoi(args[1])
@@ -238,7 +238,7 @@ Examples:
   # Restore without confirmation
   dtctl restore notebook "Analysis Notebook" 3 --yes
 `,
-		Args: cobra.ExactArgs(2),
+		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 			version, err := strconv.Atoi(args[1])
@@ -334,7 +334,7 @@ Examples:
   # Restore without confirmation
   dtctl restore document "My Launchpad" 3 --yes
 `,
-		Args: cobra.ExactArgs(2),
+		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 			version, err := strconv.Atoi(args[1])
@@ -427,7 +427,7 @@ Examples:
   # Force restore (overwrite if name conflict exists; also skips confirmation)
   dtctl restore trash <id> --force
 `,
-		Args: cobra.MinimumNArgs(1),
+		Args: minimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationUpdate)
 			if err != nil {

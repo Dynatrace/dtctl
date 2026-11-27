@@ -193,7 +193,7 @@ func newProfilingHotspotsCmd() *cobra.Command {
   dtctl exec profiling hotspots PROCESS-ABC123 --focus OrderService.load
   # which functions wait on locks
   dtctl exec profiling hotspots PROCESS-ABC123 --view functions --state lock`,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f.limitSet = cmd.Flags().Changed("limit")
 			return runProfiling(cmd, "hotspots", args[0], f)
@@ -246,7 +246,7 @@ at the root and its callers hang below as children, so each stack reads
 allocation site first.`,
 		Example: `  dtctl exec profiling allocations PROCESS-DEF456
   dtctl exec profiling allocations PROCESS-DEF456 --survivors-only`,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f.limitSet = cmd.Flags().Changed("limit")
 			return runProfiling(cmd, "allocations", args[0], f)

@@ -32,7 +32,7 @@ Examples:
   # Dry run to preview
   dtctl create slo -f slo.yaml --dry-run
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 

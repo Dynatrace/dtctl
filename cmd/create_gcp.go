@@ -29,7 +29,7 @@ Examples:
 	  dtctl create gcp connection --name "my-gcp-connection"
 	  dtctl create gcp connection my-gcp-connection
 	  dtctl create gcp connection --name "my-gcp-connection" --serviceAccountId "my-reader@project.iam.gserviceaccount.com"`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if createGCPConnectionName == "" && len(args) > 0 {
 				createGCPConnectionName = args[0]
@@ -165,7 +165,7 @@ func newCreateGCPMonitoringConfigCmd() *cobra.Command {
 Examples:
   dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "my-gcp-connection"
   dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "<connection-id>" --locationFiltering "us-central1,europe-west1"`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)

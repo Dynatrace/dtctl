@@ -77,7 +77,7 @@ See also:
   dtctl apply --help             # create-or-update semantics
 `,
 		Aliases: []string{"doc"},
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		RunE:    updateDocumentRunE,
 	}
 	c.Flags().StringP("file", "f", "", "file containing the document definition, or - for stdin (required)")

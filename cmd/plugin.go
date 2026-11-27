@@ -51,7 +51,7 @@ func newPluginListCmd() *cobra.Command {
 
   # Machine-readable listing
   dtctl plugin list -o json`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			plugins := plugin.Discover(os.Getenv("PATH"), builtinCommandNames())
 			if plugins == nil {

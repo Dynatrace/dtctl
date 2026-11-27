@@ -154,7 +154,7 @@ func validateDeleteBreakpointArgs(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) != 1 {
-		return cobra.ExactArgs(1)(cmd, args)
+		return exactArgs(1)(cmd, args)
 	}
 
 	return nil

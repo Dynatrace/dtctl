@@ -19,7 +19,7 @@ func newGetBreakpointsCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "breakpoints",
 		Short: "List all breakpoints in the current workspace",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE:  runGetBreakpoints,
 	}
 	markLiveDebuggerExperimental(c)

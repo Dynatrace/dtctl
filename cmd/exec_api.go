@@ -87,7 +87,7 @@ Examples:
   dtctl get apis
   dtctl describe api <name> --operation 'POST /things'
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		// The headers are checked here rather than in the body, so that Parse,
 		// which runs no command body, refuses what Execute would.
 		PreRunE: func(cmd *cobra.Command, _ []string) error {

@@ -61,7 +61,7 @@ Examples:
 
   # LLM-optimized markdown guide
   dtctl commands howto`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCommandsListing(cmd, args, briefMode, fullMode, requiredScopesMode)
 		},
@@ -90,7 +90,7 @@ an AI agent's system prompt or context.
 Examples:
   dtctl commands howto
   dtctl commands howto | pbcopy    # Copy to clipboard on macOS`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: runHowto,
 	}
 	stability.MarkStable(c)

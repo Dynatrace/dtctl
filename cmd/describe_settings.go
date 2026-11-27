@@ -25,7 +25,7 @@ Examples:
   # Describe a settings object by objectId
   dtctl describe settings vu9U3hXa3q0AAAABABlidWlsdGluOnJ1bS5mcm9...
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			objectID := args[0]
 
@@ -119,7 +119,7 @@ Examples:
   dtctl describe settings-schema builtin:openpipeline.logs.pipelines
   dtctl describe schema builtin:anomaly-detection.infrastructure
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			schemaID := args[0]
 

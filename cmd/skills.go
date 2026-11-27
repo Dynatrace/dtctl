@@ -118,7 +118,7 @@ Examples:
 
   # List supported agents
   dtctl skills install --list`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: runSkillsInstall,
 	}
 	c.Flags().String("for", "", "install for a specific agent (claude, codex, copilot, cursor, junie, kiro, opencode, openclaw)")
@@ -154,7 +154,7 @@ Examples:
 
   # Uninstall from cross-client directory
   dtctl skills uninstall --cross-client`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: runSkillsUninstall,
 	}
 	c.Flags().String("for", "", "uninstall for a specific agent")
@@ -185,7 +185,7 @@ Examples:
 
   # Check cross-client directory only
   dtctl skills status --for cross-client`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: runSkillsStatus,
 	}
 	c.Flags().String("for", "", "check status for a specific agent (or \"cross-client\")")

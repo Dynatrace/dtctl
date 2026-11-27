@@ -68,7 +68,7 @@ Examples:
   # Show multiple asset types
   dtctl describe extension com.dynatrace.extension.postgres --version 3.0.12 --assets=alert_templates,smartscape
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			extensionName := args[0]
 			versionFlag, _ := cmd.Flags().GetString("version")

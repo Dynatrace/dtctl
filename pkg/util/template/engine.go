@@ -155,24 +155,34 @@ func ValidateTemplate(templateStr string) ([]string, error) {
 	return vars, nil
 }
 
+// VariableError reports a variable the template cannot use: one it reads
+// without a value or default (Missing), or one that was given but never read
+// (Unused). The CLI maps it to a usage error.
+type VariableError struct {
+	Missing []string
+	Unused  []string
+	msg     string
+}
+
+func (e *VariableError) Error() string { return e.msg }
+
 // checkVariables compares the variables the template reads with the ones given.
 func checkVariables(tmpl *template.Template, vars map[string]interface{}) error {
-	used := map[string]bool{}      // every top-level variable the template reads
-	defaulted := map[string]bool{} // those read through the default function
+	u := &usage{used: map[string]bool{}, required: map[string]bool{}}
 	for _, t := range tmpl.Templates() {
 		if t.Tree != nil && t.Tree.Root != nil {
-			collectFields(t.Tree.Root, used, defaulted)
+			u.walk(t.Tree.Root, true)
 		}
 	}
 
 	var missing, unused []string
-	for name := range used {
-		if _, ok := vars[name]; !ok && !defaulted[name] {
+	for name := range u.required {
+		if _, ok := vars[name]; !ok {
 			missing = append(missing, name)
 		}
 	}
 	for name := range vars {
-		if !used[name] {
+		if !u.used[name] {
 			unused = append(unused, name)
 		}
 	}
@@ -180,12 +190,12 @@ func checkVariables(tmpl *template.Template, vars map[string]interface{}) error 
 	sort.Strings(unused)
 
 	if len(missing) > 0 {
-		return fmt.Errorf("template variable %s has no value and no default; "+
+		return &VariableError{Missing: missing, msg: fmt.Sprintf("template variable %s has no value and no default; "+
 			"pass --set %s=<value> or give it a default ({{.%s | default \"...\"}})",
-			quoteNames(missing), missing[0], missing[0])
+			quoteNames(missing), missing[0], missing[0])}
 	}
 	if len(unused) > 0 {
-		return fmt.Errorf("--set variable %s is not used by the template (check the spelling)", quoteNames(unused))
+		return &VariableError{Unused: unused, msg: fmt.Sprintf("--set variable %s is not used by the template (check the spelling)", quoteNames(unused))}
 	}
 	return nil
 }
@@ -198,39 +208,57 @@ func quoteNames(names []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// collectFields records the top-level fields (.Name, .Name.sub, $.Name) read
-// by the nodes under n. A field inside range or with reads the rebound dot,
-// not a variable, so those bodies are not searched; their pipelines are.
-func collectFields(n parse.Node, used, defaulted map[string]bool) {
+// usage records which top-level variables a template reads. A variable is
+// required when at least one read has no default.
+type usage struct {
+	used     map[string]bool
+	required map[string]bool
+}
+
+// walk visits n. rooted is true while dot is the root map; inside range and
+// with bodies dot is rebound, so only $-rooted reads count there.
+func (u *usage) walk(n parse.Node, rooted bool) {
 	switch n := n.(type) {
 	case *parse.ListNode:
 		if n == nil {
 			return
 		}
 		for _, c := range n.Nodes {
-			collectFields(c, used, defaulted)
+			u.walk(c, rooted)
 		}
 	case *parse.ActionNode:
-		collectFields(n.Pipe, used, defaulted)
+		u.walk(n.Pipe, rooted)
 	case *parse.IfNode:
-		collectFields(n.Pipe, used, defaulted)
-		collectFields(n.List, used, defaulted)
-		collectFields(n.ElseList, used, defaulted)
+		u.walk(n.Pipe, rooted)
+		u.walk(n.List, rooted)
+		u.walk(n.ElseList, rooted)
 	case *parse.RangeNode:
-		collectFields(n.Pipe, used, defaulted)
+		u.walk(n.Pipe, rooted)
+		u.walk(n.List, false)
+		u.walk(n.ElseList, rooted)
 	case *parse.WithNode:
-		collectFields(n.Pipe, used, defaulted)
+		u.walk(n.Pipe, rooted)
+		u.walk(n.List, false)
+		u.walk(n.ElseList, rooted)
 	case *parse.TemplateNode:
-		collectFields(n.Pipe, used, defaulted)
+		u.walk(n.Pipe, rooted)
 	case *parse.PipeNode:
 		if n == nil {
 			return
 		}
 		hasDefault := false
-		var fields []string
-		var walkArgs func(p *parse.PipeNode)
-		walkArgs = func(p *parse.PipeNode) {
+		var names []string
+		var args func(p *parse.PipeNode)
+		args = func(p *parse.PipeNode) {
 			for _, cmd := range p.Cmds {
+				if len(cmd.Args) >= 3 {
+					// index . "key" / index $ "key": a read of the root map.
+					if id, ok := cmd.Args[0].(*parse.IdentifierNode); ok && id.Ident == "index" {
+						if key, ok := cmd.Args[2].(*parse.StringNode); ok && isRoot(cmd.Args[1], rooted) {
+							names = append(names, key.Text)
+						}
+					}
+				}
 				for _, arg := range cmd.Args {
 					switch a := arg.(type) {
 					case *parse.IdentifierNode:
@@ -238,29 +266,40 @@ func collectFields(n parse.Node, used, defaulted map[string]bool) {
 							hasDefault = true
 						}
 					case *parse.FieldNode:
-						if len(a.Ident) > 0 {
-							fields = append(fields, a.Ident[0])
+						if rooted && len(a.Ident) > 0 {
+							names = append(names, a.Ident[0])
 						}
 					case *parse.VariableNode:
 						if len(a.Ident) > 1 && a.Ident[0] == "$" {
-							fields = append(fields, a.Ident[1])
+							names = append(names, a.Ident[1])
 						}
 					case *parse.ChainNode:
-						if f, ok := a.Node.(*parse.FieldNode); ok && len(f.Ident) > 0 {
-							fields = append(fields, f.Ident[0])
+						if f, ok := a.Node.(*parse.FieldNode); ok && rooted && len(f.Ident) > 0 {
+							names = append(names, f.Ident[0])
 						}
 					case *parse.PipeNode:
-						walkArgs(a)
+						args(a)
 					}
 				}
 			}
 		}
-		walkArgs(n)
-		for _, f := range fields {
-			used[f] = true
-			if hasDefault {
-				defaulted[f] = true
+		args(n)
+		for _, name := range names {
+			u.used[name] = true
+			if !hasDefault {
+				u.required[name] = true
 			}
 		}
 	}
+}
+
+// isRoot reports whether n is the root data: dot while rooted, or $.
+func isRoot(n parse.Node, rooted bool) bool {
+	switch n := n.(type) {
+	case *parse.DotNode:
+		return rooted
+	case *parse.VariableNode:
+		return len(n.Ident) == 1 && n.Ident[0] == "$"
+	}
+	return false
 }

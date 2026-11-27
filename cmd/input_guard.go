@@ -43,3 +43,49 @@ func rejectFiltersWithID(cmd *cobra.Command, args []string, flags ...string) err
 	}
 	return nil
 }
+
+// Positional-argument validators. They wrap cobra's so that a wrong argument
+// count is a usage error (exit 2, validation_error), not a generic failure,
+// and so a stray argument says what the command takes instead of cobra's
+// `unknown command "x" for "intents"`.
+
+func usageArgs(v cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := v(cmd, args); err != nil {
+			return &invalidInputError{err: err}
+		}
+		return nil
+	}
+}
+
+// noArgs is cobra.NoArgs for a command that takes no positional argument. A
+// command with subcommands keeps cobra's unknown-command handling (and its
+// did-you-mean suggestions).
+func noArgs(cmd *cobra.Command, args []string) error {
+	if cmd.HasSubCommands() {
+		return cobra.NoArgs(cmd, args)
+	}
+	if len(args) > 0 {
+		return &invalidInputError{err: fmt.Errorf("%q takes no arguments (got %q)", cmd.CommandPath(), args[0])}
+	}
+	return nil
+}
+
+func maximumNArgs(n int) cobra.PositionalArgs   { return usageArgs(cobra.MaximumNArgs(n)) }
+func exactArgs(n int) cobra.PositionalArgs      { return usageArgs(cobra.ExactArgs(n)) }
+func minimumNArgs(n int) cobra.PositionalArgs   { return usageArgs(cobra.MinimumNArgs(n)) }
+func rangeArgs(lo, hi int) cobra.PositionalArgs { return usageArgs(cobra.RangeArgs(lo, hi)) }
+
+// rejectArgWithFlags makes a positional argument given together with a flag
+// that supplies the same input a usage error: one of the two would be ignored.
+func rejectArgWithFlags(cmd *cobra.Command, args []string, flags ...string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	for _, flag := range flags {
+		if cmd.Flags().Changed(flag) {
+			return &invalidInputError{err: fmt.Errorf("argument %q cannot be combined with --%s; give the input one way", args[0], flag)}
+		}
+	}
+	return nil
+}

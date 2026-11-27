@@ -1,7 +1,11 @@
 package cmd
 
 import (
+	"context"
+	"fmt"
+
 	"errors"
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 	"io"
 	"strings"
 	"testing"
@@ -69,6 +73,7 @@ func TestListFiltersAreRejectedWithAnID(t *testing.T) {
 		{"execution --state", newGetWorkflowExecutionsCmd, []string{"ex-1", "--state", "SUCCESS"}, "--state"},
 		{"intent --app", newGetIntentsCmd, []string{"app/intent", "--app", "other"}, "--app"},
 		{"function --app", newGetFunctionsCmd, []string{"app/fn", "--app", "other"}, "--app"},
+		{"workflow --limit", newGetWorkflowsCmd, []string{"wf-1", "--limit", "5"}, "--limit"},
 		{"slo --filter", newGetSLOsCmd, []string{"slo-1", "--filter", "x"}, "--filter"},
 		{"notification --type", newGetNotificationsCmd, []string{"n-1", "--type", "x"}, "--type"},
 	}
@@ -95,9 +100,41 @@ func TestUnusedPositionalArgumentsAreRejected(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := runRejected(t, tc.cmd(), tc.args...)
-			if err == nil || !(strings.Contains(err.Error(), "arg(s)") || strings.Contains(err.Error(), "unknown command")) {
+			if err == nil || !(strings.Contains(err.Error(), "arg(s)") || strings.Contains(err.Error(), "takes no arguments")) {
 				t.Fatalf("error = %v, want an unused-argument error", err)
 			}
 		})
+	}
+}
+
+func TestUsageErrorsExitWithTheUsageCode(t *testing.T) {
+	err := runRejected(t, newFindIntentsCmd(), "x")
+	if code := exitCodeForError(err); code != 2 {
+		t.Errorf("stray positional exit code = %d, want 2", code)
+	}
+	if !strings.Contains(err.Error(), `takes no arguments (got "x")`) {
+		t.Errorf("error = %v", err)
+	}
+	err = fmt.Errorf("template rendering failed: %w", &template.VariableError{Missing: []string{"a"}})
+	if code := exitCodeForError(err); code != 2 {
+		t.Errorf("template error exit code = %d, want 2", code)
+	}
+	if d := errorToDetail(context.Background(), err); d.Code != "validation_error" {
+		t.Errorf("template error code = %q, want validation_error", d.Code)
+	}
+}
+
+func TestArgumentConflictsWithInputFlags(t *testing.T) {
+	for _, c := range []struct {
+		cmd  *cobra.Command
+		args []string
+	}{
+		{newExecFunctionCmd(), []string{"app/fn", "--code", "x"}},
+		{newExecFunctionCmd(), []string{"app/fn", "--file", "x.js"}},
+	} {
+		err := runRejected(t, c.cmd, c.args...)
+		if err == nil || !strings.Contains(err.Error(), "cannot be combined with") {
+			t.Errorf("%v: error = %v", c.args, err)
+		}
 	}
 }

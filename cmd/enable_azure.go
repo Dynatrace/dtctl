@@ -46,7 +46,7 @@ Examples:
   dtctl enable azure monitoring --name "my-azure-monitoring" --directoryId "$TENANT_ID" --applicationId "$CLIENT_ID"
   dtctl enable azure monitoring <id> --directoryId "$TENANT_ID" --applicationId "$CLIENT_ID"
   dtctl enable azure monitoring --name "my-azure-monitoring"`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Early flag validation — before any auth/network calls
 			if len(args) == 0 && enableAzureMonitoringName == "" {

@@ -41,7 +41,7 @@ Examples:
   # Output as JSON
   dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			analyzerName := args[0]
 

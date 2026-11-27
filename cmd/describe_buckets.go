@@ -23,7 +23,7 @@ Examples:
   dtctl describe bucket default_logs
   dtctl describe bkt custom_logs
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bucketName := args[0]
 

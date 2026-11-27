@@ -15,7 +15,7 @@ func newGetEnvironmentCmd() *cobra.Command {
 		Use:     "environment",
 		Aliases: []string{"env"},
 		Short:   "Get environment information",
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		Long: `Get information about the current Dynatrace environment.
 
 Examples:
@@ -96,7 +96,7 @@ func newGetLicenseCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "license",
 		Short: "Get environment license information",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		Long: `Get license information for the current Dynatrace environment.
 
 Examples:

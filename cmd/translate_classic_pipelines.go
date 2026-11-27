@@ -46,7 +46,7 @@ Examples:
 
   # Skip disabled rules in the translation (overrides the server default)
   dtctl translate classic-pipelines logs --skip-disabled-rules=true`,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			scope := args[0]
 			if !classicpipelinestranslate.IsValidConfiguration(scope) {

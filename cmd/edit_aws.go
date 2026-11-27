@@ -47,7 +47,7 @@ Examples:
   dtctl edit aws monitoring <id>
   dtctl edit aws monitoring --name "my-aws-monitoring"
   dtctl edit aws monitoring --name "my-aws-monitoring" --format=json`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && editAWSMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")

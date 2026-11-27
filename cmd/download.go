@@ -33,7 +33,7 @@ func newDownloadExtensionCmd() *cobra.Command {
 		Use:     "extension <extension-name>",
 		Aliases: []string{"ext"},
 		Short:   "Download an extension zip package",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			extensionName := args[0]
 			versionFlag, _ := cmd.Flags().GetString("version")

@@ -33,7 +33,7 @@ Examples:
   # Dry run to preview
   dtctl create scheduling-rule -f rule.yaml --dry-run
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 

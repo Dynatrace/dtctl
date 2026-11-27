@@ -28,7 +28,7 @@ Examples:
   dtctl describe workflow <workflow-id>
   dtctl describe wf <workflow-id>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			workflowID := args[0]
 
@@ -207,7 +207,7 @@ Examples:
   dtctl describe workflow-execution <execution-id>
   dtctl describe wfe <execution-id>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			executionID := args[0]
 

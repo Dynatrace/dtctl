@@ -37,7 +37,7 @@ Examples:
   # Wide output (shows app ID and required properties)
   dtctl get intents -o wide
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := rejectFiltersWithID(cmd, args, "app"); err != nil {
 				return err

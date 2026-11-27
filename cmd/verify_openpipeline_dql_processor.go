@@ -17,7 +17,7 @@ var verifyOpenPipelineDQLProcessorCmd = newVerifyOpenPipelineDQLProcessorCmd()
 func newVerifyOpenPipelineDQLProcessorCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "openpipeline-dql-processor [dql-script]",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  maximumNArgs(1),
 		Short: "Verify an OpenPipeline DQL processor script",
 		Long: `Verify an OpenPipeline DQL processor script without applying it.
 
