@@ -766,10 +766,10 @@ Consequently, restate D4 as *`arrivals` requires **a scope***, satisfied by `--s
 `-S`, or by both. Demanding a redundant `--scope` next to an existing segment would be
 busywork, and the cost argument that motivates D4 is satisfied either way.
 
-### 6. Sampled recovery — four follow-ups, none started
+### 6. Sampled recovery — follow-ups, none started
 
 D22 leaves these open. None changes a verdict that is reported today into a wrong one; each
-is evidence the walk has and does not use, or a case it reads conservatively.
+is evidence the walk has and does not use, a case it reads conservatively, or a cost.
 
 1. **A count that is a floor.** A response that matched records proves arrival whether or
    not it was sampled and whether or not it ran to completion. Today such a response only
@@ -779,18 +779,43 @@ is evidence the walk has and does not use, or a case it reads conservatively.
    Reporting it as arrived with "at least N" needs a lower-bound notion that `Signal` does
    not have, so it gets a design entry of its own. Preferring a complete unflagged count
    over an extrapolation from a thin sample is deliberately not part of it until the
-   missing-flag behaviour has been observed more than once.
-2. **Where the sampled flag is read from.** `RunResult.Sampled` comes from one metadata
-   block of the response. If Grail ever reports sampling only at the top level, or only as
-   a notification, every sampled rung looks unflagged and the recovery degrades to
-   `unknown`. It needs one read-only observation of real response shapes before any code.
+   missing-flag behaviour has been observed more than once; a response whose summed
+   sampling ratio equals its match count is the candidate test for "this was not sampled".
+2. **What a refusal and an empty sampled rung look like on the wire.** `SampledOf` reads one
+   flag from one metadata block. If Grail ever reports sampling only at the top level of the
+   response, or only as a notification, every sampled rung looks unflagged and the recovery
+   degrades to `unknown`. No response captured from an environment is in the repository for
+   a refused object or for a sampled rung that read no record, so the rule that separates
+   the two is an inference. One read-only observation of both shapes settles this, and
+   would also show whether the scanned-bytes figure can tell a refused rung from a thin one,
+   which would let the walk stop on an unflagged empty rung that scanned everything.
 3. **A hit without a usable weight.** A flagged rung whose `population` is null reports its
    sampled count as an exact one, with ratio 0. Whether that is a hit of unknown volume has
    to be decided before it can be labelled.
-4. **A failed query costs no seconds.** `budgetRunner` debits only the seconds a result
-   reports, so a query that fails without one is free against `BudgetSeconds`, and the walk
-   it interrupted does not say that a rung failed. This is shared by every probe, not only
-   the sampled ones.
+4. **The budget runner.** `budgetRunner.run` debits only the seconds a result reports, so a
+   query that fails without one is free against `BudgetSeconds`. The walk now names a rung
+   that failed in its evidence, but the receipt still shows no time for it. In the same
+   function, a Runner that returns a nil result with a nil error makes every probe
+   dereference nil, and it should be an error. Two further points there are by reading only
+   and not verified: a very large or infinite seconds budget may overflow when converted to
+   a duration, and the grace period after a cancellation may overrun the budget by seconds.
+5. **Worst-case query count.** A capped stream may now cost up to six queries where it cost
+   two. With all eight built-in streams capped and every rung empty and unflagged, the
+   streams take 48 queries against 16 before, which with the metric families exceeds the
+   default budget of 100. A signal that is starved says "not evaluated: discovery budget
+   exhausted", the run prints the partial note and `--require` exits 11, so no verdict is
+   wrong. Two candidate cures: run every exhaustive probe before any walk, or reserve one
+   query per remaining signal before a walk takes its next rung.
+6. **Shape of `recoverBySampling`.** The loop now carries a hit, the newest sighting, a
+   bound, a flag and a stopping reason. Splitting it into a classifier of one rung and one
+   resolution switch is worth its own commit with no change in behaviour.
+7. **Smaller items outside the walk.** The executor prints "Query cancelled." when a budget
+   deadline rather than the user ended a query (by reading only, not verified).
+   `NormalizeSince` accepts a window below one second and emits `now()-0s`. The arrivals
+   command registers process signals on a path an embedded request also takes, and SDK
+   evidence strings name CLI flags; both are for an issue of their own. This document names
+   where some of its measurements were taken and should say "a large tenant" instead, and
+   two of its decisions are numbered D18.
 
 ## Implementation sketch
 
