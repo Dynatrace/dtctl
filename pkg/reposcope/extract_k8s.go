@@ -72,8 +72,10 @@ func workloadNames(doc *yaml.Node, file string) (sourceNames, bool) {
 	if ns := mapValue(meta, "namespace"); ns != nil {
 		f.add(kindNamespace, ns.Value, file, ns.Line)
 	}
-	for _, c := range containers(mapValue(doc, "spec")) {
-		if image := mapValue(c, "image"); image != nil {
+	all := containers(mapValue(doc, "spec"))
+	for _, c := range all {
+		image := mapValue(c, "image")
+		if image != nil {
 			if t, ok := newToken(kindImage, image.Value, file, image.Line); ok {
 				t.indirect = indirectImage
 				f.tokens = append(f.tokens, t)
@@ -85,8 +87,14 @@ func workloadNames(doc *yaml.Node, file string) (sourceNames, bool) {
 			if name == nil || value == nil {
 				continue
 			}
-			if service := otelServiceName(name.Value, value.Value); service != "" {
-				f.add(kindServiceName, service, file, value.Line)
+			service := otelServiceName(name.Value, value.Value)
+			if t, ok := newToken(kindServiceName, service, file, value.Line); ok && service != "" {
+				// Which container is the unit's is known only once the
+				// unit is: see indirectNames.
+				if t.beside = len(all) > 1; t.beside && image != nil {
+					t.image = baseName(image.Value)
+				}
+				f.tokens = append(f.tokens, t)
 			}
 		}
 	}

@@ -40,6 +40,12 @@ type token struct {
 	// candidate by itself; "" for a name the unit gives itself. See
 	// indirectNames.
 	indirect string
+	// beside marks a service name read from one of several containers of a
+	// workload, and image is that container's image. A manifest lists
+	// sidecars beside the unit's own container, so such a name is the unit's
+	// only when its container's image is named like the unit.
+	beside bool
+	image  string
 }
 
 // A repository holds names that are not its own, and each of these finds a
@@ -54,6 +60,9 @@ const (
 	// A manifest or chart the unit does not claim by name may deploy a
 	// dependency: a cache, a broker, a proxy.
 	indirectUnclaimed = "a manifest or chart that is not named like the unit"
+	// A workload's second container is a proxy or an agent as a rule, and
+	// the service name it is given is that product's.
+	indirectSidecar = "a container of a manifest whose image is not named like the unit"
 	// What a directory kept for other projects' code, for build output or
 	// for test content holds, its own name included.
 	indirectForeign = "what is under %s/, which holds no name of this repository's own"

@@ -210,55 +210,59 @@ func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string
 // unit's own:
 //
 //   - the origin remote's name and every image, marked where they are read;
-//   - the names of a manifest or chart the unit does not claim. A build
-//     file's name, the unit's directory and the remote say what the unit is
-//     called, and a manifest whose workload or image is called the same is
-//     the unit's. Any other may deploy a dependency;
 //   - whatever was read at or below one of skippedDirs or excludedDirs, a
 //     directory's own name included. The walk never enters the first and
 //     enters the second only on the way to the directory discovery was asked
-//     about, and being asked about a fixture does not make it the service.
+//     about, and being asked about a fixture does not make it the service;
+//   - the names of a manifest or chart the unit does not claim. A build
+//     file's name and the unit's directory say what the unit is called, and
+//     a manifest whose workload or image is called the same is the unit's.
+//     Any other may deploy a dependency. Only a name that is the unit's own
+//     claims one: the remote's name or a vendored directory's would make a
+//     second indirect name of the manifest's and call the two direct;
+//   - in a manifest the unit claims, the service name of a container that
+//     stands beside others and whose image is not called like the unit: a
+//     sidecar's.
 //
 // A candidate matched by such names alone is reported, never as a match,
 // and gets no line (Candidate.Indirect). A --term is the way to say that it
 // is what runs this code.
 func indirectNames(dirs []token, sources []sourceNames) []token {
-	var called []string // what the unit is called
-	for _, t := range dirs {
-		called = append(called, t.value)
-	}
-	for _, f := range sources {
-		if len(f.claims) == 0 {
-			for _, t := range f.tokens {
-				called = append(called, t.value)
-			}
-		}
-	}
-	claimed := func(f sourceNames) bool {
-		return len(f.claims) == 0 || slices.ContainsFunc(f.claims, func(claim string) bool {
-			return slices.ContainsFunc(called, func(name string) bool { return sameName(claim, name) })
-		})
-	}
-	var tokens []token
-	for _, f := range sources {
-		for _, t := range f.tokens {
-			if t.indirect == "" && !claimed(f) {
-				t.indirect = indirectUnclaimed
-			}
-			tokens = append(tokens, t)
-		}
-	}
 	foreign := func(t *token) {
 		// The remote is read from .git/config and says so itself.
 		if dir := foreignDir(path.Dir(t.file)); dir != "" && t.kind != kindRemote {
 			t.indirect = fmt.Sprintf(indirectForeign, dir)
 		}
 	}
+	var called []string // what the unit is called
 	for i := range dirs {
-		foreign(&dirs[i])
+		if foreign(&dirs[i]); dirs[i].indirect == "" {
+			called = append(called, dirs[i].value)
+		}
 	}
-	for i := range tokens {
-		foreign(&tokens[i])
+	for _, f := range sources {
+		for _, t := range f.tokens {
+			if foreign(&t); len(f.claims) == 0 && t.indirect == "" {
+				called = append(called, t.value)
+			}
+		}
+	}
+	unitCalled := func(name string) bool {
+		return slices.ContainsFunc(called, func(own string) bool { return sameName(name, own) })
+	}
+	var tokens []token
+	for _, f := range sources {
+		claimed := len(f.claims) == 0 || slices.ContainsFunc(f.claims, unitCalled)
+		for _, t := range f.tokens {
+			switch foreign(&t); {
+			case t.indirect != "":
+			case !claimed:
+				t.indirect = indirectUnclaimed
+			case t.beside && !unitCalled(t.image):
+				t.indirect = indirectSidecar
+			}
+			tokens = append(tokens, t)
+		}
 	}
 	return tokens
 }

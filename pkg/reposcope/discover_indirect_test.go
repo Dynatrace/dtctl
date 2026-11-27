@@ -140,9 +140,6 @@ func TestDiscover_DirectEvidenceStillMatches(t *testing.T) {
 		{"a manifest whose image is named like the build file, under another workload name",
 			fstest.MapFS{"go.mod": checkoutModule, "deploy/app.yaml": file(deployment("storefront", "acme/checkout:1"))},
 			".", workloadRow("payments", "storefront")},
-		{"a manifest named like the remote, in a repository without a build file",
-			fstest.MapFS{".git/config": file(fmtRemote("checkout")), "k8s/deployment.yaml": file(deployment("checkout", "acme/checkout-image:1"))},
-			".", workloadRow("payments", "checkout")},
 		{"a manifest named like the unit's directory",
 			fstest.MapFS{"services/ledger/Dockerfile": file("FROM scratch\n"), "deploy/ledger.yaml": file(deployment("ledger", "acme/ledger-image:1"))},
 			"services/ledger", workloadRow("payments", "ledger")},
@@ -189,4 +186,73 @@ func TestDiscover_IndirectEvidenceInsideAWorkloadName(t *testing.T) {
 	r = discoverOne(t, repo, ".", nil, workloadRow("payments", "acme-prod-checkout"))
 	assert.Equal(t, "segment", r.Candidates[0].Tier)
 	assert.Empty(t, r.Candidates[0].Indirect)
+}
+
+// sidecarManifest is a Deployment of the unit's own name whose second
+// container, a proxy, sets a service name of its own.
+const sidecarManifest = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: acme/checkout:1
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: checkout-api
+        - name: proxy
+          image: acme/mesh-proxy:2
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: mesh-proxy
+`
+
+// Names that are not the unit's own do not add up to one that is. Each of
+// these found a candidate the repository does not own and called it a match.
+func TestDiscover_IndirectNamesDoNotAddUp(t *testing.T) {
+	checkoutModule := file("module example.invalid/acme/checkout\n")
+	t.Run("a sidecar's service name in the unit's own manifest", func(t *testing.T) {
+		repo := fstest.MapFS{"go.mod": checkoutModule, "deploy/checkout.yaml": file(sidecarManifest)}
+		r := discoverOne(t, repo, ".", nil, map[string]interface{}{fieldNamespace: "infra", fieldWorkload: "unrelated", fieldServiceName: "mesh-proxy"})
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+		assert.Equal(t, "named only by an image a manifest lists and a container of a manifest whose image is not named like the unit", r.Candidates[0].Indirect)
+
+		// The container that runs the unit's image names the service.
+		r = discoverOne(t, repo, ".", nil, map[string]interface{}{fieldServiceName: "checkout-api"})
+		assert.Equal(t, VerdictMatch, r.Verdict)
+		assert.Empty(t, r.Candidates[0].Indirect)
+	})
+	t.Run("the one container of the unit's manifest names the service whatever its image", func(t *testing.T) {
+		manifest := deployment("checkout", "registry.example.invalid/base/runtime:3") + "          env:\n            - name: OTEL_SERVICE_NAME\n              value: storefront\n"
+		r := discoverOne(t, fstest.MapFS{"go.mod": checkoutModule, "deploy/checkout.yaml": file(manifest)}, ".", nil,
+			map[string]interface{}{fieldServiceName: "storefront"})
+		assert.Equal(t, VerdictMatch, r.Verdict)
+	})
+	t.Run("the remote's name claims a manifest", func(t *testing.T) {
+		repo := fstest.MapFS{"go.mod": checkoutModule, ".git/config": file(fmtRemote("platform")),
+			"deploy/cache.yaml": file(deployment("redis-cache", "registry.example.invalid/platform:7"))}
+		r := discoverOne(t, repo, ".", nil, workloadRow("infra", "redis-cache"))
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+		assert.Equal(t, "named only by a manifest or chart that is not named like the unit", r.Candidates[0].Indirect)
+	})
+	t.Run("the remote's name and a manifest named like it, with no build file", func(t *testing.T) {
+		repo := fstest.MapFS{".git/config": file(fmtRemote("checkout")), "k8s/deployment.yaml": file(deployment("checkout", "acme/checkout-image:1"))}
+		r := discoverOne(t, repo, ".", nil, workloadRow("payments", "checkout"))
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+		assert.Equal(t, "named only by a manifest or chart that is not named like the unit and the origin remote's name", r.Candidates[0].Indirect)
+	})
+	t.Run("a directory under vendor claims a manifest", func(t *testing.T) {
+		repo := fstest.MapFS{"vendor/leftpad/pad.go": file("package leftpad\n"), "deploy/leftpad.yaml": file(deployment("leftpad", "acme/leftpad:1"))}
+		p, err := PlanDiscovery(repo, "vendor/leftpad", nil)
+		require.NoError(t, err)
+		for _, tok := range p.tokens {
+			assert.NotEmpty(t, tok.indirect, "%s %s", tok.kind, tok.value)
+		}
+		r := discoverOne(t, repo, "vendor/leftpad", nil, workloadRow("other-team", "leftpad"))
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+		assert.NotEmpty(t, r.Candidates[0].Indirect)
+	})
 }
