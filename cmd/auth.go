@@ -1142,9 +1142,13 @@ Non-interactive login (CI/CD):
 
 			// Detect environment and create appropriate OAuth config with safety level
 			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, scopeLevel)
+			// Only the browser flow requests these scopes; the client
+			// credentials grant sends --scopes or none.
 			var scopesLeftOut []string
 			var boundLevel config.SafetyLevel
-			oauthConfig.Scopes, scopesLeftOut, boundLevel = projectLoginScopes(cfg, tokenName, oauthConfig.Scopes)
+			if !nonInteractive {
+				oauthConfig.Scopes, scopesLeftOut, boundLevel = projectLoginScopes(cfg, tokenName, oauthConfig.Scopes)
+			}
 
 			// Log which environment we detected
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Detected environment: %s", oauthConfig.Environment)
