@@ -634,7 +634,7 @@ func TestRepoScopeDiscoverWideAndCSV(t *testing.T) {
 	before := len(srv.queries())
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain", "-o", "csv"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Contains(t, stdout+stderr, "a discovery report is not rows; use -o json, -o yaml or -o toon")
+	require.Contains(t, stdout+stderr, "a discovery report is not rows; use -o table, -o json, -o yaml or -o toon")
 	require.Len(t, srv.queries(), before, "refused before the first query")
 	require.NotContains(t, stderr, "Sending to")
 }

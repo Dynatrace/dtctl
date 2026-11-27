@@ -94,8 +94,12 @@ Examples:
 `,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if outputFormat(cmdContext(cmd)) == "csv" {
-				return fmt.Errorf("a discovery report is not rows; use -o json, -o yaml or -o toon")
+			// A report is one value per unit. A format that prints rows, or
+			// one the printer does not know and answers with a table of its
+			// own, would print something else after the queries had run.
+			if format := outputFormat(cmdContext(cmd)); !slices.Contains([]string{"", "table", "wide", "json", "yaml", "yml", "toon"}, format) {
+				return &reposcope.InvalidError{Source: "-o " + format,
+					Msg: "a discovery report is not rows; use -o table, -o json, -o yaml or -o toon"}
 			}
 			plans, err := discoveryPlans(cmdContext(cmd), dir, terms)
 			if err != nil {
@@ -144,7 +148,7 @@ func discoveryPlans(ctx context.Context, dir string, terms []string) ([]*reposco
 	// one workload would end up bound to each of them.
 	if len(terms) > 0 {
 		return nil, &reposcope.InvalidError{Source: "--term",
-			Msg:         "a term is looked up for one deployable, and this directory is discovered for each of: " + strings.Join(plan.SharedBy, ", "),
+			Msg:         "a term is looked up for one deployable, and this directory is discovered for each of: " + reposcope.Shown(strings.Join(plan.SharedBy, ", ")),
 			Suggestions: []string{"pass --path <deployable> with --term"}}
 	}
 	plans := make([]*reposcope.Plan, len(plan.SharedBy))
@@ -257,10 +261,10 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 			output.FprintInfo(currentStderr(ctx), "Sending to %s: %s (compared to %s); nothing else leaves this machine",
 				host, quotedValues(plan.Sent), strings.Join(reposcope.MatchedFields(), ", "))
 		}
-		runCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverBound(runCtx))
+		unitCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverBound(runCtx))
 		defer cancelTimeout()
 		began := time.Now()
-		report, err := reposcope.Discover(runCtx, runner, plan, host)
+		report, err := reposcope.Discover(unitCtx, runner, plan, host)
 		if report == nil {
 			return nil, 0, err // the plan was refused, and nothing was sent
 		}
@@ -283,9 +287,11 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 				c.SetCommand = repoScopeSetCommand(report, *c, selectors)
 			}
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) && runCtx.Err() == nil {
 			// The report marks the query that ran out of time and says the
-			// answer is partial; the run itself did what it could.
+			// answer is partial; the run itself did what it could. That is
+			// the unit's own bound: a deadline of the caller's that passed
+			// ends the run, and is the caller's to hear of.
 			err = nil
 		}
 		return report, time.Since(began), err
@@ -310,9 +316,11 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		return err
 	}
 	// An interrupted run has printed its tables by now. An agent envelope is
-	// a result or an error, never both, so there the interruption is the
-	// whole answer and the partial reports are not printed.
-	if err != nil && agentMode(ctx) {
+	// a result or an error, never both, and in plain mode the error is an
+	// envelope on stdout too, where a second document after the reports
+	// would make the output unreadable as either. There the interruption is
+	// the whole answer and the partial reports are not printed.
+	if err != nil && (agentMode(ctx) || plainMode(ctx)) {
 		return err
 	}
 	// A structured report is read without the lines the table prints under
@@ -505,8 +513,10 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // (WorkloadShared), gets no workload binding: it would select both. A
 // candidate some of whose records name the cluster and some none
 // (WithoutCluster) is bound without it: with the cluster the entry would
-// return its spans and none of its logs, or the reverse, and no other
-// candidate runs that workload for the wider binding to select.
+// return its spans and none of its logs, or the reverse. That is so only
+// while no other candidate runs that workload for the wider binding to
+// select; beside one (WorkloadShared too) the line keeps the cluster, and a
+// note says which records it leaves out.
 //
 // When any record query was sampled, a candidate gets its workload binding
 // only, whether its own records were sampled or read whole: another
@@ -535,6 +545,12 @@ func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e r
 	if c.Indirect != "" || c.WorkloadUnnamed {
 		return e, nil
 	}
+	// Nor is there one for a candidate discovery cannot explain: neither
+	// of its names is a name that was sent, whatever made Grail return the
+	// row, so nothing ties it to this code.
+	if repoScopeUnexplained(c) {
+		return e, nil
+	}
 	// Nor is there a line for a directory set would refuse as --path: it
 	// would save nothing, and its path would be printed as the clone
 	// spells it.
@@ -553,7 +569,9 @@ func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e r
 	}
 	if c.Namespace != "" && c.Workload != "" && (c.ClusterUID != "" || !c.WorkloadShared) {
 		w := reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}
-		if len(c.WithoutCluster) == 0 {
+		// Without the cluster the binding selects the workload in every
+		// cluster, which is another candidate when the workload is shared.
+		if len(c.WithoutCluster) == 0 || c.WorkloadShared {
 			w.ClusterUID = c.ClusterUID
 		}
 		if holds(reposcope.Entry{Workloads: []reposcope.Workload{w}}) {
@@ -632,6 +650,11 @@ func repoScopeIDRefusal(r *reposcope.DiscoveryReport, c reposcope.Candidate, alo
 	case r.Partial:
 		return &repoScopeRefusal{"the result is partial, and a candidate it did not see could share its service name or ids",
 			workloadOnly + "no workload binding selects it"}
+	case r.SampledRecords():
+		// Read whole itself, beside a data object that was sampled: the
+		// candidate that shares its ids could be the one below the floor.
+		return &repoScopeRefusal{"a record query was sampled, which can miss another candidate sharing its service name or ids",
+			workloadOnly + "no workload binding selects it"}
 	}
 	ids := c.ProcessGroups
 	if alone {
@@ -647,6 +670,14 @@ func repoScopeIDRefusal(r *reposcope.DiscoveryReport, c reposcope.Candidate, alo
 	}
 	if i := slices.IndexFunc(r.Candidates, carries); i >= 0 {
 		return &repoScopeRefusal{cause: fmt.Sprintf("candidate %d carries one of its entity ids, so a binding by id would select both", r.Candidates[i].Rank)}
+	}
+	// A candidate that lists only some of its ids may carry one of these
+	// among the rest.
+	more := func(o reposcope.Candidate) bool {
+		return o.Rank != c.Rank && (o.ProcessGroupsCapped && len(c.ProcessGroups) > 0 || alone && o.ServicesCapped && len(c.Services) > 0)
+	}
+	if i := slices.IndexFunc(r.Candidates, more); i >= 0 {
+		return &repoScopeRefusal{cause: fmt.Sprintf("candidate %d carries more entity ids than discovery lists, and one of them could be this candidate's, so a binding by id could select both", r.Candidates[i].Rank)}
 	}
 	if !alone {
 		return nil
@@ -892,7 +923,12 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 			for _, u := range unheld {
 				notes = append(notes, fmt.Sprintf("candidate %d's line leaves %s out, which a scope file cannot hold: %s", c.Rank, u.flags, u.problem))
 			}
-			if c.ClusterUID != "" && len(c.WithoutCluster) > 0 {
+			switch {
+			case c.ClusterUID == "" || len(c.WithoutCluster) == 0:
+			case c.WorkloadShared:
+				notes = append(notes, fmt.Sprintf("candidate %d's line keeps --cluster-uid although its %s carry no k8s.cluster.uid, so the entry returns none of them: another candidate runs %s/%s, and a binding without the cluster would select both",
+					c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
+			default:
 				notes = append(notes, fmt.Sprintf("candidate %d's line leaves --cluster-uid out: its %s carry no k8s.cluster.uid, so a binding with it would return none of them; without it the entry selects %s/%s in any cluster",
 					c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
 			}
@@ -904,6 +940,9 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 		why := repoScopeIDRefusal(r, c, true)
 		switch {
+		case repoScopeUnexplained(c):
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: neither its k8s.workload.name nor its service.name is a name discovery sent, so nothing ties it to this code%s",
+				c.Rank, repoScopeConfirmHint(c)))
 		case c.Indirect != "":
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it is %s, so nothing shows that it runs this code%s",
 				c.Rank, c.Indirect, repoScopeConfirmHint(c)))
@@ -927,6 +966,14 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 	}
 	return notes
+}
+
+// repoScopeUnexplained reports whether c is a candidate of the record
+// queries that neither of its names explains: a row Grail returned for a
+// reason discovery cannot show in a file (an array-valued service.name that
+// holds a sent name, for one). It is listed, and nothing is proposed for it.
+func repoScopeUnexplained(c reposcope.Candidate) bool {
+	return c.Tier == "substring" && (c.Workload != "" || c.ServiceName != "")
 }
 
 // repoScopeConfirmHint is how the user says that a candidate found by

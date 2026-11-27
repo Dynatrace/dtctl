@@ -293,6 +293,9 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 		// nothing shows that it runs.
 		return ": one candidate, found by its entity name alone; no span or log in 24h carries a name of this repository"
 	}
+	if repoScopeUnexplained(r.Candidates[0]) {
+		return ": one candidate, and neither its workload nor its service name is a name discovery sent"
+	}
 	return fmt.Sprintf(": one candidate, matched by a %s of its name rather than the whole of it", r.Candidates[0].Tier)
 }
 

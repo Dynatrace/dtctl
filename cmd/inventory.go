@@ -185,7 +185,9 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 		return nil, err
 	}
 	if resp == nil {
-		return nil, context.Canceled
+		// The executor returns nothing for a context that ended. Why it
+		// ended is the context's to say: a deadline is not a cancellation.
+		return nil, cmp.Or(ctx.Err(), context.Canceled)
 	}
 	cause := inventory.FirstTruncationCause(resp.GetNotifications())
 	// Sampled comes from the response, never from what the probe asked for:
