@@ -296,8 +296,18 @@ func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverag
 			b.deployable[m] = true
 		}
 	}
-	if c.module != "" {
-		c.owners = b.owners(c.module)
+	// Two modules whose directories differ only in case are one directory
+	// where case is folded, and a build file names either: the directory
+	// belongs to the deployables that depend on any of them.
+	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
+		if c.module == "" || !samePath(m, c.module) {
+			continue
+		}
+		for _, owner := range b.owners(m) {
+			if !slices.Contains(c.owners, owner) {
+				c.owners = append(c.owners, owner)
+			}
+		}
 	}
 	return c
 }

@@ -52,6 +52,9 @@ type gradleBuild struct {
 	dir        string
 	modules    map[string][]string
 	deployable map[string]bool
+	// byWords is accessed's index, nil until asked for and after a module
+	// is added.
+	byWords map[string][]string
 	// partial says why the build was not read whole, "" when it was. It is
 	// set by gradleBuildAt only: what a module depends on is then not known
 	// for every module, so neither is which deployables a module belongs to.
@@ -162,6 +165,7 @@ func (bs gradleBuilds) absorbs(f string) bool {
 func (b *gradleBuild) addModule(m string) {
 	if _, ok := b.modules[m]; !ok && m != b.dir {
 		b.modules[m] = nil
+		b.byWords = nil
 	}
 }
 
@@ -188,30 +192,55 @@ func (b *gradleBuild) module(dir string) string {
 	return ""
 }
 
-// references are the modules a build file names, each once. A reference is
-// matched to a module by its words, so projects.fooBar is foo-bar.
+// references are the modules a build file names, each once. A literal
+// project(":billing-api") names the module at that path and no other: read
+// by its words it would name a sibling billing_api as well, and hand it to a
+// deployable that does not depend on it. A type-safe accessor is matched by
+// its words, since projects.billingApi is how Gradle spells billing-api.
 func (b *gradleBuild) references(text string) []string {
 	text = gradleTestDepRe.ReplaceAllString(gradleText(text), "")
-	var refs [][]string
+	found := map[string]bool{}
 	for _, m := range gradleProjectRe.FindAllStringSubmatch(text, -1) {
-		refs = append(refs, strings.FieldsFunc(m[1], func(r rune) bool { return r == ':' }))
-	}
-	for _, m := range gradleAccessorRe.FindAllStringSubmatch(text, -1) {
-		refs = append(refs, strings.Split(m[1], "."))
-	}
-	var out []string
-	for m := range b.modules {
-		rel := strings.Split(strings.TrimPrefix(m, b.dir+"/"), "/")
-		if slices.ContainsFunc(refs, func(ref []string) bool { return slices.EqualFunc(ref, rel, sameWords) }) {
-			out = append(out, m)
+		module := path.Join(b.dir, strings.ReplaceAll(strings.Trim(m[1], ":"), ":", "/"))
+		if _, ok := b.modules[module]; ok {
+			found[module] = true
 		}
 	}
-	slices.Sort(out)
-	return out
+	for _, m := range gradleAccessorRe.FindAllStringSubmatch(text, -1) {
+		for _, module := range b.accessed()[wordsKey(strings.Split(m[1], "."))] {
+			found[module] = true
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return sortedKeys(found)
 }
 
-func sameWords(a, b string) bool {
-	return slices.Equal(splitWords(a), splitWords(b))
+// accessed are the build's modules by the words of their path, the form a
+// type-safe accessor names one in. It is put together once for the build's
+// modules as they stand: every build file of a build asks it, and comparing
+// each reference with each module made reading a build quadratic in its
+// modules, on every scoped query.
+func (b *gradleBuild) accessed() map[string][]string {
+	if b.byWords == nil {
+		b.byWords = make(map[string][]string, len(b.modules))
+		for _, m := range slices.Sorted(maps.Keys(b.modules)) {
+			key := wordsKey(strings.Split(strings.TrimPrefix(m, b.dir+"/"), "/"))
+			b.byWords[key] = append(b.byWords[key], m)
+		}
+	}
+	return b.byWords
+}
+
+// wordsKey is the words of a path's segments, the same for two paths an
+// accessor cannot tell apart.
+func wordsKey(segments []string) string {
+	parts := make([]string, len(segments))
+	for i, s := range segments {
+		parts[i] = strings.Join(splitWords(s), "\x00")
+	}
+	return strings.Join(parts, "/")
 }
 
 // gradleText is a Gradle file without its whole-line comments.

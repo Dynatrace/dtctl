@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,4 +91,45 @@ func TestResolve_SelectsNothingThroughABuildNotReadWhole(t *testing.T) {
 	require.NotNil(t, r.Entry)
 	assert.Equal(t, "all", r.Entry.Name)
 	assert.Contains(t, r.Reason, "was not read whole")
+}
+
+// Gradle spells billing-api.
+func TestResolve_LiteralProjectPathNamesOneModule(t *testing.T) {
+	repo := fstest.MapFS{
+		"settings.gradle":          {Data: []byte("include ':app', ':billing-api', ':billing_api', ':order-api'\n")},
+		"app/build.gradle":         {Data: []byte("dependencies {\n  implementation project(':billing-api')\n  implementation projects.orderApi\n}\n")},
+		"billing-api/build.gradle": {Data: []byte("")},
+		"billing_api/build.gradle": {Data: []byte("")},
+		"order-api/build.gradle":   {Data: []byte("")},
+	}
+	f := &File{Environments: map[string][]Entry{prodHost: {{Name: "app", Path: "app", ServiceNames: []string{"app"}}}}}
+	for dir, linked := range map[string]bool{"billing-api": true, "order-api": true, "billing_api": false} {
+		r, err := Resolve(repo, f, prodHost, dir, "")
+		require.NoError(t, err)
+		assert.Equal(t, linked, r.Linked, dir)
+	}
+}
+
+// build on every scoped query.
+func TestGradleBuildAt_ManyModules(t *testing.T) {
+	const modules, refs = 500, 40
+	fsys := fstest.MapFS{}
+	var settings strings.Builder
+	for i := range modules {
+		fmt.Fprintf(&settings, "include ':module-%d'\n", i)
+		var build strings.Builder
+		for j := range refs {
+			fmt.Fprintf(&build, "implementation project(':module-%d')\nimplementation projects.module%d\n", (i+j+1)%modules, i+j)
+		}
+		fsys[fmt.Sprintf("module-%d/build.gradle", i)] = &fstest.MapFile{Data: []byte(build.String())}
+	}
+	fsys["settings.gradle"] = &fstest.MapFile{Data: []byte(settings.String())}
+	start := time.Now()
+	b := gradleBuildAt(fsys, "module-0")
+	elapsed := time.Since(start)
+	require.NotNil(t, b)
+	assert.Len(t, b.modules, modules)
+	assert.Contains(t, b.modules["module-0"], "module-1")
+	assert.Len(t, b.modules["module-0"], refs)
+	assert.Less(t, elapsed, 500*time.Millisecond)
 }
