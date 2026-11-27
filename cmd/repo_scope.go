@@ -518,8 +518,15 @@ func repoScopeStatusSuggestions(s *reposcope.Status, advice []string) []string {
 	case reposcope.StatusLinked:
 		// Only the entry in effect here narrows the queries run here. One
 		// asked for by name may cover another directory.
-		if s.Selected == reposcope.SelectedByName {
+		// An entry of segments alone inserts no filter: its segments are
+		// what a query is sent with.
+		switch byName, narrows := s.Selected == reposcope.SelectedByName, len(s.Filters) > 0; {
+		case byName && narrows:
 			return []string{fmt.Sprintf("pass --%s %s to 'dtctl query' to narrow fetch logs and fetch spans to this entry from any directory", repoScopeFlag, s.Entry.Name)}
+		case byName:
+			return []string{fmt.Sprintf("pass --%s %s to 'dtctl query' to send the entry's filter segments with a query from any directory", repoScopeFlag, s.Entry.Name)}
+		case !narrows:
+			return []string{fmt.Sprintf("'dtctl query' sends the filter segments of %q with every query here; add --%s to run a query without them", s.Entry.Name, noRepoScopeFlag)}
 		}
 		return []string{fmt.Sprintf("'dtctl query' narrows fetch logs and fetch spans to %q here; add --%s to run a query unscoped", s.Entry.Name, noRepoScopeFlag)}
 	case reposcope.StatusNotARepository:

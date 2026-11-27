@@ -159,6 +159,23 @@ func TestRepoScopeDeleteSaysWhenTheFileWasRemoved(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(repo, reposcope.FileName))
 }
 
+// An entry of segments alone inserts no filter, and the suggestion does not
+// say that it narrows fetch logs.
+func TestRepoScopeSuggestionSaysWhatTheEntryDoes(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, "environments:\n  "+repoScopeTestEnvHost+":\n    - name: seg\n      path: a\n      segments: [{id: Ab3dEf9hIjk}]\n"+
+		"    - name: all\n      segments: [{id: Ab3dEf9hIjk}]\n    - name: both\n      path: b\n      service-names: [both]\n      segments: [{id: Ab3dEf9hIjk}]\n")
+	for args, want := range map[string]string{
+		"describe seg":  "pass --repo-scope seg to 'dtctl query' to send the entry's filter segments with a query from any directory",
+		"describe both": "pass --repo-scope both to 'dtctl query' to narrow fetch logs and fetch spans to this entry from any directory",
+		"current":       `'dtctl query' sends the filter segments of "all" with every query here; add --no-repo-scope to run a query without them`,
+	} {
+		code, stdout, stderr := runRepoScoped(append([]string{"repo-scope"}, append(strings.Fields(args), "--agent")...), RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, []string{want}, agentEnvelope(t, stdout).Context.Suggestions, args)
+	}
+}
+
 // Without a scope file there is no entry to find and no file to name: the
 // answer says that the repository has none, and how to get one.
 func TestRepoScopeNamedEntryWithoutAFile(t *testing.T) {
