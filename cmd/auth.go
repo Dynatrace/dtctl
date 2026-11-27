@@ -544,7 +544,8 @@ This command will:
 
 After successful login, you can use dtctl commands without needing to manage API tokens manually.
 
-If --context and --environment are omitted, the current context is used. This is useful
+--context (global flag) names the context to create or update; if it does not exist,
+login creates it (--environment is then required). If --context and --environment are omitted, the current context is used. This is useful
 for re-authenticating when both the access token and refresh token have expired.
 
 Token storage:
@@ -850,7 +851,6 @@ Non-interactive login (CI/CD):
 			return nil
 		},
 	}
-	c.Flags().String("context", "", "name for the context to create or update (defaults to current context)")
 	c.Flags().String("environment", "", "Dynatrace environment URL (defaults to current context's environment)")
 	c.Flags().String("token-name", "", "name for storing the OAuth token (defaults to existing token name or <context>-oauth)")
 	c.Flags().String("timeout", "5m", "timeout for the authentication flow (bounds the browser flow and the client credentials token request)")

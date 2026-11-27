@@ -321,7 +321,6 @@ resources in sync with their file definitions.
 	c.Flags().StringP("file", "f", "", "file containing resource definition, or - for stdin (required)")
 	markFileFlag(c, "file", fileValuePath)
 	c.Flags().StringArray("set", []string{}, "set template variable (key=value)")
-	c.Flags().Bool("dry-run", false, "preview changes without applying")
 	c.Flags().Bool("show-diff", false, "show diff of changes when updating existing resources")
 	c.Flags().Bool("no-hooks", false, "skip pre-apply and post-apply hooks")
 	c.Flags().String("id", "", "override or inject resource ID (use with --write-id to stamp ID into file)")

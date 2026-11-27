@@ -137,6 +137,9 @@ func newConfigInitCmd() *cobra.Command {
 		Short: "Create a .dtctl.yaml template in the current directory",
 		Long: `Create a project-local .dtctl.yaml configuration template.
 
+The global --context flag names the context in the template; the command
+creates it, so it need not exist yet (default: my-environment).
+
 This creates a .dtctl.yaml file in the current directory with example
 configuration that can be customized for your project. Project-local
 configuration takes precedence over global configuration.
@@ -196,7 +199,6 @@ to create the global binding this file needs.
 			return nil
 		},
 	}
-	c.Flags().String("context", "", "context name to use in template (default: my-environment)")
 	c.Flags().Bool("force", false, "overwrite existing .dtctl.yaml")
 	stability.MarkStable(c)
 	return c

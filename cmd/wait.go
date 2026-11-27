@@ -132,7 +132,7 @@ Examples:
 
 			// Parse output flags
 			quiet, _ := cmd.Flags().GetBool("quiet")
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			verbose := verbosity(cmdContext(cmd)) > 0
 
 			// Build backoff config
 			backoffConfig := wait.BackoffConfig{
@@ -234,8 +234,6 @@ Examples:
 	c.Flags().Duration("max-interval", 10*time.Second, "maximum interval between retries")
 	c.Flags().Float64("backoff-multiplier", 2.0, "exponential backoff multiplier (must be > 1.0)")
 	c.Flags().BoolP("quiet", "q", false, "suppress progress messages")
-	c.Flags().BoolP("verbose", "v", false, "show detailed progress")
-	stability.MarkFlag(c, "verbose", stability.Experimental, pre10Since)
 	c.Flags().Int64("max-result-records", 0, "maximum number of result records")
 	c.Flags().Int64("max-result-bytes", 0, "maximum result size in bytes")
 	c.Flags().Float64("default-scan-limit-gbytes", 0, "scan limit in gigabytes")
@@ -259,8 +257,6 @@ func init() {
 	// Query input flags
 	// Timing flags
 	// Output control flags
-	// Renamed or removed in 1.0 because it hides a global flag
-	// (contrib breaking-changes/unshadow-global-flags.md).
 	// Query execution flags (inherited from query command)
 }
 

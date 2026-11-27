@@ -45,7 +45,7 @@ Examples:
   dtctl diff -f workflow.yaml --side-by-side
   
   # JSON patch output
-  dtctl diff -f workflow.yaml -o json-patch
+  dtctl diff -f workflow.yaml --format json-patch
   
   # Semantic diff (resource-aware)
   dtctl diff -f dashboard.yaml --semantic
@@ -68,11 +68,9 @@ Exit Codes:
 	c.Flags().BoolP("quiet", "q", false, "No output, just exit code")
 	c.Flags().Bool("ignore-metadata", false, "Ignore metadata fields (timestamps, versions)")
 	c.Flags().Bool("ignore-order", false, "Ignore array order for comparison")
-	c.Flags().Int("context", 3, "Number of context lines")
+	c.Flags().Int("context-lines", 3, "Number of context lines")
 	c.Flags().Bool("color", true, "Colorize output")
-	c.Flags().StringP("output", "o", "", "Output format (overrides --format): json-patch, semantic")
-	stability.MarkFlag(c, "context", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "output", stability.Experimental, pre10Since)
+	stability.MarkFlagStable(c, "context-lines")
 	stability.MarkStable(c)
 	// diff -f FILE compares with the live resource of the file's kind. Two
 	// local files reach no API, but "unknown" for them is the cautious answer,
@@ -83,8 +81,6 @@ Exit Codes:
 
 func init() {
 	rootCmd.AddCommand(diffCmd)
-	// Renamed or removed in 1.0 because it hides a global flag
-	// (contrib breaking-changes/unshadow-global-flags.md).
 }
 
 const (
@@ -101,13 +97,8 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	quiet, _ := cmd.Flags().GetBool("quiet")
 	ignoreMetadata, _ := cmd.Flags().GetBool("ignore-metadata")
 	ignoreOrder, _ := cmd.Flags().GetBool("ignore-order")
-	contextLines, _ := cmd.Flags().GetInt("context")
+	contextLines, _ := cmd.Flags().GetInt("context-lines")
 	colorize, _ := cmd.Flags().GetBool("color")
-	outputFlag, _ := cmd.Flags().GetString("output")
-
-	if outputFlag != "" {
-		format = outputFlag
-	}
 
 	if sideBySide {
 		format = "side-by-side"

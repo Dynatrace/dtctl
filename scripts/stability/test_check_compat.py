@@ -53,6 +53,49 @@ class SurfaceTest(unittest.TestCase):
         self.assertEqual(s["get widgets --old"], ("stable", True, None, True))
 
 
+class ReplacedByGlobalTest(unittest.TestCase):
+    BASE = [
+        "(global)                      stable",
+        "get widgets                   stable",
+        "  --context                   stable",
+        "  --limit                     stable",
+    ]
+
+    def run_check(self, head_rows):
+        return cc.withdrawal_findings(
+            cc.surface(manifest(*self.BASE)), cc.surface(manifest(*head_rows)))
+
+    def test_local_flag_replaced_by_a_stable_global_passes(self):
+        removed, replaced, demoted = self.run_check([
+            "(global)                      stable",
+            "  --context                   stable",
+            "get widgets                   stable",
+            "  --limit                     stable",
+        ])
+        self.assertEqual((removed, demoted), ([], []))
+        self.assertEqual(replaced, ["get widgets --context"])
+
+    def test_local_flag_replaced_by_a_non_stable_global_is_refused(self):
+        removed, replaced, _ = self.run_check([
+            "(global)                      stable",
+            "  --context                   experimental  since 0.40.0",
+            "get widgets                   stable",
+            "  --limit                     stable",
+        ])
+        self.assertEqual(removed, ["get widgets --context"])
+        self.assertEqual(replaced, [])
+
+    def test_local_flag_with_no_global_of_that_name_is_refused(self):
+        removed, replaced, _ = self.run_check([
+            "(global)                      stable",
+            "  --other                     stable",
+            "get widgets                   stable",
+            "  --limit                     stable",
+        ])
+        self.assertEqual(removed, ["get widgets --context"])
+        self.assertEqual(replaced, [])
+
+
 class UndeclaredTest(unittest.TestCase):
     # The base as main has it before the tag existed: no line says (declared).
     BASE = [

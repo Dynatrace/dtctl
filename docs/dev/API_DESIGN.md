@@ -937,7 +937,7 @@ dtctl exec copilot -f question.txt               # Read question from file
 dtctl exec copilot "Explain errors" --stream     # Stream response in real-time
 
 # CoPilot chat options
-dtctl exec copilot "Analyze this" --context "Additional context here"
+dtctl exec copilot "Analyze this" --chat-context "Additional context here"
 dtctl exec copilot "What is DQL?" --no-docs      # Disable Dynatrace docs retrieval
 dtctl exec copilot "List errors" --instruction "Answer in bullet points"
 
@@ -2234,7 +2234,7 @@ dtctl diff workflow prod-workflow staging-workflow
 
 # Different output formats
 dtctl diff -f dashboard.yaml --semantic
-dtctl diff -f workflow.yaml -o json-patch
+dtctl diff -f workflow.yaml --format json-patch
 dtctl diff -f dashboard.yaml --side-by-side
 
 # Ignore metadata and order

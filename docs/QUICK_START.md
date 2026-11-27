@@ -117,7 +117,7 @@ dtctl verify openpipeline-matcher -f matcher.dql
 echo 'matchesValue(content, "error")' | dtctl verify openpipeline-matcher -f -
 
 # Scope to a stage context or a configuration
-dtctl verify openpipeline-matcher 'matchesValue(content, "error")' --context ROUTING_RULE
+dtctl verify openpipeline-matcher 'matchesValue(content, "error")' --stage ROUTING_RULE
 dtctl verify openpipeline-matcher 'matchesValue(content, "error")' --config-id logs
 
 # Verify a DQL processor script

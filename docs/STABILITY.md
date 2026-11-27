@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 22 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 980
+- entries below (commands + flags): 976
 
 ## Surface
 
@@ -288,7 +288,6 @@ auth login                           stable
   --account-urn                      stable
   --client-id                        stable
   --client-secret                    stable
-  --context                          stable
   --environment                      stable
   --safety-level                     stable
   --scopes                           stable
@@ -320,7 +319,6 @@ config delete-credentials            stable
 config describe-context              stable
 config get-contexts                  stable
 config init                          stable
-  --context                          stable
   --force                            stable
 config list-development              stable
 config migrate-tokens                stable
@@ -606,12 +604,11 @@ describe workflow                    stable
 describe workflow-execution          stable
 diff                                 stable
   --color                            stable
-  --context                          experimental  since 0.39.0  (declared)
+  --context-lines                    stable  (declared)
   --file                             stable
   --format                           stable
   --ignore-metadata                  stable
   --ignore-order                     stable
-  --output                           experimental  since 0.39.0  (declared)
   --quiet                            stable
   --semantic                         stable
   --side-by-side                     stable
@@ -698,7 +695,7 @@ exec api                             stable
   --header                           stable
   --method                           stable
 exec copilot                         stable
-  --context                          experimental  since 0.39.0  (declared)
+  --chat-context                     stable  (declared)
   --file                             stable
   --instruction                      stable
   --no-docs                          stable
@@ -1163,8 +1160,8 @@ verify openpipeline-dql-processor    stable
   --file                             stable
 verify openpipeline-matcher          stable
   --config-id                        stable
-  --context                          experimental  since 0.39.0  (declared)
   --file                             stable
+  --stage                            stable  (declared)
 verify query                         stable
   --canonical                        stable
   --client-context                   stable
@@ -1196,5 +1193,4 @@ wait query                           stable
   --set                              stable
   --timeout                          stable
   --timezone                         stable
-  --verbose                          experimental  since 0.39.0  (declared)
 ```

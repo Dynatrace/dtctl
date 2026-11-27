@@ -60,7 +60,7 @@ dtctl diff -f new.yaml
 dtctl diff -f new.yaml --side-by-side
 
 # JSON patch format (RFC 6902)
-dtctl diff -f new.yaml -o json-patch
+dtctl diff -f new.yaml --format json-patch
 
 # Semantic diff (resource-aware)
 dtctl diff -f new.yaml --semantic
@@ -805,7 +805,7 @@ dtctl diff workflow prod-workflow staging-workflow
 dtctl diff dashboard my-dashboard -f new-dashboard.yaml --semantic
 
 # JSON patch output
-dtctl diff workflow my-wf -f new-wf.yaml -o json-patch
+dtctl diff workflow my-wf -f new-wf.yaml --format json-patch
 
 ## Flags
 
@@ -816,7 +816,7 @@ dtctl diff workflow my-wf -f new-wf.yaml -o json-patch
 -q, --quiet               No output, just exit code
     --ignore-metadata     Ignore metadata fields
     --ignore-order        Ignore array order
-    --context int         Number of context lines (default 3)
+    --context-lines int   Number of context lines (default 3)
     --color               Colorize output (default true)
 
 ## Exit Codes

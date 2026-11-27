@@ -87,7 +87,6 @@ See also:
 	c.Flags().StringArray("label", []string{}, "classification label to set (repeatable); replaces the document's labels (cannot be cleared, only replaced). Falls back to labels in the payload")
 	c.Flags().Bool("create-snapshot", false, "snapshot the document's current state before updating it, so the previous version stays available via 'dtctl history document'/'dtctl restore document'")
 	c.Flags().String("snapshot-description", "", "description for the snapshot created by --create-snapshot (max 128 characters)")
-	c.Flags().Bool("dry-run", false, "preview the update without applying it")
 	c.Flags().Bool("show-diff", false, "show a diff of the change")
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "file")
