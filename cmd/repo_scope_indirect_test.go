@@ -108,20 +108,23 @@ func TestRepoScopeDiscoverIndirectEvidenceProposesNoSharedLine(t *testing.T) {
 	require.NotContains(t, stdout, "--service-name redis-cache")
 }
 
-// The same line is proposed when one of the candidates reporting the name is
-// the unit's own workload: the name is then tied to this code by more than
-// the manifest that spells it.
-func TestRepoScopeDiscoverSharedLineNeedsOneDirectCandidate(t *testing.T) {
-	row := func(workload, records string) string {
+// Nor is it proposed when one of the candidates reporting the name is the
+// unit's own workload, named exactly or inside a longer name: what the unit
+// names is that workload, and the service name is still the cache's, spelled
+// only by the manifest that deploys it. A line binding it would select the
+// cache. (This test first required the line, on the reasoning that one
+// candidate named by the unit ties the service name to this code. It does
+// not: the tie is to the candidate's workload.)
+func TestRepoScopeDiscoverSharedLineNeedsTheServiceNameToBeTheUnits(t *testing.T) {
+	row := func(workload, serviceName, records string) string {
 		// Without a namespace no workload binding selects either alone.
-		return `{"k8s.workload.name":"` + workload + `","service.name":"redis-cache","records":"` + records +
+		return `{"k8s.workload.name":"` + workload + `","service.name":"` + serviceName + `","records":"` + records +
 			`","serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`
 	}
-	// Whichever of the two has more records, and whether the unit's
-	// workload carries its name exactly or inside a longer one.
+	// Whichever of the two has more records.
 	for own, rows := range map[string]string{
-		"checkout":       row("checkout", "1000") + "," + row("redis-cache", "10"),
-		"eu-checkout-v2": row("redis-cache", "1000") + "," + row("eu-checkout-v2", "10"),
+		"checkout":       row("checkout", "redis-cache", "1000") + "," + row("redis-cache", "redis-cache", "10"),
+		"eu-checkout-v2": row("redis-cache", "redis-cache", "1000") + "," + row("eu-checkout-v2", "redis-cache", "10"),
 	} {
 		newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": rows}))
 		chdirCheckoutWithRedis(t)
@@ -133,12 +136,43 @@ func TestRepoScopeDiscoverSharedLineNeedsOneDirectCandidate(t *testing.T) {
 		require.Len(t, reports[0].Candidates, 2)
 		direct := 0
 		for _, c := range reports[0].Candidates {
+			require.False(t, c.ServiceNameOwn, c.Workload)
 			if c.Indirect == "" {
 				direct++
 				require.Equal(t, own, c.Workload, "the workload go.mod names")
 			}
 		}
 		require.Equal(t, 1, direct)
-		require.Contains(t, stdout, "repo-scope set redis-cache --service-name redis-cache", rows)
+		require.NotContains(t, stdout, "--service-name redis-cache", rows)
+		require.NotContains(t, stdout, "repo-scope set redis", rows)
+	}
+
+	// The control: the service name is the unit's own, and two workloads
+	// report it.
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": row("blue", "checkout", "1000") + "," + row("green", "checkout", "10")}))
+	chdirCheckoutWithRedis(t)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", "json"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "repo-scope set checkout --service-name checkout")
+}
+
+// A single row whose service name is the cache's and whose workload only
+// holds the unit's name: found, by the part that is the unit's own, and no
+// match. Its line is the one a segment candidate gets, to confirm.
+func TestRepoScopeDiscoverIndirectWholeNameBesideOwnPart(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": `{` + flowCluster + `"k8s.namespace.name":"infra","k8s.workload.name":"eu-checkout-v2","service.name":"redis-cache","records":"900",` +
+			`"serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`,
+	}))
+	chdirCheckoutWithRedis(t)
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.Equal(t, "segment", report.Candidates[0].Tier)
+	for kind, v := range report.Verdicts {
+		require.NotEqual(t, reposcope.VerdictMatch, v, kind)
+	}
+	for _, s := range suggestions {
+		require.NotContains(t, s, "confirm with the user, then:")
+		require.NotContains(t, s, "--service-name")
 	}
 }

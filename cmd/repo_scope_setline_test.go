@@ -224,8 +224,8 @@ func TestRepoScopeNamesClaim(t *testing.T) {
 func TestRepoScopeSelectAllLineIsNamedAfterTheServiceName(t *testing.T) {
 	candidates := func(secondMatchedDir bool) []reposcope.Candidate {
 		return []reposcope.Candidate{
-			{Rank: 1, Name: "web", Workload: "web", ServiceName: "Checkout_API", ServiceNameShared: true, Tier: "exact", Spans: 10, MatchedDir: true},
-			{Rank: 2, Name: "jobs", Workload: "jobs", ServiceName: "Checkout_API", ServiceNameShared: true, Tier: "exact", Spans: 5, MatchedDir: secondMatchedDir},
+			{Rank: 1, Name: "web", Workload: "web", ServiceName: "Checkout_API", ServiceNameShared: true, ServiceNameOwn: true, Tier: "exact", Spans: 10, MatchedDir: true},
+			{Rank: 2, Name: "jobs", Workload: "jobs", ServiceName: "Checkout_API", ServiceNameShared: true, ServiceNameOwn: true, Tier: "exact", Spans: 5, MatchedDir: secondMatchedDir},
 		}
 	}
 	r := &reposcope.DiscoveryReport{Unit: ".", Dir: "services/checkout", Sent: []string{"Checkout_API"}, Verdict: reposcope.VerdictAmbiguous,
@@ -245,4 +245,32 @@ func TestRepoScopeSelectAllLineIsNamedAfterTheServiceName(t *testing.T) {
 	r.Unit, r.Dir = "web", "web"
 	p = newRepoScopeProposal(r, nil, names)
 	require.Equal(t, "dtctl repo-scope set web-checkout-api --service-name Checkout_API --path web", p.selectAll[0].line)
+}
+
+// One line per shared service name, in the order of the best-ranked candidate
+// that reports each, and only for a name that is the unit's own.
+func TestRepoScopeSelectAllLinesFollowTheRanking(t *testing.T) {
+	candidate := func(rank int, workload, serviceName string, own bool) reposcope.Candidate {
+		return reposcope.Candidate{Rank: rank, Name: workload, Workload: workload, ServiceName: serviceName,
+			ServiceNameShared: true, ServiceNameOwn: own, Tier: "exact", Spans: 10}
+	}
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"ledger", "checkout", "redis-cache"}, Verdict: reposcope.VerdictAmbiguous,
+		Candidates: []reposcope.Candidate{
+			candidate(1, "blue", "ledger", true),
+			candidate(2, "cache-a", "redis-cache", false),
+			candidate(3, "green", "checkout", true),
+			candidate(4, "teal", "ledger", true),
+			candidate(5, "cache-b", "redis-cache", false),
+			candidate(6, "red", "checkout", true),
+		}}
+	p := newRepoScopeProposal(r, nil, repoScopeNames{})
+	var lines []string
+	for _, a := range p.selectAll {
+		require.False(t, a.all)
+		lines = append(lines, a.line)
+	}
+	require.Equal(t, []string{
+		"dtctl repo-scope set ledger --service-name ledger",
+		"dtctl repo-scope set checkout --service-name checkout",
+	}, lines)
 }

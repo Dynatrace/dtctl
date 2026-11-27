@@ -811,30 +811,30 @@ func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]str
 // name, not for one of the candidates: it is named after the service name,
 // and it covers the directory discovery ran for only when that directory's
 // name matched every candidate it selects (see repoScopeDir).
+//
+// Only a service name that is the unit's own gets one (ServiceNameOwn). That
+// one of the candidates reporting the name is the unit's own workload says
+// nothing about the name: checkout reporting under redis-cache beside the
+// cache itself would get a line that selects the cache.
 func repoScopeSelectAllLines(r *reposcope.DiscoveryReport, selectors []string, names repoScopeNames) []repoScopeSelectAll {
 	var out []repoScopeSelectAll
 	for _, c := range r.Candidates {
-		if !c.ServiceNameShared || slices.ContainsFunc(out, func(s repoScopeSelectAll) bool { return s.serviceName == c.ServiceName }) {
+		if !c.ServiceNameShared || !c.ServiceNameOwn ||
+			slices.ContainsFunc(out, func(s repoScopeSelectAll) bool { return s.serviceName == c.ServiceName }) {
 			continue
 		}
-		// indirect stays set only when every candidate reporting the name
-		// was found by indirect names: the line is then no better founded
-		// than theirs would be.
-		reporting, matchedDir, indirect := 0, true, c.Indirect
+		reporting, matchedDir := 0, true
 		for _, o := range r.Candidates {
 			if o.ServiceName == c.ServiceName {
 				reporting++
 				matchedDir = matchedDir && o.MatchedDir
-				if o.Indirect == "" {
-					indirect = ""
-				}
 			}
 		}
 		// The service name of every candidate that reports it, and nothing
 		// of this one. A sampled candidate's service name, or one of a
 		// partial result, is never proposed alone.
 		all := reposcope.Candidate{Rank: c.Rank, Name: reposcope.EntryName(c.ServiceName), ServiceName: c.ServiceName,
-			Sampled: c.Sampled, MatchedDir: matchedDir, Indirect: indirect}
+			Sampled: c.Sampled, MatchedDir: matchedDir}
 		if repoScopeSetCommand(r, all, selectors) == "" {
 			continue
 		}

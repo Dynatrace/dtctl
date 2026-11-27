@@ -214,6 +214,31 @@ spec:
 // these found a candidate the repository does not own and called it a match.
 func TestDiscover_IndirectNamesDoNotAddUp(t *testing.T) {
 	checkoutModule := file("module example.invalid/acme/checkout\n")
+	t.Run("a whole name that is indirect beside a part that is the unit's", func(t *testing.T) {
+		// The cache's service name is spelled by a manifest the unit does
+		// not claim; the unit's own name is only a segment of the workload.
+		repo := fstest.MapFS{"go.mod": checkoutModule, "deploy/redis.yaml": file(deployment("redis-cache", "redis:7.2"))}
+		r := discoverOne(t, repo, ".", nil, map[string]interface{}{fieldNamespace: "infra", fieldWorkload: "eu-checkout-v2", fieldServiceName: "redis-cache"})
+		c := r.Candidates[0]
+		assert.Equal(t, "segment", c.Tier, "the tier is that of the name that is the unit's own")
+		assert.Empty(t, c.Indirect)
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+		assert.Contains(t, c.Evidence, `k8s.workload.name "eu-checkout-v2" contains module "checkout" (go.mod:1) (segment match)`)
+		assert.False(t, c.ServiceNameOwn)
+	})
+	t.Run("a whole workload name that is indirect and holds the unit's as a part", func(t *testing.T) {
+		repo := fstest.MapFS{"go.mod": checkoutModule, "deploy/cache.yaml": file(deployment("checkout-cache", "redis:7.2"))}
+		r := discoverOne(t, repo, ".", nil, workloadRow("infra", "checkout-cache"))
+		c := r.Candidates[0]
+		assert.Equal(t, "segment", c.Tier)
+		assert.Empty(t, c.Indirect)
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+		assert.Equal(t, []string{
+			`k8s.workload.name "checkout-cache" from deploy/cache.yaml:4`,
+			`k8s.workload.name "checkout-cache" contains module "checkout" (go.mod:1) (segment match)`,
+			"10 spans in 24h",
+		}, c.Evidence)
+	})
 	t.Run("a sidecar's service name in the unit's own manifest", func(t *testing.T) {
 		repo := fstest.MapFS{"go.mod": checkoutModule, "deploy/checkout.yaml": file(sidecarManifest)}
 		r := discoverOne(t, repo, ".", nil, map[string]interface{}{fieldNamespace: "infra", fieldWorkload: "unrelated", fieldServiceName: "mesh-proxy"})

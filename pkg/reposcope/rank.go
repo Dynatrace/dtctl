@@ -47,6 +47,11 @@ type Candidate struct {
 	// namespace, or one whose records name no workload at all. A
 	// service-name binding would select that candidate's records too.
 	ServiceNameShared bool `json:"serviceNameShared,omitempty" yaml:"serviceNameShared,omitempty"`
+	// ServiceNameOwn reports that the service name is a name the unit gives
+	// itself, or a term: not merely one the repository holds (see Indirect).
+	// A binding by a service name that is not would select what some other
+	// product reports under it.
+	ServiceNameOwn bool `json:"serviceNameOwn,omitempty" yaml:"serviceNameOwn,omitempty"`
 	// ProcessGroups and Services are the ids the records carried, up to
 	// discoveryIDLimit of each per row. A Capped flag says a row had more
 	// ids than that, so the list is not all of them. ProcessGroupCount and
@@ -400,16 +405,39 @@ func (c *Candidate) absorb(o *Candidate) {
 // neither is one discovery cannot explain, whatever Grail's in() saw in it
 // (an array-valued service.name holding a sent name, for one), and gets the
 // loosest tier: an exact match is one a reader can check against a file.
+//
+// The tier is that of the names that are the unit's own, when one of them
+// matched at all. A whole name that is only indirect (a cache's service
+// name, spelled by a manifest the unit does not claim) beside the unit's own
+// name inside the workload's is a segment match: what ties the row to this
+// code is the part, and the two must not add up to a candidate found by its
+// whole name with a name of the unit's own.
 func (d *discovery) recordTier(key recordKey) tier {
+	whole := false
 	for _, m := range d.matchers {
 		if m.value == key.workload || m.value == key.serviceName {
-			return tierExact
+			if m.own() {
+				return tierExact
+			}
+			whole = true
 		}
 	}
-	if len(d.workloadSegments(key.workload)) > 0 {
+	inside := d.workloadSegments(key.workload)
+	switch {
+	case slices.ContainsFunc(inside, matcher.own):
+		return tierSegment
+	case whole:
+		return tierExact
+	case len(inside) > 0:
 		return tierSegment
 	}
 	return tierSubstring
+}
+
+// own reports whether the matcher's name is the unit's own or a term, rather
+// than one the repository merely holds (see indirectNames).
+func (m matcher) own() bool {
+	return m.token.indirect == ""
 }
 
 // workloadSegments are the sent names that are a run of workload's segments,
@@ -543,14 +571,27 @@ func (d *discovery) explain(c *Candidate) {
 		{fieldServiceName, c.ServiceName},
 	} {
 		var from []token
+		own := false
 		for _, m := range d.matchers {
 			if field.value != "" && m.value == field.value {
 				from = append(from, m.token)
+				own = own || m.own()
 			}
 		}
 		c.cite(field.name, field.value, from)
 		c.named = append(c.named, from...)
-		if inside := d.workloadSegments(c.Workload); len(inside) > 0 && field.name == fieldWorkload && len(from) == 0 {
+		if field.name == fieldServiceName {
+			c.ServiceNameOwn = own
+			continue
+		}
+		// The names inside the workload's are evidence when none names it
+		// whole, and the unit's own among them also when only an indirect
+		// name does.
+		inside := d.workloadSegments(c.Workload)
+		if len(from) > 0 {
+			inside = slices.DeleteFunc(inside, func(m matcher) bool { return own || !m.own() })
+		}
+		if len(inside) > 0 {
 			for _, m := range inside {
 				c.sources[m.token.file] = true
 				c.named = append(c.named, m.token)

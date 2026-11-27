@@ -525,6 +525,7 @@ func TestDiscover_Match(t *testing.T) {
 		ProcessGroups:     []string{pgID},
 		ProcessGroupCount: 1,
 		ServiceName:       "checkout",
+		ServiceNameOwn:    true,
 		Namespace:         "payments",
 		Workload:          "checkout",
 		Tier:              "exact",
