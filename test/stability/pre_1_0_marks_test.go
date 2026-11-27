@@ -90,11 +90,6 @@ var pre10Demotions = []pre10Demotion{
 	// exception entry, the cost of demoting late is having shipped `stable` on
 	// a flag we already knew would break.
 
-	// breaking-changes/exec-wait-default.md — exec commands wait for the run.
-	// Only this one loses something a caller can type: `--wait=false` is valid
-	// today and has no successor.
-	{"exec analyzer", "--wait", "exec-wait-default"},
-
 	// breaking-changes/reject-unusable-input.md — the only row of that
 	// document that removes a flag dtctl actually has. (Its other removal row,
 	// `-y`/`--force` on a command with no prompt, matches nothing today.) The

@@ -686,12 +686,12 @@ exec                                 stable
 exec analyzer                        stable
   --file                             stable
   --input                            stable
+  --no-wait                          stable  (declared)
   --precision                        experimental  since 0.42.0  (declared)
   --query                            stable
   --series                           experimental  since 0.42.0  (declared)
   --timeout                          experimental  since 0.39.0  (declared)
   --validate                         stable
-  --wait                             experimental  since 0.39.0  (declared)
 exec api                             stable
   --data                             stable
   --dry-run                          stable

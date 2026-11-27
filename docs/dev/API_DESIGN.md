@@ -923,7 +923,7 @@ dtctl exec analyzer dt.statistics.GenericForecastAnalyzer --query "timeseries av
 
 # Analyzer execution options
 dtctl exec analyzer <name> -f input.json --validate  # Validate input without executing
-dtctl exec analyzer <name> -f input.json --wait      # Wait for completion (default)
+dtctl exec analyzer <name> -f input.json --no-wait   # Return immediately (default: wait for completion)
 dtctl exec analyzer <name> -f input.json --timeout 600  # Custom timeout (seconds)
 dtctl exec analyzer <name> -f input.json -o json     # Output result as JSON
 

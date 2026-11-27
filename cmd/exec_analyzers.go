@@ -36,7 +36,10 @@ Examples:
   dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json --validate
 
   # Execute and wait for completion (default)
-  dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json --wait
+  dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json
+
+  # Start the analyzer and return immediately without waiting for the result
+  dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json --no-wait
 
   # Output as JSON
   dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json -o json
@@ -72,14 +75,14 @@ Examples:
 			}
 
 			// Execute analyzer
-			wait, _ := cmd.Flags().GetBool("wait")
+			noWait, _ := cmd.Flags().GetBool("no-wait")
 			timeout, _ := cmd.Flags().GetInt("timeout")
 
 			var result *analyzer.ExecuteResult
-			if wait {
-				result, err = handler.ExecuteAndWait(cmd.Context(), analyzerName, input, timeout)
-			} else {
+			if noWait {
 				result, err = handler.Execute(analyzerName, input, 30)
+			} else {
+				result, err = handler.ExecuteAndWait(cmd.Context(), analyzerName, input, timeout)
 			}
 
 			if err != nil {
@@ -90,8 +93,8 @@ Examples:
 		},
 	}
 	c.Flags().Bool("validate", false, "validate input without executing")
-	c.Flags().Bool("wait", true, "wait for analyzer execution to complete")
-	stability.MarkFlag(c, "wait", stability.Experimental, pre10Since)
+	c.Flags().Bool("no-wait", false, "return immediately instead of waiting for analyzer execution to complete")
+	stability.MarkFlagStable(c, "no-wait")
 	c.Flags().Int("timeout", 300, "timeout in seconds when waiting for completion")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)
 	c.Flags().String("series", "full", `how to render timeseries embedded in the result (agent mode only):
