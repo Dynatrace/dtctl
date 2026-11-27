@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Dynatrace/dtctl/pkg/apply"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/resources/document"
 	"github.com/Dynatrace/dtctl/pkg/safety"
@@ -238,7 +239,7 @@ func createDocumentFromData(cmd *cobra.Command, docType string, fileData []byte)
 	}
 
 	// Extract content, name, description using the same logic as apply
-	contentData, extractedName, extractedDesc, warnings := extractDocumentContent(doc, docType)
+	contentData, extractedName, extractedDesc, warnings := apply.ExtractDocumentContent(jsonData, doc, docType)
 
 	// Fall back to labels embedded in the payload (e.g. from 'get -o yaml')
 	// when none were supplied via --label.
@@ -342,67 +343,6 @@ func createDocumentFromData(cmd *cobra.Command, docType string, fileData []byte)
 		output.FprintInfo(currentStderr(cmdContext(cmd)), "  URL:  %s", url)
 	}
 	return nil
-}
-
-// extractDocumentContent extracts the content from a document, handling various input formats
-// Returns: contentData, name, description, warnings
-func extractDocumentContent(doc map[string]interface{}, docType string) ([]byte, string, string, []string) {
-	var warnings []string
-	name, _ := doc["name"].(string)
-	description, _ := doc["description"].(string)
-
-	// Check if this is a "get" output format with nested content
-	if content, hasContent := doc["content"]; hasContent {
-		contentMap, isMap := content.(map[string]interface{})
-		if isMap {
-			// Check for double-nested content (common mistake)
-			if innerContent, hasInner := contentMap["content"]; hasInner {
-				if inner, ok := innerContent.(map[string]interface{}); ok {
-					warnings = append(warnings, "detected double-nested content (.content.content) - using inner content")
-					contentMap = inner
-				}
-			}
-
-			// Validate structure based on document type
-			if docType == "dashboard" {
-				if _, hasTiles := contentMap["tiles"]; !hasTiles {
-					warnings = append(warnings, "dashboard content has no 'tiles' field - dashboard may be empty")
-				}
-				if _, hasVersion := contentMap["version"]; !hasVersion {
-					warnings = append(warnings, "dashboard content has no 'version' field")
-				}
-			} else if docType == "notebook" {
-				if _, hasSections := contentMap["sections"]; !hasSections {
-					warnings = append(warnings, "notebook content has no 'sections' field - notebook may be empty")
-				}
-			}
-
-			contentData, _ := json.Marshal(contentMap)
-			return contentData, name, description, warnings
-		}
-	}
-
-	// No content field - the whole doc might be the content (direct format)
-	// Check if it looks like dashboard/notebook content
-	if docType == "dashboard" {
-		if _, hasTiles := doc["tiles"]; hasTiles {
-			// This is direct content format
-			contentData, _ := json.Marshal(doc)
-			return contentData, name, description, warnings
-		}
-		warnings = append(warnings, "document has no 'content' or 'tiles' field - structure may be incorrect")
-	} else if docType == "notebook" {
-		if _, hasSections := doc["sections"]; hasSections {
-			// This is direct content format
-			contentData, _ := json.Marshal(doc)
-			return contentData, name, description, warnings
-		}
-		warnings = append(warnings, "document has no 'content' or 'sections' field - structure may be incorrect")
-	}
-
-	// Fall back to using the whole document as content
-	contentData, _ := json.Marshal(doc)
-	return contentData, name, description, warnings
 }
 
 // extractDocumentLabels pulls a "labels" string array from a parsed document

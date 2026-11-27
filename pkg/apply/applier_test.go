@@ -429,7 +429,7 @@ func TestExtractDocumentContent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("json.Marshal() error = %v", err)
 			}
-			contentData, name, description, warnings := extractDocumentContent(data, tt.doc, tt.docType)
+			contentData, name, description, warnings := ExtractDocumentContent(data, tt.doc, tt.docType)
 
 			if name != tt.wantName {
 				t.Errorf("name = %q, want %q", name, tt.wantName)
@@ -488,7 +488,7 @@ func TestExtractDocumentContent_NonMapNestedContent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("json.Marshal() error = %v", err)
 			}
-			contentData, name, _, warnings := extractDocumentContent(data, doc, "launchpad")
+			contentData, name, _, warnings := ExtractDocumentContent(data, doc, "launchpad")
 
 			if name != "Launchpad" {
 				t.Errorf("name = %q, want %q", name, "Launchpad")

@@ -32,7 +32,7 @@ func (a *Applier) applyDocument(data []byte, docType string, opts ApplyOptions) 
 	}
 
 	// Extract and validate content - handle round-trippable format from 'get' command
-	contentData, name, description, validationWarnings := extractDocumentContent(data, doc, docType)
+	contentData, name, description, validationWarnings := ExtractDocumentContent(data, doc, docType)
 
 	// Labels come from --label flags (opts.Labels) when supplied; otherwise they
 	// ride along in the exported document ('get document -o yaml') so a round-trip
@@ -275,12 +275,12 @@ func extractDocumentLabels(doc map[string]interface{}) []string {
 	return labels
 }
 
-// extractDocumentContent extracts the content from a document, handling various input formats.
+// ExtractDocumentContent extracts the content from a document, handling various input formats.
 // doc is the parsed form of data and is only used for inspection; the returned
 // content is taken from data as written, so object key order is preserved
 // (apps such as Notebooks derive e.g. table column order from it).
 // Returns: contentData, name, description, warnings
-func extractDocumentContent(data []byte, doc map[string]interface{}, docType string) ([]byte, string, string, []string) {
+func ExtractDocumentContent(data []byte, doc map[string]interface{}, docType string) ([]byte, string, string, []string) {
 	var warnings []string
 	name, _ := doc["name"].(string)
 	description, _ := doc["description"].(string)
@@ -454,7 +454,7 @@ func (a *Applier) dryRunDocument(docType string, data []byte, doc map[string]int
 	id, _ := doc["id"].(string)
 
 	// Use the same extraction/validation logic as apply
-	contentData, name, _, warnings := extractDocumentContent(data, doc, docType)
+	contentData, name, _, warnings := ExtractDocumentContent(data, doc, docType)
 	if name == "" {
 		name = fmt.Sprintf("Untitled %s", docType)
 	}
