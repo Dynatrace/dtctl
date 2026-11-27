@@ -296,7 +296,7 @@ func TestParse_RequiresInputForConfirmationPrompts(t *testing.T) {
 		"delete bucket":           {"delete bucket b", true},
 		"delete bucket --confirm": {"delete bucket b --confirm b", false},
 		"restore":                 {"restore workflow " + id + " 1", true},
-		"restore --force":         {"restore workflow " + id + " 1 --force", false},
+		"restore --yes":           {"restore workflow " + id + " 1 --yes", false},
 		"restore trash":           {"restore trash " + id, true},
 		"restore trash --force":   {"restore trash " + id + " --force", false},
 		// restore trash asks only for a single document.

@@ -475,7 +475,7 @@ dtctl restore dashboard <id-or-name> <version>   # Restore dashboard to version
 dtctl restore notebook <id-or-name> <version>    # Restore notebook to version
 dtctl restore document <id-or-name> <version>    # Restore any document type to version
 dtctl restore dashboard "My Dashboard" 5         # Restore by name to version 5
-dtctl restore notebook "My Notebook" 3 --force   # Skip confirmation
+dtctl restore notebook "My Notebook" 3 -y   # Skip confirmation
 
 # Notes:
 # - Snapshots are opt-in: pass --create-snapshot on update/apply/edit to capture
@@ -558,7 +558,7 @@ dtctl history workflow <id> -o json              # Output as JSON
 # Restore Previous Version
 dtctl restore workflow <id-or-name> <version>    # Restore to version
 dtctl restore workflow "My Workflow" 5           # Restore by name
-dtctl restore workflow <id> 3 --force            # Skip confirmation
+dtctl restore workflow <id> 3 -y                 # Skip confirmation
 ```
 
 ### 7. Identity & Access Management (IAM)

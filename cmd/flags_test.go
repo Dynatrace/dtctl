@@ -573,7 +573,7 @@ func TestLogsFlags(t *testing.T) {
 
 // TestRestoreFlags validates restore command flags
 func TestRestoreFlags(t *testing.T) {
-	// Test force flag on restore subcommands
+	// Test yes flag on restore subcommands
 	restoreSubcommands := []string{"workflow", "dashboard", "notebook"}
 
 	for _, cmdName := range restoreSubcommands {
@@ -591,14 +591,14 @@ func TestRestoreFlags(t *testing.T) {
 				return
 			}
 
-			flag := subcmd.Flags().Lookup("force")
+			flag := subcmd.Flags().Lookup("yes")
 			if flag == nil {
-				t.Errorf("Restore %s flag --force not found", cmdName)
+				t.Errorf("Restore %s flag --yes not found", cmdName)
 				return
 			}
 
 			if flag.DefValue != "false" {
-				t.Errorf("Flag --force default = %q, want %q", flag.DefValue, "false")
+				t.Errorf("Flag --yes default = %q, want %q", flag.DefValue, "false")
 			}
 		})
 	}
@@ -911,4 +911,22 @@ func TestMetadataFlagCompletionRegistered(t *testing.T) {
 	if directive&cobra.ShellCompDirectiveNoFileComp == 0 {
 		t.Error("expected NoFileComp directive")
 	}
+}
+
+// TestShortFlagFMeansFileOnly guards the 1.0 rule (#524): the shorthand -f is
+// allowed only on a flag named "file", and --force never has a shorthand
+// (-y/--yes skips a prompt; --force overrides something dtctl refuses).
+func TestShortFlagFMeansFileOnly(t *testing.T) {
+	walkCommands(rootCmd, func(c *cobra.Command) {
+		check := func(f *pflag.Flag) {
+			if f.Shorthand == "f" && f.Name != "file" {
+				t.Errorf("%s --%s: shorthand -f is reserved for --file", c.CommandPath(), f.Name)
+			}
+			if f.Name == "force" && f.Shorthand != "" {
+				t.Errorf("%s --force: must have no shorthand, has -%s", c.CommandPath(), f.Shorthand)
+			}
+		}
+		c.LocalFlags().VisitAll(check)
+		c.PersistentFlags().VisitAll(check)
+	})
 }
