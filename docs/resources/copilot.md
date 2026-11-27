@@ -53,7 +53,7 @@ dtctl exec copilot "Explain the recent errors" --stream
 
 # Provide additional context for the conversation
 dtctl exec copilot "Why is my service slow?" \
-  --context "Service: payment-api, Environment: production"
+  --chat-context "Service: payment-api, Environment: production"
 
 # Add formatting instructions to guide the response
 dtctl exec copilot "List top errors" \

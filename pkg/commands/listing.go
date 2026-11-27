@@ -656,8 +656,8 @@ func visitOwnFlags(cmd *cobra.Command, fn func(*pflag.Flag)) {
 //
 // The comparison is by identity, not by name: a command may redefine a name an
 // ancestor already uses persistently, and cobra then binds the command's own
-// flag (`dtctl diff --context` is an int line count, not the global string
-// context). Matching on the name alone would drop every such flag from the
+// flag (a local flag that reuses a global name binds to the command's own value,
+// not the global one). Matching on the name alone would drop every such flag from the
 // catalog. Only the nearest ancestor that declares the name matters — that is
 // the one cobra would have merged in.
 func inheritedFlag(cmd *cobra.Command, f *pflag.Flag) bool {

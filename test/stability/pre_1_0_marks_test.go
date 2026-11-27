@@ -73,14 +73,6 @@ var pre10Demotions = []pre10Demotion{
 	{"exec analyzer", "--timeout", "timeout-duration"},
 	{"exec slo", "--timeout", "timeout-duration"},
 
-	// breaking-changes/unshadow-global-flags.md — a local flag may not hide a
-	// global one, so these are renamed or removed.
-	{"diff", "--context", "unshadow-global-flags"},
-	{"diff", "--output", "unshadow-global-flags"},
-	{"exec copilot", "--context", "unshadow-global-flags"},
-	{"verify openpipeline-matcher", "--context", "unshadow-global-flags"},
-	{"wait query", "--verbose", "unshadow-global-flags"},
-
 	// The three documents below are accepted but not yet merged. They are
 	// pre-empted anyway: the cost of demoting early is a badge and an
 	// exception entry, the cost of demoting late is having shipped `stable` on
@@ -146,10 +138,6 @@ func TestPre10StableExclusionsStayStable(t *testing.T) {
 		// can type changes meaning, so demoting it would refuse a working
 		// command line under a stable floor to guard against a non-break.
 		"auth login --timeout": "only the declared type changes",
-		// unshadow-global-flags.md: the local flag goes away but the global one
-		// has the same effect, so no command line changes meaning.
-		"apply --dry-run":           "global --dry-run is equivalent",
-		"update document --dry-run": "global --dry-run is equivalent",
 		// cloud-flags-kebab-case.md: already kebab-case or unchanged.
 		"create aws connection --name":    "no change",
 		"create aws monitoring --regions": "no change",
@@ -300,9 +288,9 @@ var pre10SurvivingCommands = map[string]string{
 	"enable aws monitoring":   "--roleArn is optional",
 	"enable azure monitoring": "the credential flags are optional",
 	"enable gcp monitoring":   "--serviceAccountId is optional",
-	"diff":                    "--format replaces the removed -o",
-	"wait query":              "--verbose only adds progress output",
-	"exec copilot":            "--context only adds conversation context",
+	"diff":                    "--format replaces the removed -o; --context-lines is the renamed flag",
+	"wait query":              "progress output follows the global -v",
+	"exec copilot":            "--chat-context only adds conversation context",
 	"restore workflow":        "--yes only skips a prompt",
 	"exec analyzer":           "--timeout has a default",
 	"exec slo":                "--timeout has a default",

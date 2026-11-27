@@ -53,6 +53,43 @@ class SurfaceTest(unittest.TestCase):
         self.assertEqual(s["get widgets --old"], ("stable", True, None, True))
 
 
+class ReplacedByGlobalTest(unittest.TestCase):
+    GLOBAL = [
+        "(global)                      stable",
+        "  --context                   stable",
+    ]
+
+    def run_check(self, command, head_global):
+        base = [
+            "(global)                      stable",
+            command + "                   stable",
+            "  --context                   stable",
+        ]
+        head = head_global + [command + "                   stable"]
+        return cc.withdrawal_findings(
+            cc.surface(manifest(*base)), cc.surface(manifest(*head)))
+
+    def test_allowlisted_key_replaced_by_a_stable_global_passes(self):
+        removed, replaced, demoted = self.run_check("auth login", self.GLOBAL)
+        self.assertEqual((removed, demoted), ([], []))
+        self.assertEqual(replaced, ["auth login --context"])
+
+    def test_same_name_stable_global_does_not_exempt_other_removals(self):
+        removed, replaced, _ = self.run_check("get widgets", self.GLOBAL)
+        self.assertEqual(removed, ["get widgets --context"])
+        self.assertEqual(replaced, [])
+
+    def test_allowlisted_key_without_a_stable_global_is_refused(self):
+        for head_global in (
+            ["(global)                      stable"],
+            ["(global)                      stable",
+             "  --context                   experimental  since 0.40.0"],
+        ):
+            removed, replaced, _ = self.run_check("config init", head_global)
+            self.assertEqual(removed, ["config init --context"])
+            self.assertEqual(replaced, [])
+
+
 class UndeclaredTest(unittest.TestCase):
     # The base as main has it before the tag existed: no line says (declared).
     BASE = [

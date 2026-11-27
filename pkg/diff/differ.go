@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 
@@ -43,7 +44,11 @@ type DiffResult struct {
 }
 
 type Change struct {
-	Path      string
+	Path string
+	// Pointer is Path as unescaped reference tokens (map keys and array
+	// indexes), the form a JSON patch (RFC 6901) is built from. Path is for
+	// display and is ambiguous when a key contains '.', '[' or '/'.
+	Pointer   []string
 	Operation ChangeOperation
 	OldValue  interface{}
 	NewValue  interface{}
@@ -89,7 +94,7 @@ func (d *Differ) Compare(left, right interface{}, leftLabel, rightLabel string) 
 	leftNorm := normalize(left, d.options.IgnoreMetadata, d.options.IgnoreOrder)
 	rightNorm := normalize(right, d.options.IgnoreMetadata, d.options.IgnoreOrder)
 
-	changes := computeDiff("", leftNorm, rightNorm)
+	changes := computeDiff("", nil, leftNorm, rightNorm)
 
 	result := &DiffResult{
 		HasChanges: len(changes) > 0,
@@ -192,7 +197,7 @@ func parseData(data []byte) (interface{}, error) {
 	return nil, fmt.Errorf("file is not valid YAML or JSON")
 }
 
-func computeDiff(path string, left, right interface{}) []Change {
+func computeDiff(path string, ptr []string, left, right interface{}) []Change {
 	var changes []Change
 
 	if reflect.DeepEqual(left, right) {
@@ -213,6 +218,7 @@ func computeDiff(path string, left, right interface{}) []Change {
 
 		for k := range allKeys {
 			newPath := k
+			newPtr := appendToken(ptr, k)
 			if path != "" {
 				newPath = path + "." + k
 			}
@@ -224,17 +230,19 @@ func computeDiff(path string, left, right interface{}) []Change {
 			case !leftExists:
 				changes = append(changes, Change{
 					Path:      newPath,
+					Pointer:   newPtr,
 					Operation: ChangeOpAdd,
 					NewValue:  rightVal,
 				})
 			case !rightExists:
 				changes = append(changes, Change{
 					Path:      newPath,
+					Pointer:   newPtr,
 					Operation: ChangeOpRemove,
 					OldValue:  leftVal,
 				})
 			default:
-				changes = append(changes, computeDiff(newPath, leftVal, rightVal)...)
+				changes = append(changes, computeDiff(newPath, newPtr, leftVal, rightVal)...)
 			}
 		}
 		return changes
@@ -249,25 +257,33 @@ func computeDiff(path string, left, right interface{}) []Change {
 			maxLen = len(rightSlice)
 		}
 
-		for i := 0; i < maxLen; i++ {
-			newPath := fmt.Sprintf("%s[%d]", path, i)
+		minLen := len(leftSlice)
+		if len(rightSlice) < minLen {
+			minLen = len(rightSlice)
+		}
 
-			switch {
-			case i >= len(leftSlice):
+		for i := 0; i < maxLen; i++ {
+			if i < len(leftSlice) && i < len(rightSlice) {
+				newPath := fmt.Sprintf("%s[%d]", path, i)
+				changes = append(changes, computeDiff(newPath, appendToken(ptr, strconv.Itoa(i)), leftSlice[i], rightSlice[i])...)
+			} else if i >= len(leftSlice) {
 				changes = append(changes, Change{
-					Path:      newPath,
+					Path:      fmt.Sprintf("%s[%d]", path, i),
+					Pointer:   appendToken(ptr, strconv.Itoa(i)),
 					Operation: ChangeOpAdd,
 					NewValue:  rightSlice[i],
 				})
-			case i >= len(rightSlice):
-				changes = append(changes, Change{
-					Path:      newPath,
-					Operation: ChangeOpRemove,
-					OldValue:  leftSlice[i],
-				})
-			default:
-				changes = append(changes, computeDiff(newPath, leftSlice[i], rightSlice[i])...)
 			}
+		}
+		// Removals go from the highest index down, so each index is still valid
+		// when a patch applies them in order.
+		for i := len(leftSlice) - 1; i >= minLen; i-- {
+			changes = append(changes, Change{
+				Path:      fmt.Sprintf("%s[%d]", path, i),
+				Pointer:   appendToken(ptr, strconv.Itoa(i)),
+				Operation: ChangeOpRemove,
+				OldValue:  leftSlice[i],
+			})
 		}
 		return changes
 	}
@@ -275,6 +291,7 @@ func computeDiff(path string, left, right interface{}) []Change {
 	if !reflect.DeepEqual(left, right) {
 		changes = append(changes, Change{
 			Path:      path,
+			Pointer:   ptr,
 			Operation: ChangeOpReplace,
 			OldValue:  left,
 			NewValue:  right,
@@ -282,6 +299,14 @@ func computeDiff(path string, left, right interface{}) []Change {
 	}
 
 	return changes
+}
+
+// appendToken returns a copy of ptr with tok added, so sibling changes never
+// share a backing array.
+func appendToken(ptr []string, tok string) []string {
+	out := make([]string, 0, len(ptr)+1)
+	out = append(out, ptr...)
+	return append(out, tok)
 }
 
 func computeSummary(changes []Change) DiffSummary {

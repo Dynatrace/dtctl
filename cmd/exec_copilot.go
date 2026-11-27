@@ -31,7 +31,7 @@ Examples:
   dtctl exec copilot "Explain the recent errors" --stream
 
   # Provide additional context
-  dtctl exec copilot "Analyze this" --context "Error logs from production"
+  dtctl exec copilot "Analyze this" --chat-context "Error logs from production"
 
   # Disable document retrieval (Dynatrace docs)
   dtctl exec copilot "What is DQL?" --no-docs
@@ -66,7 +66,7 @@ Examples:
 
 			// Build options
 			stream, _ := cmd.Flags().GetBool("stream")
-			contextStr, _ := cmd.Flags().GetString("context")
+			contextStr, _ := cmd.Flags().GetString("chat-context")
 			instruction, _ := cmd.Flags().GetString("instruction")
 			noDocs, _ := cmd.Flags().GetBool("no-docs")
 
@@ -113,8 +113,8 @@ Examples:
 	// only an explicitly empty --file.
 	rejectEmptyFlag(c, "file")
 	c.Flags().Bool("stream", false, "stream response in real-time")
-	c.Flags().String("context", "", "additional context for the conversation")
-	stability.MarkFlag(c, "context", stability.Experimental, pre10Since)
+	c.Flags().String("chat-context", "", "additional context for the conversation")
+	stability.MarkFlagStable(c, "chat-context")
 	c.Flags().String("instruction", "", "formatting instructions (e.g., 'Answer in bullet points')")
 	c.Flags().Bool("no-docs", false, "disable Dynatrace documentation retrieval")
 	stability.MarkStable(c)
@@ -326,8 +326,6 @@ func init() {
 	execCopilotCmd.AddCommand(execCopilotDocSearchCmd)
 
 	// CoPilot flags
-	// Renamed or removed in 1.0 because it hides a global flag
-	// (contrib breaking-changes/unshadow-global-flags.md).
 	// CoPilot nl2dql flags
 	// CoPilot dql2nl flags
 	// CoPilot document-search flags

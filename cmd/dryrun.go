@@ -245,9 +245,9 @@ func deleteDryRun(cmd *cobra.Command, kind, name, id string) error {
 // query is deliberately absent: it has no dry run, only a warning that the flag
 // is meaningless in live mode. `dtctl verify query` is the check-without-running
 // command for DQL.
-//
-// apply and update document define their own --dry-run flag.
 var dryRunCommands = []*cobra.Command{
+	applyCmd,
+	updateDocumentCmd,
 	accountCreateTokenCmd,
 	accountCreateServiceUserCmd,
 	accountDeleteTokenCmd,

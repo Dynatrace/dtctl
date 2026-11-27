@@ -44,8 +44,8 @@ Examples:
   # Read matcher from stdin
   echo 'matchesValue(content, "error")' | dtctl verify openpipeline-matcher -f -
 
-  # Verify with a stage context
-  dtctl verify openpipeline-matcher 'matchesValue(content, "error")' --context ROUTING_RULE
+  # Verify against a stage
+  dtctl verify openpipeline-matcher 'matchesValue(content, "error")' --stage ROUTING_RULE
 
   # Verify scoped to a specific configuration
   dtctl verify openpipeline-matcher 'matchesValue(content, "error")' --config-id logs
@@ -59,7 +59,7 @@ Examples:
 			}
 
 			fileFlag, _ := cmd.Flags().GetString("file")
-			contextFlag, _ := cmd.Flags().GetString("context")
+			stageFlag, _ := cmd.Flags().GetString("stage")
 			configIDFlag, _ := cmd.Flags().GetString("config-id")
 
 			// Exactly one of: positional arg or --file
@@ -92,7 +92,7 @@ Examples:
 			result, err := handler.Verify(matcherverify.VerifyOptions{
 				Query:           query,
 				ConfigurationID: configIDFlag,
-				Context:         contextFlag,
+				Context:         stageFlag,
 			})
 			if err != nil {
 				return err
@@ -124,8 +124,8 @@ Examples:
 	}
 	c.Flags().StringP("file", "f", "", `read the matcher from a file ("-" for stdin)`)
 	markFileFlag(c, "file", fileValuePath)
-	c.Flags().String("context", "", `stage context, e.g. "processing" or "ROUTING_RULE"`)
-	stability.MarkFlag(c, "context", stability.Experimental, pre10Since)
+	c.Flags().String("stage", "", `pipeline stage, e.g. "processing" or "ROUTING_RULE"`)
+	stability.MarkFlagStable(c, "stage")
 	c.Flags().String("config-id", "", `configuration scope, e.g. "logs"`)
 	stability.MarkStable(c)
 	rejectEmptyFlag(c, "file")
@@ -168,8 +168,6 @@ func readVerifyExpressionFromFile(ctx context.Context, path string) (string, err
 }
 
 func init() {
-	// Renamed or removed in 1.0 because it hides a global flag
-	// (contrib breaking-changes/unshadow-global-flags.md).
 }
 
 // Declared stable: the invocation and output contract of this command is

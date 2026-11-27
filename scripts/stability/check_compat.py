@@ -109,6 +109,47 @@ def surface(text):
     return entries
 
 
+# Stable command-local flags that a stable global flag of the same name and
+# meaning replaced. An entry here is a reviewed decision; a removal that merely
+# shares a name with a global flag (--output, --context, --verbose) is not
+# exempt, because that is exactly the shadowing the replacement removes.
+REPLACED_BY_GLOBAL = frozenset({
+    "auth login --context",
+    "config init --context",
+})
+
+
+def withdrawal_findings(base, head):
+    """(removed, replaced, demoted) keys of stable base entries that changed.
+
+    A stable `<command> --<flag>` that vanished is not a withdrawal when it is
+    listed in REPLACED_BY_GLOBAL and the head has a stable `(global) --<flag>`:
+    the command still accepts the flag with the same name and a stable contract,
+    because a command-local flag was replaced by the root persistent one. Those
+    go in `replaced`, which is reported but does not fail the check.
+
+    The allowlist is explicit because the manifest records tiers, not flag types
+    or meanings, so equivalence is a review decision recorded in the list.
+    """
+    removed, replaced, demoted = [], [], []
+    for key, (level, deprecated, _, _) in sorted(base.items()):
+        if level != "stable":
+            continue
+        if key not in head:
+            if deprecated:
+                continue
+            command, sep, flag = key.partition(FLAG_SEP)
+            glob = head.get("(global) --" + flag) if sep and command != "(global)" else None
+            if key in REPLACED_BY_GLOBAL and glob and glob[0] == "stable":
+                replaced.append(key)
+            else:
+                removed.append(key)
+            continue
+        if head[key][0] != "stable":
+            demoted.append((key, head[key][0]))
+    return removed, replaced, demoted
+
+
 def parse_version(s):
     """X.Y.Z (leading v allowed, prerelease/build suffix dropped) -> tuple."""
     core = re.split(r"[-+]", s.strip().lstrip("v"), maxsplit=1)[0]
@@ -266,19 +307,13 @@ def main():
     head_version = (parse_version(args.head_version) if args.head_version
                     else version_of(None))
 
-    removed, demoted = [], []
-    for key, (level, deprecated, _, _) in sorted(base.items()):
-        if level != "stable":
-            continue
-        if key not in head:
-            if not deprecated:
-                removed.append(key)
-            continue
-        if head[key][0] != "stable":
-            demoted.append((key, head[key][0]))
+    removed, replaced, demoted = withdrawal_findings(base, head)
     misdated = since_findings(base, head, base_version, head_version)
     undeclared = undeclared_findings(base, head)
 
+    for key in replaced:
+        print("note: %s replaced by global flag --%s (stable)"
+              % (key, key.partition(FLAG_SEP)[2]))
     if not removed and not demoted and not misdated and not undeclared:
         print("OK Stable surface intact against %s (%d stable entries checked); "
               "since-versions consistent with %s; no new flag is stable by omission."
