@@ -28,7 +28,7 @@ func TestEnableGCPMonitoringFlags(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, flag := range []string{"name", "serviceAccountId"} {
+	for _, flag := range []string{"name", "service-account-id"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Errorf("expected flag --%s to be registered on enable gcp monitoring", flag)
 		}
@@ -51,7 +51,7 @@ func TestEnableAzureMonitoringFlags(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, flag := range []string{"name", "directoryId", "applicationId"} {
+	for _, flag := range []string{"name", "directory-id", "application-id"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Errorf("expected flag --%s to be registered on enable azure monitoring", flag)
 		}

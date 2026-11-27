@@ -51,11 +51,11 @@ func isNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
-// AllLocations is the --locationFiltering value that removes the location
+// AllLocations is the --locations value that removes the location
 // filter, so every location is monitored.
 const AllLocations = "all"
 
-// ParseLocations parses a --locationFiltering value into the config's
+// ParseLocations parses a --locations value into the config's
 // locationFiltering list. A blank input and AllLocations both yield an empty
 // list, which the backend reads as "no location filter". Spelling out every
 // schema location instead is not equivalent: the Smartscape poller turns each
@@ -68,12 +68,12 @@ func ParseLocations(input string) ([]string, error) {
 
 	locations := SplitCSV(input)
 	if len(locations) == 0 {
-		return nil, fmt.Errorf("--locationFiltering must contain at least one location, or %q", AllLocations)
+		return nil, fmt.Errorf("--locations must contain at least one location, or %q", AllLocations)
 	}
 	for _, location := range locations {
 		if strings.EqualFold(location, AllLocations) {
 			if len(locations) > 1 {
-				return nil, fmt.Errorf("--locationFiltering %q cannot be combined with other locations", AllLocations)
+				return nil, fmt.Errorf("--locations %q cannot be combined with other locations", AllLocations)
 			}
 			return []string{}, nil
 		}

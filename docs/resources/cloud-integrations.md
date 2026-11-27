@@ -64,7 +64,19 @@ There is no dedicated `aws`/`azure`/`gcp` resource type in the command catalog. 
 
 ## Flags
 
-Resource commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`, `-v`, ...). Cloud-integration commands add their own noun-specific flags, such as `--name`, `--regions`, `--featureSets`, `--credentials`, `--roleArn` (AWS), `--type`, `--directoryId`, `--applicationId`, `--clientSecret`, `--locationFiltering` (Azure), and `--serviceAccountId` (GCP connections), plus `--credentials`, `--locationFiltering`, and `--featureSets` (GCP monitoring). See the examples below for their usage in context.
+Resource commands take dtctl's **global flags** (`-o/--output`, `--context`, `--jq`, `-v`, ...). Cloud-integration commands add their own noun-specific flags, such as `--name`, `--regions`, `--feature-sets`, `--credentials`, `--role-arn` (AWS), `--type`, `--directory-id`, `--application-id`, `--client-secret`, `--locations` (Azure), and `--service-account-id` (GCP connections), plus `--credentials`, `--locations`, and `--feature-sets` (GCP monitoring). See the examples below for their usage in context.
+
+**Renamed in 1.0.** The camelCase flags and their spelling aliases are gone. An old name fails with `unknown flag: --roleArn (renamed to --role-arn)`.
+
+| Before | Now |
+|---|---|
+| `--roleArn` | `--role-arn` |
+| `--featureSets`, `--featuresets` | `--feature-sets` |
+| `--locationFiltering` | `--locations` |
+| `--applicationId`, `--applicationID`, `--aplicationID` | `--application-id` |
+| `--directoryId`, `--directoryID` | `--directory-id` |
+| `--clientSecret` | `--client-secret` |
+| `--serviceAccountId`, `--serviceaccountid` | `--service-account-id` |
 
 ## Required token scopes
 
@@ -77,7 +89,7 @@ Cloud integration connections and monitoring configurations are managed through 
 
 ## Output
 
-`create`/`update` commands print the created or updated object's identifying fields; `create aws connection` and `create azure connection` additionally print copy-paste setup material (a CloudFormation snippet for AWS; Issuer/Subject/Audiences values for Azure federated identity). `get aws monitoring-regions`, `get aws monitoring-feature-sets`, `get gcp monitoring-locations`, and `get gcp monitoring-feature-sets` print the discoverable values needed for the `--regions`, `--featureSets`, and `--locationFiltering` flags elsewhere in the workflow.
+`create`/`update` commands print the created or updated object's identifying fields; `create aws connection` and `create azure connection` additionally print copy-paste setup material (a CloudFormation snippet for AWS; Issuer/Subject/Audiences values for Azure federated identity). `get aws monitoring-regions`, `get aws monitoring-feature-sets`, `get gcp monitoring-locations`, and `get gcp monitoring-feature-sets` print the discoverable values needed for the `--regions`, `--feature-sets`, and `--locations` flags elsewhere in the workflow.
 
 ## Examples
 
@@ -93,10 +105,10 @@ dtctl create aws connection --name "my-aws-connection"
 The command prints a copy-paste `aws cloudformation deploy` snippet that creates the IAM role using the connection's `objectId` as `sts:ExternalId`. Run it in AWS CloudShell, then patch the resulting role ARN into the connection:
 
 ```bash
-dtctl update aws connection --name "my-aws-connection" --roleArn "$ROLE_ARN"
+dtctl update aws connection --name "my-aws-connection" --role-arn "$ROLE_ARN"
 ```
 
-Create a monitoring configuration (`--regions` is required; `--featureSets` is optional and defaults to the extension's default set). Monitoring configurations are created disabled:
+Create a monitoring configuration (`--regions` is required; `--feature-sets` is optional and defaults to the extension's default set). Monitoring configurations are created disabled:
 
 ```bash
 dtctl create aws monitoring --name "my-aws-monitoring" \
@@ -114,7 +126,7 @@ dtctl enable aws monitoring --name "my-aws-monitoring"
 
 # Or patch the role ARN and enable in one step:
 dtctl enable aws monitoring --name "my-aws-monitoring" \
-  --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
+  --role-arn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
 ```
 
 Update and delete:
@@ -122,7 +134,7 @@ Update and delete:
 ```bash
 dtctl update aws monitoring --name "my-aws-monitoring" \
   --regions us-east-1,eu-central-1,ap-southeast-2 \
-  --featureSets EC2_essential,RDS_essential
+  --feature-sets EC2_essential,RDS_essential
 
 dtctl delete aws monitoring my-aws-monitoring
 dtctl delete aws connection my-aws-connection
@@ -146,8 +158,8 @@ dtctl create azure connection --name "$CONNECTION_NAME" --type federatedIdentity
 ```bash
 dtctl update azure connection \
   --name "$CONNECTION_NAME" \
-  --directoryId "$TENANT_ID" \
-  --applicationId "$CLIENT_ID"
+  --directory-id "$TENANT_ID" \
+  --application-id "$CLIENT_ID"
 ```
 
 For the `clientSecret` type, create the connection with the secret directly:
@@ -156,9 +168,9 @@ For the `clientSecret` type, create the connection with the secret directly:
 dtctl create azure connection \
   --name "$CONNECTION_NAME" \
   --type clientSecret \
-  --directoryId "$TENANT_ID" \
-  --applicationId "$CLIENT_ID" \
-  --clientSecret "$CLIENT_SECRET"
+  --directory-id "$TENANT_ID" \
+  --application-id "$CLIENT_ID" \
+  --client-secret "$CLIENT_SECRET"
 ```
 
 Create a monitoring configuration (created disabled), optionally scoped to regions/feature sets, then enable:
@@ -167,8 +179,8 @@ Create a monitoring configuration (created disabled), optionally scoped to regio
 dtctl create azure monitoring \
   --name "$CONNECTION_NAME" \
   --credentials "$CONNECTION_NAME" \
-  --locationFiltering westeurope,northeurope \
-  --featureSets microsoft_compute.virtualmachines_essential
+  --locations westeurope,northeurope \
+  --feature-sets microsoft_compute.virtualmachines_essential
 
 dtctl enable azure monitoring --name "$CONNECTION_NAME"
 ```
@@ -179,15 +191,15 @@ Rotate an expired client secret with `--append`, so the old secret stays valid u
 NEW_SECRET=$(az ad app credential reset --id "$CLIENT_ID" --append \
   --display-name "dtctl-$(date +%Y-%m-%d)" --query password -o tsv)
 
-dtctl update azure connection --name "$CONNECTION_NAME" --clientSecret "$NEW_SECRET"
+dtctl update azure connection --name "$CONNECTION_NAME" --client-secret "$NEW_SECRET"
 ```
 
 Update and delete:
 
 ```bash
 dtctl update azure monitoring "$CONNECTION_NAME" \
-  --locationFiltering westeurope,northeurope \
-  --featureSets microsoft_compute.virtualmachines_essential
+  --locations westeurope,northeurope \
+  --feature-sets microsoft_compute.virtualmachines_essential
 
 dtctl delete azure monitoring "$CONNECTION_NAME"
 dtctl delete azure connection "$CONNECTION_NAME"
@@ -207,10 +219,10 @@ gcloud projects add-iam-policy-binding <project-id> \
 # Set the service account email on the connection
 dtctl update gcp connection \
   --name "my-gcp-connection" \
-  --serviceAccountId "dynatrace-monitoring@<project-id>.iam.gserviceaccount.com"
+  --service-account-id "dynatrace-monitoring@<project-id>.iam.gserviceaccount.com"
 
 # Create a monitoring configuration against the connection (created disabled).
-# Without --locationFiltering it monitors every location (no location filter).
+# Without --locations it monitors every location (no location filter).
 dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "my-gcp-connection"
 
 # Discover locations and feature sets
@@ -225,10 +237,10 @@ Update and delete:
 
 ```bash
 dtctl update gcp monitoring --name "my-gcp-monitoring" \
-  --locationFiltering us-central1,europe-west1
+  --locations us-central1,europe-west1
 
 # Remove the location filter again (monitor every location)
-dtctl update gcp monitoring --name "my-gcp-monitoring" --locationFiltering all
+dtctl update gcp monitoring --name "my-gcp-monitoring" --locations all
 
 dtctl delete gcp monitoring my-gcp-monitoring
 dtctl delete gcp connection my-gcp-connection
@@ -278,7 +290,7 @@ Both Azure authentication types (federated identity and client secret) use a sin
 
 `az ad sp create-for-rbac` prints the client secret only once, so capture it immediately when creating a service principal for the `clientSecret` authentication type.
 
-When you pass `--clientSecret` to `dtctl`, the value doesn't touch bash history or disk, but it can still be visible in the `dtctl` process arguments while the command runs. Avoid running this on shared machines, and be aware of any process-argument logging in your environment.
+When you pass `--client-secret` to `dtctl`, the value doesn't touch bash history or disk, but it can still be visible in the `dtctl` process arguments while the command runs. Avoid running this on shared machines, and be aware of any process-argument logging in your environment.
 
 ### GCP: workload identity federation setup
 

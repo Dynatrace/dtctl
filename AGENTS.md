@@ -288,7 +288,7 @@ fails if the flag is gone but the entry stays.
 survives with the flag hidden. `create azure connection` keeps one (the
 `federatedIdentityCredential` path needs none of the renamed credential flags),
 so the flag mark is right. `update azure connection` does not: it requires one
-of `--directoryId`/`--applicationId`/`--clientSecret`, so at a stable floor
+of `--directory-id`/`--application-id`/`--client-secret`, so at a stable floor
 `--help` offers only `--name` and every invocation fails demanding three flags
 the floor just hid. Demote the *command* there — a `stability_blocked` error
 that names the exception which would admit it beats a dead end. The split is

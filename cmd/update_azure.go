@@ -40,12 +40,12 @@ func newUpdateAzureConnectionCmd() *cobra.Command {
 		Long: `Update Azure connection by ID argument or by --name.
 
 Examples:
-  dtctl update azure connection --name "siwek" --directoryId "XYZ" --applicationId "ZUZ"
-  dtctl update azure connection <id> --directoryId "XYZ" --applicationId "ZUZ"`,
+  dtctl update azure connection --name "siwek" --directory-id "XYZ" --application-id "ZUZ"
+  dtctl update azure connection <id> --directory-id "XYZ" --application-id "ZUZ"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if updateAzureConnectionDirectoryID == "" && updateAzureConnectionApplicationID == "" && updateAzureConnectionClientSecret == "" {
-				return fmt.Errorf("at least one of --directoryId, --applicationId, or --clientSecret is required")
+				return fmt.Errorf("at least one of --directory-id, --application-id, or --client-secret is required")
 			}
 
 			if len(args) == 0 && updateAzureConnectionName == "" {
@@ -76,7 +76,7 @@ Examples:
 			switch value.Type {
 			case "federatedIdentityCredential":
 				if updateAzureConnectionClientSecret != "" {
-					return fmt.Errorf("--clientSecret is not applicable to connections of type federatedIdentityCredential")
+					return fmt.Errorf("--client-secret is not applicable to connections of type federatedIdentityCredential")
 				}
 				if value.FederatedIdentityCredential == nil {
 					value.FederatedIdentityCredential = &azureconnection.FederatedIdentityCredential{Consumers: []string{"SVC:com.dynatrace.da"}}
@@ -92,7 +92,7 @@ Examples:
 			case "clientSecret":
 				if value.ClientSecret == nil {
 					if updateAzureConnectionDirectoryID == "" || updateAzureConnectionApplicationID == "" {
-						return fmt.Errorf("the API returned no clientSecret data for this connection; provide both --directoryId and --applicationId to initialize it")
+						return fmt.Errorf("the API returned no clientSecret data for this connection; provide both --directory-id and --application-id to initialize it")
 					}
 					value.ClientSecret = &azureconnection.ClientSecretCredential{Consumers: []string{"SVC:com.dynatrace.da"}}
 				} else if len(value.ClientSecret.Consumers) == 0 {
@@ -131,23 +131,17 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&updateAzureConnectionName, "name", "", "Azure connection name (used when ID argument is not provided)")
-	c.Flags().StringVar(&updateAzureConnectionDirectoryID, "directoryId", "", "Directory ID to set")
-	c.Flags().StringVar(&updateAzureConnectionDirectoryID, "directoryID", "", "Alias for --directoryId")
-	c.Flags().StringVar(&updateAzureConnectionApplicationID, "applicationId", "", "Application ID to set")
-	c.Flags().StringVar(&updateAzureConnectionApplicationID, "applicationID", "", "Alias for --applicationId")
-	c.Flags().StringVar(&updateAzureConnectionApplicationID, "aplicationID", "", "Compatibility alias for typo --aplicationID")
-	c.Flags().StringVar(&updateAzureConnectionClientSecret, "clientSecret", "", "Client secret value (clientSecret type only); prefer passing via env var to keep out of shell history (note: expanded value can still be visible in process arguments)")
+	c.Flags().StringVar(&updateAzureConnectionDirectoryID, "directory-id", "", "Directory ID to set")
+	c.Flags().StringVar(&updateAzureConnectionApplicationID, "application-id", "", "Application ID to set")
+	c.Flags().StringVar(&updateAzureConnectionClientSecret, "client-secret", "", "Client secret value (clientSecret type only); prefer passing via env var to keep out of shell history (note: expanded value can still be visible in process arguments)")
 	stability.Mark(c, stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "directoryId", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "directoryID", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "applicationId", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "applicationID", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "aplicationID", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "clientSecret", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "directory-id", stability.Experimental, cloudFlagsKebabSince)
+	stability.MarkFlag(c, "application-id", stability.Experimental, cloudFlagsKebabSince)
+	stability.MarkFlag(c, "client-secret", stability.Experimental, cloudFlagsKebabSince)
 	// At least one of these is required, and a flag left out keeps the stored
 	// value; an explicitly empty one (every spelling) is rejected rather than
 	// read as "left out".
-	for _, name := range []string{"directoryId", "directoryID", "applicationId", "applicationID", "aplicationID", "clientSecret"} {
+	for _, name := range []string{"directory-id", "application-id", "client-secret"} {
 		rejectEmptyFlag(c, name)
 	}
 	return c
@@ -166,14 +160,14 @@ func newUpdateAzureMonitoringConfigCmd() *cobra.Command {
 		Long: `Update Azure monitoring configuration by ID argument or by --name.
 
 Examples:
-  dtctl update azure monitoring --name "siwek" --locationFiltering "eastus,westeurope"
-  dtctl update azure monitoring --name "siwek" --featureSets "microsoft_compute.virtualmachines_essential,microsoft_web.sites_functionapp_essential"
-  dtctl update azure monitoring <id> --locationFiltering "eastus,westeurope"`,
+  dtctl update azure monitoring --name "siwek" --locations "eastus,westeurope"
+  dtctl update azure monitoring --name "siwek" --feature-sets "microsoft_compute.virtualmachines_essential,microsoft_web.sites_functionapp_essential"
+  dtctl update azure monitoring <id> --locations "eastus,westeurope"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(updateAzureMonitoringConfigLocationFiltering) == "" &&
 				strings.TrimSpace(updateAzureMonitoringConfigFeatureSets) == "" {
-				return fmt.Errorf("at least one of --locationFiltering or --featureSets is required")
+				return fmt.Errorf("at least one of --locations or --feature-sets is required")
 			}
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationUpdate)
@@ -207,14 +201,14 @@ Examples:
 			if strings.TrimSpace(updateAzureMonitoringConfigLocationFiltering) != "" {
 				locations := azuremonitoringconfig.SplitCSV(updateAzureMonitoringConfigLocationFiltering)
 				if len(locations) == 0 {
-					return fmt.Errorf("--locationFiltering must contain at least one location")
+					return fmt.Errorf("--locations must contain at least one location")
 				}
 				value.Azure.LocationFiltering = locations
 			}
 			if strings.TrimSpace(updateAzureMonitoringConfigFeatureSets) != "" {
 				featureSets := azuremonitoringconfig.SplitCSV(updateAzureMonitoringConfigFeatureSets)
 				if len(featureSets) == 0 {
-					return fmt.Errorf("--featureSets must contain at least one feature set")
+					return fmt.Errorf("--feature-sets must contain at least one feature set")
 				}
 				value.FeatureSets = featureSets
 			}
@@ -244,16 +238,14 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&updateAzureMonitoringConfigName, "name", "", "Monitoring config name/description (used when ID argument is not provided)")
-	c.Flags().StringVar(&updateAzureMonitoringConfigLocationFiltering, "locationFiltering", "", "Comma-separated locations")
-	c.Flags().StringVar(&updateAzureMonitoringConfigFeatureSets, "featureSets", "", "Comma-separated feature sets")
-	c.Flags().StringVar(&updateAzureMonitoringConfigFeatureSets, "featuresets", "", "Alias for --featureSets")
+	c.Flags().StringVar(&updateAzureMonitoringConfigLocationFiltering, "locations", "", "Comma-separated locations")
+	c.Flags().StringVar(&updateAzureMonitoringConfigFeatureSets, "feature-sets", "", "Comma-separated feature sets")
 	stability.Mark(c, stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "locationFiltering", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "featureSets", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "featuresets", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "locations", stability.Experimental, cloudFlagsKebabSince)
+	stability.MarkFlag(c, "feature-sets", stability.Experimental, cloudFlagsKebabSince)
 	// At least one is required and a flag left out keeps the stored value, so
 	// an explicitly empty one is rejected rather than read as "left out".
-	for _, name := range []string{"locationFiltering", "featureSets", "featuresets"} {
+	for _, name := range []string{"locations", "feature-sets"} {
 		rejectEmptyFlag(c, name)
 	}
 	return c
@@ -265,19 +257,15 @@ func init() {
 	updateAzureProviderCmd.AddCommand(updateAzureConnectionCmd)
 	updateAzureProviderCmd.AddCommand(updateAzureMonitoringConfigCmd)
 	// Every path through this command needs a flag the rename takes away
-	// (every one of --directoryId, --applicationId and --clientSecret), so at a stable floor it has no usable
+	// (every one of --directory-id, --application-id and --client-secret), so at a stable floor it has no usable
 	// invocation left. Marking the command says that plainly instead of
 	// hiding the flags and then failing on a "required" flag help no
 	// longer lists.
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
 	// Every path through this command needs a flag the rename takes away
-	// (both --locationFiltering and --featureSets), so at a stable floor it has no usable
+	// (both --locations and --feature-sets), so at a stable floor it has no usable
 	// invocation left. Marking the command says that plainly instead of
 	// hiding the flags and then failing on a "required" flag help no
 	// longer lists.
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
 }
 
 // Declared stable: the invocation and output contract of this command is

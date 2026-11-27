@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 22 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 980
+- entries below (commands + flags): 971
 
 ## Surface
 
@@ -349,19 +349,19 @@ create aws                           stable
 create aws connection                stable
   --dry-run                          stable
   --name                             stable
-  --roleArn                          experimental  since 0.39.0  (declared)
+  --role-arn                         experimental  since 0.48.0  (declared)
 create aws monitoring                stable
   --central-enrichment               stable
   --credentials                      stable
   --dry-run                          stable
-  --featureSets                      experimental  since 0.39.0  (declared)
+  --feature-sets                     experimental  since 0.48.0  (declared)
   --name                             stable
   --regions                          stable
 create azure                         stable
 create azure connection              stable
-  --applicationId                    experimental  since 0.39.0  (declared)
-  --clientSecret                     experimental  since 0.39.0  (declared)
-  --directoryId                      experimental  since 0.39.0  (declared)
+  --application-id                   experimental  since 0.48.0  (declared)
+  --client-secret                    experimental  since 0.48.0  (declared)
+  --directory-id                     experimental  since 0.48.0  (declared)
   --dry-run                          stable
   --issuer                           stable
   --name                             stable
@@ -370,9 +370,8 @@ create azure monitoring              stable
   --central-enrichment               stable
   --credentials                      stable
   --dry-run                          stable
-  --featureSets                      experimental  since 0.39.0  (declared)
-  --featuresets                      experimental  since 0.39.0  (declared)
-  --locationFiltering                experimental  since 0.39.0  (declared)
+  --feature-sets                     experimental  since 0.48.0  (declared)
+  --locations                        experimental  since 0.48.0  (declared)
   --name                             stable
 create breakpoint                    experimental  since 0.39.0
   --dry-run                          experimental
@@ -415,15 +414,13 @@ create gcp                           stable
 create gcp connection                stable
   --dry-run                          stable
   --name                             stable
-  --serviceAccountId                 experimental  since 0.39.0  (declared)
-  --serviceaccountid                 experimental  since 0.39.0  (declared)
+  --service-account-id               experimental  since 0.48.0  (declared)
 create gcp monitoring                stable
   --central-enrichment               stable
   --credentials                      stable
   --dry-run                          stable
-  --featureSets                      experimental  since 0.39.0  (declared)
-  --featuresets                      experimental  since 0.39.0  (declared)
-  --locationFiltering                experimental  since 0.39.0  (declared)
+  --feature-sets                     experimental  since 0.48.0  (declared)
+  --locations                        experimental  since 0.48.0  (declared)
   --name                             stable
 create lookup                        stable
   --description                      stable
@@ -670,18 +667,18 @@ enable aws                           stable
 enable aws monitoring                stable
   --dry-run                          stable
   --name                             stable
-  --roleArn                          experimental  since 0.39.0  (declared)
+  --role-arn                         experimental  since 0.48.0  (declared)
 enable azure                         stable
 enable azure monitoring              stable
-  --applicationId                    experimental  since 0.39.0  (declared)
-  --directoryId                      experimental  since 0.39.0  (declared)
+  --application-id                   experimental  since 0.48.0  (declared)
+  --directory-id                     experimental  since 0.48.0  (declared)
   --dry-run                          stable
   --name                             stable
 enable gcp                           stable
 enable gcp monitoring                stable
   --dry-run                          stable
   --name                             stable
-  --serviceAccountId                 experimental  since 0.39.0  (declared)
+  --service-account-id               experimental  since 0.48.0  (declared)
 exec                                 stable
 exec analyzer                        stable
   --file                             stable
@@ -1084,27 +1081,23 @@ update aws                           stable
 update aws connection                experimental  since 0.39.0
   --dry-run                          experimental
   --name                             experimental
-  --roleArn                          experimental  since 0.39.0  (declared)
+  --role-arn                         experimental  since 0.48.0  (declared)
 update aws monitoring                stable
   --dry-run                          stable
-  --featureSets                      experimental  since 0.39.0  (declared)
+  --feature-sets                     experimental  since 0.48.0  (declared)
   --name                             stable
   --regions                          stable
 update azure                         stable
 update azure connection              experimental  since 0.39.0
-  --aplicationID                     experimental  since 0.39.0  (declared)
-  --applicationID                    experimental  since 0.39.0  (declared)
-  --applicationId                    experimental  since 0.39.0  (declared)
-  --clientSecret                     experimental  since 0.39.0  (declared)
-  --directoryID                      experimental  since 0.39.0  (declared)
-  --directoryId                      experimental  since 0.39.0  (declared)
+  --application-id                   experimental  since 0.48.0  (declared)
+  --client-secret                    experimental  since 0.48.0  (declared)
+  --directory-id                     experimental  since 0.48.0  (declared)
   --dry-run                          experimental
   --name                             experimental
 update azure monitoring              experimental  since 0.39.0
   --dry-run                          experimental
-  --featureSets                      experimental  since 0.39.0  (declared)
-  --featuresets                      experimental  since 0.39.0  (declared)
-  --locationFiltering                experimental  since 0.39.0  (declared)
+  --feature-sets                     experimental  since 0.48.0  (declared)
+  --locations                        experimental  since 0.48.0  (declared)
   --name                             experimental
 update breakpoint                    experimental  since 0.39.0
   --condition                        experimental
@@ -1139,13 +1132,11 @@ update gcp                           stable
 update gcp connection                experimental  since 0.39.0
   --dry-run                          experimental
   --name                             experimental
-  --serviceAccountId                 experimental  since 0.39.0  (declared)
-  --serviceaccountid                 experimental  since 0.39.0  (declared)
+  --service-account-id               experimental  since 0.48.0  (declared)
 update gcp monitoring                experimental  since 0.39.0
   --dry-run                          experimental
-  --featureSets                      experimental  since 0.39.0  (declared)
-  --featuresets                      experimental  since 0.39.0  (declared)
-  --locationFiltering                experimental  since 0.39.0  (declared)
+  --feature-sets                     experimental  since 0.48.0  (declared)
+  --locations                        experimental  since 0.48.0  (declared)
   --name                             experimental
 update settings                      stable
 usage                                experimental  since 0.43.0

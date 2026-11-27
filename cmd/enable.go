@@ -23,10 +23,10 @@ Available resources:
   gcp monitoring          Enable GCP monitoring configuration (Preview)
   azure monitoring        Enable Azure monitoring configuration`,
 		Example: `  # Enable GCP monitoring with service account
-  dtctl enable gcp monitoring --name "my-gcp-monitoring" --serviceAccountId "sa@project.iam.gserviceaccount.com"
+  dtctl enable gcp monitoring --name "my-gcp-monitoring" --service-account-id "sa@project.iam.gserviceaccount.com"
 
   # Enable Azure monitoring with federated identity
-  dtctl enable azure monitoring --name "my-azure-monitoring" --directoryId "$TENANT_ID" --applicationId "$CLIENT_ID"
+  dtctl enable azure monitoring --name "my-azure-monitoring" --directory-id "$TENANT_ID" --application-id "$CLIENT_ID"
 
   # Enable monitoring without updating connection credentials
   dtctl enable gcp monitoring --name "my-gcp-monitoring"`,

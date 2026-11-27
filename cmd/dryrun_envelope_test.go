@@ -147,7 +147,7 @@ func TestCloudMonitoringToggleDryRuns(t *testing.T) {
 		details map[string]string
 	}{
 		{
-			argv: []string{"enable", "aws", "monitoring", "--name", "mon-1", "--roleArn", "arn:aws:iam::123456789012:role/r"},
+			argv: []string{"enable", "aws", "monitoring", "--name", "mon-1", "--role-arn", "arn:aws:iam::123456789012:role/r"},
 			verb: "enable",
 			human: "Dry run: would resolve AWS monitoring config \"mon-1\"\n" +
 				"Dry run: would update linked AWS connection roleArn=\"arn:aws:iam::123456789012:role/r\"\n" +
@@ -155,7 +155,7 @@ func TestCloudMonitoringToggleDryRuns(t *testing.T) {
 			details: map[string]string{"monitoring_config": "mon-1", "role_arn": "arn:aws:iam::123456789012:role/r"},
 		},
 		{
-			argv: []string{"enable", "gcp", "monitoring", "mon-1", "--serviceAccountId", "sa@example.invalid"},
+			argv: []string{"enable", "gcp", "monitoring", "mon-1", "--service-account-id", "sa@example.invalid"},
 			verb: "enable",
 			human: "Dry run: would resolve GCP monitoring config \"mon-1\"\n" +
 				"Dry run: would update linked GCP connection with service account \"sa@example.invalid\"\n" +
@@ -163,7 +163,7 @@ func TestCloudMonitoringToggleDryRuns(t *testing.T) {
 			details: map[string]string{"monitoring_config": "mon-1", "service_account_id": "sa@example.invalid"},
 		},
 		{
-			argv: []string{"enable", "azure", "monitoring", "--name", "mon-1", "--directoryId", "dir-1", "--applicationId", "app-1"},
+			argv: []string{"enable", "azure", "monitoring", "--name", "mon-1", "--directory-id", "dir-1", "--application-id", "app-1"},
 			verb: "enable",
 			human: "Dry run: would resolve Azure monitoring config \"mon-1\"\n" +
 				"Dry run: would update linked Azure connection directoryId=\"dir-1\" applicationId=\"app-1\"\n" +

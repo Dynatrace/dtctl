@@ -39,19 +39,19 @@ func newEnableGCPMonitoringCmd() *cobra.Command {
 		Long: `Enable a GCP monitoring configuration by updating the linked connection
 credentials and then enabling the monitoring config in a single step.
 
-If --serviceAccountId is provided, dtctl will:
+If --service-account-id is provided, dtctl will:
   1. Update the linked GCP connection with the specified service account
   2. Populate the serviceAccount field in the monitoring credential
   3. Enable the monitoring config and all credentials
 
-If the linked connection already has a service account configured, --serviceAccountId
+If the linked connection already has a service account configured, --service-account-id
 can be omitted; in that case the connection update step is skipped and only the
-monitoring config is enabled. Passing --serviceAccountId always overwrites the
+monitoring config is enabled. Passing --service-account-id always overwrites the
 service account on the linked connection.
 
 Examples:
-  dtctl enable gcp monitoring --name "my-gcp-monitoring" --serviceAccountId "sa@project.iam.gserviceaccount.com"
-  dtctl enable gcp monitoring <id> --serviceAccountId "sa@project.iam.gserviceaccount.com"
+  dtctl enable gcp monitoring --name "my-gcp-monitoring" --service-account-id "sa@project.iam.gserviceaccount.com"
+  dtctl enable gcp monitoring <id> --service-account-id "sa@project.iam.gserviceaccount.com"
   dtctl enable gcp monitoring --name "my-gcp-monitoring"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -106,7 +106,7 @@ Examples:
 				configName = existing.ObjectID
 			}
 
-			// Step 1: Update linked GCP connection with service account if --serviceAccountId provided
+			// Step 1: Update linked GCP connection with service account if --service-account-id provided
 			if enableGCPMonitoringServiceAccountID != "" {
 				if len(existing.Value.GoogleCloud.Credentials) == 0 {
 					return fmt.Errorf("monitoring config %q has no credentials configured", configName)
@@ -179,16 +179,14 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&enableGCPMonitoringName, "name", "", "Monitoring config name/description (used when ID argument is not provided)")
-	c.Flags().StringVar(&enableGCPMonitoringServiceAccountID, "serviceAccountId", "", "Service account email to set on the linked connection (optional)")
-	stability.MarkFlag(c, "serviceAccountId", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&enableGCPMonitoringServiceAccountID, "service-account-id", "", "Service account email to set on the linked connection (optional)")
+	stability.MarkFlag(c, "service-account-id", stability.Experimental, cloudFlagsKebabSince)
 	stability.MarkStable(c)
 	return c
 }
 
 func init() {
 	enableGCPProviderCmd.AddCommand(enableGCPMonitoringCmd)
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
 }
 
 // Declared stable: the invocation and output contract of these commands is

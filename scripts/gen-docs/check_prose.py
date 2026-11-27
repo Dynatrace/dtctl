@@ -43,9 +43,9 @@ LINK_SKIP = ("dev", "site")
 SITE_DOCS = pathlib.Path("site/_docs")
 REDIRECT_PREFIX = "https://github.com/Dynatrace/dtctl/blob/main/"
 
-# A long flag. Case-sensitive on purpose: a few flags are camelCase
-# (`--serviceAccountId`, `--hostPatterns`), and a lowercase-only pattern would
-# silently truncate them to a prefix that happens to be a real flag.
+# A long flag. Case-sensitive on purpose: a lowercase-only pattern would
+# silently truncate a mistyped camelCase flag (`--roleArn`) to a prefix that
+# happens to be a real flag.
 FLAG = r"(--[A-Za-z0-9][A-Za-z0-9-]*)"
 
 # Commands hidden behind a registration gate are absent from a stock binary, so

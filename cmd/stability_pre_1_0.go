@@ -16,3 +16,9 @@ package cmd
 // Each mark cites the document that drives it. When a document is implemented
 // the flag is either gone or renamed, and its mark goes with it.
 const pre10Since = "0.39.0"
+
+// cloudFlagsKebabSince is the version in which the kebab-case cloud flags
+// (--role-arn, --feature-sets, --locations, --application-id, --directory-id,
+// --client-secret, --service-account-id) first shipped. They are new names, so
+// they cannot claim the 0.39.0 of the camelCase flags they replace.
+const cloudFlagsKebabSince = "0.48.0"

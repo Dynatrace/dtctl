@@ -350,11 +350,11 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			cmd:  createAWSConnectionCmd,
 			setup: func() {
 				_ = createAWSConnectionCmd.Flags().Set("name", "new-aws-connection")
-				_ = createAWSConnectionCmd.Flags().Set("roleArn", mockRoleArn)
+				_ = createAWSConnectionCmd.Flags().Set("role-arn", mockRoleArn)
 			},
 		},
 		{
-			// --featureSets is left empty on purpose so the command resolves
+			// --feature-sets is left empty on purpose so the command resolves
 			// the connection and reads the extension schema before reaching
 			// its guard; that is the traffic the guard has to survive.
 			name: "create aws monitoring",
@@ -401,7 +401,7 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			cmd:  updateAWSConnectionCmd,
 			setup: func() {
 				_ = updateAWSConnectionCmd.Flags().Set("name", mockAWSConnectionName)
-				_ = updateAWSConnectionCmd.Flags().Set("roleArn", mockRoleArn)
+				_ = updateAWSConnectionCmd.Flags().Set("role-arn", mockRoleArn)
 			},
 		},
 		{
@@ -417,7 +417,7 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			cmd:  updateAzureConnectionCmd,
 			setup: func() {
 				_ = updateAzureConnectionCmd.Flags().Set("name", mockAzureConnectionName)
-				_ = updateAzureConnectionCmd.Flags().Set("applicationId", "22222222-2222-2222-2222-222222222222")
+				_ = updateAzureConnectionCmd.Flags().Set("application-id", "22222222-2222-2222-2222-222222222222")
 			},
 		},
 		{
@@ -425,7 +425,7 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			cmd:  updateAzureMonitoringConfigCmd,
 			setup: func() {
 				_ = updateAzureMonitoringConfigCmd.Flags().Set("name", mockAzureConfigName)
-				_ = updateAzureMonitoringConfigCmd.Flags().Set("locationFiltering", "eastus,westeurope")
+				_ = updateAzureMonitoringConfigCmd.Flags().Set("locations", "eastus,westeurope")
 			},
 		},
 		{
@@ -433,7 +433,7 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			cmd:  updateGCPConnectionCmd,
 			setup: func() {
 				_ = updateGCPConnectionCmd.Flags().Set("name", mockGCPConnectionName)
-				_ = updateGCPConnectionCmd.Flags().Set("serviceAccountId", "reader@example-project.iam.gserviceaccount.invalid")
+				_ = updateGCPConnectionCmd.Flags().Set("service-account-id", "reader@example-project.iam.gserviceaccount.invalid")
 			},
 		},
 		{
@@ -441,7 +441,7 @@ func TestCloudCommandsDryRunSendsNoMutatingRequest(t *testing.T) {
 			cmd:  updateGCPMonitoringConfigCmd,
 			setup: func() {
 				_ = updateGCPMonitoringConfigCmd.Flags().Set("name", mockGCPConfigName)
-				_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "us-central1,europe-west1")
+				_ = updateGCPMonitoringConfigCmd.Flags().Set("locations", "us-central1,europe-west1")
 			},
 		},
 	}

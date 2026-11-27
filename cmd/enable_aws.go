@@ -35,11 +35,11 @@ func newEnableAWSMonitoringCmd() *cobra.Command {
 		Aliases: []string{"monitoring-config"},
 		Short:   "Enable AWS monitoring configuration",
 		Long: `Enable an AWS monitoring configuration by optionally patching the linked connection's
-roleArn and then enabling the monitoring config in a single step.
+--role-arn and then enabling the monitoring config in a single step.
 
 Examples:
-  dtctl enable aws monitoring --name "my-aws" --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
-  dtctl enable aws monitoring <id> --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
+  dtctl enable aws monitoring --name "my-aws" --role-arn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
+  dtctl enable aws monitoring <id> --role-arn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
   dtctl enable aws monitoring --name "my-aws"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -162,8 +162,8 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&enableAWSMonitoringName, "name", "", "Monitoring config name/description (used when ID argument is not provided)")
-	c.Flags().StringVar(&enableAWSMonitoringRoleArn, "roleArn", "", "AWS IAM role ARN to set on the linked connection (optional)")
-	stability.MarkFlag(c, "roleArn", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&enableAWSMonitoringRoleArn, "role-arn", "", "AWS IAM role ARN to set on the linked connection (optional)")
+	stability.MarkFlag(c, "role-arn", stability.Experimental, cloudFlagsKebabSince)
 	stability.MarkStable(c)
 	return c
 }
@@ -171,8 +171,6 @@ Examples:
 func init() {
 	enableCmd.AddCommand(enableAWSProviderCmd)
 	enableAWSProviderCmd.AddCommand(enableAWSMonitoringCmd)
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
 }
 
 // Declared stable: the invocation and output contract of these commands is

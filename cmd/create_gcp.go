@@ -28,7 +28,7 @@ func newCreateGCPConnectionCmd() *cobra.Command {
 Examples:
 	  dtctl create gcp connection --name "my-gcp-connection"
 	  dtctl create gcp connection my-gcp-connection
-	  dtctl create gcp connection --name "my-gcp-connection" --serviceAccountId "my-reader@project.iam.gserviceaccount.com"`,
+	  dtctl create gcp connection --name "my-gcp-connection" --service-account-id "my-reader@project.iam.gserviceaccount.com"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if createGCPConnectionName == "" && len(args) > 0 {
@@ -74,10 +74,8 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&createGCPConnectionName, "name", "", "GCP connection name (required)")
-	c.Flags().StringVar(&createGCPConnectionServiceAccountID, "serviceAccountId", "", "Customer service account email (optional; can be set later with update)")
-	c.Flags().StringVar(&createGCPConnectionServiceAccountID, "serviceaccountid", "", "Alias for --serviceAccountId")
-	stability.MarkFlag(c, "serviceAccountId", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "serviceaccountid", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&createGCPConnectionServiceAccountID, "service-account-id", "", "Customer service account email (optional; can be set later with update)")
+	stability.MarkFlag(c, "service-account-id", stability.Experimental, cloudFlagsKebabSince)
 	stability.MarkStable(c)
 	// The name can come from the positional argument instead, so --name is
 	// not marked required; an explicitly empty value is still rejected.
@@ -139,7 +137,7 @@ func printGCPPrincipalHint(ctx context.Context, handler *gcpconnection.Handler, 
 	fmt.Fprintln(currentStdout(ctx), "  --role=\"roles/iam.serviceAccountTokenCreator\"")
 	fmt.Fprintln(currentStdout(ctx))
 	fmt.Fprintln(currentStdout(ctx), "5) Update connection in Dynatrace with customer service account:")
-	fmt.Fprintf(currentStdout(ctx), "dtctl update gcp connection --name %q --serviceAccountId \"${CUSTOMER_SA_EMAIL}\"\n", connectionName)
+	fmt.Fprintf(currentStdout(ctx), "dtctl update gcp connection --name %q --service-account-id \"${CUSTOMER_SA_EMAIL}\"\n", connectionName)
 	fmt.Fprintln(currentStdout(ctx))
 	fmt.Fprintln(currentStdout(ctx), "Optional: check Domain Restricted Sharing policy allows Dynatrace customer:")
 	fmt.Fprintln(currentStdout(ctx), "gcloud resource-manager org-policies describe constraints/iam.allowedPolicyMemberDomains \\")
@@ -164,7 +162,7 @@ func newCreateGCPMonitoringConfigCmd() *cobra.Command {
 
 Examples:
   dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "my-gcp-connection"
-  dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "<connection-id>" --locationFiltering "us-central1,europe-west1"`,
+  dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "<connection-id>" --locations "us-central1,europe-west1"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)
@@ -227,12 +225,10 @@ Examples:
 	}
 	c.Flags().StringVar(&createGCPMonitoringConfigName, "name", "", "Monitoring config name/description (required)")
 	c.Flags().StringVar(&createGCPMonitoringConfigCredentials, "credentials", "", "GCP connection name or ID (required)")
-	c.Flags().StringVar(&createGCPMonitoringConfigLocationFiltering, "locationFiltering", "", "Comma-separated locations to monitor, or 'all' for no filter (default: all)")
-	c.Flags().StringVar(&createGCPMonitoringConfigFeatureSets, "featureSets", "", "Comma-separated feature sets (default: all *_essential from schema)")
-	c.Flags().StringVar(&createGCPMonitoringConfigFeatureSets, "featuresets", "", "Alias for --featureSets")
-	stability.MarkFlag(c, "locationFiltering", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "featureSets", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "featuresets", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&createGCPMonitoringConfigLocationFiltering, "locations", "", "Comma-separated locations to monitor, or 'all' for no filter (default: all)")
+	c.Flags().StringVar(&createGCPMonitoringConfigFeatureSets, "feature-sets", "", "Comma-separated feature sets (default: all *_essential from schema)")
+	stability.MarkFlag(c, "locations", stability.Experimental, cloudFlagsKebabSince)
+	stability.MarkFlag(c, "feature-sets", stability.Experimental, cloudFlagsKebabSince)
 	addCentralEnrichmentFlag(c, &createGCPMonitoringConfigCentral)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "name")
@@ -271,10 +267,6 @@ func buildGCPMonitoringConfig(name, version string, credential gcpmonitoringconf
 func init() {
 	createGCPProviderCmd.AddCommand(createGCPConnectionCmd)
 	createGCPProviderCmd.AddCommand(createGCPMonitoringConfigCmd)
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
 }
 
 // Declared stable: the invocation and output contract of these commands is

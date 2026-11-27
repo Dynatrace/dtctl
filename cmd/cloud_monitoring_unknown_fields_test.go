@@ -309,7 +309,7 @@ func TestCloudMonitoringReadModifyWriteKeepsUnmodelledFields(t *testing.T) {
 		{name: "update azure monitoring", cloud: "azure", cmd: updateAzureMonitoringConfigCmd,
 			setup: func(n string) {
 				_ = updateAzureMonitoringConfigCmd.Flags().Set("name", n)
-				_ = updateAzureMonitoringConfigCmd.Flags().Set("locationFiltering", "eastus,westeurope")
+				_ = updateAzureMonitoringConfigCmd.Flags().Set("locations", "eastus,westeurope")
 			},
 			check: func(t *testing.T, sent map[string]any) {
 				assertPathEquals(t, sent, "value.azure.locationFiltering", []any{"eastus", "westeurope"})
@@ -317,7 +317,7 @@ func TestCloudMonitoringReadModifyWriteKeepsUnmodelledFields(t *testing.T) {
 		{name: "update gcp monitoring", cloud: "gcp", cmd: updateGCPMonitoringConfigCmd,
 			setup: func(n string) {
 				_ = updateGCPMonitoringConfigCmd.Flags().Set("name", n)
-				_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "us-central1,europe-west1")
+				_ = updateGCPMonitoringConfigCmd.Flags().Set("locations", "us-central1,europe-west1")
 			},
 			check: func(t *testing.T, sent map[string]any) {
 				assertPathEquals(t, sent, "value.googleCloud.locationFiltering", []any{"us-central1", "europe-west1"})

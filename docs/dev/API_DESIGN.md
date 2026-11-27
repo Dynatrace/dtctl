@@ -1222,8 +1222,8 @@ dtctl create azure connection --name "my-conn" --type federatedIdentityCredentia
 dtctl create azure connection --name "my-conn" --type clientSecret
 
 # Imperative update by name or ID
-dtctl update azure connection --name "my-conn" --directoryId "<tenant-id>" --applicationId "<client-id>"
-dtctl update azure connection <object-id> --directoryId "<tenant-id>" --applicationId "<client-id>"
+dtctl update azure connection --name "my-conn" --directory-id "<tenant-id>" --application-id "<client-id>"
+dtctl update azure connection <object-id> --directory-id "<tenant-id>" --application-id "<client-id>"
 
 # Apply/create-update from manifest
 dtctl apply -f azure_connection.yaml
@@ -1295,11 +1295,11 @@ dtctl get gcp connections -o json
 dtctl get gcp connections -o yaml
 
 # Imperative create from flags
-dtctl create gcp connection --name "my-gcp-conn" --serviceAccountId "reader@project.iam.gserviceaccount.com"
+dtctl create gcp connection --name "my-gcp-conn" --service-account-id "reader@project.iam.gserviceaccount.com"
 
 # Imperative update by name or ID
-dtctl update gcp connection --name "my-gcp-conn" --serviceAccountId "reader@project.iam.gserviceaccount.com"
-dtctl update gcp connection <object-id> --serviceAccountId "reader@project.iam.gserviceaccount.com"
+dtctl update gcp connection --name "my-gcp-conn" --service-account-id "reader@project.iam.gserviceaccount.com"
+dtctl update gcp connection <object-id> --service-account-id "reader@project.iam.gserviceaccount.com"
 
 # Delete by name or ID
 dtctl delete gcp connection <name-or-id>
@@ -1338,8 +1338,8 @@ dtctl get gcp monitoring-feature-sets
 dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "my-gcp-conn"
 
 # Imperative update by name or ID
-dtctl update gcp monitoring --name "my-gcp-monitoring" --locationFiltering "us-central1,europe-west1"
-dtctl update gcp monitoring <object-id> --featureSets "compute_engine_essential,cloud_run_essential"
+dtctl update gcp monitoring --name "my-gcp-monitoring" --locations "us-central1,europe-west1"
+dtctl update gcp monitoring <object-id> --feature-sets "compute_engine_essential,cloud_run_essential"
 
 # Delete by name or ID
 dtctl delete gcp monitoring <name-or-id>
