@@ -30,6 +30,9 @@ Examples:
   dtctl update aws connection <id> --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if err := awsconnection.ValidateRoleArn(updateAWSConnectionRoleArn); err != nil {
 				return err
 			}
@@ -113,6 +116,9 @@ Examples:
   dtctl update aws monitoring --name "my-aws" --featureSets EC2_essential,RDS_essential`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if strings.TrimSpace(updateAWSMonitoringConfigRegions) == "" &&
 				strings.TrimSpace(updateAWSMonitoringConfigFeatureSets) == "" {
 				return fmt.Errorf("at least one of --regions or --featureSets is required")

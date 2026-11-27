@@ -50,6 +50,9 @@ Examples:
   dtctl edit gcp monitoring --name "my-gcp-monitoring" --format=json`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if len(args) == 0 && editGCPMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")
 			}

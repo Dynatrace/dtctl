@@ -44,6 +44,9 @@ Examples:
   dtctl update azure connection <id> --directoryId "XYZ" --applicationId "ZUZ"`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if updateAzureConnectionDirectoryID == "" && updateAzureConnectionApplicationID == "" && updateAzureConnectionClientSecret == "" {
 				return fmt.Errorf("at least one of --directoryId, --applicationId, or --clientSecret is required")
 			}
@@ -171,6 +174,9 @@ Examples:
   dtctl update azure monitoring <id> --locationFiltering "eastus,westeurope"`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if strings.TrimSpace(updateAzureMonitoringConfigLocationFiltering) == "" &&
 				strings.TrimSpace(updateAzureMonitoringConfigFeatureSets) == "" {
 				return fmt.Errorf("at least one of --locationFiltering or --featureSets is required")

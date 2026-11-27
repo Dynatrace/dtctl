@@ -171,7 +171,7 @@ func checkVariables(tmpl *template.Template, vars map[string]interface{}) error 
 	u := &usage{used: map[string]bool{}, required: map[string]bool{}}
 	for _, t := range tmpl.Templates() {
 		if t.Tree != nil && t.Tree.Root != nil {
-			u.walk(t.Tree.Root, true)
+			u.walk(t.Tree.Root, true, nil)
 		}
 	}
 
@@ -209,88 +209,112 @@ func quoteNames(names []string) string {
 }
 
 // usage records which top-level variables a template reads. A variable is
-// required when at least one read has no default.
+// required when at least one read has no default and is not optional.
+//
+// The rule for optional reads: a read in an {{if}} / {{with}} condition (and in
+// and/or/not inside it) counts as used but not required, because testing a
+// variable is how a template makes it optional. A read of that same variable in
+// the guarded body is optional too ({{with .x}}{{.x}}{{end}}); a read of any
+// other variable in a body stays required.
 type usage struct {
 	used     map[string]bool
 	required map[string]bool
 }
 
 // walk visits n. rooted is true while dot is the root map; inside range and
-// with bodies dot is rebound, so only $-rooted reads count there.
-func (u *usage) walk(n parse.Node, rooted bool) {
+// with bodies dot is rebound, so only $-rooted reads count there. guarded names
+// the variables an enclosing condition tests.
+func (u *usage) walk(n parse.Node, rooted bool, guarded map[string]bool) {
 	switch n := n.(type) {
 	case *parse.ListNode:
 		if n == nil {
 			return
 		}
 		for _, c := range n.Nodes {
-			u.walk(c, rooted)
+			u.walk(c, rooted, guarded)
 		}
 	case *parse.ActionNode:
-		u.walk(n.Pipe, rooted)
+		u.pipe(n.Pipe, rooted, false, guarded)
 	case *parse.IfNode:
-		u.walk(n.Pipe, rooted)
-		u.walk(n.List, rooted)
-		u.walk(n.ElseList, rooted)
+		inner := u.pipe(n.Pipe, rooted, true, guarded)
+		u.walk(n.List, rooted, merge(guarded, inner))
+		u.walk(n.ElseList, rooted, guarded)
 	case *parse.RangeNode:
-		u.walk(n.Pipe, rooted)
-		u.walk(n.List, false)
-		u.walk(n.ElseList, rooted)
+		u.pipe(n.Pipe, rooted, false, guarded)
+		u.walk(n.List, false, guarded)
+		u.walk(n.ElseList, rooted, guarded)
 	case *parse.WithNode:
-		u.walk(n.Pipe, rooted)
-		u.walk(n.List, false)
-		u.walk(n.ElseList, rooted)
+		inner := u.pipe(n.Pipe, rooted, true, guarded)
+		u.walk(n.List, false, merge(guarded, inner))
+		u.walk(n.ElseList, rooted, guarded)
 	case *parse.TemplateNode:
-		u.walk(n.Pipe, rooted)
-	case *parse.PipeNode:
-		if n == nil {
-			return
-		}
-		hasDefault := false
-		var names []string
-		var args func(p *parse.PipeNode)
-		args = func(p *parse.PipeNode) {
-			for _, cmd := range p.Cmds {
-				if len(cmd.Args) >= 3 {
-					// index . "key" / index $ "key": a read of the root map.
-					if id, ok := cmd.Args[0].(*parse.IdentifierNode); ok && id.Ident == "index" {
-						if key, ok := cmd.Args[2].(*parse.StringNode); ok && isRoot(cmd.Args[1], rooted) {
-							names = append(names, key.Text)
-						}
-					}
-				}
-				for _, arg := range cmd.Args {
-					switch a := arg.(type) {
-					case *parse.IdentifierNode:
-						if a.Ident == "default" {
-							hasDefault = true
-						}
-					case *parse.FieldNode:
-						if rooted && len(a.Ident) > 0 {
-							names = append(names, a.Ident[0])
-						}
-					case *parse.VariableNode:
-						if len(a.Ident) > 1 && a.Ident[0] == "$" {
-							names = append(names, a.Ident[1])
-						}
-					case *parse.ChainNode:
-						if f, ok := a.Node.(*parse.FieldNode); ok && rooted && len(f.Ident) > 0 {
-							names = append(names, f.Ident[0])
-						}
-					case *parse.PipeNode:
-						args(a)
+		u.pipe(n.Pipe, rooted, false, guarded)
+	}
+}
+
+func merge(a, b map[string]bool) map[string]bool {
+	m := map[string]bool{}
+	for k := range a {
+		m[k] = true
+	}
+	for k := range b {
+		m[k] = true
+	}
+	return m
+}
+
+// pipe records the reads of one pipeline and returns the variables it reads.
+func (u *usage) pipe(n *parse.PipeNode, rooted, optional bool, guarded map[string]bool) map[string]bool {
+	read := map[string]bool{}
+	if n == nil {
+		return read
+	}
+	hasDefault := false
+	var names []string
+	var args func(p *parse.PipeNode)
+	args = func(p *parse.PipeNode) {
+		for _, cmd := range p.Cmds {
+			if len(cmd.Args) >= 3 {
+				// index . "key" / index $ "key": a read of the root map.
+				if id, ok := cmd.Args[0].(*parse.IdentifierNode); ok && id.Ident == "index" {
+					if key, ok := cmd.Args[2].(*parse.StringNode); ok && isRoot(cmd.Args[1], rooted) {
+						names = append(names, key.Text)
 					}
 				}
 			}
-		}
-		args(n)
-		for _, name := range names {
-			u.used[name] = true
-			if !hasDefault {
-				u.required[name] = true
+			for _, arg := range cmd.Args {
+				switch a := arg.(type) {
+				case *parse.IdentifierNode:
+					if a.Ident == "default" {
+						hasDefault = true
+					}
+				case *parse.FieldNode:
+					if rooted && len(a.Ident) > 0 {
+						names = append(names, a.Ident[0])
+					}
+				case *parse.VariableNode:
+					if len(a.Ident) > 1 && a.Ident[0] == "$" {
+						names = append(names, a.Ident[1])
+					}
+				case *parse.ChainNode:
+					if f, ok := a.Node.(*parse.FieldNode); ok && rooted && len(f.Ident) > 0 {
+						names = append(names, f.Ident[0])
+					}
+				case *parse.PipeNode:
+					args(a)
+				}
 			}
 		}
 	}
+	args(n)
+	for _, name := range names {
+		u.used[name] = true
+		read[name] = true
+		if !hasDefault && !optional && !guarded[name] {
+			u.required[name] = true
+		}
+	}
+	return read
 }
 
 // isRoot reports whether n is the root data: dot while rooted, or $.

@@ -61,6 +61,9 @@ func newGetAzureConnectionCmd() *cobra.Command {
 		Long:    `Get one or more Azure connections (authentication credentials).`,
 		Args:    maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -119,6 +122,9 @@ func newGetAzureMonitoringConfigCmd() *cobra.Command {
 		Long:    `Get one or more Azure monitoring configurations.`,
 		Args:    maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err

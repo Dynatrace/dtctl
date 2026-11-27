@@ -75,6 +75,7 @@ func TestListFiltersAreRejectedWithAnID(t *testing.T) {
 		{"intent --app", newGetIntentsCmd, []string{"app/intent", "--app", "other"}, "--app"},
 		{"function --app", newGetFunctionsCmd, []string{"app/fn", "--app", "other"}, "--app"},
 		{"workflow --limit", newGetWorkflowsCmd, []string{"wf-1", "--limit", "5"}, "--limit"},
+		{"scheduling-rule --limit", newGetSchedulingRulesCmd, []string{"r-1", "--limit", "5"}, "--limit"},
 		{"slo --filter", newGetSLOsCmd, []string{"slo-1", "--filter", "x"}, "--filter"},
 		{"notification --type", newGetNotificationsCmd, []string{"n-1", "--type", "x"}, "--type"},
 	}
@@ -136,6 +137,39 @@ func TestArgumentConflictsWithInputFlags(t *testing.T) {
 		err := runRejected(t, c.cmd, c.args...)
 		if err == nil || !strings.Contains(err.Error(), "cannot be combined with") {
 			t.Errorf("%v: error = %v", c.args, err)
+		}
+	}
+}
+
+func TestRunnableParentsRejectStrayArguments(t *testing.T) {
+	for _, c := range []struct {
+		cmd  *cobra.Command
+		args []string
+		want string
+	}{
+		{newInventoryCmd(), []string{"junk"}, "takes no arguments"},
+		{newExecCopilotCmd(), []string{"what", "is", "dql"}, "quote the message"},
+	} {
+		err := runRejected(t, c.cmd, c.args...)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%v: error = %v, want %q", c.args, err, c.want)
+		}
+	}
+}
+
+func TestCloudArgumentAndNameConflict(t *testing.T) {
+	for _, c := range []struct {
+		cmd  *cobra.Command
+		args []string
+	}{
+		{newCreateGCPConnectionCmd(), []string{"a", "--name", "b"}},
+		{newEnableAWSMonitoringCmd(), []string{"id", "--name", "b"}},
+		{newEditGCPMonitoringCmd(), []string{"id", "--name", "b"}},
+		{newUpdateAzureConnectionCmd(), []string{"id", "--name", "b"}},
+	} {
+		err := runRejected(t, c.cmd, c.args...)
+		if err == nil || !strings.Contains(err.Error(), "cannot be combined with --name") {
+			t.Errorf("%s %v: error = %v", c.cmd.Name(), c.args, err)
 		}
 	}
 }

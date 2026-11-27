@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -29,10 +31,12 @@ func TestLeafCommandsValidateArgs(t *testing.T) {
 	var missing []string
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
-		if len(c.Commands()) > 0 {
-			for _, sub := range c.Commands() {
-				walk(sub)
-			}
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+		// A runnable parent is checked too: cobra lets a non-root parent
+		// accept and drop any positional arguments.
+		if len(c.Commands()) > 0 && (c == rootCmd || !c.Runnable() || refusesItself(c)) {
 			return
 		}
 		if !c.Runnable() {
@@ -66,4 +70,14 @@ func TestLeafCommandsValidateArgs(t *testing.T) {
 			t.Errorf("argsExempt lists %q, which no longer lacks an Args validator; remove it", path)
 		}
 	}
+}
+
+// refusesItself reports a group whose RunE only refuses a missing or unknown
+// subcommand; it reads its own arguments to suggest the right one.
+func refusesItself(c *cobra.Command) bool {
+	if c.RunE == nil {
+		return false
+	}
+	name := runtime.FuncForPC(reflect.ValueOf(c.RunE).Pointer()).Name()
+	return strings.HasSuffix(name, ".requireSubcommand") || strings.HasSuffix(name, ".requireSkillsSubcommand")
 }

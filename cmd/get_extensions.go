@@ -34,7 +34,7 @@ Examples:
 `,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectFiltersWithID(cmd, args, "name"); err != nil {
+			if err := rejectFiltersWithID(cmd, args, "name", "limit"); err != nil {
 				return err
 			}
 			name, _ := cmd.Flags().GetString("name")

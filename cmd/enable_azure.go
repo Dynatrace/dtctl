@@ -48,6 +48,9 @@ Examples:
   dtctl enable azure monitoring --name "my-azure-monitoring"`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			// Early flag validation — before any auth/network calls
 			if len(args) == 0 && enableAzureMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")

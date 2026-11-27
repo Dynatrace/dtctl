@@ -43,6 +43,9 @@ Examples:
   dtctl enable aws monitoring --name "my-aws"`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if len(args) == 0 && enableAWSMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")
 			}

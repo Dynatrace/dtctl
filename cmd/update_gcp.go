@@ -30,6 +30,9 @@ Examples:
   dtctl update gcp connection <id> --serviceAccountId "my-reader@project.iam.gserviceaccount.com"`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if updateGCPConnectionServiceAccountID == "" {
 				return fmt.Errorf("--serviceAccountId is required")
 			}
@@ -124,6 +127,9 @@ Examples:
   dtctl update gcp monitoring --name "my-monitoring" --locationFiltering all   # remove the location filter`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if strings.TrimSpace(updateGCPMonitoringConfigLocationFiltering) == "" &&
 				strings.TrimSpace(updateGCPMonitoringConfigFeatureSets) == "" {
 				return fmt.Errorf("at least one of --locationFiltering or --featureSets is required")

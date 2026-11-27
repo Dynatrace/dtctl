@@ -110,7 +110,7 @@ Examples:
 // validateGetActionsInput rejects input the command would otherwise ignore or
 // the API would refuse, naming the flag the user typed.
 func validateGetActionsInput(cmd *cobra.Command, args []string) error {
-	if err := rejectFiltersWithID(cmd, args, "app", "name", "filter"); err != nil {
+	if err := rejectFiltersWithID(cmd, args, "app", "name", "filter", "limit"); err != nil {
 		return err
 	}
 	limits := []struct {

@@ -31,6 +31,9 @@ Examples:
 	  dtctl create gcp connection --name "my-gcp-connection" --serviceAccountId "my-reader@project.iam.gserviceaccount.com"`,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if createGCPConnectionName == "" && len(args) > 0 {
 				createGCPConnectionName = args[0]
 			}

@@ -45,7 +45,7 @@ Examples:
 `,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
+			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access", "limit"); err != nil {
 				return err
 			}
 			cfg, c, printer, err := setup(cmdContext(cmd))
@@ -126,7 +126,7 @@ Examples:
 `,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
+			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access", "limit"); err != nil {
 				return err
 			}
 			cfg, c, printer, err := setup(cmdContext(cmd))
@@ -580,7 +580,7 @@ Examples:
 `,
 		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := rejectFiltersWithID(cmd, args, "type", "types", "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
+			if err := rejectFiltersWithID(cmd, args, "type", "types", "name", "mine", "filter", "sort", "add-fields", "admin-access", "limit"); err != nil {
 				return err
 			}
 			cfg, c, printer, err := setup(cmdContext(cmd))
