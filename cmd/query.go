@@ -424,6 +424,11 @@ Examples:
 			for _, w := range bounds.Warnings {
 				output.FprintWarning(currentStderr(cmdContext(cmd)), "%s", w)
 			}
+			// Refused here, not where live mode starts: every local check
+			// comes before the scope's first request and its line.
+			if live && !currentCaps(cmdContext(cmd)).LongRunningStreams {
+				return &CapabilityError{Feature: "live mode"}
+			}
 			// Every local check has passed. The scope now reads the entry's
 			// segments, which is its first request, and says what it applied;
 			// so a command line refused above sends and prints exactly what
@@ -507,9 +512,6 @@ Examples:
 
 			// Handle live mode
 			if live {
-				if !currentCaps(cmdContext(cmd)).LongRunningStreams {
-					return &CapabilityError{Feature: "live mode"}
-				}
 				// Warn about flags that are not meaningfully applicable in live mode
 				if len(metadataFields) > 0 {
 					output.FprintWarning(currentStderr(cmdContext(cmd)), "--metadata is ignored in live mode (metadata is not displayed during live updates)")

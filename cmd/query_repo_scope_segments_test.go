@@ -279,6 +279,19 @@ func TestQueryLive_SegmentUnavailable(t *testing.T) {
 	require.NotContains(t, stderr, "the query runs unscoped")
 }
 
+// Live mode that the caller may not run is refused before the scope reads or
+// says anything, as every other command line that cannot run is.
+func TestQueryLive_RefusedBeforeTheScopeActs(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, segmentScope)
+
+	code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--live"}, RunOptions{Capabilities: &Capabilities{HostWorkingDirectory: true}})
+	require.NotZero(t, code)
+	require.Contains(t, stderr, "live mode")
+	require.Empty(t, srv.requests())
+	require.NotContains(t, stderr, "repo scope")
+}
+
 // What is typed wins over what is committed: a segment the user also names
 // is sent once, with the user's variables. Together they cannot exceed what a
 // query takes, and that is an error rather than a silent choice.
