@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/norm"
@@ -536,11 +538,40 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // a query that did not answer could have found that other candidate. An id
 // binding is held to more still, see repoScopeIDRefusal.
 func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
+	return repoScopeSetCommandOn(runtime.GOOS, r, c, selectors)
+}
+
+// repoScopeSetCommandOn is repoScopeSetCommand for the system goos names.
+// The line is written for a POSIX shell. cmd.exe does not read its quotes,
+// so there a word that needs them is not one word: a directory named
+// a&calc.exe&b, which a clone may carry, would end the command and start
+// another. On Windows a candidate whose line would hold such a word gets no
+// line, and a note gives the values to type (see repoScopeUnpastable).
+func repoScopeSetCommandOn(goos string, r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
 	e, _ := repoScopeBindings(r, c)
 	if !e.HasBindings() {
 		return ""
 	}
-	return repoScopeSetLine(exec.ShellQuote(c.Name), repoScopeFlags(e), repoScopeDir(r, c), selectors)
+	line := repoScopeSetLine(exec.ShellQuote(c.Name), repoScopeFlags(e), repoScopeDir(r, c), selectors)
+	if repoScopeUnpastable(goos, line) {
+		return ""
+	}
+	return line
+}
+
+// repoScopeUnpastable reports whether line, written for a POSIX shell,
+// cannot be pasted into the shells of goos as it stands. Only Windows has
+// such lines: any character beyond letters, digits, spaces and "_-./\:"
+// is one cmd.exe or PowerShell may read as more than itself (a quote, "&",
+// "%", "^", "|", "<", ">", "(", ")", "!", "$", ";", "=", ",", "@", "+" and
+// the like), so a line holding one is not proposed there.
+func repoScopeUnpastable(goos, line string) bool {
+	if goos != "windows" {
+		return false
+	}
+	return strings.ContainsFunc(line, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(` _-./\:`, r)
+	})
 }
 
 // repoScopeHeldNote says what the scope file's entries for this environment
@@ -888,6 +919,19 @@ func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]str
 	case r.Unit == "." && r.Dir != ".":
 		hint = fmt.Sprintf("each line covers the whole repository; add --path %s to cover only %s", exec.ShellQuote(r.Dir), r.Dir)
 	}
+	// A template is filled in by hand, but its --path and selectors are
+	// pasted with it: where they would need quoting this system's shells
+	// do not read, they are left for the user to add.
+	if repoScopeUnpastable(runtime.GOOS, repoScopeSetLine("x", nil, dir, selectors)) {
+		if hint != "" {
+			hint += "; "
+		}
+		hint += "on Windows the --config, --context and --path of this run would need quoting, so add them yourself, quoted for your shell"
+		if dir != "." {
+			hint += fmt.Sprintf(" (--path %s)", strconv.Quote(dir))
+		}
+		dir, selectors = ".", nil
+	}
 	links := []string{
 		repoScopeSetLine("<name>", []string{"--namespace", "<namespace>", "--workload", "<workload>"}, dir, selectors),
 		repoScopeSetLine("<name>", []string{"--service-name", "<service.name>"}, dir, selectors),
@@ -967,7 +1011,7 @@ func repoScopeSharedNameNotes(r *reposcope.DiscoveryReport) []string {
 func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 	var notes []string
 	for _, c := range r.Candidates {
-		_, unheld := repoScopeBindings(r, c)
+		e, unheld := repoScopeBindings(r, c)
 		if c.SetCommand != "" {
 			for _, u := range unheld {
 				notes = append(notes, fmt.Sprintf("candidate %d's line leaves %s out, which a scope file cannot hold: %s", c.Rank, u.flags, u.problem))
@@ -989,6 +1033,15 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 		why := repoScopeIDRefusal(r, c, true)
 		switch {
+		case e.HasBindings():
+			// Something binds it, and still it has no line: only a line
+			// this system's shells would not read as written is withheld.
+			values := repoScopeFlags(e)
+			if dir := repoScopeDir(r, c); dir != "." {
+				values = append(values, "--path", exec.ShellQuote(dir))
+			}
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: on Windows it would need quoting that cmd.exe and PowerShell do not read as a POSIX shell does, so pasting it could run something else; to save it, type dtctl repo-scope set with the --config and --context of this run and these values, quoted for your shell: %s %s",
+				c.Rank, exec.ShellQuote(c.Name), strings.Join(values, " ")))
 		case repoScopeUnexplained(c):
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: neither its k8s.workload.name nor its service.name is a name discovery sent, so nothing ties it to this code%s",
 				c.Rank, repoScopeConfirmHint(c)))

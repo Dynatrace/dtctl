@@ -121,7 +121,7 @@ func TestRepoScopeSetLineBindsNoMoreThanWasRead(t *testing.T) {
 			r.Unit, r.Dir = ".", "."
 			var lines []string
 			for i, c := range r.Candidates {
-				r.Candidates[i].SetCommand = repoScopeSetCommand(&r, c, nil)
+				r.Candidates[i].SetCommand = repoScopeSetCommandOn("linux", &r, c, nil)
 				lines = append(lines, r.Candidates[i].SetCommand)
 			}
 			require.Equal(t, tc.want, lines)
@@ -137,6 +137,56 @@ func TestRepoScopeDoubtOfAnUnexplainedRow(t *testing.T) {
 	require.Equal(t, ": one candidate, and neither its workload nor its service name is a name discovery sent", repoScopeDoubt(r))
 	r.Candidates[0] = reposcope.Candidate{Rank: 1, Tier: "substring", Services: []string{"SERVICE-0000000000000001"}}
 	require.Equal(t, ": one candidate, matched by a substring of its name rather than the whole of it", repoScopeDoubt(r), "an entity found by its name")
+}
+
+// The set line is quoted for a POSIX shell, and cmd.exe does not read those
+// quotes: a directory a clone may carry, a&calc.exe&b, would end the command
+// and start another when the line is pasted. The decision takes the system
+// as a parameter; nothing here ran on Windows.
+func TestRepoScopeSetLineOnWindows(t *testing.T) {
+	const uid = "11111111-2222-3333-4444-555555555555"
+	candidate := reposcope.Candidate{Rank: 1, Name: "checkout", ClusterUID: uid, Namespace: "payments", Workload: "checkout", Tier: "exact", Spans: 10}
+	report := func(unit string) *reposcope.DiscoveryReport {
+		return &reposcope.DiscoveryReport{Unit: unit, Dir: unit, Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{candidate}}
+	}
+	const plain = "dtctl --context prod repo-scope set checkout --cluster-uid " + uid + " --namespace payments --workload checkout"
+	context := []string{"--context", "prod"}
+
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		require.Equal(t, plain, repoScopeSetCommandOn(goos, report("."), candidate, context), goos)
+		require.Equal(t, plain+" --path services/checkout", repoScopeSetCommandOn(goos, report("services/checkout"), candidate, context), goos)
+	}
+	hostile := report("services/a&calc.exe&b")
+	require.Equal(t, plain+" --path 'services/a&calc.exe&b'", repoScopeSetCommandOn("linux", hostile, candidate, context))
+	require.Empty(t, repoScopeSetCommandOn("windows", hostile, candidate, context))
+	require.Equal(t, []string{"candidate 1 has no set line: on Windows it would need quoting that cmd.exe and PowerShell do not read as a POSIX shell does, " +
+		"so pasting it could run something else; to save it, type dtctl repo-scope set with the --config and --context of this run and these values, quoted for your shell: " +
+		"checkout --cluster-uid " + uid + " --namespace payments --workload checkout --path 'services/a&calc.exe&b'"}, repoScopeNoLineNotes(hostile))
+
+	for value, unpastable := range map[string]bool{
+		"services/checkout":      false,
+		`C:\Users\dev\config`:    false,
+		"prod":                   false,
+		"services/a&calc.exe&b":  true,
+		"100%PATH%":              true,
+		"a^b":                    true,
+		"my dir":                 false, // a space alone is quoted, and the quote is what is refused
+		"'my dir'":               true,
+		"a|b":                    true,
+		"$(calc)":                true,
+		"a;b":                    true,
+		"café/résumé":            false,
+		"=cmd":                   true,
+		"a,b":                    true,
+		"`calc`":                 true,
+		"a\"b":                   true,
+		"payments staging (old)": true,
+	} {
+		require.Equal(t, unpastable, repoScopeUnpastable("windows", value), value)
+		require.False(t, repoScopeUnpastable("linux", value), value)
+	}
+	// A selector that needs quoting withholds the line as well.
+	require.Empty(t, repoScopeSetCommandOn("windows", report("."), candidate, []string{"--context", exec.ShellQuote("payments staging")}))
 }
 
 // What the scope file already holds decides what running a line does: set
