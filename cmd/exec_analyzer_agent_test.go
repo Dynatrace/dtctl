@@ -105,6 +105,7 @@ func TestExecAnalyzerNoWaitRejectsTimeout(t *testing.T) {
 	code, env := runAgentEnvelope(t, execAnalyzerArgs("--no-wait", "--timeout", "60"))
 	require.Equal(t, client.ExitUsageError, code)
 	assert.Contains(t, fmt.Sprint(env), "--timeout")
+	assert.Contains(t, fmt.Sprint(env), "validation_error")
 
 	// Without an explicit --timeout, --no-wait is accepted.
 	code, _ = runAgentEnvelope(t, execAnalyzerArgs("--no-wait"))
