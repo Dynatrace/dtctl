@@ -542,7 +542,8 @@ type loginLevels struct {
 // context that already exists keeps the level it stores, because logging in
 // again is how an expired session is renewed and must not change what the
 // context may do; flagLevel, the flag's default, applies to a context that is
-// new or stores no level, and is saved only to a new one.
+// new or stores no level, and is saved only to a new one outside a project
+// config.
 //
 // The scopes follow the level dtctl enforces, not the declared one. The two
 // differ in an auto-discovered project config, whose level is clamped to what
@@ -582,6 +583,11 @@ func loginSafetyLevels(cfg *config.Config, global []config.NamedContext, context
 			levels.declared = stored
 			levels.source = loginLevelFromContext
 		}
+	} else if cfg.IsLocal() {
+		// A new context in a project config stores no level: dtctl enforces
+		// the level of the token's global binding there, and the default,
+		// written to the file, would declare one nobody chose.
+		levels.saved = ""
 	}
 
 	var refusal *diagnostic.Error

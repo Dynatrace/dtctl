@@ -2186,6 +2186,70 @@ func TestAuthLogin_ContextWithoutALevelIsNotGivenOne(t *testing.T) {
 	}
 }
 
+// TestAuthLogin_NewProjectContextIsNotGivenTheDefault: a login that creates a
+// context in a project directory without --safety-level must not write the
+// default into .dtctl.yaml. Nobody chose it, and dtctl enforces the level of
+// the token's global binding there, so the file would declare more than holds.
+func TestAuthLogin_NewProjectContextIsNotGivenTheDefault(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", config.SafetyLevelReadOnly})
+	localPath := setupLoginProject(t, global, loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly}))
+
+	stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "fresh", "--environment", envURL, "--token-name", "prod-oauth")
+	if runErr != nil || !granted {
+		t.Fatalf("login: err %v, granted %v\n%s", runErr, granted, stderr)
+	}
+	if want := "Safety level: readonly\n"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, stderr)
+	}
+	after, err := config.LoadFrom(localPath)
+	if err != nil {
+		t.Fatalf("load the project file: %v", err)
+	}
+	nc, err := after.GetContext("fresh")
+	if err != nil {
+		t.Fatalf("context not saved: %v", err)
+	}
+	if nc.Context.SafetyLevel != "" {
+		t.Errorf("the project file gives the new context the level %q, want none", nc.Context.SafetyLevel)
+	}
+	raw, err := os.ReadFile(localPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(raw), "safety-level:"); got != 1 {
+		t.Errorf("the project file has %d safety-level keys, want only the one of \"project\":\n%s", got, raw)
+	}
+
+	// The next login finds a context without a level, not one that declares
+	// the default.
+	stderr, _, runErr = runBrowserLogin(t, "--context", "fresh")
+	if !errors.Is(runErr, errBrowserLoginStubbed) {
+		t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+	}
+	if want := `The default level is readwrite-all; the global config allows token "prod-oauth" readonly, so the login requests readonly scopes.`; !strings.Contains(stderr, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, stderr)
+	}
+
+	t.Run("--safety-level is saved", func(t *testing.T) {
+		stderr, runErr, _ := runClientCredentialsLogin(t, "--context", "pinned", "--environment", envURL, "--token-name", "prod-oauth", "--safety-level", "readonly")
+		if runErr != nil {
+			t.Fatalf("login: %v\n%s", runErr, stderr)
+		}
+		after, err := config.LoadFrom(localPath)
+		if err != nil {
+			t.Fatalf("load the project file: %v", err)
+		}
+		nc, err := after.GetContext("pinned")
+		if err != nil {
+			t.Fatalf("context not saved: %v", err)
+		}
+		if nc.Context.SafetyLevel != config.SafetyLevelReadOnly {
+			t.Errorf("level %q, want readonly", nc.Context.SafetyLevel)
+		}
+	})
+}
+
 // TestAuthLogin_InvalidLevelInTheGlobalBindingIsRefused: in a project
 // directory a global context that binds the login's token to a level that is
 // not a level stops the login before a token is requested. dtctl ranks such a

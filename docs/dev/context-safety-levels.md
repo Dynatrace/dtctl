@@ -223,7 +223,8 @@ The rules live in `loginSafetyLevels` in `cmd/auth.go`:
 - Not given, context exists: the stored level is kept, and a context that
   stores none is left without one. A stored value that is not a level is
   refused before a token is requested.
-- Not given, new context: the default is saved.
+- Not given, new context: the default is saved. In an auto-discovered project
+  config nothing is saved, as for a context that stores no level.
 
 The scopes follow the level dtctl *enforces*, which in an auto-discovered
 project config is the declared level clamped to the global binding of the token
