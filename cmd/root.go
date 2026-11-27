@@ -939,7 +939,7 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 		detail := &output.ErrorDetail{
 			Code:       code,
-			Message:    queryErr.Error(),
+			Message:    errorText(queryErr),
 			StatusCode: queryErr.StatusCode,
 		}
 		addQueryErrorHints(detail, queryErr)
@@ -1091,7 +1091,7 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 		return &output.ErrorDetail{
 			Code:        "task_log_unavailable",
-			Message:     taskLogErr.Error(),
+			Message:     taskLogErrorText(taskLogErr),
 			Suggestions: suggestions,
 		}
 	}

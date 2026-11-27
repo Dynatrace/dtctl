@@ -209,6 +209,28 @@ func TestCheckResponse_SiblingConstraintViolations(t *testing.T) {
 	}
 }
 
+func TestCheckResponse_DetailsAndSiblingViolationsCombined(t *testing.T) {
+	both := `{"error":{"message":"Constraints violated.","details":"overloaded","constraintViolations":[{"path":"scope","message":"is required"}]}}`
+	if got := CheckResponse(respFor(t, 400, both)).(*APIError).Details; got != "overloaded; scope: is required" {
+		t.Errorf("Details = %q", got)
+	}
+	empty := `{"error":{"message":"Constraints violated.","details":{},"constraintViolations":[{"path":"scope","message":"is required"}]}}`
+	if got := CheckResponse(respFor(t, 400, empty)).(*APIError).Details; got != "scope: is required" {
+		t.Errorf("Details with empty details object = %q", got)
+	}
+}
+
+func TestParseAPIError(t *testing.T) {
+	a := ParseAPIError(500, "fb", []byte(`{"error":{"message":"m","details":"d"}}`))
+	if a.Message != "m" || a.Details != "d" {
+		t.Errorf("got %+v", a)
+	}
+	a = ParseAPIError(502, "Bad Gateway", []byte("<html>oops</html>"))
+	if a.Message != "Bad Gateway" || a.Details != "<html>oops</html>" {
+		t.Errorf("got %+v", a)
+	}
+}
+
 func TestCheckResponse_RawBodyKeptWhenNothingParsed(t *testing.T) {
 	body := `{"error":{"message":"Nope.","extra":{"a":1}}}`
 	apiErr := CheckResponse(respFor(t, 400, body)).(*APIError)

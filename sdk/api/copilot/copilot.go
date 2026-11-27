@@ -160,7 +160,7 @@ func (h *Handler) ChatStream(ctx context.Context, text string, state *Conversati
 	if resp.IsError() {
 		body, _ := io.ReadAll(resp.RawBody())
 		_ = resp.RawBody().Close()
-		return nil, fmt.Errorf("failed to send message: status %d: %s", resp.StatusCode(), string(body))
+		return nil, fmt.Errorf("failed to send message: %w", httpclient.NewAPIErrorFromBody(resp.StatusCode(), string(body)))
 	}
 
 	defer func() {

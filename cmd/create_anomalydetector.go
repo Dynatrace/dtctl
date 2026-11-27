@@ -196,7 +196,7 @@ func printDryRunAnomalyDetector(cmd *cobra.Command, body map[string]any, invalid
 
 	switch {
 	case skipped != nil:
-		output.FprintWarning(currentStderr(ctx), "schema validation skipped: %v", skipped)
+		output.FprintWarning(currentStderr(ctx), "schema validation skipped: %s", errorText(skipped))
 	case !agentMode(ctx):
 		output.FprintSuccess(currentStderr(ctx), "Schema validation passed")
 	}

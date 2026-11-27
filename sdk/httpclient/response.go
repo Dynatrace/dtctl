@@ -24,7 +24,16 @@ func CheckResponse(resp *resty.Response) error {
 		return nil
 	}
 
-	msg := resp.Status()
+	return ParseAPIError(resp.StatusCode(), resp.Status(), resp.Body())
+}
+
+// ParseAPIError builds an [*APIError] from a raw error response body: the
+// Dynatrace error envelope supplies the message and details, and fallbackMsg
+// is used when none is found. When nothing is parsed, the capped body is kept
+// in Details. It is what [CheckResponse] uses, for callers that hold only the
+// status and body.
+func ParseAPIError(statusCode int, fallbackMsg string, body []byte) *APIError {
+	msg := fallbackMsg
 	details := ""
 
 	// Try to extract message from Dynatrace error envelope.
@@ -39,15 +48,20 @@ func CheckResponse(resp *resty.Response) error {
 		} `json:"error"`
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(resp.Body(), &envelope); err == nil {
+	if err := json.Unmarshal(body, &envelope); err == nil {
 		if envelope.Error != nil && envelope.Error.Message != "" {
 			msg = envelope.Error.Message
 			// The top-level message is often generic (e.g. "Constraints
 			// violated."); the actionable specifics live in "details" or in
 			// a sibling "constraintViolations".
 			details = formatErrorDetails(envelope.Error.Details)
-			if details == "" && len(envelope.Error.ConstraintViolations) > 0 {
-				details = formatErrorDetails(json.RawMessage(`{"constraintViolations":` + string(envelope.Error.ConstraintViolations) + `}`))
+			if len(envelope.Error.ConstraintViolations) > 0 {
+				if cv := formatErrorDetails(json.RawMessage(`{"constraintViolations":` + string(envelope.Error.ConstraintViolations) + `}`)); cv != "" {
+					if details != "" {
+						details += "; "
+					}
+					details += cv
+				}
 			}
 		} else if envelope.Message != "" {
 			msg = envelope.Message
@@ -56,10 +70,10 @@ func CheckResponse(resp *resty.Response) error {
 	details = TruncateBody(details)
 	// Nothing parsed out: keep the raw body (capped) so no explanation is lost.
 	if details == "" {
-		details = TruncateBody(strings.TrimSpace(resp.String()))
+		details = TruncateBody(strings.TrimSpace(string(body)))
 	}
 
-	return NewAPIError(resp.StatusCode(), msg, details)
+	return NewAPIError(statusCode, msg, details)
 }
 
 // formatErrorDetails renders the "details" of a Dynatrace platform error
@@ -70,7 +84,7 @@ func CheckResponse(resp *resty.Response) error {
 // is joined as "path: message; ..." entries. For non-standard shapes the raw
 // JSON bytes are returned as-is. Returns "" when empty.
 func formatErrorDetails(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
+	if t := strings.TrimSpace(string(raw)); t == "" || t == "null" || t == "{}" {
 		return ""
 	}
 

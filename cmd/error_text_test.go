@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/Dynatrace/dtctl/pkg/diagnostic"
+	"github.com/Dynatrace/dtctl/pkg/resources/workflow"
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
@@ -63,4 +65,15 @@ func TestAPIErrorBodyStillRendered(t *testing.T) {
 		require.Contains(t, stderr, "Constraints violated.")
 		require.Contains(t, stderr, "retention: must be at least 1 day")
 	})
+}
+
+func TestTaskLogErrorTextKeepsPerTaskDetails(t *testing.T) {
+	e := &workflow.TaskLogError{ExecutionID: "ex1", Total: 2, Failed: []workflow.TaskLogFailure{
+		{Task: "a", Err: httpclient.NewAPIError(500, "boom", "detail-a")},
+		{Task: "b", Err: httpclient.NewAPIError(403, "denied", "detail-b")},
+	}}
+	got := taskLogErrorText(e)
+	if !strings.Contains(got, "detail-a") || !strings.Contains(got, "detail-b") {
+		t.Errorf("per-task details lost: %q", got)
+	}
 }
