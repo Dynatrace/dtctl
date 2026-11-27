@@ -21,6 +21,15 @@ change nothing under `sdk/` (check [CHANGELOG.md](CHANGELOG.md) for what actuall
 moved), and the version jumped from `sdk/v0.2.0` straight to the CLI's line when
 this alignment was introduced.
 
+**Upgrade the two modules together.** A program that imports the dtctl root
+module (for example `pkg/engine`) as well as this one must keep both on the same
+version. The root module of a version is compiled against the SDK of that
+version only, and the SDK makes no stability promise during v0, so a build that
+selects a newer `sdk/` tag than its root module may not compile. The root module
+`v0.47.0` does not compile against the SDK release after `sdk/v0.47.0`, where
+`api/codelevelanalysis.Kind` became a type: the build fails in
+`pkg/resources/profiling`, whether or not the program uses profiling.
+
 ## What's in the SDK
 
 ### Infrastructure
@@ -43,6 +52,7 @@ Thin, typed Go clients for Dynatrace REST APIs. Each package covers one API surf
 | `api/appengine` | App Engine (functions) |
 | `api/bucket` | Grail bucket management |
 | `api/classicpipelinestranslate` | Classic pipeline translation |
+| `api/codelevelanalysis` | Code-level analysis (method hotspots, memory allocations), experimental |
 | `api/copilot` | Davis Copilot completions |
 | `api/document` | Documents (dashboards, notebooks) + trash |
 | `api/edgeconnect` | EdgeConnect management |

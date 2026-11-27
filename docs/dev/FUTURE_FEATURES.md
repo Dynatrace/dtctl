@@ -447,10 +447,9 @@ with a known place in the code.
   throttle waits and the polls, and the poll and throttle timings are package
   variables only the SDK's own tests can shorten. `Response.Status` and
   `FocusRow.Relation` are untyped strings.
-- **`Failure` drops the API's error details.** `ClassifyError` copies the
-  message of an `httpclient.APIError` and not its `Details`; an error it does
-  not classify has no display-safe message at all (its text can hold the
-  request URL).
+- **An unclassified analysis error has no display-safe message.** The text of
+  an error `ClassifyError` reports false for is the SDK's and can hold the
+  request URL or the token of the task.
 - **Any JSON object passes for a completed analysis.** A 200 whose body is
   `{}` or an object of another shape has no rows in any view and reads as a
   process without samples (`checkResult` in `analysis.go`). The keys each view
@@ -464,6 +463,29 @@ with a known place in the code.
   `isTokenRefreshError` in `cmd/root.go`). `exec profiling` types the errors
   it words itself; `cmd/root.go` knows that type by name in four places, which
   an interface the root asks for would replace.
+  Three poll errors and the submit's transport error are still untyped, so
+  their code follows the task token or the entity id their text quotes (a
+  token that holds `config` gives `config_error`); only the timeout was given
+  a fixed code. `suggest.ParseFlagError` and `suggest.ParseCommandError`
+  rebuild a bare error for any text that holds `unknown flag` or `unknown
+  command`, which drops the chain of every command's error. And a refused
+  value is `validation_error` with exit code 1 here, where the root ties that
+  code to exit code 2: kept from 0.47.0, to be decided with the interface.
+- **The envelope's window span rounds to minutes.** A window under 30 seconds
+  shows `"span":"0s"` beside correct bounds (`spanString` in
+  `cmd/query_window.go`, shared by every command with a window).
+- **The handler keeps the uncompacted response** for the life of a result,
+  data points included, and the three tree walks recurse one Go frame per
+  level of the tree.
+- **A Node.js frame with a Windows path** keeps its `node_modules\` prefix and
+  gets a `\/` in its label (`nodeLabel` in `nodes.go`). Whether the API sends
+  backslashes is not known; a cure changes labels people search for.
+- **Allocation frames of the agent's bridge classes survive `appOnly`.**
+  `isAgentFrame` reads `className`, which an allocation node does not have;
+  its name-only match covers the prefixes alone, and the comment above it says
+  otherwise.
+- **A redirect loop is retried by the shared client** like a failed dial
+  (`sdk/httpclient/retry.go`), for every API; part of the retry policy above.
 - **An empty output format beside `--plain` is read two ways.**
   `output.IsTabularFormat` treats `--output=` as a table that `--plain` turns
   into JSON, and `output.NewPrinterWithOpts` turns only `table` and `wide`
