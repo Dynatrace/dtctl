@@ -664,7 +664,7 @@ func TestRepoScopeDelete(t *testing.T) {
 	require.Zero(t, code)
 	var deleted repoScopeDeleted
 	agentResult(t, stdout, &deleted)
-	require.Equal(t, repoScopeDeleted{Deleted: true, Name: "ledger", File: reposcope.FileName, Environment: repoScopeTestEnvHost}, deleted)
+	require.Equal(t, repoScopeDeleted{Deleted: true, Name: "ledger", File: reposcope.FileName, Environment: repoScopeTestEnvHost, FileRemoved: true}, deleted)
 	_, err := os.Stat(filepath.Join(repo, reposcope.FileName))
 	require.ErrorIs(t, err, os.ErrNotExist)
 }

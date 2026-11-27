@@ -143,6 +143,22 @@ func TestRepoScopeCurrentTakesAutoAsTheTerminalForm(t *testing.T) {
 	}
 }
 
+// The envelope of a delete says, like the terminal does, that the file went
+// with its last entry.
+func TestRepoScopeDeleteSaysWhenTheFileWasRemoved(t *testing.T) {
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, monorepoScope)
+	var deleted repoScopeDeleted
+	_, stdout, _ := runRepoScoped([]string{"repo-scope", "delete", "ledger", "--agent"}, RunOptions{})
+	agentResult(t, stdout, &deleted)
+	require.Equal(t, repoScopeDeleted{Deleted: true, Name: "ledger", File: reposcope.FileName, Environment: repoScopeTestEnvHost}, deleted)
+	require.Contains(t, stdout, `"fileRemoved":false`)
+	_, stdout, _ = runRepoScoped([]string{"repo-scope", "delete", "checkout", "--agent"}, RunOptions{})
+	agentResult(t, stdout, &deleted)
+	require.True(t, deleted.FileRemoved)
+	require.NoFileExists(t, filepath.Join(repo, reposcope.FileName))
+}
+
 // Without a scope file there is no entry to find and no file to name: the
 // answer says that the repository has none, and how to get one.
 func TestRepoScopeNamedEntryWithoutAFile(t *testing.T) {

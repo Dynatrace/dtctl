@@ -641,6 +641,9 @@ type repoScopeDeleted struct {
 	Name        string `json:"name"`
 	File        string `json:"file"`
 	Environment string `json:"environment"`
+	// FileRemoved says the entry was the file's last, and the file went
+	// with it.
+	FileRemoved bool `json:"fileRemoved"`
 }
 
 // deleteRepoScope removes the named entry for the current context's
@@ -661,7 +664,7 @@ func deleteRepoScope(cmd *cobra.Command, name string) error {
 	if agentMode(ctx) {
 		printer := newPrinterCtx(ctx)
 		enrichAgent(printer, "delete", "repo-scope")
-		return printer.Print(repoScopeDeleted{Deleted: true, Name: name, File: reposcope.FileName, Environment: scope.host})
+		return printer.Print(repoScopeDeleted{Deleted: true, Name: name, File: reposcope.FileName, Environment: scope.host, FileRemoved: scope.file.Empty()})
 	}
 	output.FprintSuccess(currentStderr(ctx), "Repo scope %q deleted for %s", name, scope.host)
 	if scope.file.Empty() {
