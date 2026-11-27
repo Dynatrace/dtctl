@@ -107,12 +107,15 @@ const (
 // and nothing. Matching on record fields is exact, so "payment_service" in a
 // pom.xml has to reach Dynatrace as "payment-service" too. Names in stopWords
 // and names shorter than minTokenRunes or longer than maxTokenRunes have none.
+// The upper bound is on the longest spelling, the words joined by a
+// separator, since every spelling is sent: 252 characters of camelCase are 378
+// that way.
 func variants(raw string) []string {
 	base := baseName(raw)
 	words := splitWords(base)
 	joined := strings.Join(words, "")
 	if len(words) == 0 || stopWords[strings.Join(words, "-")] || stopWords[joined] ||
-		utf8.RuneCountInString(joined) < minTokenRunes || utf8.RuneCountInString(base) > maxTokenRunes {
+		utf8.RuneCountInString(joined) < minTokenRunes || longestSpelling(raw) > maxTokenRunes {
 		return nil
 	}
 	var out []string
@@ -124,6 +127,13 @@ func variants(raw string) []string {
 		}
 	}
 	return out
+}
+
+// longestSpelling is the length in characters of the longest spelling raw is
+// sent in: the name as written, or its words joined by a separator.
+func longestSpelling(raw string) int {
+	base := baseName(raw)
+	return max(utf8.RuneCountInString(base), utf8.RuneCountInString(strings.Join(splitWords(base), "-")))
 }
 
 // baseName strips what is not part of a name: everything up to the last '/'

@@ -304,6 +304,9 @@ func checkTerms(terms []string) ([]string, error) {
 		case utf8.RuneCountInString(term) > maxTokenRunes:
 			return nil, &InvalidError{Source: "--term",
 				Msg: fmt.Sprintf("%q is longer than the %d characters a workload or service name has", term, maxTokenRunes)}
+		case longestSpelling(term) > maxTokenRunes:
+			return nil, &InvalidError{Source: "--term",
+				Msg: fmt.Sprintf("%q is sent with its words joined, which is longer than the %d characters a workload or service name has", term, maxTokenRunes)}
 		case len(variants(term)) == 0:
 			return nil, &InvalidError{Source: "--term",
 				Msg: fmt.Sprintf("%q is not looked for: a name needs at least %d letters or digits and must not be a generic word such as api, server or web, which every environment holds many of",

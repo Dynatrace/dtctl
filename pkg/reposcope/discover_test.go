@@ -386,6 +386,19 @@ func TestPlan_AnOverlongNameIsNotAName(t *testing.T) {
 
 	_, err = PlanDiscovery(fstest.MapFS{}, ".", []string{long})
 	require.ErrorContains(t, err, "is longer than the 253 characters a workload or service name has")
+
+	// The bound holds for every spelling a name is sent in: one of 252
+	// characters in camelCase is 378 with its words joined by "-".
+	camel := strings.Repeat("aB", 126)
+	_, err = PlanDiscovery(fstest.MapFS{}, ".", []string{camel})
+	require.ErrorContains(t, err, "is sent with its words joined, which is longer than the 253 characters a workload or service name has")
+	p, err = PlanDiscovery(fstest.MapFS{"go.mod": {Data: []byte("module example.invalid/" + camel + "\n")}}, ".", nil)
+	require.NoError(t, err)
+	assert.Empty(t, p.Sent)
+	atBound := strings.Repeat("aB", 84) + "c"
+	require.Len(t, variants(atBound), 4)
+	assert.Len(t, variants(atBound)[0], maxTokenRunes, "253 characters with the separators are within the bound")
+	assert.Empty(t, variants(atBound+"d"))
 }
 
 // A repository with more source files than discovery reads still gets a plan
