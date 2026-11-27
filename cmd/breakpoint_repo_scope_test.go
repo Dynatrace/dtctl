@@ -636,8 +636,8 @@ func TestCreateBreakpoint_RepoScopeDryRun(t *testing.T) {
 		{"the hint turned off", "", map[string]string{noRepoScopeEnv: "1"},
 			"Dry run: would create breakpoint at A.java:1 in workspace %s, which must have filters; --filters key:value sets them"},
 	} {
-		for _, filters := range [][]string{nil, {webSetJSON}} {
-			t.Run(tc.name, func(t *testing.T) {
+		for held, filters := range map[string][]string{"a workspace without filters": nil, "a workspace with filters": {webSetJSON}} {
+			t.Run(tc.name+", "+held, func(t *testing.T) {
 				srv := newLiveDebuggerStub(t, "readonly", filters...)
 				srv.activeRules = 2
 				repo := filepath.Base(chdirTestRepo(t, breakpointScope))
@@ -832,4 +832,80 @@ func TestWorkspaceHolds(t *testing.T) {
 	empty := livedebugger.FilterSet{Labels: []livedebugger.FilterField{{Field: "service.name"}}}
 	require.True(t, workspaceHolds([]livedebugger.FilterSet{label("service.name", "a"), {}, empty}, want))
 	require.False(t, workspaceHolds([]livedebugger.FilterSet{{}}, want))
+}
+
+// unfilterableScope links entries a workspace cannot be filtered by: one of
+// service ids only, which are never sent, and one of filter segments only,
+// which a workspace does not take.
+const unfilterableScope = `environments:
+  127.0.0.1:
+    - name: ids
+      services: [SERVICE-0123456789ABCDEF]
+    - name: segments
+      path: services/segments
+      segments:
+        - id: Ab3dEf9hIjk
+`
+
+// An entry that renders no filter set sets none: --repo-scope with it is
+// refused on create and update, real run and dry run, before anything is
+// sent. Sending the empty list would clear the workspace's filters.
+func TestBreakpoint_AnEntryWithoutFilterSetsIsRefused(t *testing.T) {
+	for _, entry := range []string{"ids", "segments"} {
+		for _, argv := range [][]string{
+			{"create", "breakpoint", "A.java:1"},
+			{"update", "breakpoint"},
+		} {
+			for _, mode := range []string{"", "--dry-run"} {
+				t.Run(entry+"/"+argv[0]+mode, func(t *testing.T) {
+					srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+					chdirTestRepo(t, unfilterableScope)
+					args := slices.Concat(argv, []string{"--repo-scope", entry, "--agent", "--yes"})
+					if mode != "" {
+						args = append(args, mode)
+					}
+
+					code, stdout, _ := runRepoScoped(args, RunOptions{})
+					require.Equal(t, 2, code, stdout)
+					detail := agentError(t, stdout)
+					require.Equal(t, "validation_error", detail.Code)
+					require.True(t, strings.HasPrefix(detail.Message, `--repo-scope: entry "`+entry+`" `), detail.Message)
+					require.True(t, strings.HasSuffix(detail.Message, "to set filters"), detail.Message)
+					require.Empty(t, srv.ops())
+				})
+			}
+		}
+	}
+}
+
+// The workspace line is for a person reading a listing. An agent's envelope
+// and structured output carry no such line, on either stream.
+func TestBreakpoint_WorkspaceLineIsForAPersonOnly(t *testing.T) {
+	for _, tc := range []struct {
+		mode []string
+		want bool
+	}{
+		{[]string{"--no-agent"}, true},
+		{[]string{"--no-agent", "-o", "wide"}, true},
+		{[]string{"--agent"}, false},
+		{[]string{"--no-agent", "-o", "json"}, false},
+		{[]string{"--no-agent", "-o", "yaml"}, false},
+	} {
+		for _, argv := range [][]string{{"get", "breakpoints"}, {"get", "snapshots", "A.java:1"}} {
+			t.Run(strings.Join(slices.Concat(argv[:2], tc.mode), " "), func(t *testing.T) {
+				srv := newLiveDebuggerStub(t, "readonly")
+				srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+				ws := filepath.Base(chdirTestRepo(t, breakpointScope)) + "/checkout"
+
+				code, stdout, stderr := runRepoScoped(slices.Concat(argv, tc.mode), RunOptions{})
+				require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+				require.NotContains(t, stdout, "workspace: ")
+				if tc.want {
+					require.Contains(t, stderr, "workspace: "+ws+"\n")
+				} else {
+					require.NotContains(t, stderr, "workspace: ")
+				}
+			})
+		}
+	}
 }

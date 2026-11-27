@@ -174,8 +174,10 @@ func TestBreakpointWorkspaceIsSentAsNamedAndShownSafe(t *testing.T) {
 		{"update", "breakpoint", "dtctl-rule-0001", "--enabled=false"}, {"delete", "breakpoint", "--all", "--yes"},
 	} {
 		stub := newLiveDebuggerStub(t, "readwrite-all", `{"labels":[{"field":"k8s.namespace.name","values":["payments"]}]}`)
+		stub.rules = []interface{}{ruleAt("A.java", 1, "")}
 		chdirHostileRepo(t, "", nil)
-		_, stdout, stderr := runRepoScoped(args, RunOptions{})
+		code, stdout, stderr := runRepoScoped(args, RunOptions{})
+		require.Zero(t, code, "%q: %s", args, stderr)
 		require.Equal(t, []string{hostileName}, stub.projectPaths(), "%q", args)
 		expectTerminalSafe(t, stdout+stderr, args)
 		if args[1] == "breakpoints" {
