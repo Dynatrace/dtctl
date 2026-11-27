@@ -486,7 +486,7 @@ func showRepoScope(cmd *cobra.Command, verb, name string) error {
 	// A Status is one value. A format that prints rows would print its
 	// address, or a row of its fields.
 	format := outputFormat(ctx)
-	terminal := format == "" || format == "table" || format == "wide"
+	terminal := format == "" || format == "table" || format == "wide" || format == output.FormatAuto
 	if !terminal && !slices.Contains([]string{"json", "yaml", "yml", "toon"}, format) {
 		return &reposcope.InvalidError{Source: "-o " + format,
 			Msg: fmt.Sprintf("repo-scope %s prints one entry, not rows; use -o table, -o json, -o yaml or -o toon", verb)}

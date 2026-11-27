@@ -130,6 +130,19 @@ func TestRepoScopeListRefusesAFormatItCannotPrint(t *testing.T) {
 	}
 }
 
+// -o auto is the format a terminal gets when none is named.
+func TestRepoScopeCurrentTakesAutoAsTheTerminalForm(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, monorepoScope)
+	chdirSubdir(t, "services/checkout")
+	for _, verb := range []string{"current", "describe"} {
+		_, plain, _ := runRepoScoped([]string{"repo-scope", verb}, RunOptions{})
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", verb, "-o", "auto"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, plain, stdout)
+	}
+}
+
 // Without a scope file there is no entry to find and no file to name: the
 // answer says that the repository has none, and how to get one.
 func TestRepoScopeNamedEntryWithoutAFile(t *testing.T) {
