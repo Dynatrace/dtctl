@@ -10,6 +10,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/resources/analyzer"
 	"github.com/Dynatrace/dtctl/pkg/safety"
 	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/pkg/suggest"
 )
 
 // execAnalyzerCmd executes a Davis analyzer
@@ -47,6 +48,11 @@ Examples:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			analyzerName := args[0]
+
+			// --timeout bounds the polling loop, which --no-wait skips.
+			if noWait, _ := cmd.Flags().GetBool("no-wait"); noWait && cmd.Flags().Changed("timeout") {
+				return &suggest.FlagError{Flag: "timeout", Message: "--timeout only applies when waiting and cannot be combined with --no-wait"}
+			}
 
 			// Running an analyzer computes over data and persists nothing, so it is a
 			// read despite being a POST.
