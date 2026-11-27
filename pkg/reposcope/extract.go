@@ -82,13 +82,21 @@ func sourceFor(file string) *source {
 	return nil
 }
 
-// sourceNames is what one source contributed: tokens that belong together,
-// the directory they were found in, and the names that may claim a unit for
-// them (a manifest's workload and image names).
+// sourceNames is what one source contributed: tokens that belong together
+// and the directory they were found in.
+//
+// A build file's names are its unit's. A manifest's or a chart's are only
+// when the unit claims it (needsClaim): claims are the names it can be
+// claimed by, its workload's or chart's and its images', and named is the
+// first of those alone, which also places a manifest kept outside every unit
+// (see attribute). Only a name that made a token is either: a placeholder
+// claims nothing.
 type sourceNames struct {
-	dir    string
-	claims []string
-	tokens []token
+	dir        string
+	needsClaim bool
+	named      string
+	claims     []string
+	tokens     []token
 }
 
 type signals struct {
@@ -242,7 +250,7 @@ func indirectNames(dirs []token, sources []sourceNames) []token {
 	}
 	for _, f := range sources {
 		for _, t := range f.tokens {
-			if foreign(&t); len(f.claims) == 0 && t.indirect == "" {
+			if foreign(&t); !f.needsClaim && t.indirect == "" {
 				called = append(called, t.value)
 			}
 		}
@@ -252,7 +260,7 @@ func indirectNames(dirs []token, sources []sourceNames) []token {
 	}
 	var tokens []token
 	for _, f := range sources {
-		claimed := len(f.claims) == 0 || slices.ContainsFunc(f.claims, unitCalled)
+		claimed := !f.needsClaim || slices.ContainsFunc(f.claims, unitCalled)
 		for _, t := range f.tokens {
 			switch foreign(&t); {
 			case t.indirect != "":
@@ -421,22 +429,29 @@ func nearestUnit(units map[string]bool, dir string) string {
 	return "."
 }
 
-// attribute picks the unit a source's names belong to: the one unit named
-// like one of its claims, so deploy/checkout/deployment.yaml lands on
-// services/checkout, else the nearest unit above where they were found.
+// attribute picks the unit a source's names belong to: the nearest unit
+// above where they were found. A manifest or chart kept outside every unit
+// below the root goes to the one unit called like its workload or chart, so
+// deploy/checkout/deployment.yaml lands on services/checkout.
+//
+// One that lies inside a unit stays there whatever it names, and an image
+// never moves one: a sidecar's image called like another unit would hand
+// that unit the whole manifest, its workload name as the unit's own.
 func attribute(units map[string]bool, f sourceNames) string {
-	for _, claim := range f.claims {
-		var named []string
-		for u := range units {
-			if u != "." && sameName(path.Base(u), claim) {
-				named = append(named, u)
-			}
-		}
-		if len(named) == 1 {
-			return named[0]
+	nearest := nearestUnit(units, f.dir)
+	if nearest != "." || f.named == "" {
+		return nearest
+	}
+	var called []string
+	for u := range units {
+		if u != "." && sameName(path.Base(u), f.named) {
+			called = append(called, u)
 		}
 	}
-	return nearestUnit(units, f.dir)
+	if len(called) == 1 {
+		return called[0]
+	}
+	return nearest
 }
 
 // buildFile adapts a reader of one name to a source: a build file's name
