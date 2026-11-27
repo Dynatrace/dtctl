@@ -673,6 +673,12 @@ func deleteRepoScope(cmd *cobra.Command, name string) error {
 // listRepoScopes is `repo-scope list`, and `repo-scope` on its own.
 func listRepoScopes(cmd *cobra.Command, _ []string) error {
 	ctx := cmdContext(cmd)
+	// Entries are rows or values. A format that draws a chart of numbers, or
+	// one the printer does not know and reads as a table, prints neither.
+	if format := outputFormat(ctx); !slices.Contains([]string{"", "table", "wide", "csv", "json", "jsonl", "yaml", "yml", "toon", output.FormatAuto}, format) {
+		return &reposcope.InvalidError{Source: "-o " + format,
+			Msg: "repo-scope list prints entries; use -o table, -o wide, -o csv, -o json, -o jsonl, -o yaml or -o toon"}
+	}
 	scope, err := openRepoScopeForEdit(ctx)
 	if err != nil {
 		return err

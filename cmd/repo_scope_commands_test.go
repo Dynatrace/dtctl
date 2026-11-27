@@ -112,6 +112,24 @@ func TestRepoScopeSetSuggestsCommandsForTheEntryItSaved(t *testing.T) {
 	}, agentEnvelope(t, stdout).Context.Suggestions)
 }
 
+// list prints rows, or the entries in a format that holds a value. A format
+// that draws a chart, or none at all, is refused before anything is printed.
+func TestRepoScopeListRefusesAFormatItCannotPrint(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, monorepoScope)
+	for _, format := range []string{"chart", "bogus", "sparkline"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "list", "-o", format}, RunOptions{})
+		require.Equal(t, client.ExitUsageError, code, format)
+		require.Empty(t, stdout, format)
+		require.Contains(t, stderr, "repo-scope list prints entries; use -o table, -o wide, -o csv, -o json, -o jsonl, -o yaml or -o toon", format)
+	}
+	for _, format := range []string{"table", "wide", "csv", "json", "jsonl", "yaml", "yml", "toon"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "list", "-o", format}, RunOptions{})
+		require.Zero(t, code, "%s: %s", format, stderr)
+		require.Contains(t, stdout, "ledger", format)
+	}
+}
+
 // Without a scope file there is no entry to find and no file to name: the
 // answer says that the repository has none, and how to get one.
 func TestRepoScopeNamedEntryWithoutAFile(t *testing.T) {
