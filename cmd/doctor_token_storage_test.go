@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adrg/xdg"
-
 	"github.com/Dynatrace/dtctl/pkg/auth"
 	"github.com/Dynatrace/dtctl/pkg/config"
 )
@@ -129,9 +127,7 @@ func TestDoctor_TokenStorage_ExplicitFileWithReachableKeyring(t *testing.T) {
 // real file store.
 func TestBuildSessionStatus_ReportsStoreTheTokenWasFoundIn(t *testing.T) {
 	t.Setenv(config.EnvTokenStorage, "file")
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	xdg.Reload()
-	t.Cleanup(xdg.Reload)
+	setXDGHome(t, "XDG_DATA_HOME", t.TempDir())
 
 	const (
 		envURL    = "https://abc12345.apps.dynatrace.com"

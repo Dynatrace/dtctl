@@ -75,6 +75,7 @@ var optionalNonEmptyFlags = []flagSite{
 	{ctxSetCmd, "environment"},
 	{configSetContextCmd, "environment"},
 	{authLoginCmd, "environment"},
+	{authLoginCmd, "safety-level"},
 	{getSettingsCmd, "schema"},
 	{createExtensionCmd, "file"},
 	{createExtensionCmd, "hub-extension"},

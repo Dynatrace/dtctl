@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/prompt"
 	"github.com/Dynatrace/dtctl/pkg/stability"
+	"github.com/Dynatrace/dtctl/sdk/urls"
 )
 
 // authCheckKeyringFunc and authEnsureKeyringFunc are the functions used to
@@ -112,6 +115,11 @@ var authClientCredentialsFunc = func(ctx context.Context, flow *auth.OAuthFlow, 
 var authBrowserFlowFunc = func(ctx context.Context, flow *auth.OAuthFlow) (*auth.TokenSet, error) {
 	return flow.Start(ctx)
 }
+
+// authNewOAuthFlowFunc builds the OAuth flow from the configuration auth login
+// composed. It defaults to the real constructor; tests override it to read the
+// scopes a login is about to request, which the flow itself does not expose.
+var authNewOAuthFlowFunc = auth.NewOAuthFlow
 
 // authCmd represents the auth command
 var authCmd = newAuthCmd()
@@ -504,6 +512,365 @@ func finalizeLoginConfig(cfg *config.Config, contextName, environment, tokenName
 	cfg.PruneEmptyEnvironments(contextName, placeholderNames)
 }
 
+// loginLevelSource says where the level a login asks for came from.
+type loginLevelSource int
+
+const (
+	loginLevelFromFlag    loginLevelSource = iota // --safety-level was given
+	loginLevelFromContext                         // the level the context stores
+	loginLevelFromDefault                         // a new context, or one that stores no level
+)
+
+// loginLevels are the safety levels a login works with.
+type loginLevels struct {
+	// saved is written to the context. Empty leaves the context's file as it
+	// is, which is the case for an existing context that stores no level.
+	saved config.SafetyLevel
+	// declared is the level the flag, the context or the default asks for,
+	// and source says which of them.
+	declared config.SafetyLevel
+	source   loginLevelSource
+	// requested is the level dtctl enforces for the context once the login
+	// has written it, and so the level whose scopes the login requests.
+	requested config.SafetyLevel
+}
+
+// loginSafetyLevels works out the levels for a login that stores its token as
+// tokenName.
+//
+// With --safety-level the flag decides the declared level. Without it, a
+// context that already exists keeps the level it stores, because logging in
+// again is how an expired session is renewed and must not change what the
+// context may do; flagLevel, the flag's default, applies to a context that is
+// new or stores no level, and is saved only to a new one outside a project
+// config.
+//
+// The scopes follow the level dtctl enforces, not the declared one. The two
+// differ in an auto-discovered project config, whose level is clamped to what
+// the global config binds to the token (Config.EffectiveSafetyLevelFor): a
+// cloned .dtctl.yaml must not be able to make a login ask for more than the
+// context is allowed to use. The clamp is looked up for tokenName, the token
+// the login writes, whatever token the context stored before, and it applies
+// to a new context and to the flag as well.
+//
+// A level that is not a valid value is refused rather than kept or replaced,
+// in the context and in the global binding alike. Keeping it would save and
+// print a level dtctl does not enforce, and replacing it would pick a level
+// nobody chose. In a project config that covers every context of global, the
+// global config's contexts (globalContextsFor), that binds tokenName, whatever
+// level the clamp arrives at: dtctl ranks an unknown value with readwrite-all,
+// so the clamp alone would return it only to a project context above that
+// rank, and for a tie only when it is listed first.
+func loginSafetyLevels(cfg *config.Config, global []config.NamedContext, contextName, tokenName string, flagLevel config.SafetyLevel, flagGiven bool) (loginLevels, error) {
+	levels := loginLevels{saved: flagLevel, declared: flagLevel, source: loginLevelFromDefault}
+	if flagGiven {
+		levels.source = loginLevelFromFlag
+	} else if nc, err := cfg.GetContext(contextName); err == nil {
+		stored := nc.Context.SafetyLevel
+		if !stored.IsValid() {
+			return loginLevels{}, &diagnostic.Error{
+				Operation: "auth login",
+				Message: fmt.Sprintf("context %q stores the safety level %q, which is not a valid value (valid values: %s)",
+					contextName, stored, validSafetyLevelList()),
+				Suggestions: []string{
+					fmt.Sprintf("Give the context a valid level, then log in again: dtctl ctx set %s --safety-level <level>", shellWord(contextName)),
+					fmt.Sprintf("Or set it with the login: dtctl auth login --context %s --safety-level <level>", shellWord(contextName)),
+				},
+			}
+		}
+		levels.saved = stored
+		if stored != "" {
+			levels.declared = stored
+			levels.source = loginLevelFromContext
+		}
+	} else if cfg.IsLocal() {
+		// A new context in a project config stores no level: dtctl enforces
+		// the level of the token's global binding there, and the default,
+		// written to the file, would declare one nobody chose.
+		levels.saved = ""
+	}
+
+	var refusal *diagnostic.Error
+	for _, nc := range globalContextsBinding(global, tokenName) {
+		if nc.Context.SafetyLevel.IsValid() {
+			continue
+		}
+		if refusal == nil {
+			refusal = &diagnostic.Error{
+				Operation: "auth login",
+				Message: fmt.Sprintf("global context %q binds token %q to the safety level %q, which is not a valid value (valid values: %s)",
+					nc.Name, tokenName, nc.Context.SafetyLevel, validSafetyLevelList()),
+			}
+		}
+		refusal.Suggestions = append(refusal.Suggestions, fmt.Sprintf("Give the global context a valid level: dtctl ctx set %s --global --safety-level <level>", shellWord(nc.Name)))
+	}
+	if refusal != nil {
+		return loginLevels{}, refusal
+	}
+
+	// The declared level is valid, and so is every level the clamp can
+	// return in its place.
+	levels.requested = cfg.EffectiveSafetyLevelFor(&config.Context{TokenRef: tokenName, SafetyLevel: levels.declared})
+	return levels, nil
+}
+
+// ceilingNotice explains why the login requests scopes for a lower level than
+// the declared one. bound says whether the global config binds tokenName at
+// all: a project config whose token it does not bind is held to the default.
+func (l loginLevels) ceilingNotice(tokenName string, bound bool) string {
+	var declared string
+	switch l.source {
+	case loginLevelFromFlag:
+		declared = fmt.Sprintf("--safety-level %s was given", l.declared)
+	case loginLevelFromContext:
+		declared = fmt.Sprintf("The context declares %s", l.declared)
+	default:
+		declared = fmt.Sprintf("The default level is %s", l.declared)
+	}
+	ceiling := fmt.Sprintf("the global config allows token %q %s", tokenName, l.requested)
+	if !bound {
+		ceiling = fmt.Sprintf("the global config binds no context to token %q, which limits a project config to %s", tokenName, l.requested)
+	}
+	return fmt.Sprintf("%s; %s, so the login requests %s scopes.", declared, ceiling, l.requested)
+}
+
+// projectLoginScopes narrows the scopes of a browser login in a project
+// config to those the global binding of tokenName requests as well, and
+// returns that binding's level and what was left out. scopes are those of the
+// enforced level.
+//
+// The levels are ranked, but their scope sets are not nested: readonly
+// requests read scopes that readwrite-mine does not. Clamping the level by
+// rank therefore still lets a project file that declares readonly obtain
+// scopes the owner of a readwrite-mine token never asked for. A context
+// clamped to the binding's own level requests exactly the binding's scopes,
+// so nothing is left out there, nor outside a project config, nor for any
+// pair of levels whose sets are nested.
+func projectLoginScopes(cfg *config.Config, tokenName string, scopes []string) (kept, leftOut []string, bound config.SafetyLevel) {
+	if !cfg.IsLocal() {
+		return scopes, nil, ""
+	}
+	// The most permissive level, clamped: what is left is the binding's.
+	bound = cfg.EffectiveSafetyLevelFor(&config.Context{TokenRef: tokenName, SafetyLevel: config.SafetyLevelDangerouslyUnrestricted})
+	boundScopes := auth.GetScopesForSafetyLevel(bound)
+	for _, s := range scopes {
+		if slices.Contains(boundScopes, s) {
+			kept = append(kept, s)
+		} else {
+			leftOut = append(leftOut, s)
+		}
+	}
+	return kept, leftOut, bound
+}
+
+// shellWord returns s as one POSIX shell word, for a command that a message
+// suggests: a context name may hold a space, a quote or a dollar sign, and the
+// suggestion must still name that context when it is pasted. A name made only
+// of characters no shell treats specially stays bare, which is the common case.
+func shellWord(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_-./:@%+=,", r))
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// validSafetyLevelList is the list of valid levels as an error message shows it.
+func validSafetyLevelList() string {
+	levels := config.ValidSafetyLevels()
+	names := make([]string, len(levels))
+	for i, l := range levels {
+		names[i] = string(l)
+	}
+	return strings.Join(names, ", ")
+}
+
+// globalContextsFor returns the contexts of the global config when cfg is an
+// auto-discovered project config, whose own list holds the project file's
+// contexts only, and nil otherwise. It is best effort, like the bindings the
+// config builds from the same file: without a readable global config there is
+// nothing to report.
+func globalContextsFor(cfg *config.Config) []config.NamedContext {
+	if !cfg.IsLocal() {
+		return nil
+	}
+	global, err := config.LoadFrom(config.DefaultConfigPath())
+	if err != nil {
+		return nil
+	}
+	return global.Contexts
+}
+
+// globalContextsBinding returns the contexts of global, the global config's
+// contexts, that bind tokenName: those the clamp of a project config's level
+// is built from. The rule is the one of buildGlobalBindings in sdk/session,
+// which keeps its bindings to itself: a context binds its token to the host
+// of its environment, so one whose environment has no host binds nothing.
+func globalContextsBinding(global []config.NamedContext, tokenName string) []config.NamedContext {
+	var binding []config.NamedContext
+	for _, nc := range global {
+		if nc.Context.TokenRef == tokenName && urls.Host(nc.Context.Environment) != "" {
+			binding = append(binding, nc)
+		}
+	}
+	return binding
+}
+
+// tokenPeer is another context that uses the stored token a login replaces.
+type tokenPeer struct {
+	label string // the context's name as a message shows it
+	// scopes are those a browser login to the context would request: the
+	// most the context can get back by logging in after this login.
+	scopes []string
+	// otherEnvironment says that the context is on another environment of
+	// the tier than the login's.
+	otherEnvironment bool
+	// global says that the context is one of the global config while the
+	// login runs on a project config.
+	global bool
+}
+
+// contextsSharingToken returns the contexts other than contextName whose
+// stored token is the one a login to environment replaces when it stores its
+// token as tokenName. Tokens are stored per OAuth tier and name, so a context
+// of another tier keeps its own token under the same name, and two
+// environments of one tier share one. global holds the contexts of the global
+// config when cfg is a project config (globalContextsFor); they are peers
+// too, and the login is never one of them.
+//
+// A peer's scopes are worked out the way its own login would: for a context
+// of cfg from the level dtctl enforces for it, narrowed in a project config
+// to what the binding of tokenName requests (projectLoginScopes); for a
+// global context from its own level, which nothing clamps.
+func contextsSharingToken(cfg *config.Config, global []config.NamedContext, contextName, tokenName, environment string) []tokenPeer {
+	tier := auth.DetectEnvironment(environment)
+	host := urls.Host(environment)
+	shares := func(c *config.Context) bool {
+		return c.TokenRef == tokenName && auth.DetectEnvironment(c.Environment) == tier
+	}
+	var peers []tokenPeer
+	for i := range cfg.Contexts {
+		nc := &cfg.Contexts[i]
+		if nc.Name != contextName && shares(&nc.Context) {
+			scopes, _, _ := projectLoginScopes(cfg, tokenName, auth.GetScopesForSafetyLevel(cfg.EffectiveSafetyLevelFor(&nc.Context)))
+			peers = append(peers, tokenPeer{label: fmt.Sprintf("%q", nc.Name), scopes: scopes, otherEnvironment: urls.Host(nc.Context.Environment) != host})
+		}
+	}
+	for i := range global {
+		nc := &global[i]
+		if shares(&nc.Context) {
+			peers = append(peers, tokenPeer{
+				label:            fmt.Sprintf("%q (global config)", nc.Name),
+				scopes:           auth.GetScopesForSafetyLevel(nc.Context.GetEffectiveSafetyLevel()),
+				otherEnvironment: urls.Host(nc.Context.Environment) != host,
+				global:           true,
+			})
+		}
+	}
+	slices.SortFunc(peers, func(a, b tokenPeer) int { return strings.Compare(a.label, b.label) })
+	return peers
+}
+
+// peerLabels returns the peers' names as a message shows them.
+func peerLabels(peers []tokenPeer) []string {
+	labels := make([]string, len(peers))
+	for i, p := range peers {
+		labels[i] = p.label
+	}
+	return labels
+}
+
+// contextsOnOtherEnvironments returns the peers that are not on the login's
+// environment. The login replaces their token with one requested for its own
+// environment, and dtctl cannot tell whether theirs accepts it, so they are
+// named whatever the scopes are.
+func contextsOnOtherEnvironments(peers []tokenPeer) []tokenPeer {
+	var elsewhere []tokenPeer
+	for _, p := range peers {
+		if p.otherEnvironment {
+			elsewhere = append(elsewhere, p)
+		}
+	}
+	return elsewhere
+}
+
+// contextsNarrowedByLogin returns the peers on the login's environment whose
+// own login would request a scope that is not in scopes, the set this login
+// requests. Those contexts lose that scope until one of them logs in again.
+// The comparison is by scope set and not by rank: readonly requests read
+// scopes that readwrite-mine does not.
+func contextsNarrowedByLogin(peers []tokenPeer, scopes []string) []tokenPeer {
+	var narrowed []tokenPeer
+	for _, p := range peers {
+		if p.otherEnvironment {
+			continue
+		}
+		if slices.ContainsFunc(p.scopes, func(s string) bool { return !slices.Contains(scopes, s) }) {
+			narrowed = append(narrowed, p)
+		}
+	}
+	return narrowed
+}
+
+// warnSharedToken tells the user, before a browser login replaces a stored
+// token, which other contexts use it and what to do about it: narrowed are
+// those that lose scopes (contextsNarrowedByLogin), elsewhere those on another
+// environment than environment, the login's (contextsOnOtherEnvironments).
+//
+// In a project directory (local) two ways out need saying differently. A
+// token name of its own is none by itself: dtctl refuses a token there that
+// the global config does not bind. And a context of the global config cannot
+// be logged in to by name, because the project config is the one loaded:
+// globalConfigPath is the file that login has to name.
+func warnSharedToken(w io.Writer, tokenName, environment string, narrowed, elsewhere []tokenPeer, local bool, globalConfigPath string) {
+	if len(narrowed) > 0 {
+		whose, lose := "whose safety level requests", "that context loses"
+		if len(narrowed) > 1 {
+			whose, lose = "whose safety levels request", "those contexts lose"
+		}
+		output.FprintWarning(w, "Token %q is also used by %s, %s scopes this login does not. The login replaces the token, so %s them.", tokenName, joinNames(peerLabels(narrowed)), whose, lose)
+	}
+	if len(elsewhere) > 0 {
+		which := "which is on another environment"
+		if len(elsewhere) > 1 {
+			which = "which are on other environments"
+		}
+		output.FprintWarning(w, "Token %q is also used by %s, %s. The login replaces the token with one requested for %s.", tokenName, joinNames(peerLabels(elsewhere)), which, environment)
+	}
+
+	const boundNameOnly = "A token name of its own (--token-name) works here only once a context in the global config binds that name to this environment."
+	switch {
+	case len(narrowed) > 0:
+		// Each login replaces the token again, so with several contexts
+		// there is no login that restores them all.
+		restore := "Log in to it afterwards to restore its scopes"
+		if len(narrowed) > 1 {
+			restore = "Afterwards, log in to the context whose scopes you need (a login restores only those of its own context)"
+		}
+		if !local {
+			output.FprintHint(w, "%s, or give this context its own token with --token-name.", restore)
+			return
+		}
+		if slices.ContainsFunc(narrowed, func(p tokenPeer) bool { return p.global }) {
+			restore += ". A context of the global config is logged in to from outside this directory, or with --config " + shellWord(globalConfigPath)
+		}
+		output.FprintHint(w, "%s. %s", restore, boundNameOnly)
+	case len(elsewhere) > 0 && local:
+		output.FprintHint(w, "%s", boundNameOnly)
+	case len(elsewhere) > 0:
+		output.FprintHint(w, "Give this context its own token with --token-name to leave the stored one as it is.")
+	}
+}
+
+// joinNames joins names the way a sentence lists them: a, b and c.
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
 // Environment variables that supply client credentials grant parameters. They
 // are preferred over the equivalent flags because command line arguments are
 // visible to other processes.
@@ -546,6 +913,25 @@ After successful login, you can use dtctl commands without needing to manage API
 
 If --context and --environment are omitted, the current context is used. This is useful
 for re-authenticating when both the access token and refresh token have expired.
+
+Safety level:
+  A context that already exists keeps its safety level, whether that is below
+  or above the default: renewing a session does not change what the context
+  may do. Pass --safety-level to change it, and pass it in CI when the level
+  must not depend on what the config already holds. A context that stores a
+  value that is not a safety level is refused until it has one
+  (dtctl ctx set <name> --safety-level <level>, or --safety-level here).
+
+  For an auto-discovered .dtctl.yaml, dtctl enforces no more for a context
+  than the global config grants its token. The browser login requests the
+  scopes of that level, for a new context and with --safety-level too, and
+  says so when that is less than was asked for. It leaves out any scope of
+  that level the granted one does not request (readonly under a
+  readwrite-mine grant).
+
+  A login replaces the stored token. If another context uses the same token
+  and its level needs scopes this login does not request, or it is on another
+  environment, the browser login names it before the browser opens.
 
 Token storage:
   By default, OAuth tokens are stored in the OS keyring (macOS Keychain, Windows
@@ -644,8 +1030,10 @@ Non-interactive login (CI/CD):
 			}
 
 			// Resolve contextName, environment and tokenName from the config when not
-			// supplied as explicit flags.
-			if contextName == "" || environment == "" {
+			// supplied as explicit flags. A missing --token-name is reason enough:
+			// an existing context keeps its token name even when --context and
+			// --environment are both given.
+			if contextName == "" || environment == "" || tokenName == "" {
 				contextHint := "Use 'dtctl ctx' to list available context names, then pass --context <name> --environment <url>"
 				cfg, err := loadConfig(cmdContext(cmd))
 				if err != nil {
@@ -692,10 +1080,10 @@ Non-interactive login (CI/CD):
 
 			// Parse and validate safety level
 			safetyLevel := config.SafetyLevel(safetyLevelStr)
-			if safetyLevelStr == "" {
-				safetyLevel = config.DefaultSafetyLevel
-			} else if !safetyLevel.IsValid() {
-				return fmt.Errorf("invalid safety level: %s (valid values: %v)", safetyLevelStr, config.ValidSafetyLevels())
+			if !safetyLevel.IsValid() {
+				// Typed: the agent-mode code of a plain error would be read
+				// off the text, which quotes the value.
+				return &invalidInputError{err: fmt.Errorf("invalid safety level %q (valid values: %s)", safetyLevelStr, validSafetyLevelList())}
 			}
 
 			// Load config
@@ -704,6 +1092,15 @@ Non-interactive login (CI/CD):
 				// If config doesn't exist, create a new one
 				cfg = config.NewConfig()
 			}
+
+			// levels.saved is what the context stores from here on;
+			// levels.requested is what the login asks the identity provider for.
+			globalContexts := globalContextsFor(cfg)
+			levels, err := loginSafetyLevels(cfg, globalContexts, contextName, tokenName, safetyLevel, cmd.Flags().Changed("safety-level"))
+			if err != nil {
+				return err
+			}
+			scopeLevel := levels.requested
 
 			// Ensure a token storage backend is available before starting OAuth flow.
 			// Keyring is preferred; file-based storage is the fallback for headless/WSL/CI environments.
@@ -745,14 +1142,24 @@ Non-interactive login (CI/CD):
 			}
 
 			// Detect environment and create appropriate OAuth config with safety level
-			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, safetyLevel)
+			oauthConfig := auth.OAuthConfigFromEnvironmentURLWithSafety(environment, scopeLevel)
+			// Only the browser flow requests these scopes; the client
+			// credentials grant sends --scopes or none.
+			var scopesLeftOut []string
+			var boundLevel config.SafetyLevel
+			if !nonInteractive {
+				oauthConfig.Scopes, scopesLeftOut, boundLevel = projectLoginScopes(cfg, tokenName, oauthConfig.Scopes)
+			}
 
 			// Log which environment we detected
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Detected environment: %s", oauthConfig.Environment)
 			output.FprintInfo(currentStderr(cmdContext(cmd)), "Safety level: %s", oauthConfig.SafetyLevel)
 
+			// A login replaces the stored token, which other contexts may use.
+			peers := contextsSharingToken(cfg, globalContexts, contextName, tokenName, environment)
+
 			// Create OAuth flow
-			flow, err := auth.NewOAuthFlow(oauthConfig)
+			flow, err := authNewOAuthFlowFunc(oauthConfig)
 			if err != nil {
 				return fmt.Errorf("failed to initialize OAuth: %w", err)
 			}
@@ -772,10 +1179,15 @@ Non-interactive login (CI/CD):
 					// The browser flow requests the safety level's scope set at the
 					// IdP, so there the two move together. Here they do not, and a
 					// narrowing safety level would otherwise read as if it had.
-					if safetyLevel != config.SafetyLevelDangerouslyUnrestricted {
-						output.FprintWarning(currentStderr(cmdContext(cmd)), "--safety-level %s gates dtctl itself; it does not narrow the token.", safetyLevel)
+					if scopeLevel != config.SafetyLevelDangerouslyUnrestricted {
+						output.FprintWarning(currentStderr(cmdContext(cmd)), "The safety level %s gates dtctl itself; it does not narrow the token.", scopeLevel)
 						output.FprintHint(currentStderr(cmdContext(cmd)), "Pass --scopes, or provision the OAuth client with only the scopes this pipeline needs.")
 					}
+				}
+				// The grant's scopes do not follow the safety level, so all there
+				// is to say about a shared token is that it is replaced.
+				if len(peers) > 0 {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "Token %q is also used by %s. This login replaces it with the OAuth client's token.", tokenName, joinNames(peerLabels(peers)))
 				}
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Authenticating with the client credentials grant (no browser)...")
 				tokens, err = authClientCredentialsFunc(ctx, flow, clientID, clientSecret, accountURN, grantScopes)
@@ -790,6 +1202,15 @@ Non-interactive login (CI/CD):
 				}
 			} else {
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Requesting OAuth scopes for safety level %s...", oauthConfig.SafetyLevel)
+				if scopeLevel != levels.declared {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", levels.ceilingNotice(tokenName, len(globalContextsBinding(globalContexts, tokenName)) > 0))
+				}
+				if len(scopesLeftOut) > 0 {
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "The login requests only scopes that the global binding of token %q (%s) requests too. Left out: %s.", tokenName, boundLevel, strings.Join(scopesLeftOut, ", "))
+				}
+				// Said before the browser opens, while the login can still be abandoned.
+				warnSharedToken(currentStderr(cmdContext(cmd)), tokenName, environment,
+					contextsNarrowedByLogin(peers, oauthConfig.Scopes), contextsOnOtherEnvironments(peers), cfg.IsLocal(), config.DefaultConfigPath())
 
 				output.FprintInfo(currentStderr(cmdContext(cmd)), "Starting OAuth authentication flow...")
 				tokens, err = authBrowserFlowFunc(ctx, flow)
@@ -837,7 +1258,7 @@ Non-interactive login (CI/CD):
 				}
 			}
 
-			finalizeLoginConfig(cfg, contextName, environment, tokenName, safetyLevel, placeholderNames)
+			finalizeLoginConfig(cfg, contextName, environment, tokenName, levels.saved, placeholderNames)
 
 			// Save config (respects local .dtctl.yaml if present)
 			if err := saveConfig(cmdContext(cmd), cfg); err != nil {
@@ -854,7 +1275,7 @@ Non-interactive login (CI/CD):
 	c.Flags().String("environment", "", "Dynatrace environment URL (defaults to current context's environment)")
 	c.Flags().String("token-name", "", "name for storing the OAuth token (defaults to existing token name or <context>-oauth)")
 	c.Flags().String("timeout", "5m", "timeout for the authentication flow (bounds the browser flow and the client credentials token request)")
-	c.Flags().String("safety-level", string(config.DefaultSafetyLevel), "safety level for the context (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)")
+	c.Flags().String("safety-level", string(config.DefaultSafetyLevel), "safety level for the context (readonly, readwrite-mine, readwrite-all, dangerously-unrestricted); an existing context keeps its level unless this is given")
 	c.Flags().String("client-id", "", "OAuth client ID for the non-interactive client credentials grant (env: "+envLoginClientID+")")
 	c.Flags().String("client-secret", "", "OAuth client secret for the client credentials grant; prefer the environment variable (env: "+envLoginClientSecret+")")
 	c.Flags().String("account-urn", "", "account URN sent as the resource indicator, e.g. urn:dtaccount:<uuid> (env: "+envLoginAccountURN+")")
@@ -863,6 +1284,9 @@ Non-interactive login (CI/CD):
 	// Left out, it defaults from the config; an explicitly empty value (an
 	// unset shell variable) must not silently take that default.
 	rejectEmptyFlag(c, "environment")
+	// Given, it replaces the level an existing context stores; an explicitly
+	// empty value must not do that with the default.
+	rejectEmptyFlag(c, "safety-level")
 	return c
 }
 
