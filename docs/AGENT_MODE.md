@@ -403,11 +403,15 @@ and nothing is sent: the message names the code (`not_fetch`,
 `unsupported_object`, `no_binding`, `subquery` or `unscannable`) and the
 reason. `user_filter` is not an error: the query runs as typed, with
 `applied: false`, because the query's own filter on a scoped field is what was
-asked for. A segment the named entry references that cannot be read is a
+asked for. Nor is `verify query --repo-scope <name>` for an entry that holds
+only filter segments: it sends none, so it verifies the text as typed, exits
+by the verdict and says on stderr that the segments were not part of it
+(`segments_not_sent`). A segment the named entry references that cannot be read is a
 `validation_error` as well, and more segments than a query takes (ten, the
 entry's and `--segment`'s together) is an error in every case. A scoped query that fails keeps the query's own error code and
 position, which points into the text that was sent; `suggestions` shows that
-text and the `--no-repo-scope` retry.
+text and the `--no-repo-scope` retry, and a runnable repair among them is of
+the query as typed, with `--repo-scope <name>` when the run named one.
 
 `dtctl repo-scope discover` returns a list of reports as `result`, one per
 unit: one report in most repositories, and one per deployable from a
