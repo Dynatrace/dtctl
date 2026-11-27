@@ -225,10 +225,14 @@ func hasShortFlagLetter(args []string, letter rune) bool {
 }
 
 // rawBoolFlagEnabled reports whether the unparsed args switch a boolean long
-// flag on: "--flag" or "--flag=<true value>"; "--flag=false" does not.
+// flag on: "--flag" or "--flag=<true value>"; "--flag=false" does not. Scanning
+// stops at the "--" terminator, after which everything is a positional.
 func rawBoolFlagEnabled(args []string, flag string) bool {
 	on := false
 	for _, a := range args {
+		if a == "--" {
+			break
+		}
 		if a == flag {
 			on = true
 		} else if strings.HasPrefix(a, flag+"=") {

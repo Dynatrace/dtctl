@@ -189,4 +189,9 @@ func TestTimeoutErrorRespectsAgentOptOut(t *testing.T) {
 		rawBoolFlagEnabled([]string{"--agent=false"}, "--agent") || rawBoolFlagEnabled(nil, "--agent") {
 		t.Error("rawBoolFlagEnabled misparses")
 	}
+	// A positional after the "--" terminator is not a flag.
+	if !rawBoolFlagEnabled([]string{"--agent", "--", "--agent=false"}, "--agent") ||
+		rawBoolFlagEnabled([]string{"--", "--agent"}, "--agent") {
+		t.Error("rawBoolFlagEnabled scans past --")
+	}
 }
