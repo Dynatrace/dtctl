@@ -174,8 +174,10 @@ type Signal struct {
 	Datapoints int64       `json:"datapoints,omitempty" yaml:"datapoints,omitempty"`
 	LastSeen   string      `json:"lastSeen,omitempty" yaml:"lastSeen,omitempty"`
 	AgeSeconds int64       `json:"ageSeconds,omitempty" yaml:"ageSeconds,omitempty"`
-	// Evidence says what was checked, for every state that is not live. It is
-	// carried so a negative is citable without re-probing.
+	// Evidence says what was checked, for every state that is not live, and
+	// for a live signal whose verdict needs a qualifier: one that was sampled,
+	// or one that matched records without an event time. It is carried so a
+	// negative is citable without re-probing.
 	Evidence string `json:"evidence,omitempty" yaml:"evidence,omitempty"`
 	// Truncation is set when State is unknown because a limit cut the probe
 	// short, naming which limit. It is structured rather than left to the

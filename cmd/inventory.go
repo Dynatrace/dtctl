@@ -187,17 +187,13 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 	// Grail declines to sample several data objects and rounds every ratio
 	// down to a power of ten, reporting both as a warning on a 200. This flag
 	// is what keeps the SDK from extrapolating a count that was never sampled.
-	sampled := false
-	if meta := resp.GetMetadata(); meta != nil {
-		sampled = meta.Sampled
-	}
 	return &inventory.RunResult{
 		Records:         resp.GetRecords(),
 		Seconds:         time.Since(start).Seconds(),
 		Truncated:       cause != "",
 		TruncationCause: cause,
 		ColumnTypes:     inventory.ColumnTypesOf(resp.GetTypes()),
-		Sampled:         sampled,
+		Sampled:         inventory.SampledOf(resp.GetMetadata()),
 	}, nil
 }
 

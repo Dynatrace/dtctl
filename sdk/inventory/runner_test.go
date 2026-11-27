@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Dynatrace/dtctl/sdk/api/query"
@@ -49,6 +50,66 @@ func TestFirstTruncationCauseSkipsNonTruncating(t *testing.T) {
 	})
 	if got != TruncationScanLimit {
 		t.Errorf("FirstTruncationCause = %q, want %q", got, TruncationScanLimit)
+	}
+}
+
+// TestSampledOfReadsOnlyTheResponse: the flag is what the environment said it
+// did, and absent metadata means it said nothing.
+func TestSampledOfReadsOnlyTheResponse(t *testing.T) {
+	if !SampledOf(&query.GrailMetadata{Sampled: true}) {
+		t.Error("SampledOf = false for a response flagged as sampled")
+	}
+	if SampledOf(&query.GrailMetadata{}) {
+		t.Error("SampledOf = true for a response without the flag")
+	}
+	if SampledOf(nil) {
+		t.Error("SampledOf = true for a response without metadata")
+	}
+}
+
+// flaglessRunner is a Runner whose author did not know about
+// RunResult.Sampled: every result leaves it unset.
+type flaglessRunner struct{ inner Runner }
+
+func (r flaglessRunner) RunQuery(ctx context.Context, dql string) (*RunResult, error) {
+	res, err := r.inner.RunQuery(ctx, dql)
+	if res != nil {
+		res.Sampled = false
+	}
+	return res, err
+}
+
+// TestRunnerWithoutTheSampledFlagDegradesToUnknown pins what omitting the flag
+// costs, which is the reason SampledOf can be a helper rather than a rule: the
+// sampled recovery is lost and the signal stays unknown, with no count and no
+// bound taken from a result that never confirmed it sampled.
+func TestRunnerWithoutTheSampledFlagDegradesToUnknown(t *testing.T) {
+	for name, rungs := range map[string][]mockResponse{
+		"rungs that matched": {sampledRung(100000, 96, 9600000, at(0, 30))},
+		"rungs that matched nothing": {
+			sampledRung(100000, 0, 0, ""), sampledRung(10000, 0, 0, ""), sampledRung(1000, 0, 0, ""),
+			sampledRung(100, 0, 0, ""), sampledRung(10, 0, 0, ""),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mock := windowRunner()
+			mock.responses = append(append([]mockResponse{cappedLogs()}, rungs...), mock.responses...)
+
+			inv, err := Discover(context.Background(), flaglessRunner{mock}, windowDefs(), windowOpts())
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			logs := signalByName(t, inv, "logs")
+			if logs.State != SignalUnknown || logs.Truncation != TruncationScanLimit {
+				t.Errorf("state/truncation = %q/%q, want unknown/scan_limit", logs.State, logs.Truncation)
+			}
+			if logs.Records != 0 || logs.SamplingRatio != 0 || logs.RecordsSampled != 0 {
+				t.Errorf("records/ratio/sampled = %d/%d/%d, want 0/0/0: nothing confirmed that it sampled", logs.Records, logs.SamplingRatio, logs.RecordsSampled)
+			}
+			if strings.Contains(logs.Evidence, "matched nothing") {
+				t.Errorf("evidence %q claims a sampled bound", logs.Evidence)
+			}
+		})
 	}
 }
 

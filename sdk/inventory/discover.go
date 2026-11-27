@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -35,6 +36,16 @@ type RunResult struct {
 	// reports both as a warning on a 200 rather than an error. A probe that
 	// assumed its requested ratio had been honoured would extrapolate a
 	// refused object's count by that whole factor.
+	//
+	// False is also what a Runner that never sets the field reports, so what
+	// discovery concludes from it is part of the contract. On the sampled
+	// retry of a scan-capped probe (sampling.go), a result without the flag
+	// that matched nothing and was not cut short is read as an empty rung,
+	// and the next ratio is tried. One that matched a record or was cut short
+	// is read as the capped query run again, which ends the retries. Either
+	// way an unflagged result supplies no count and no bound, so a Runner
+	// that leaves Sampled unset loses every sampled verdict: the signal stays
+	// "unknown", it never gets a wrong count. Set it with SampledOf.
 	Sampled bool
 }
 
@@ -63,9 +74,10 @@ const (
 // Returning records is not the whole job. RunResult also carries the response's
 // column types and the reason a result was cut short, and several verdicts are
 // only as good as those two fields — a Runner that omits ColumnTypes turns every
-// "n/a" into a confident "empty", with no error to say so. Build the result with
-// ColumnTypesOf and FirstTruncationCause rather than filling those fields by
-// hand; see runner.go.
+// "n/a" into a confident "empty", with no error to say so. A third field,
+// Sampled, decides whether a scan-capped stream can be recovered at all. Build
+// the result with ColumnTypesOf, FirstTruncationCause and SampledOf rather than
+// filling those fields by hand; see runner.go.
 type Runner interface {
 	RunQuery(ctx context.Context, dql string) (*RunResult, error)
 }
@@ -741,6 +753,11 @@ func stringSet(items []string) map[string]bool {
 	return set
 }
 
+// asInt64 reads a count from a result field. The shapes are the ones a Runner
+// can hand over: Grail sends a long as a string, encoding/json decodes a bare
+// number as float64, and a decoder set to UseNumber keeps it as json.Number.
+// That last case is listed because a count read as zero is not an error
+// anywhere downstream: it is a probe that "matched nothing".
 func asInt64(v interface{}) int64 {
 	switch n := v.(type) {
 	case float64:
@@ -749,6 +766,12 @@ func asInt64(v interface{}) int64 {
 		return n
 	case int:
 		return int64(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i
+		}
+		f, _ := n.Float64()
+		return int64(f)
 	case string:
 		i, _ := strconv.ParseInt(n, 10, 64)
 		return i
@@ -807,6 +830,12 @@ func needMetricCatalog(defs map[string]*CapabilityDef, opts DiscoverOptions, win
 func allZeroTripwire(signals []Signal) string {
 	evaluated, empty := 0, 0
 	for _, s := range signals {
+		// A match is a match in any state. A sampled hit too thin to date is
+		// unknown and has still shown that the scope selects records, which
+		// is the one thing this warning doubts.
+		if s.Records > 0 || s.RecordsSampled > 0 {
+			return ""
+		}
 		switch s.State {
 		// None of these say anything about whether the scope is valid, so
 		// none of them can weigh against the wrong-scope explanation. Leaving

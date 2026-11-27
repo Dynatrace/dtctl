@@ -292,6 +292,11 @@ diagnostic one for onboarding: a source that emitted during rollout and then sto
 identical to a healthy one under any retention-scoped check. Default `--stale-after` is
 `max(2m, window/3)`.
 
+One condition in the table is narrower for a signal that had to be sampled (D22). A sample
+of fewer than 30 records cannot date when a source stopped, so such a signal is `live` or
+`unknown` and never `stale`; from 30 records up it is `stale` only when its age is past the
+threshold by more than the sampling can shift it.
+
 For `--require` purposes `live` passes; `stale`, `empty`, `no-data`, `n/a`, and `absent`
 fail; `unknown` and an unprobed name exit 11. A required `n/a` signal is reported as a gate
 that *can never pass* rather than as a telemetry failure.
@@ -591,10 +596,22 @@ telemetry is not implicated.
   probe fell from **341 GB to 0.92 GB** at 1-in-1000 while landing within **1.5%** of the true
   count, turning an `unknown` into a real `live`. Four properties make it safe to lean on, and
   each is a guarded rule rather than an assumption:
-  - *A hit is conclusive at any ratio*, because sampling only ever drops records. So the
-    ladder walks **most-aggressive-first and stops at the first hit** — it does not converge
-    on precision, which would cost ~10x per extra rung for no change in verdict
-    (`TestSampledProbeStopsAtFirstConclusiveRung`).
+  - *A hit is conclusive about arrival at any ratio*, because sampling only ever drops
+    records. So the ladder walks **most-aggressive-first and stops at the first rung that
+    matches 30 records or more** — it does not converge on a precise count, which would cost
+    ~10x per extra rung for no change in verdict (`TestSampledProbeStopsAtFirstConclusiveRung`).
+    A thinner hit proves arrival but cannot date it, so the walk keeps descending, and ends
+    on the thickest hit it made when no rung reaches 30
+    (`TestThinSampleDescendsForATrustworthyAge`, `TestThickestHitSuppliesTheCount`). It
+    descends only while the age is still in question. A sample is a subset, so the newest
+    record in the window is no older than the newest one seen; once a hit is held and that
+    record is inside the stale threshold the signal is `live`, no finer rung can change it,
+    and the walk ends on the thin estimate (`TestThinSampleInsideTheThresholdEndsTheWalk`). The walk also continues past a rung that
+    matched nothing, and ends at the first rung that is cut short. While every rung is
+    sampled, that bounds the total scan at a little over one cap. The bound says nothing
+    about a rung the environment answered without sampling: such a rung ends the walk when
+    it matched a record or was cut short, but a response does not say how much an unflagged
+    rung that matched nothing has scanned.
   - *A miss is a bound, not an absence.* A sampled zero stays `unknown` and reports the
     population it can rule out (~3x the ratio, at 95%). This is strictly better evidence than
     the truncation it replaces, which covers an unspecified slice of the window and supports
@@ -603,12 +620,42 @@ telemetry is not implicated.
     sample `events`, `bizevents` and `security.events`, and rounds every ratio down to a power
     of ten — reporting both as a warning on a **200**, with a full unsampled result. Trusting
     the requested ratio would have overstated a refused object's volume by that entire factor,
-    so the probe sums `dt.system.sampling_ratio` and the runner reads `metadata.sampled`
-    (`TestSampledCountIgnoresRequestedRatio`, `TestSamplingRefusalIsNotRetried`).
+    so the probe sums `dt.system.sampling_ratio` and the runner reads the `sampled` flag of
+    the response's Grail metadata block through `inventory.SampledOf`
+    (`TestSampledCountIgnoresRequestedRatio`, `TestSamplingRefusalIsNotRetried`). A rung
+    without the flag is a refusal only if it matched a record or was itself cut short. One
+    that matched nothing and ran to completion is an empty rung: the walk continues past it,
+    and it supplies no bound, since nothing in the response confirms that it sampled at all
+    (`TestUnflaggedEmptyRungDoesNotEndTheWalk`, `TestSampledBoundComesFromAFlaggedRung`).
+    A refusal met after a thin hit ends the walk on that hit rather than discarding it
+    (`TestThinSampleSurvivesARefusedNextRung`).
+    The evidence says "this environment does not support sampling" only when nothing in the
+    walk contradicts it. After a rung that did carry the flag the sentence is false, and after
+    an unflagged rung cut short by something other than the scan limit it is unsupported, so
+    both keep the plain capped evidence (`TestRefusalIsClaimedOnlyWhenNothingContradictsIt`).
   - *A sampled `takeMax` is biased old by about `window / sampled_records`* — measured at 91s
     for 11 records over 15m, and under a second for 676. A `stale` verdict the bias alone could
     explain is therefore withheld as `unknown`, because inventing an ingest outage is the most
     expensive wrong answer this command can give (`TestSampledStaleInsideTheBiasIsUnknown`).
+    That figure is the gap to expect from a source that emits evenly, not a bound. A burst
+    early in the window followed by a trickle leaves a thin sample holding only old
+    timestamps while the source is alive, and subtracting the expected gap does not help. So a
+    hit of fewer than 30 sampled records never says `stale`: it is `live` when its newest
+    record is inside the threshold and `unknown` otherwise, with the sampled count and
+    last-seen kept so the arrival it did prove is still on the record. The price is that a
+    real outage on a source sampled that thinly exits 11 instead of 10
+    (`TestThinSampleNeverSaysStale`, `TestThinSampleStillSaysLive`).
+    The age is therefore not taken from the hit alone. Every rung filters the same window by
+    the same scope, so a record any of them matched is a record of this scope, whether or not
+    that response was sampled or ran to completion. The hit the walk ends on supplies the
+    count and the ratio; the newest record the walk matched supplies last-seen, and the
+    evidence names the rung it came from when that is not the hit's own
+    (`TestNewestMatchOfTheWalkDatesTheHit`).
+    Each rung asks for a window that ends when the rung runs, so its records are dated
+    against a clock reading taken just before it, not against the one reading taken before
+    the exhaustive probe: a walk of six queries would otherwise report its last rung's
+    records younger than they are by the time the walk took
+    (`TestEachRungIsDatedAgainstItsOwnClockReading`).
 
   The error sampling introduces shrinks with volume, and the cap only binds on high volume, so
   the two failure modes barely overlap: the signals sampling is imprecise about are the ones
@@ -618,7 +665,7 @@ telemetry is not implicated.
 
 ## Open questions — with recommendations
 
-All five carry a recommendation; three were settled empirically on `gmg`, 2026-09-11.
+The first five carry a recommendation; three were settled empirically on `gmg`, 2026-09-11.
 
 ### 1. Time fields for the remaining streams — RESOLVED
 
@@ -719,6 +766,57 @@ Consequently, restate D4 as *`arrivals` requires **a scope***, satisfied by `--s
 `-S`, or by both. Demanding a redundant `--scope` next to an existing segment would be
 busywork, and the cost argument that motivates D4 is satisfied either way.
 
+### 6. Sampled recovery — follow-ups, none started
+
+D22 leaves these open. None changes a verdict that is reported today into a wrong one; each
+is evidence the walk has and does not use, a case it reads conservatively, or a cost.
+
+1. **A count that is a floor.** A response that matched records proves arrival whether or
+   not it was sampled and whether or not it ran to completion. Today such a response only
+   dates a hit another rung made: the capped exhaustive probe, an unflagged rung and a
+   sampled rung that was cut short all supply their newest timestamp and no count. With no
+   hit to date, the signal stays `unknown` even though records of the scope were seen.
+   Reporting it as arrived with "at least N" needs a lower-bound notion that `Signal` does
+   not have, so it gets a design entry of its own. Preferring a complete unflagged count
+   over an extrapolation from a thin sample is deliberately not part of it until the
+   missing-flag behaviour has been observed more than once; a response whose summed
+   sampling ratio equals its match count is the candidate test for "this was not sampled".
+2. **What a refusal and an empty sampled rung look like on the wire.** `SampledOf` reads one
+   flag from one metadata block. If Grail ever reports sampling only at the top level of the
+   response, or only as a notification, every sampled rung looks unflagged and the recovery
+   degrades to `unknown`. No response captured from an environment is in the repository for
+   a refused object or for a sampled rung that read no record, so the rule that separates
+   the two is an inference. One read-only observation of both shapes settles this, and
+   would also show whether the scanned-bytes figure can tell a refused rung from a thin one,
+   which would let the walk stop on an unflagged empty rung that scanned everything.
+3. **A hit without a usable weight.** A flagged rung whose `population` is null reports its
+   sampled count as an exact one, with ratio 0. Whether that is a hit of unknown volume has
+   to be decided before it can be labelled.
+4. **The budget runner.** `budgetRunner.run` debits only the seconds a result reports, so a
+   query that fails without one is free against `BudgetSeconds`. The walk now names a rung
+   that failed in its evidence, but the receipt still shows no time for it. In the same
+   function, a Runner that returns a nil result with a nil error makes every probe
+   dereference nil, and it should be an error. Two further points there are by reading only
+   and not verified: a very large or infinite seconds budget may overflow when converted to
+   a duration, and the grace period after a cancellation may overrun the budget by seconds.
+5. **Worst-case query count.** A capped stream may now cost up to six queries where it cost
+   two. With all eight built-in streams capped and every rung empty and unflagged, the
+   streams take 48 queries against 16 before, which with the metric families exceeds the
+   default budget of 100. A signal that is starved says "not evaluated: discovery budget
+   exhausted", the run prints the partial note and `--require` exits 11, so no verdict is
+   wrong. Two candidate cures: run every exhaustive probe before any walk, or reserve one
+   query per remaining signal before a walk takes its next rung.
+6. **Shape of `recoverBySampling`.** The loop now carries a hit, the newest sighting, a
+   bound, a flag and a stopping reason. Splitting it into a classifier of one rung and one
+   resolution switch is worth its own commit with no change in behaviour.
+7. **Smaller items outside the walk.** The executor prints "Query cancelled." when a budget
+   deadline rather than the user ended a query (by reading only, not verified).
+   `NormalizeSince` accepts a window below one second and emits `now()-0s`. The arrivals
+   command registers process signals on a path an embedded request also takes, and SDK
+   evidence strings name CLI flags; both are for an issue of their own. This document names
+   where some of its measurements were taken and should say "a large tenant" instead, and
+   two of its decisions are numbered D18.
+
 ## Implementation sketch
 
 | Area | Change |
@@ -752,7 +850,7 @@ busywork, and the cost argument that motivates D4 is satisfied either way.
 | `sdk/inventory/discover.go` | `Since`/`Scope`/`StaleAfter`/`Signals` options; `RunResult.ColumnTypes`; view→bucket/table resolution from the catalog's `query_string` |
 | `sdk/inventory/definitions.go` | `spans`/`rum` → `start_time`; Davis `backingBuckets`; `timeField` and `backingBuckets` validation |
 | `cmd/inventory.go` | Parent command reduced to its original shape; shared discovery flags, definition loading, budget, and runner construction extracted for both commands |
-| `sdk/inventory/runner.go` | The Runner author's half of the contract: `ColumnTypesOf`, `TruncationCauseOf`, `FirstTruncationCause`, `NormalizeSince`, `DefaultStaleAfter` |
+| `sdk/inventory/runner.go` | The Runner author's half of the contract: `ColumnTypesOf`, `TruncationCauseOf`, `FirstTruncationCause`, `SampledOf`, `NormalizeSince`, `DefaultStaleAfter` |
 | `sdk/inventory/require.go` | `CheckRequired`/`RequireVerdict`, `ValidateSignalNames`, and the exit-code contract |
 | `cmd/inventory_signals.go` | The `arrivals` subcommand: flags, the signal table, rendering, result-specific agent suggestions — all decisions delegated to the SDK |
 | `pkg/auth/resource_scopes.go` | `arrivals` → query scopes |
@@ -831,6 +929,7 @@ existed. So the SDK now performs the translation instead of documenting it:
 |---|---|
 | `ColumnTypesOf` | flattens the API's per-index-range type blocks (a known type beats `undefined`) |
 | `TruncationCauseOf` / `FirstTruncationCause` | classifies which limit cut a result short |
+| `SampledOf` | reads whether the environment applied sampling; omitting it loses the sampled recovery of a capped stream, which stays `unknown` (`TestRunnerWithoutTheSampledFlagDegradesToUnknown`) |
 
 | Convenience | |
 |---|---|
