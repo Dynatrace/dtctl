@@ -117,6 +117,10 @@ def withdrawal_findings(base, head):
     with the same name and a stable contract, because a command-local flag was
     replaced by the root persistent one. Those go in `replaced`, which is
     reported but does not fail the check.
+
+    The rule is deliberately narrow: a stable global of the same name. The
+    manifest records tiers, not flag types or meanings, so whether the global
+    is truly equivalent is a review call, not something this check can prove.
     """
     removed, replaced, demoted = [], [], []
     for key, (level, deprecated, _, _) in sorted(base.items()):

@@ -171,7 +171,7 @@ to create the global binding this file needs.
 			}
 
 			// Get context from flag if provided
-			contextName, _ := cmd.Flags().GetString("context")
+			contextName := requestedContext(cmd)
 
 			// Create template config
 			template := createLocalConfigTemplate(contextName)

@@ -1769,6 +1769,17 @@ func loadConfig(ctx context.Context) (*config.Config, error) {
 	return withInvocationEnv(ctx, cfg), nil
 }
 
+// requestedContext is the context name this invocation asked for: the global
+// --context flag, else DTCTL_CONTEXT, the same precedence loadConfig applies. It
+// is for commands that create a context and so must know the name before (or
+// without) loading a config.
+func requestedContext(cmd *cobra.Command) string {
+	if name, _ := cmd.Flags().GetString("context"); name != "" {
+		return name
+	}
+	return getenv(cmdContext(cmd), "DTCTL_CONTEXT")
+}
+
 // NewClientFromConfig creates a new client from config with verbose mode configured
 //
 // It resolves the process-level state. Code that runs inside an invocation uses

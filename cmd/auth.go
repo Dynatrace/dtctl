@@ -603,7 +603,7 @@ Non-interactive login (CI/CD):
   dtctl auth login --context ci --environment https://abc12345.apps.dynatrace.com --safety-level readonly`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Get flags
-			contextName, _ := cmd.Flags().GetString("context")
+			contextName := requestedContext(cmd)
 			environment, _ := cmd.Flags().GetString("environment")
 			tokenName, _ := cmd.Flags().GetString("token-name")
 			timeoutStr, _ := cmd.Flags().GetString("timeout")

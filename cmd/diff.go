@@ -100,6 +100,17 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	contextLines, _ := cmd.Flags().GetInt("context-lines")
 	colorize, _ := cmd.Flags().GetBool("color")
 
+	// The global -o selects the machine-readable form: json is the JSON patch.
+	// Any other explicit value is refused rather than ignored.
+	if outputFormatChanged(cmdContext(cmd)) {
+		switch of := outputFormat(cmdContext(cmd)); of {
+		case "json":
+			format = "json-patch"
+		default:
+			return &suggest.FlagError{Flag: "output", Message: fmt.Sprintf("diff does not support -o %s (supported: json, the JSON patch; omit -o for the text diff, or use --format)", of)}
+		}
+	}
+
 	if sideBySide {
 		format = "side-by-side"
 	}
