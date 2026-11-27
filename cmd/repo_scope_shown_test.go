@@ -15,14 +15,16 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
 
-// expectTerminalSafe fails when text holds a control character other than
-// the line feeds that end its lines.
+// expectTerminalSafe fails when text holds a character a terminal does not
+// show as itself, other than the line feeds that end its lines. That is the
+// set reposcope.Shown replaces, which is wider than the control characters: a
+// bidirectional override reorders the line it is printed on.
 func expectTerminalSafe(t *testing.T, text string, args []string) {
 	t.Helper()
-	if i := strings.IndexFunc(text, func(r rune) bool { return r != '\n' && unicode.IsControl(r) }); i >= 0 {
+	if i := strings.IndexFunc(text, func(r rune) bool { return r != '\n' && !unicode.IsPrint(r) }); i >= 0 {
 		line := text[strings.LastIndexByte(text[:i], '\n')+1:]
 		line, _, _ = strings.Cut(line, "\n")
-		t.Errorf("%q prints a control character: %q", args, line)
+		t.Errorf("%q prints a non-printing character: %q", args, line)
 	}
 }
 
@@ -55,7 +57,7 @@ func TestRepoScopeOutsideARepositoryNamesNoPath(t *testing.T) {
 // act on the terminal: the commands that say why a file does not load, and a
 // query run beside it, print none of it raw.
 func TestRepoScopeRefusalHoldsTheFilesValues(t *testing.T) {
-	const hostile = `"\e[2J\a"`
+	const hostile = `"\e[2J\a\u202E"`
 	entry := func(lines ...string) string {
 		return "environments:\n  127.0.0.1:\n    - " + strings.Join(lines, "\n      ") + "\n"
 	}
@@ -100,8 +102,8 @@ func TestRepoScopeRefusalHoldsTheFilesValues(t *testing.T) {
 // file and from directory names, and whatever one comes to hold, the lines a
 // person reads show it without what would act on the terminal.
 func TestRepoScopePrintersHoldAReasonAndAWarning(t *testing.T) {
-	const hostile = "a\x1b[2Jb\ac"
-	const shown = "a�[2Jb�c"
+	const hostile = "a\x1b[2Jb\ac\u202Ed"
+	const shown = "a\uFFFD[2Jb\uFFFDc\uFFFDd"
 	entry := &reposcope.Entry{Name: "checkout", ServiceNames: []string{"checkout"}, Segments: []reposcope.Segment{{ID: "abc"}}}
 	for name, print := range map[string]func(w io.Writer){
 		"current, no entry":  func(w io.Writer) { printRepoScopeCurrent(w, &reposcope.Status{Reason: hostile}) },
