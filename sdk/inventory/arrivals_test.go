@@ -1389,6 +1389,134 @@ func TestRefusalIsClaimedOnlyWhenNothingContradictsIt(t *testing.T) {
 	}
 }
 
+// TestRungThatFailsLeavesItsReason: a rung that fails, or that the budget
+// refuses, ends the walk with whatever the ladder had established. Without a
+// hit that is the capped verdict or a sampled bound, and the reader has to be
+// told that the recovery was interrupted and by what: the plain exhaustive
+// probe reports the same failure as "probe failed", and a walk that says only
+// "the scan cap" hides a permission error behind a volume problem.
+func TestRungThatFailsLeavesItsReason(t *testing.T) {
+	failed := func(ratio int64) mockResponse {
+		return mockResponse{match: rungMatch(ratio), err: errors.New("HTTP 403: missing scope storage:logs:read\nrequest id 0000")}
+	}
+	const reason = "; sampled retry failed: HTTP 403: missing scope storage:logs:read"
+	for _, tc := range []struct {
+		name  string
+		rungs []mockResponse
+		lead  func(opts DiscoverOptions) string
+	}{
+		{
+			name:  "on the first rung",
+			rungs: []mockResponse{failed(100000)},
+			lead: func(o DiscoverOptions) string {
+				return truncatedEvidence("logs", TruncationScanLimit, o.Since, o.ScanLimitGBytes)
+			},
+		},
+		{
+			name:  "after an empty rung without the flag",
+			rungs: []mockResponse{unflaggedEmptyRung(100000, true), failed(10000)},
+			lead: func(o DiscoverOptions) string {
+				return truncatedEvidence("logs", TruncationScanLimit, o.Since, o.ScanLimitGBytes)
+			},
+		},
+		{
+			name:  "after a sampled miss",
+			rungs: []mockResponse{sampledRung(100000, 0, 0, ""), failed(10000)},
+			lead: func(o DiscoverOptions) string {
+				return sampledZeroEvidence("logs", 100000, o.Since, o.ScanLimitGBytes)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append(append([]mockResponse{cappedLogs()}, tc.rungs...), runner.responses...)
+			opts := windowOpts()
+
+			logs := signalByName(t, discoverWith(t, runner, opts), "logs")
+			if logs.State != SignalUnknown || logs.Truncation != TruncationScanLimit {
+				t.Errorf("state/truncation = %q/%q, want unknown/scan_limit", logs.State, logs.Truncation)
+			}
+			if want := tc.lead(opts) + reason; logs.Evidence != want {
+				t.Errorf("evidence = %q\nwant       %q", logs.Evidence, want)
+			}
+			if got, want := len(sampledCalls(runner)), len(tc.rungs); got != want {
+				t.Errorf("ran %d sampled probes, want %d: a failed rung ends the walk", got, want)
+			}
+		})
+	}
+}
+
+// TestRungThatFailsDoesNotUndoAHit: with a hit held, the verdict is the hit's
+// and a failure further down the ladder takes nothing from it.
+func TestRungThatFailsDoesNotUndoAHit(t *testing.T) {
+	runner := windowRunner()
+	runner.responses = append([]mockResponse{
+		cappedLogs(),
+		sampledRung(100000, 2, 200000, at(6, 0)),
+		{match: rungMatch(10000), err: errors.New("HTTP 500")},
+	}, runner.responses...)
+
+	logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+	if logs.State != SignalUnknown || logs.RecordsSampled != 2 || logs.Records != 200000 || logs.Truncation != "" {
+		t.Errorf("state/sampled/records/truncation = %q/%d/%d/%q, want unknown/2/200000 and no truncation (evidence: %s)",
+			logs.State, logs.RecordsSampled, logs.Records, logs.Truncation, logs.Evidence)
+	}
+	if !strings.Contains(logs.Evidence, "too few to say when the data stopped") {
+		t.Errorf("evidence %q should be the thin hit's own", logs.Evidence)
+	}
+	if got := len(sampledCalls(runner)); got != 2 {
+		t.Errorf("ran %d sampled probes, want 2", got)
+	}
+}
+
+// TestBudgetThatEndsMidWalkIsNamed: the walk shares the run's query budget.
+// When the budget refuses a rung, the signal keeps what the earlier rungs
+// established and says that the budget, not the ladder, ended the recovery.
+func TestBudgetThatEndsMidWalkIsNamed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rungs []mockResponse
+		lead  func(opts DiscoverOptions) string
+	}{
+		{
+			name:  "with nothing established",
+			rungs: []mockResponse{unflaggedEmptyRung(100000, true), unflaggedEmptyRung(10000, true)},
+			lead: func(o DiscoverOptions) string {
+				return truncatedEvidence("logs", TruncationScanLimit, o.Since, o.ScanLimitGBytes)
+			},
+		},
+		{
+			name:  "with a sampled bound",
+			rungs: []mockResponse{sampledRung(100000, 0, 0, ""), sampledRung(10000, 0, 0, "")},
+			lead: func(o DiscoverOptions) string {
+				return sampledZeroEvidence("logs", 10000, o.Since, o.ScanLimitGBytes)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append(append([]mockResponse{cappedLogs()}, tc.rungs...), runner.responses...)
+			opts := windowOpts()
+			opts.Signals = []string{"logs"}
+			// The catalog, the buckets and the capped probe take three; two
+			// rungs take the rest.
+			opts.BudgetQueries = 5
+
+			inv := discoverWith(t, runner, opts)
+			logs := signalByName(t, inv, "logs")
+			if got := len(sampledCalls(runner)); got != 2 {
+				t.Fatalf("ran %d sampled probes, want 2 before the budget ended", got)
+			}
+			if logs.State != SignalUnknown || logs.Truncation != TruncationScanLimit {
+				t.Errorf("state/truncation = %q/%q, want unknown/scan_limit", logs.State, logs.Truncation)
+			}
+			if want := tc.lead(opts) + "; sampled retry stopped: discovery budget exhausted"; logs.Evidence != want {
+				t.Errorf("evidence = %q\nwant       %q", logs.Evidence, want)
+			}
+		})
+	}
+}
+
 // TestThinSampleSurvivesARefusedNextRung: a refusal met while descending for
 // precision must not lose an answer that was already conclusive, any more
 // than a capped rung may.

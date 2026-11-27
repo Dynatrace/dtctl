@@ -348,6 +348,11 @@ func (b *budgetRunner) recoverBySampling(ctx context.Context, sig Signal, def *C
 	// is the one thing that rules out "this environment does not sample the
 	// object".
 	var flagged bool
+	// stopped says why the walk ended early when a rung failed or the budget
+	// refused it. It is reported only when no hit was made: a hit is a verdict
+	// of its own, while a capped verdict or a bound next to an interrupted
+	// walk would otherwise read as the most the ladder could find.
+	var stopped string
 walk:
 	for _, ratio := range samplingLadder {
 		askedAt := clock()
@@ -356,11 +361,15 @@ walk:
 		case err == nil:
 		case ctx.Err() != nil:
 			return sig, ctx.Err()
+		case err == errBudgetExhausted:
+			// Out of budget. Stop walking and resolve with whatever the
+			// ladder already established — a bound measured by an earlier
+			// rung stays valid regardless of why the next one did not run.
+			stopped = "sampled retry stopped: discovery budget exhausted"
+			break walk
 		default:
-			// Out of budget, or the probe failed. Stop walking and resolve
-			// with whatever the ladder already established — a bound measured
-			// by an earlier rung stays valid regardless of why the next one
-			// did not run.
+			// The probe failed, and the same holds.
+			stopped = "sampled retry failed: " + firstLine(err.Error())
 			break walk
 		}
 		p := readSampledProbe(res, ratio, askedAt)
@@ -434,11 +443,13 @@ walk:
 
 	if hit == nil {
 		if zeroAt == 0 {
-			return capped(), nil
+			sig = capped()
+			sig.Evidence = joinEvidence(sig.Evidence, stopped)
+			return sig, nil
 		}
 		sig.State = SignalUnknown
 		sig.Truncation = cause
-		sig.Evidence = sampledZeroEvidence(def.DataObject, zeroAt, opts.Since, opts.ScanLimitGBytes)
+		sig.Evidence = joinEvidence(sampledZeroEvidence(def.DataObject, zeroAt, opts.Since, opts.ScanLimitGBytes), stopped)
 		return sig, nil
 	}
 	return b.sampledVerdict(sig, def, opts, timeField, *hit, newest), nil
