@@ -361,3 +361,31 @@ func TestDiscover_AnUnexplainedValueIsNoTerm(t *testing.T) {
 	assert.Equal(t, "substring", r.Candidates[0].Tier)
 	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 }
+
+// Within a tier a candidate named by the unit itself stands before one only
+// an indirect name found, whatever their volume: a busy proxy must not push
+// the unit's own workload down a list of which a terminal shows the top.
+func TestDiscover_RanksOwnNamesBeforeIndirectOnes(t *testing.T) {
+	repo := fstest.MapFS{"go.mod": file("module example.invalid/acme/checkout\n"),
+		"deploy/checkout.yaml": file(deployment("checkout", "acme/checkout:1", "envoyproxy/envoy:v1.30")),
+		// A second file that lists the proxy, so that as many files name it
+		// as name the unit's workload.
+		"deploy/worker.yaml": file(deployment("ledger-worker", "acme/ledger-worker:1", "envoyproxy/envoy:v1.30"))}
+	p, err := PlanDiscovery(repo, ".", nil)
+	require.NoError(t, err)
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		objectSpans: {{records: []map[string]interface{}{
+			{fieldNamespace: "mesh", fieldWorkload: "envoy", fieldRecords: float64(900000)},
+			{fieldNamespace: "payments", fieldWorkload: "checkout", fieldRecords: float64(10)},
+			{fieldNamespace: "payments", fieldWorkload: "acme-checkout-canary", fieldRecords: float64(5)},
+		}}},
+	}}, p, prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 3)
+	var order []string
+	for _, c := range r.Candidates {
+		order = append(order, c.Workload+" "+c.Tier)
+	}
+	assert.Equal(t, []string{"checkout exact", "envoy exact", "acme-checkout-canary segment"}, order)
+	assert.NotEmpty(t, r.Candidates[1].Indirect)
+}

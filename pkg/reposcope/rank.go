@@ -804,6 +804,9 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.rate = d.rate(c)
 		all = append(all, c)
 	}
+	for _, c := range all {
+		c.Indirect = indirect(c.named)
+	}
 	sort.Slice(all, func(i, j int) bool { return before(all[i], all[j]) })
 	shared := sharedServiceNames(all)
 	inClusters := workloadClusters(all)
@@ -812,7 +815,6 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.ServiceNameShared = shared[c.ServiceName]
 		c.WorkloadShared = c.Workload != "" && inClusters[Workload{Namespace: c.Namespace, Name: c.Workload}] > 1
 		c.MatchedDir = d.dirSource != "" && c.sources[d.dirSource]
-		c.Indirect = indirect(c.named)
 		c.Rank, c.Tier = i+1, c.tier.String()
 		c.Name = EntryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
 	}
@@ -887,8 +889,9 @@ func workloadClusters(cs []*Candidate) map[Workload]int {
 	return count
 }
 
-// before orders candidates: better tier, more repository files naming them,
-// more records per hour, then by identity, so the order never depends on the
+// before orders candidates: better tier, a name of the unit's own before
+// indirect names alone, more repository files naming them, more records per
+// hour, then by identity, so the order never depends on the
 // order rows arrived in. Records are compared per hour because a sampled
 // object may have been read over a shorter window than the other. A sampled
 // object counts its hits: every candidate of one object was read by the same
@@ -898,6 +901,8 @@ func before(c, o *Candidate) bool {
 	switch {
 	case c.tier != o.tier:
 		return c.tier < o.tier
+	case (c.Indirect == "") != (o.Indirect == ""):
+		return c.Indirect == ""
 	case len(c.sources) != len(o.sources):
 		return len(c.sources) > len(o.sources)
 	case c.rate != o.rate:
