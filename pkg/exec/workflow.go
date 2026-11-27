@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -127,10 +128,11 @@ func (e *WorkflowExecutor) GetStatus(executionID string) (*ExecutionStatus, erro
 func formatWorkflowAPIError(prefix string, statusCode int, body string) error {
 	var envelope apiErrorEnvelope
 	if err := json.Unmarshal([]byte(body), &envelope); err == nil && envelope.Error.Message != "" {
-		return fmt.Errorf("%s: status %d: %s", prefix, statusCode, envelope.Error.Message)
+		return fmt.Errorf("%s: %w", prefix, httpclient.NewAPIError(statusCode, envelope.Error.Message, ""))
 	}
 
-	return fmt.Errorf("%s: status %d: %s", prefix, statusCode, body)
+	// The body is kept in APIError.Details, not in the message.
+	return fmt.Errorf("%s: %w", prefix, httpclient.NewAPIError(statusCode, http.StatusText(statusCode), body))
 }
 
 // WaitOptions configures the wait behavior

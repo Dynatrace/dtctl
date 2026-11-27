@@ -13,7 +13,8 @@ import (
 // successful responses.
 //
 // It attempts to parse the Dynatrace error response body for a human-readable
-// message. If parsing fails, the raw response body is included as details.
+// message. If parsing fails, the raw response body is kept in Details (never
+// in the message or in Error()).
 func CheckResponse(resp *resty.Response) error {
 	if resp == nil || !resp.IsError() {
 		return nil

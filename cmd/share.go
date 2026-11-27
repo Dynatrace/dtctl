@@ -798,7 +798,7 @@ func visibilityError(err error, documentID, state string) error {
 	return &diagnostic.Error{
 		Operation:   fmt.Sprintf("make document %q %s", documentID, state),
 		StatusCode:  apiErr.StatusCode,
-		Message:     "access denied: " + err.Error(),
+		Message:     "access denied: " + errorText(err),
 		Err:         err,
 		Suggestions: []string{"Only the document's owner can make it public or private (an admin also on ready-made documents)"},
 	}
@@ -816,7 +816,7 @@ func environmentShareScopeError(err error, cfg *config.Config, operation string,
 	return &diagnostic.Error{
 		Operation:  operation,
 		StatusCode: apiErr.StatusCode,
-		Message:    "access denied: " + err.Error(),
+		Message:    "access denied: " + errorText(err),
 		Err:        err,
 		Suggestions: append(loginScopeAdvice(cfg, scopes),
 			"Platform token: create it with "+strings.Join(scopes, ", "),

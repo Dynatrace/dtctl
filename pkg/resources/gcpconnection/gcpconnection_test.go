@@ -183,7 +183,7 @@ func TestHandlerCreateUpdateStatusMapping(t *testing.T) {
 			{status: 403, wantErr: "create gcp_connection (HTTP 403): boom"},
 			{status: 404, wantErr: fmt.Sprintf("schema %q not found", SchemaID)},
 			{status: 409, wantErr: "already exists"},
-			{status: 500, wantErr: "failed to create gcp_connection: status 500"},
+			{status: 500, wantErr: "failed to create gcp_connection: API error (500)"},
 		}
 		for _, tc := range tests {
 			h, server := newHandler(t, func(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +213,7 @@ func TestHandlerCreateUpdateStatusMapping(t *testing.T) {
 			{status: 404, wantErr: "gcp_connection \"obj-1\" not found"},
 			{status: 409, wantErr: "version conflict"},
 			{status: 412, wantErr: "version conflict"},
-			{status: 500, wantErr: "failed to update gcp_connection: status 500"},
+			{status: 500, wantErr: "failed to update gcp_connection: API error (500)"},
 		}
 		for _, tc := range tests {
 			h, server := newHandler(t, func(w http.ResponseWriter, r *http.Request) {

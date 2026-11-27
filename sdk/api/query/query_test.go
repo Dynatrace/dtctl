@@ -287,6 +287,30 @@ func TestCancel(t *testing.T) {
 	}
 }
 
+func TestCancel_ErrorKeepsBodyInDetails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/platform/storage/query/v1/query:cancel", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream-body-with-internal-detail"))
+	})
+
+	h := NewHandler(newTestClient(t, mux))
+	err := h.Cancel(context.Background(), "tok")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "upstream-body") {
+		t.Errorf("Error() leaks the response body: %q", err.Error())
+	}
+	var apiErr *httpclient.APIError
+	if !errorAsAPIError(err, &apiErr) {
+		t.Fatalf("expected *httpclient.APIError in chain, got %T", err)
+	}
+	if apiErr.StatusCode != http.StatusBadGateway || !strings.Contains(apiErr.Details, "upstream-body") {
+		t.Errorf("got status %d details %q", apiErr.StatusCode, apiErr.Details)
+	}
+}
+
 func TestVerify(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/platform/storage/query/v1/query:verify", func(w http.ResponseWriter, r *http.Request) {

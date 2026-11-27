@@ -173,7 +173,7 @@ func (h *Handler) listBySchema(schemaID string) ([]AWSConnection, error) {
 					Body:       resp.String(),
 				})
 			}
-			return nil, fmt.Errorf("failed to list aws_connections for schema %q: %s", schemaID, resp.String())
+			return nil, fmt.Errorf("failed to list aws_connections for schema %q: %w", schemaID, httpclient.CheckResponse(resp))
 		}
 
 		for i := range result.Items {
@@ -206,7 +206,7 @@ func (h *Handler) Get(id string) (*AWSConnection, error) {
 				ExistingObject: true,
 			})
 		}
-		return nil, fmt.Errorf("failed to get aws_connection: %s", resp.String())
+		return nil, fmt.Errorf("failed to get aws_connection: %w", httpclient.CheckResponse(resp))
 	}
 	flattenConnection(&result)
 	return &result, nil
@@ -231,7 +231,7 @@ func (h *Handler) Delete(id string) error {
 				ExistingObject: true,
 			})
 		}
-		return fmt.Errorf("failed to delete aws_connection: status %d: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("failed to delete aws_connection: %w", httpclient.CheckResponse(resp))
 	}
 	return nil
 }
@@ -281,7 +281,7 @@ func (h *Handler) Create(req AWSConnectionCreate) (*AWSConnection, error) {
 	if resp.IsError() {
 		switch resp.StatusCode() {
 		case 400:
-			return nil, fmt.Errorf("invalid aws_connection: %s", resp.String())
+			return nil, fmt.Errorf("invalid aws_connection: %w", httpclient.CheckResponse(resp))
 		case 403:
 			return nil, diagnostic.SettingsForbidden(diagnostic.SettingsDenial{
 				Operation:  "create aws_connection",
@@ -294,7 +294,7 @@ func (h *Handler) Create(req AWSConnectionCreate) (*AWSConnection, error) {
 		case 409:
 			return nil, fmt.Errorf("aws_connection already exists or conflicts with existing connection")
 		default:
-			return nil, fmt.Errorf("failed to create aws_connection: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to create aws_connection: %w", httpclient.CheckResponse(resp))
 		}
 	}
 
@@ -336,7 +336,7 @@ func (h *Handler) Update(objectID string, value Value) (*AWSConnection, error) {
 	if resp.IsError() {
 		switch resp.StatusCode() {
 		case 400:
-			return nil, fmt.Errorf("invalid aws_connection: %s", resp.String())
+			return nil, fmt.Errorf("invalid aws_connection: %w", httpclient.CheckResponse(resp))
 		case 403:
 			return nil, diagnostic.SettingsForbidden(diagnostic.SettingsDenial{
 				Operation:      fmt.Sprintf("update aws_connection %q", objectID),
@@ -350,7 +350,7 @@ func (h *Handler) Update(objectID string, value Value) (*AWSConnection, error) {
 		case 409, 412:
 			return nil, fmt.Errorf("aws_connection version conflict (connection was modified)")
 		default:
-			return nil, fmt.Errorf("failed to update aws_connection: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to update aws_connection: %w", httpclient.CheckResponse(resp))
 		}
 	}
 	return h.Get(objectID)

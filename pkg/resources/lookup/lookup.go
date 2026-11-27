@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Handler handles lookup table resources
@@ -520,7 +522,7 @@ func ValidatePath(path string) error {
 func handleUploadError(statusCode int, body string, path string) error {
 	switch statusCode {
 	case 400:
-		return fmt.Errorf("invalid upload request: %s", body)
+		return fmt.Errorf("invalid upload request: %w", bodyError(statusCode, body))
 	case 403:
 		return forbiddenError("write", "storage:files:write", "re-run your create or apply command with --check-scopes", path, body)
 	case 409:
@@ -528,21 +530,27 @@ func handleUploadError(statusCode int, body string, path string) error {
 	case 413:
 		return fmt.Errorf("file size exceeds maximum limit (100 MB)")
 	default:
-		return fmt.Errorf("upload failed (status %d): %s", statusCode, body)
+		return fmt.Errorf("upload failed: %w", bodyError(statusCode, body))
 	}
+}
+
+// bodyError carries a response body in APIError.Details so it stays out of the
+// message; dtctl's error rendering shows it.
+func bodyError(statusCode int, body string) error {
+	return httpclient.NewAPIError(statusCode, http.StatusText(statusCode), body)
 }
 
 // handleDeleteError formats delete errors with user-friendly messages
 func handleDeleteError(statusCode int, body string, path string) error {
 	switch statusCode {
 	case 400:
-		return fmt.Errorf("invalid delete request: %s", body)
+		return fmt.Errorf("invalid delete request: %w", bodyError(statusCode, body))
 	case 403:
 		return forbiddenError("delete", "storage:files:delete", "dtctl delete lookup "+path+" --check-scopes", path, body)
 	case 404:
 		return fmt.Errorf("lookup table %q not found. Run 'dtctl get lookups' to list available lookups", path)
 	default:
-		return fmt.Errorf("delete failed (status %d): %s", statusCode, body)
+		return fmt.Errorf("delete failed: %w", bodyError(statusCode, body))
 	}
 }
 

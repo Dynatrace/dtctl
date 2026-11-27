@@ -24,16 +24,18 @@ type APIError struct {
 	// Message is a human-readable error description.
 	Message string
 	// Details contains additional error information from the API response body.
+	// It is deliberately not part of Error(): the body is upstream-controlled
+	// text that callers must opt in to logging or showing (errors.As, then
+	// read Details).
 	Details string
 	// sentinel is the matching sentinel error, if any.
 	sentinel error
 }
 
-// Error implements the error interface.
+// Error implements the error interface. It returns the status and the short
+// message only; the raw response body in Details is never included, so logging
+// or returning the error cannot pass upstream-supplied text along.
 func (e *APIError) Error() string {
-	if e.Details != "" {
-		return fmt.Sprintf("API error (%d): %s - %s", e.StatusCode, e.Message, e.Details)
-	}
 	return fmt.Sprintf("API error (%d): %s", e.StatusCode, e.Message)
 }
 

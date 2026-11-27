@@ -464,7 +464,7 @@ func TestExecSLO_ErrorCases(t *testing.T) {
 			}
 
 			if tt.expectError && tt.errorContains != "" {
-				if !strings.Contains(err.Error(), tt.errorContains) {
+				if !strings.Contains(errWithDetails(err), tt.errorContains) {
 					t.Errorf("expected error to contain %q, got %q", tt.errorContains, err.Error())
 				}
 			}

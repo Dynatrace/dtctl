@@ -2,12 +2,14 @@ package exec
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 func TestWorkflowExecutor_Execute_SendsLegacyParamsCompatibilityRequest(t *testing.T) {
@@ -218,7 +220,12 @@ func TestWorkflowExecutor_Execute_FallsBackToRawErrorBody(t *testing.T) {
 		t.Fatal("Execute() expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "status 502: upstream gateway timeout") {
-		t.Fatalf("Execute() error = %q, want raw response body fallback", err.Error())
+	// The raw body stays in APIError.Details, out of the message.
+	if strings.Contains(err.Error(), "upstream gateway timeout") {
+		t.Fatalf("Execute() error = %q, must not carry the raw response body", err.Error())
+	}
+	var apiErr *httpclient.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadGateway || apiErr.Details != "upstream gateway timeout" {
+		t.Fatalf("Execute() error = %v, want an *APIError with the body in Details", err)
 	}
 }

@@ -401,7 +401,7 @@ func (h *Handler) Cancel(ctx context.Context, requestToken string) error {
 		return fmt.Errorf("failed to cancel query: %w", err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("cancel failed with status %d: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("cancel failed: %w", httpclient.CheckResponse(resp))
 	}
 	return nil
 }

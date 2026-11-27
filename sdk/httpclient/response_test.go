@@ -166,3 +166,28 @@ func TestCheckResponse(t *testing.T) {
 		})
 	}
 }
+
+// The raw body (here carrying a secret-looking value) must reach callers only
+// through Details, never through Error().
+func TestCheckResponse_ErrorOmitsBody(t *testing.T) {
+	const secret = "token-dt0c01.SECRET"
+	for name, body := range map[string]string{
+		"unparseable body":    "upstream said: " + secret,
+		"envelope details":    `{"error":{"message":"Invalid request.","details":"` + secret + `"}}`,
+		"constraint violated": `{"error":{"message":"Constraints violated.","details":{"constraintViolations":[{"path":"a","message":"` + secret + `"}]}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := CheckResponse(respFor(t, 400, body))
+			apiErr, ok := err.(*APIError)
+			if !ok {
+				t.Fatalf("expected *APIError, got %T", err)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("Error() leaks the body: %q", err.Error())
+			}
+			if !strings.Contains(apiErr.Details, secret) {
+				t.Errorf("Details = %q, want the body", apiErr.Details)
+			}
+		})
+	}
+}

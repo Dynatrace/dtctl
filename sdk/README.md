@@ -80,7 +80,7 @@ Thin, typed Go clients for Dynatrace REST APIs. Each package covers one API surf
 - **Minimal dependencies.** No Cobra, Viper, logrus, or OpenTelemetry.
 - **One-way dependency.** CLI -> SDK, never SDK -> CLI.
 - **Logging is injected.** The SDK accepts a `Logger` interface; it never imports a logging library.
-- **Errors are typed.** Use `errors.Is`/`errors.As` reliably. API errors follow the format `"API error (<code>): <message>"`.
+- **Errors are typed.** Use `errors.Is`/`errors.As` reliably. API errors follow the format `"API error (<code>): <message>"`; the upstream response body is never part of `Error()` and is available in `APIError.Details`.
 
 ## Versioning
 
