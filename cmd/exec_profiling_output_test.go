@@ -495,6 +495,9 @@ func TestExecProfiling_AgentCodeIgnoresWhatTheMessageQuotes(t *testing.T) {
 		{"focus, unknown flag", []string{"hotspots", testProcess, "--focus", "unknown flag: --agin"}, "error"},
 		{"leaf type, unknown shorthand", []string{"hotspots", testProcess, "--leaf-type", "unknown shorthand flag: 'x' in -x"}, "validation_error"},
 		{"entity, unknown command", []string{"hotspots", `unknown command "x" for "dtctl"`}, "validation_error"},
+		// The same words in a shape cobra's own errors do not have.
+		{"entity, unknown flag in other words", []string{"hotspots", "SERVICE-unknown flag config"}, "validation_error"},
+		{"focus, unknown command in other words", []string{"hotspots", testProcess, "--focus", "unknown command config"}, "error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -509,7 +512,7 @@ func TestExecProfiling_AgentCodeIgnoresWhatTheMessageQuotes(t *testing.T) {
 			require.Equal(t, profilingErrorEnvelope{Error: profilingEnvelopeError{Code: tc.code, Message: want}}, decodeProfilingError(t, stdout))
 		})
 	}
-	require.Len(t, api.paths, 12, "only the --focus cases reach the API, once with and once without --agent")
+	require.Len(t, api.paths, 14, "only the --focus cases reach the API, once with and once without --agent")
 }
 
 // The hints about a wrong environment URL and an expired login are for a
