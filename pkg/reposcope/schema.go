@@ -205,6 +205,10 @@ func (f *File) check() *InvalidError {
 // validateHost checks one environment's key and entries.
 func (f *File) validateHost(host string) *InvalidError {
 	if canonical := canonicalHost(host); canonical != host {
+		// Nothing to advise when what is left is no host either.
+		if len(canonical) > maxDNSSubdomain || !dnsSubdomainRe.MatchString(canonical) {
+			return invalid(fmt.Sprintf("environment %q is not a host name", host))
+		}
 		msg := fmt.Sprintf("environment %q must be written as the bare host %q", host, canonical)
 		if _, taken := f.Environments[canonical]; taken {
 			msg = fmt.Sprintf("environments %q and %q name the same host", host, canonical)
@@ -542,7 +546,7 @@ func serviceNameProblem(name string) string {
 }
 
 // canonicalHost is the form a host key must already have: lowercase, with no
-// scheme, path, port or trailing dot.
+// scheme, user, path, port or trailing dot.
 func canonicalHost(key string) string {
 	h := strings.ToLower(strings.TrimSpace(key))
 	if i := strings.Index(h, "://"); i >= 0 {
@@ -550,6 +554,9 @@ func canonicalHost(key string) string {
 	}
 	if i := strings.IndexAny(h, "/?#"); i >= 0 {
 		h = h[:i]
+	}
+	if i := strings.LastIndex(h, "@"); i >= 0 {
+		h = h[i+1:]
 	}
 	if host, _, err := net.SplitHostPort(h); err == nil {
 		h = host
