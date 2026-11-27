@@ -550,6 +550,9 @@ func TestExtract_Dockerfile(t *testing.T) {
 		{"a launch script names nothing", `ENTRYPOINT ["./run.sh"]`, ""},
 		{"what a launcher runs is read", `CMD ["uvicorn", "ledger.main:app"]`, "ledger"},
 		{"an interpreter is known by its stem", `CMD ["python3.12", "scheduler.py"]`, "scheduler"},
+		{"an array continued over lines", "ENTRYPOINT [\"java\", \\\n    \"-jar\", \\\r\n    \"/app/billing-core.jar\"]", "billing-core"},
+		{"shell form continued over lines", "CMD node \\\n    dist/report-builder.js", "report-builder"},
+		{"a quoted shell-form line names nothing", `CMD "/app/order-api" --verbose`, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -572,6 +575,14 @@ func TestPlan_DockerfileFlagOperandsAreNotSent(t *testing.T) {
 		`CMD ["node", "--require", "./tracing.js", "server.js"]`,
 		`ENTRYPOINT ["tini", "-g", "--", "/app/order-api"]`,
 		"CMD python -m acme_secret_module",
+		`ENTRYPOINT ["--api-key", "SECRET999"]`,
+		`CMD ["gunicorn", "--host", "0.0.0.0"]`,
+		// An array continued on the next line is still an array, and a
+		// quoted script in shell form is one argument, not words.
+		"ENTRYPOINT [\"java\", \\\n  \"-Dapi.key=secret123\", \"-cp\", \"/app/lib\", \"com.example.Main\"]",
+		`CMD sh -c "java -Dapi.key=secret123 -jar /app/checkout.jar"`,
+		`CMD sh -c 'exec /app/order-api --db-pass hunter2'`,
+		`ENTRYPOINT ['/app/order-api']`,
 	} {
 		p, err := PlanDiscovery(fstest.MapFS{"Dockerfile": {Data: []byte("FROM scratch\n" + dockerfile + "\n")}}, ".", nil)
 		require.NoError(t, err)
@@ -601,6 +612,12 @@ func TestExtract_DockerfileReadsTheLastStage(t *testing.T) {
 			"FROM golang AS build\nCMD [\"/bin/order-api\"]\nFROM scratch\nCMD [\"/bin/order-api\"]\n", "order-api", 4},
 		"no stage at all": {
 			"CMD [\"/bin/order-api\"]\n", "order-api", 1},
+		"an instruction after a continued one is cited on its own line": {
+			"FROM scratch\nRUN apk add \\\n    curl \\\n    jq\nENTRYPOINT [\"/bin/order-api\"]\n", "order-api", 5},
+		"a continued instruction is cited where it starts": {
+			"FROM scratch\nENTRYPOINT [ \\\n  \"/bin/order-api\"]\n", "order-api", 2},
+		"a FROM continued over lines starts a stage": {
+			"FROM golang AS build\nENTRYPOINT [\"/bin/builder-tool\"]\nFROM \\\n  scratch\n", "", 0},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, _ := dockerEntrypoint(tt.dockerfile, "Dockerfile")

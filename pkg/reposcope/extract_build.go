@@ -20,7 +20,6 @@ var (
 	pomParentRe    = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
 	pomArtifactRe  = regexp.MustCompile(`<artifactId>\s*([^<]+?)\s*</artifactId>`)
 	assemblyNameRe = regexp.MustCompile(`<AssemblyName>\s*([^<]+?)\s*</AssemblyName>`)
-	dockerRunRe    = regexp.MustCompile(`(?im)^[ \t]*(ENTRYPOINT|CMD)[ \t]+(.+)$`)
 
 	// The Gradle expressions read one assignment in either DSL: `name = "x"`
 	// and `name = 'x'`, and Kotlin's `name.set("x")` for a property. The
@@ -137,31 +136,44 @@ var launchers = keySet("sh", "bash", "exec", "java", "node", "python", "python3"
 	"dotnet", "npm", "yarn", "pnpm", "ruby", "php", "tini", "dumb-init",
 	"nginx", "uvicorn", "gunicorn", "index", "run", "start", "wsgi", "asgi")
 
-var dockerFromRe = regexp.MustCompile(`(?im)^[ \t]*FROM[ \t]`)
+// dockerInstructionRe reads one instruction, its continued lines joined.
+var dockerInstructionRe = regexp.MustCompile(`(?is)^[ \t]*(FROM|ENTRYPOINT|CMD)[ \t]+(.+)$`)
 
 // dockerEntrypoint reads what the image runs. The image is the last stage of
 // the file, so only that stage is read: an earlier one runs a build tool.
 // Docker appends CMD to ENTRYPOINT, so the last of each are read together,
-// and runTarget picks the name out of them.
+// and runTarget picks the name out of them. An instruction is read with the
+// lines it continues on, and cited at the line it starts.
 func dockerEntrypoint(text, file string) (token, bool) {
-	stage := 0
-	if from := dockerFromRe.FindAllStringIndex(text, -1); len(from) > 0 {
-		stage = from[len(from)-1][0]
+	type instruction struct {
+		args string
+		line int
 	}
-	var entrypoint, cmd []int
-	for _, m := range dockerRunRe.FindAllStringSubmatchIndex(text[stage:], -1) {
-		if strings.EqualFold(text[stage+m[2]:stage+m[3]], "ENTRYPOINT") {
-			entrypoint = m
-		} else {
-			cmd = m
+	var entrypoint, cmd *instruction
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		start, logical := i+1, strings.TrimRight(lines[i], "\r")
+		for strings.HasSuffix(logical, "\\") && i+1 < len(lines) {
+			i++
+			logical = strings.TrimSuffix(logical, "\\") + " " + strings.TrimRight(lines[i], "\r")
+		}
+		m := dockerInstructionRe.FindStringSubmatch(logical)
+		switch {
+		case m == nil:
+		case strings.EqualFold(m[1], "FROM"):
+			entrypoint, cmd = nil, nil
+		case strings.EqualFold(m[1], "ENTRYPOINT"):
+			entrypoint = &instruction{m[2], start}
+		default:
+			cmd = &instruction{m[2], start}
 		}
 	}
 	var args []string
 	line := 0
-	for _, m := range [][]int{cmd, entrypoint} {
-		if m != nil {
-			args = append(splitDockerArgs(text[stage+m[4]:stage+m[5]]), args...)
-			line = strings.Count(text[:stage+m[0]], "\n") + 1
+	for _, in := range []*instruction{cmd, entrypoint} {
+		if in != nil {
+			args = append(splitDockerArgs(in.args), args...)
+			line = in.line
 		}
 	}
 	name := runTarget(args)
@@ -172,11 +184,17 @@ func dockerEntrypoint(text, file string) (token, bool) {
 }
 
 // splitDockerArgs splits ENTRYPOINT/CMD arguments in exec form (a JSON
-// array) or shell form.
+// array) or shell form. A shell-form line that holds a quote has no
+// arguments here: where its words end is the shell's to say, and a quoted
+// script (sh -c "...") split at its spaces would pass for a command line of
+// its own.
 func splitDockerArgs(args string) []string {
 	var exec []string
 	if json.Unmarshal([]byte(strings.TrimSpace(args)), &exec) == nil {
 		return exec
+	}
+	if strings.ContainsAny(args, "\"'`") {
+		return nil
 	}
 	return strings.Fields(args)
 }
