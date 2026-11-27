@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -208,26 +209,41 @@ func TestResolve_DirectoryThatIsNotUTF8(t *testing.T) {
 }
 
 // Reading a build's references is linear in its modules: resolving reads the
-// build on every scoped query.
+// build on every scoped query. Held by how the time grows from one build to
+// one four times its size, not by a duration, which a slow machine or the
+// race detector would stretch: comparing every reference with every module
+// took sixteen times as long for the larger one.
 func TestGradleBuildAt_ManyModules(t *testing.T) {
-	const modules, refs = 500, 40
-	fsys := fstest.MapFS{}
-	var settings strings.Builder
-	for i := range modules {
-		fmt.Fprintf(&settings, "include ':module-%d'\n", i)
-		var build strings.Builder
-		for j := range refs {
-			fmt.Fprintf(&build, "implementation project(':module-%d')\nimplementation projects.module%d\n", (i+j+1)%modules, i+j)
+	const refs = 40
+	build := func(modules int) fstest.MapFS {
+		fsys := fstest.MapFS{}
+		var settings strings.Builder
+		for i := range modules {
+			fmt.Fprintf(&settings, "include ':module-%d'\n", i)
+			var file strings.Builder
+			for j := range refs {
+				fmt.Fprintf(&file, "implementation project(':module-%d')\nimplementation projects.module%d\n", (i+j+1)%modules, i+j)
+			}
+			fsys[fmt.Sprintf("module-%d/build.gradle", i)] = &fstest.MapFile{Data: []byte(file.String())}
 		}
-		fsys[fmt.Sprintf("module-%d/build.gradle", i)] = &fstest.MapFile{Data: []byte(build.String())}
+		fsys["settings.gradle"] = &fstest.MapFile{Data: []byte(settings.String())}
+		return fsys
 	}
-	fsys["settings.gradle"] = &fstest.MapFile{Data: []byte(settings.String())}
-	start := time.Now()
-	b := gradleBuildAt(fsys, "module-0")
-	elapsed := time.Since(start)
-	require.NotNil(t, b)
-	assert.Len(t, b.modules, modules)
-	assert.Contains(t, b.modules["module-0"], "module-1")
-	assert.Len(t, b.modules["module-0"], refs)
-	assert.Less(t, elapsed, 500*time.Millisecond)
+	// The fastest of three reads, so that one pause does not decide it.
+	read := func(fsys fstest.MapFS, modules int) time.Duration {
+		fastest := time.Duration(math.MaxInt64)
+		for range 3 {
+			start := time.Now()
+			b := gradleBuildAt(fsys, "module-0")
+			fastest = min(fastest, time.Since(start))
+			require.NotNil(t, b)
+			require.Len(t, b.modules, modules)
+			require.Contains(t, b.modules["module-0"], "module-1")
+			require.Len(t, b.modules["module-0"], refs)
+		}
+		return fastest
+	}
+	const small, large = 120, 480
+	one, four := read(build(small), small), read(build(large), large)
+	assert.Less(t, four, 9*one, "%d modules took %s and %d took %s", small, one, large, four)
 }
