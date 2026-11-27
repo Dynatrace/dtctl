@@ -302,6 +302,48 @@ func TestRepositoryName(t *testing.T) {
 	}
 }
 
+// .git/config is read the way git reads it, as far as an origin URL needs: a
+// comment after a header or a value is none of either, a section name and a
+// key are spelled in any case, and a value may be quoted. A header the reader
+// does not understand ends the section before it, so the URL of a remote
+// declared after origin is never taken for origin's.
+func TestRepositoryNameReadsGitConfigSpellings(t *testing.T) {
+	const ledger = "[remote \"backup\"] ; mirror\n\turl = https://example.invalid/shop/ledger.git\n"
+	for _, tt := range []struct{ name, config, want string }{
+		{"comments after the URL and after the next header",
+			"[remote \"origin\"]\n\turl = https://example.invalid/shop/storefront.git # primary\n" + ledger, "storefront"},
+		{"a comment after the URL alone",
+			"[remote \"origin\"]\n\turl = https://example.invalid/shop/storefront.git ; primary\n", "storefront"},
+		{"a comment right behind the URL",
+			"[remote \"origin\"]\n\turl = https://example.invalid/shop/storefront.git#primary\n", "storefront"},
+		{"a comment after origin's header",
+			"[remote \"origin\"] # primary\n\turl = https://example.invalid/shop/storefront.git\n" + ledger, "storefront"},
+		{"comment lines",
+			"# remotes\n[remote \"origin\"]\n\t; url = https://example.invalid/shop/old.git\n\turl = https://example.invalid/shop/storefront.git\n", "storefront"},
+		{"a section name in capitals", "[Remote \"origin\"]\n\turl = https://example.invalid/shop/storefront.git\n", "storefront"},
+		{"a key in capitals", "[remote \"origin\"]\n\tURL = https://example.invalid/shop/storefront.git\n", "storefront"},
+		{"no spaces around the equals sign", "[remote \"origin\"]\nurl=https://example.invalid/shop/storefront.git\n", "storefront"},
+		{"a quoted URL", "[remote \"origin\"]\n\turl = \"https://example.invalid/shop/storefront.git\"\n", "storefront"},
+		{"a quoted URL with a comment", "[remote \"origin\"]\n\turl = \"https://example.invalid/shop/storefront.git\" # primary\n", "storefront"},
+		{"a quoted URL that holds a comment character", "[remote \"origin\"]\n\turl = \"https://example.invalid/shop/store;front.git\"\n", "store;front"},
+		{"Windows line ends", "[remote \"origin\"]\r\n\turl = https://example.invalid/shop/storefront.git\r\n", "storefront"},
+		{"a remote named Origin is another remote", "[remote \"Origin\"]\n\turl = https://example.invalid/shop/ledger.git\n", ""},
+		{"a header that is not understood ends origin's section",
+			"[remote \"origin\"]\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[remote \"backup\" extra]\n\turl = https://example.invalid/shop/ledger.git\n", ""},
+		{"so does one that is never closed",
+			"[remote \"origin\"]\n[remote \"backup\"\n\turl = https://example.invalid/shop/ledger.git\n", ""},
+		{"a quote that is never closed is no URL",
+			"[remote \"origin\"]\n\turl = \"https://example.invalid/shop/storefront.git\n", ""},
+		{"nor is text after the closing quote",
+			"[remote \"origin\"]\n\turl = \"https://example.invalid/shop/store\"front.git\n", ""},
+		{"a URL key of another section", "[remote \"origin\"]\n[branch \"main\"]\n\turl = https://example.invalid/shop/ledger.git\n", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, RepositoryName(fstest.MapFS{".git/config": {Data: []byte(tt.config)}}))
+		})
+	}
+}
+
 // Only the last segment of the remote's path is a name. Credentials, a query
 // string, a fragment and the directories of a local path are not, and a remote
 // with no path names nothing.

@@ -11,9 +11,13 @@ import (
 // which is often the name a team deploys it under. It is read as a file: no
 // git subprocess, so nothing here needs more than fsys.
 
+// A section header, with the comment git allows after it: [remote "origin"].
+// The section's name is spelled in any case, the subsection's in one. A key
+// and its value follow on lines of their own; the value is bare up to a
+// comment, or quoted, and then a comment character is part of it.
 var (
-	gitSectionRe = regexp.MustCompile(`^\s*\[\s*([^\]]+?)\s*\]\s*$`)
-	gitURLRe     = regexp.MustCompile(`^\s*url\s*=\s*(\S+)\s*$`)
+	gitSectionRe = regexp.MustCompile(`^\[\s*([A-Za-z0-9.-]+)(?:\s+"([^"\\]*)")?\s*\]\s*(?:[#;].*)?$`)
+	gitURLRe     = regexp.MustCompile(`(?i)^url\s*=\s*(?:"([^"\\]*)"|([^"#;\s][^"#;]*?)?)\s*(?:[#;].*)?$`)
 )
 
 const gitConfig = ".git/config"
@@ -46,20 +50,27 @@ func RepositoryName(fsys fs.FS) string {
 
 // originURL is the origin remote's URL in .git/config, with its line. When
 // .git is a file (a worktree or a submodule) the configuration lives outside
-// the repository root fsys is limited to, and there is none.
+// the repository root fsys is limited to, and there is none. Nor is there one
+// when the URL is written in a way this reader does not understand, an escape
+// or a line continuation among them: a caller then falls back to what it has
+// without the remote.
 func originURL(fsys fs.FS) (remote string, line int, ok bool) {
 	data, err := readSource(fsys, gitConfig)
 	if err != nil {
 		return "", 0, false
 	}
-	section := ""
+	origin := false
 	for i, text := range strings.Split(string(data), "\n") {
-		if m := gitSectionRe.FindStringSubmatch(text); m != nil {
-			section = m[1]
+		text = strings.TrimSpace(text)
+		if strings.HasPrefix(text, "[") {
+			// A header that is not understood still ends the section before
+			// it: what follows is not origin's.
+			m := gitSectionRe.FindStringSubmatch(text)
+			origin = m != nil && strings.EqualFold(m[1], "remote") && m[2] == "origin"
 			continue
 		}
-		if m := gitURLRe.FindStringSubmatch(text); m != nil && section == `remote "origin"` {
-			return m[1], i + 1, true
+		if m := gitURLRe.FindStringSubmatch(text); m != nil && origin {
+			return m[1] + m[2], i + 1, true
 		}
 	}
 	return "", 0, false
