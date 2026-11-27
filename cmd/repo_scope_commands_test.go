@@ -76,6 +76,20 @@ func TestRepoScopeBrokenFileIsNamedWithoutItsPath(t *testing.T) {
 	require.NotContains(t, stdout, filepath.Dir(repo))
 }
 
+// What an agent is told to run after a set speaks about the entry it saved,
+// in the environment it saved it for, from whatever directory.
+func TestRepoScopeSetSuggestsCommandsForTheEntryItSaved(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, "")
+	chdirSubdir(t, "elsewhere")
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "set", "ledger", "--service-name", "ledger", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []string{
+		"dtctl repo-scope describe ledger --context c",
+		"dtctl query 'fetch logs | limit 20' --repo-scope ledger --context c",
+	}, agentEnvelope(t, stdout).Context.Suggestions)
+}
+
 // Without a scope file there is no entry to find and no file to name: the
 // answer says that the repository has none, and how to get one.
 func TestRepoScopeNamedEntryWithoutAFile(t *testing.T) {

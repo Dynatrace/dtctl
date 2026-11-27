@@ -329,6 +329,9 @@ type repoScopeFile struct {
 	loc  reposcope.Location
 	host string
 	file *reposcope.File
+	// selectors are the global flags that pick the config and the context
+	// the file was read for (see repoScopeSelectors).
+	selectors []string
 }
 
 // openRepoScope reads the scope file. A missing file reads as an empty one,
@@ -342,7 +345,11 @@ func openRepoScope(ctx context.Context, cfg *config.Config) (*repoScopeFile, err
 		return nil, err
 	}
 	loc, err := repoScopeLocation(ctx)
-	return loadRepoScope(host, loc, err)
+	s, err := loadRepoScope(host, loc, err)
+	if s != nil {
+		s.selectors = repoScopeSelectors(ctx, cfg)
+	}
+	return s, err
 }
 
 // loadRepoScope reads the file at loc for host. located is why loc could not
@@ -604,7 +611,14 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 		}
 		printer := newPrinterCtx(ctx)
 		if ap := enrichAgent(printer, "set", "repo-scope"); ap != nil {
-			ap.SetSuggestions([]string{"dtctl repo-scope current", "dtctl query 'fetch logs | limit 20'"})
+			// About the entry just saved, in the environment it was saved
+			// for: `current` and a bare query answer for the working
+			// directory and the current context, which may be others.
+			selectors := strings.Join(append([]string{""}, scope.selectors...), " ")
+			ap.SetSuggestions([]string{
+				"dtctl repo-scope describe " + entry.Name + selectors,
+				fmt.Sprintf("dtctl query 'fetch logs | limit 20' --%s %s%s", repoScopeFlag, entry.Name, selectors),
+			})
 		}
 		return printer.Print(status)
 	}
