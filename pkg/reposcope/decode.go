@@ -96,6 +96,12 @@ func read(data []byte) (*File, *InvalidError) {
 	if err := r.document(root, f); err != nil {
 		return nil, err
 	}
+	if _, has := mappingValue(root, "environments"); !has && len(f.unknown) > 0 {
+		// The keys would be a warning on the queries the entries scope, and
+		// there are none: nothing would ever say that the file is not read.
+		return nil, invalid(`holds no "environments" key, so nothing in it is applied; `+unknownKeys(f.unknown),
+			"write the environments under the key environments")
+	}
 	if len(r.narrowing) > 0 {
 		them := "them"
 		if len(r.narrowing) == 1 {
@@ -128,6 +134,9 @@ func otherVersion(root *yaml.Node) *InvalidError {
 		// read as the version it spells.
 		if k.Value != "apiVersion" || k.Kind != yaml.ScalarNode || v.Kind != yaml.ScalarNode || tagged(k) || tagged(v) {
 			continue
+		}
+		if v.Value != apiVersion && strings.EqualFold(v.Value, apiVersion) {
+			return invalid(fmt.Sprintf("apiVersion %q on line %d must be written %q", v.Value, k.Line, apiVersion))
 		}
 		if v.Value != "" && !isNull(v) && v.Value != apiVersion {
 			return invalid(fmt.Sprintf("apiVersion %q on line %d is not supported (this dtctl reads %q)", v.Value, k.Line, apiVersion),
@@ -171,6 +180,19 @@ func emptyDocument(doc *yaml.Node) bool {
 // tagged reports a node written with a tag of its own (!!str, !custom).
 func tagged(n *yaml.Node) bool {
 	return n.Style&yaml.TaggedStyle != 0
+}
+
+// mappingValue is the value under key in the mapping n.
+func mappingValue(n *yaml.Node, key string) (*yaml.Node, bool) {
+	if n.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Kind == yaml.ScalarNode && n.Content[i].Value == key {
+			return n.Content[i+1], true
+		}
+	}
+	return nil, false
 }
 
 // plainNodes refuses an anchor, a merge key or an explicit tag anywhere under
@@ -372,6 +394,13 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 				return err
 			})
 		default:
+			// One of the two keys in another case is a slip, and read past
+			// it hides the entries or the version.
+			for _, known := range []string{"apiVersion", "environments"} {
+				if strings.EqualFold(key, known) {
+					return invalid(fmt.Sprintf("key %q on line %d must be written %q", key, k.Line, known))
+				}
+			}
 			f.unknown = append(f.unknown, fmt.Sprintf("%q on line %d", key, k.Line))
 		}
 		return err

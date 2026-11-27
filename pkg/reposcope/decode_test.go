@@ -311,6 +311,30 @@ func TestFileTypesCarryEveryField(t *testing.T) {
 	assert.NotRegexp(t, `(?m)^[ -]*[A-Za-z-]*[a-z][A-Z][A-Za-z]*:`, strings.SplitN(string(data), "apiVersion: v1\n", 2)[1], "a camelCase key in the file")
 }
 
+// A key of the document that is one of the format's two but for its case can
+// only be a slip, and read past it leaves a file whose entries are not there
+// or whose version is not looked at.
+func TestDecode_RefusesADocumentKeyInAnotherCase(t *testing.T) {
+	entries := "  " + prodHost + ":\n    - name: checkout\n      service-names: [checkout]\n"
+	for doc, msg := range map[string]string{
+		"Environments:\n" + entries:                               `key "Environments" on line 1 must be written "environments"`,
+		"apiversion: v2\nenvironments:\n" + entries:               `key "apiversion" on line 1 must be written "apiVersion"`,
+		"ENVIRONMENTS:\n" + entries + "environments:\n" + entries: `key "ENVIRONMENTS" on line 1 must be written "environments"`,
+		"apiVersion: V1\nenvironments:\n" + entries:               `apiVersion "V1" on line 1 must be written "v1"`,
+		"environment:\n" + entries:                                `holds no "environments" key, so nothing in it is applied; unknown key "environment" on line 1 (a typo, or written by a newer dtctl)`,
+		"kind: RepoScope\n":                                       `holds no "environments" key, so nothing in it is applied; unknown key "kind" on line 1`,
+	} {
+		_, err := decode([]byte(doc))
+		require.NotNil(t, err, doc)
+		assert.Contains(t, err.Msg, msg)
+	}
+	// The version alone, and a key beside the environments, still load.
+	for _, doc := range []string{"apiVersion: v1\n", "kind: RepoScope\nenvironments:\n" + entries, "environments: {}\n"} {
+		_, err := decode([]byte(doc))
+		assert.Nil(t, err, doc)
+	}
+}
+
 // A value is read as the text its line shows, and a tag is a way to say it is
 // something else. None is accepted, on a value, on a key, on the document or
 // on what follows it.

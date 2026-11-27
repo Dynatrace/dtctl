@@ -110,6 +110,9 @@ var stricter = regexp.MustCompile(strings.Join([]string{
 	`^the key on line \d+ must be a plain string$`,
 	`^the key on line \d+ is longer than \d+ bytes, which no key of the format is$`,
 	`^the tag \S+ on line \d+ is not accepted$`,
+	`^key "[^"]+" on line \d+ must be written "(apiVersion|environments)"$`,
+	`^apiVersion "[^"]+" on line \d+ must be written "v1"$`,
+	`^holds no "environments" key, so nothing in it is applied; unknown keys? `,
 	`^holds more than one '---' after its document$`,
 	// A key the legacy reader's pattern could not see: empty, or of more
 	// than one line.
