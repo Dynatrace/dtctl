@@ -717,3 +717,73 @@ func TestUnshareScopesFollowItsFlags(t *testing.T) {
 		require.ElementsMatch(t, append(slices.Clone(base), c.extra), got, "--%s", c.flag)
 	}
 }
+
+// TestLoginScopeAdvice_ProjectLoginLeavesTheScopeOut: in a project directory
+// the login requests only the scopes of the enforced level that the token's
+// global binding requests too. For a scope it leaves out, "log in again" is
+// advice that never works: every login there leaves it out again.
+func TestLoginScopeAdvice_ProjectLoginLeavesTheScopeOut(t *testing.T) {
+	const (
+		envURL  = "https://abc12345.apps.dynatrace.com"
+		leftOut = "storage:user.events:read" // readonly requests it, readwrite-mine does not
+		kept    = "storage:logs:read"        // both request it
+	)
+	load := func(t *testing.T, bound, declared config.SafetyLevel) *config.Config {
+		t.Helper()
+		setupLoginProject(t,
+			loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", bound}),
+			loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", declared}))
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if !cfg.IsLocal() {
+			t.Fatal("the project config was not picked up")
+		}
+		return cfg
+	}
+
+	t.Run("a scope the login leaves out", func(t *testing.T) {
+		cfg := load(t, config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly)
+		advice := strings.Join(loginScopeAdvice(cfg, []string{leftOut}), "\n")
+		if strings.Contains(advice, "run 'dtctl auth login' again") {
+			t.Errorf("the advice says to log in again:\n%s", advice)
+		}
+		want := `OAuth login: in this project directory 'dtctl auth login' does not request ` + leftOut + `, because the global binding of token "prod-oauth" (readwrite-mine) does not. Logging in again here does not add it`
+		if advice != want {
+			t.Errorf("advice = %q\nwant     %q", advice, want)
+		}
+	})
+
+	t.Run("a left-out scope next to a requested one names the left-out one only", func(t *testing.T) {
+		cfg := load(t, config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly)
+		advice := strings.Join(loginScopeAdvice(cfg, []string{kept, leftOut}), "\n")
+		if !strings.Contains(advice, "does not request "+leftOut+",") || strings.Contains(advice, "run 'dtctl auth login' again") {
+			t.Errorf("advice = %q", advice)
+		}
+	})
+
+	t.Run("a scope the login requests", func(t *testing.T) {
+		cfg := load(t, config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly)
+		advice := strings.Join(loginScopeAdvice(cfg, []string{kept}), "\n")
+		if !strings.Contains(advice, "run 'dtctl auth login' again") {
+			t.Errorf("advice = %q, want the log-in-again advice", advice)
+		}
+	})
+
+	t.Run("under a readonly binding nothing is left out", func(t *testing.T) {
+		cfg := load(t, config.SafetyLevelReadOnly, config.SafetyLevelReadOnly)
+		advice := strings.Join(loginScopeAdvice(cfg, []string{leftOut}), "\n")
+		if !strings.Contains(advice, "run 'dtctl auth login' again") {
+			t.Errorf("advice = %q, want the log-in-again advice", advice)
+		}
+	})
+
+	t.Run("a scope the level does not request keeps its own advice", func(t *testing.T) {
+		cfg := load(t, config.SafetyLevelReadWriteMine, config.SafetyLevelReadOnly)
+		advice := strings.Join(loginScopeAdvice(cfg, []string{"document:documents:write"}), "\n")
+		if !strings.Contains(advice, `the readonly safety level of context "project" does not request document:documents:write`) {
+			t.Errorf("advice = %q", advice)
+		}
+	})
+}

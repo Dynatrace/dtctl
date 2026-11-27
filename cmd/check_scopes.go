@@ -501,6 +501,15 @@ func loginScopeAdvice(cfg *config.Config, missing []string) []string {
 		}
 	}
 	if len(notRequested) == 0 {
+		// In a project directory the login requests less than the level's
+		// list: only what the token's global binding requests too.
+		if nc, err := cfg.CurrentContextObj(); err == nil {
+			_, leftOut, bound := projectLoginScopes(cfg, nc.TokenRef, missing)
+			if len(leftOut) > 0 {
+				return []string{fmt.Sprintf("OAuth login: in this project directory 'dtctl auth login' does not request %s, because the global binding of token %q (%s) does not. Logging in again here does not add it",
+					strings.Join(leftOut, ", "), nc.TokenRef, bound)}
+			}
+		}
 		return []string{fmt.Sprintf("OAuth login: 'dtctl auth login' requests %s at the %s safety level. A session from an older dtctl does not carry it — run 'dtctl auth login' again to pick it up",
 			strings.Join(missing, ", "), level)}
 	}
