@@ -26,12 +26,12 @@ func newUpdateGCPConnectionCmd() *cobra.Command {
 		Long: `Update GCP connection by ID argument or by --name.
 
 Examples:
-  dtctl update gcp connection --name "my-gcp-connection" --serviceAccountId "my-reader@project.iam.gserviceaccount.com"
-  dtctl update gcp connection <id> --serviceAccountId "my-reader@project.iam.gserviceaccount.com"`,
+  dtctl update gcp connection --name "my-gcp-connection" --service-account-id "my-reader@project.iam.gserviceaccount.com"
+  dtctl update gcp connection <id> --service-account-id "my-reader@project.iam.gserviceaccount.com"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if updateGCPConnectionServiceAccountID == "" {
-				return fmt.Errorf("--serviceAccountId is required")
+				return fmt.Errorf("--service-account-id is required")
 			}
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationUpdate)
@@ -92,16 +92,10 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&updateGCPConnectionName, "name", "", "GCP connection name (used when ID argument is not provided)")
-	c.Flags().StringVar(&updateGCPConnectionServiceAccountID, "serviceAccountId", "", "Service account email to set")
-	c.Flags().StringVar(&updateGCPConnectionServiceAccountID, "serviceaccountid", "", "Alias for --serviceAccountId")
+	c.Flags().StringVar(&updateGCPConnectionServiceAccountID, "service-account-id", "", "Service account email to set")
 	stability.Mark(c, stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "serviceAccountId", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "serviceaccountid", stability.Experimental, pre10Since)
-	// Not MarkFlagRequired: --serviceaccountid sets the same value, and an
-	// invocation using only that spelling is valid. The command body reports
-	// both left out; an explicitly empty value is rejected at parse time.
-	rejectEmptyFlag(c, "serviceAccountId")
-	rejectEmptyFlag(c, "serviceaccountid")
+	stability.MarkFlag(c, "service-account-id", stability.Experimental, cloudFlagsKebabSince)
+	markFlagRequiredNonEmpty(c, "service-account-id")
 	return c
 }
 
@@ -118,15 +112,15 @@ func newUpdateGCPMonitoringConfigCmd() *cobra.Command {
 		Long: `Update GCP monitoring configuration by ID argument or by --name.
 
 Examples:
-  dtctl update gcp monitoring --name "my-monitoring" --locationFiltering "us-central1,europe-west1"
-  dtctl update gcp monitoring --name "my-monitoring" --featureSets "compute_engine_essential,cloud_run_essential"
-  dtctl update gcp monitoring <id> --locationFiltering "us-central1,europe-west1"
-  dtctl update gcp monitoring --name "my-monitoring" --locationFiltering all   # remove the location filter`,
+  dtctl update gcp monitoring --name "my-monitoring" --locations "us-central1,europe-west1"
+  dtctl update gcp monitoring --name "my-monitoring" --feature-sets "compute_engine_essential,cloud_run_essential"
+  dtctl update gcp monitoring <id> --locations "us-central1,europe-west1"
+  dtctl update gcp monitoring --name "my-monitoring" --locations all   # remove the location filter`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(updateGCPMonitoringConfigLocationFiltering) == "" &&
 				strings.TrimSpace(updateGCPMonitoringConfigFeatureSets) == "" {
-				return fmt.Errorf("at least one of --locationFiltering or --featureSets is required")
+				return fmt.Errorf("at least one of --locations or --feature-sets is required")
 			}
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationUpdate)
@@ -167,7 +161,7 @@ Examples:
 			if strings.TrimSpace(updateGCPMonitoringConfigFeatureSets) != "" {
 				featureSets := gcpmonitoringconfig.SplitCSV(updateGCPMonitoringConfigFeatureSets)
 				if len(featureSets) == 0 {
-					return fmt.Errorf("--featureSets must contain at least one feature set")
+					return fmt.Errorf("--feature-sets must contain at least one feature set")
 				}
 				value.FeatureSets = featureSets
 			}
@@ -197,25 +191,21 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&updateGCPMonitoringConfigName, "name", "", "Monitoring config name/description (used when ID argument is not provided)")
-	c.Flags().StringVar(&updateGCPMonitoringConfigLocationFiltering, "locationFiltering", "", "Comma-separated locations to monitor, or 'all' to remove the location filter")
-	c.Flags().StringVar(&updateGCPMonitoringConfigFeatureSets, "featureSets", "", "Comma-separated feature sets")
-	c.Flags().StringVar(&updateGCPMonitoringConfigFeatureSets, "featuresets", "", "Alias for --featureSets")
+	c.Flags().StringVar(&updateGCPMonitoringConfigLocationFiltering, "locations", "", "Comma-separated locations to monitor, or 'all' to remove the location filter")
+	c.Flags().StringVar(&updateGCPMonitoringConfigFeatureSets, "feature-sets", "", "Comma-separated feature sets")
 	// At least one is required and a flag left out keeps the stored value, so
 	// an explicitly empty one is rejected rather than read as "left out".
-	for _, name := range []string{"locationFiltering", "featureSets", "featuresets"} {
+	for _, name := range []string{"locations", "feature-sets"} {
 		rejectEmptyFlag(c, name)
 	}
-	// Every path through this command needs a flag the rename takes away
-	// (both --locationFiltering and --featureSets), so at a stable floor it has
-	// no usable invocation left. Marking the command says that plainly instead
-	// of hiding the flags and then failing on a "required" flag help no longer
-	// lists. Renamed to kebab-case in 1.0 (contrib
-	// breaking-changes/cloud-flags-kebab-case.md); the spelling aliases are
-	// removed outright.
+	// Every path through this command needs one of the kebab-case flags (both --locations and --feature-sets),
+	// which are new names in 0.48.0 and not yet proven stable (experimental):
+	// at a stable floor they would be hidden, leaving this command with no usable
+	// invocation. Marking the command says that plainly instead of hiding the
+	// flags and then failing on a "required" flag help no longer lists.
 	stability.Mark(c, stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "locationFiltering", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "featureSets", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "featuresets", stability.Experimental, pre10Since)
+	stability.MarkFlag(c, "locations", stability.Experimental, cloudFlagsKebabSince)
+	stability.MarkFlag(c, "feature-sets", stability.Experimental, cloudFlagsKebabSince)
 	return c
 }
 

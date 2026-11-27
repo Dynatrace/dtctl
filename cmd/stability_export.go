@@ -97,3 +97,16 @@ func WalkCompleteCommandTree(fn func(c *cobra.Command)) {
 		return struct{}{}
 	})
 }
+
+// FlagNames returns "command path --flag" for every flag declared anywhere in
+// the complete command tree, hidden commands and flags included. Exported for
+// the flag-name guard in test/stability, which sees `dtctl serve` too.
+func FlagNames() []string {
+	var out []string
+	WalkCompleteCommandTree(func(c *cobra.Command) {
+		add := func(f *pflag.Flag) { out = append(out, c.CommandPath()+" --"+f.Name) }
+		c.Flags().VisitAll(add)
+		c.PersistentFlags().VisitAll(add)
+	})
+	return out
+}

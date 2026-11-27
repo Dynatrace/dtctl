@@ -428,7 +428,48 @@ func adviseFlag(cmd *cobra.Command, flag string) *suggest.FlagError {
 	case flag == "dry-run":
 		return &suggest.FlagError{Flag: flag, Message: dryRunUnavailableMessage(cmd)}
 	}
+	if to, ok := renamedCloudFlag(cmd, flag); ok {
+		return &suggest.FlagError{Flag: flag,
+			Message:    fmt.Sprintf("unknown flag: --%s (renamed to --%s)", flag, to),
+			Suggestion: &suggest.Suggestion{Value: to}}
+	}
 	return nil
+}
+
+// renamedCloudFlags maps the camelCase flags (and their spelling aliases) the
+// aws, azure and gcp commands used before 1.0 to their kebab-case names. Keys
+// are lower-case, so every capitalization a caller might still type matches
+// (--roleArn, --rolearn, --applicationID, ...). The aliases were removed
+// outright; this table only turns the resulting "unknown flag" into a pointer.
+var renamedCloudFlags = map[string]string{
+	"rolearn":           "role-arn",
+	"featuresets":       "feature-sets",
+	"locationfiltering": "locations",
+	"applicationid":     "application-id",
+	"aplicationid":      "application-id", // shipped typo, removed with the rest
+	"directoryid":       "directory-id",
+	"clientsecret":      "client-secret",
+	"serviceaccountid":  "service-account-id",
+}
+
+// renamedCloudFlag reports the kebab-case replacement for a removed cloud
+// flag. It applies only below an aws, azure or gcp command (the same word on
+// `auth login` was never a cloud flag) and only when the command defines the
+// replacement, so a command that never took the flag (get aws monitoring
+// --featureSets) keeps cobra's plain error instead of a pointer to a flag it
+// also rejects.
+func renamedCloudFlag(cmd *cobra.Command, flag string) (string, bool) {
+	to, ok := renamedCloudFlags[strings.ToLower(flag)]
+	if !ok || cmd.Flags().Lookup(to) == nil {
+		return "", false
+	}
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "aws", "azure", "gcp":
+			return to, true
+		}
+	}
+	return "", false
 }
 
 // verbSynonyms maps verbs agents guess from other CLIs to the dtctl verb that

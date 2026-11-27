@@ -26,8 +26,8 @@ func newUpdateAWSConnectionCmd() *cobra.Command {
 		Long: `Patch an existing AWS connection. Currently supports updating the IAM role ARN.
 
 Examples:
-  dtctl update aws connection --name "my-aws" --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
-  dtctl update aws connection <id> --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole`,
+  dtctl update aws connection --name "my-aws" --role-arn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
+  dtctl update aws connection <id> --role-arn arn:aws:iam::123456789012:role/DynatraceMonitoringRole`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := awsconnection.ValidateRoleArn(updateAWSConnectionRoleArn); err != nil {
@@ -89,10 +89,10 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&updateAWSConnectionName, "name", "", "AWS connection name (used when ID argument is not provided)")
-	c.Flags().StringVar(&updateAWSConnectionRoleArn, "roleArn", "", "AWS IAM role ARN (required)")
+	c.Flags().StringVar(&updateAWSConnectionRoleArn, "role-arn", "", "AWS IAM role ARN (required)")
 	stability.Mark(c, stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "roleArn", stability.Experimental, pre10Since)
-	markFlagRequiredNonEmpty(c, "roleArn")
+	stability.MarkFlag(c, "role-arn", stability.Experimental, cloudFlagsKebabSince)
+	markFlagRequiredNonEmpty(c, "role-arn")
 	return c
 }
 
@@ -110,12 +110,12 @@ func newUpdateAWSMonitoringConfigCmd() *cobra.Command {
 
 Examples:
   dtctl update aws monitoring --name "my-aws" --regions us-east-1,eu-central-1
-  dtctl update aws monitoring --name "my-aws" --featureSets EC2_essential,RDS_essential`,
+  dtctl update aws monitoring --name "my-aws" --feature-sets EC2_essential,RDS_essential`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(updateAWSMonitoringConfigRegions) == "" &&
 				strings.TrimSpace(updateAWSMonitoringConfigFeatureSets) == "" {
-				return fmt.Errorf("at least one of --regions or --featureSets is required")
+				return fmt.Errorf("at least one of --regions or --feature-sets is required")
 			}
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationUpdate)
@@ -161,7 +161,7 @@ Examples:
 			if strings.TrimSpace(updateAWSMonitoringConfigFeatureSets) != "" {
 				featureSets := awsmonitoringconfig.SplitCSV(updateAWSMonitoringConfigFeatureSets)
 				if len(featureSets) == 0 {
-					return fmt.Errorf("--featureSets must contain at least one feature set")
+					return fmt.Errorf("--feature-sets must contain at least one feature set")
 				}
 				value.FeatureSets = featureSets
 			}
@@ -192,28 +192,24 @@ Examples:
 	}
 	c.Flags().StringVar(&updateAWSMonitoringConfigName, "name", "", "Monitoring config name/description (used when ID argument is not provided)")
 	c.Flags().StringVar(&updateAWSMonitoringConfigRegions, "regions", "", "Comma-separated AWS regions")
-	c.Flags().StringVar(&updateAWSMonitoringConfigFeatureSets, "featureSets", "", "Comma-separated feature sets")
-	stability.MarkFlag(c, "featureSets", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&updateAWSMonitoringConfigFeatureSets, "feature-sets", "", "Comma-separated feature sets")
+	stability.MarkFlag(c, "feature-sets", stability.Experimental, cloudFlagsKebabSince)
 	stability.MarkStable(c)
 	// At least one of these is required, and a flag left out keeps the stored
 	// value; an explicitly empty one is rejected rather than read as "left out".
 	rejectEmptyFlag(c, "regions")
-	rejectEmptyFlag(c, "featureSets")
+	rejectEmptyFlag(c, "feature-sets")
 	return c
 }
 
 func init() {
 	updateAWSProviderCmd.AddCommand(updateAWSConnectionCmd)
 	updateAWSProviderCmd.AddCommand(updateAWSMonitoringConfigCmd)
-	// Every path through this command needs a flag the rename takes away
-	// (--roleArn is required), so at a stable floor it has no usable
-	// invocation left. Marking the command says that plainly instead of
-	// hiding the flags and then failing on a "required" flag help no
-	// longer lists.
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
+	// Every path through this command needs one of the kebab-case flags (--role-arn is required),
+	// which are new names in 0.48.0 and not yet proven stable (experimental):
+	// at a stable floor they would be hidden, leaving this command with no usable
+	// invocation. Marking the command says that plainly instead of hiding the
+	// flags and then failing on a "required" flag help no longer lists.
 }
 
 // Declared stable: the invocation and output contract of this command is

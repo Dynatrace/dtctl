@@ -32,7 +32,7 @@ connection's objectId as sts:ExternalId).
 
 Examples:
   dtctl create aws connection --name "my-aws"
-  dtctl create aws connection --name "my-aws" --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole`,
+  dtctl create aws connection --name "my-aws" --role-arn arn:aws:iam::123456789012:role/DynatraceMonitoringRole`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if createAWSConnectionRoleArn != "" {
 				if err := awsconnection.ValidateRoleArn(createAWSConnectionRoleArn); err != nil {
@@ -75,8 +75,8 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&createAWSConnectionName, "name", "", "AWS connection name (required)")
-	c.Flags().StringVar(&createAWSConnectionRoleArn, "roleArn", "", "AWS IAM role ARN (optional; can be patched later)")
-	stability.MarkFlag(c, "roleArn", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&createAWSConnectionRoleArn, "role-arn", "", "AWS IAM role ARN (optional; can be patched later)")
+	stability.MarkFlag(c, "role-arn", stability.Experimental, cloudFlagsKebabSince)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "name")
 	return c
@@ -101,7 +101,7 @@ is in place. The --regions flag is required (comma-separated AWS regions).
 
 Examples:
   dtctl create aws monitoring --name "my-aws" --credentials "my-aws" --regions us-east-1,eu-central-1
-  dtctl create aws monitoring --name "my-aws" --credentials "my-aws" --regions us-east-1 --featureSets EC2_essential,RDS_essential`,
+  dtctl create aws monitoring --name "my-aws" --credentials "my-aws" --regions us-east-1 --feature-sets EC2_essential,RDS_essential`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)
@@ -165,8 +165,8 @@ Examples:
 	c.Flags().StringVar(&createAWSMonitoringConfigName, "name", "", "Monitoring config name/description (required)")
 	c.Flags().StringVar(&createAWSMonitoringConfigCredentials, "credentials", "", "AWS connection name or ID (required)")
 	c.Flags().StringVar(&createAWSMonitoringConfigRegions, "regions", "", "Comma-separated AWS regions (required, first is the deployment region)")
-	c.Flags().StringVar(&createAWSMonitoringConfigFeatureSets, "featureSets", "", "Comma-separated feature sets (default: all *_essential)")
-	stability.MarkFlag(c, "featureSets", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&createAWSMonitoringConfigFeatureSets, "feature-sets", "", "Comma-separated feature sets (default: all *_essential)")
+	stability.MarkFlag(c, "feature-sets", stability.Experimental, cloudFlagsKebabSince)
 	addCentralEnrichmentFlag(c, &createAWSMonitoringConfigCentral)
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "name")
@@ -222,7 +222,7 @@ func printAWSConnectionInstructions(ctx context.Context, tenantURL, objectID, co
 			tenantURL, objectID)
 		fmt.Fprintln(currentStdout(ctx), "   $ROLE_ARN = aws cloudformation describe-stacks --stack-name $STACK `")
 		fmt.Fprintln(currentStdout(ctx), "     --query \"Stacks[0].Outputs[?OutputKey=='DynatraceMonitoringRoleArn'].OutputValue\" --output text")
-		fmt.Fprintf(currentStdout(ctx), "   dtctl update aws connection --name %q --roleArn $ROLE_ARN\n", connectionName)
+		fmt.Fprintf(currentStdout(ctx), "   dtctl update aws connection --name %q --role-arn $ROLE_ARN\n", connectionName)
 	} else {
 		fmt.Fprintf(currentStdout(ctx), "   STACK=%q\n", stackName)
 		fmt.Fprintf(currentStdout(ctx), "   curl -fsSLo da-role.yaml %s\n", templateURL)
@@ -230,7 +230,7 @@ func printAWSConnectionInstructions(ctx context.Context, tenantURL, objectID, co
 			tenantURL, objectID)
 		fmt.Fprintln(currentStdout(ctx), "   ROLE_ARN=$(aws cloudformation describe-stacks --stack-name \"$STACK\" \\")
 		fmt.Fprintln(currentStdout(ctx), "     --query \"Stacks[0].Outputs[?OutputKey=='DynatraceMonitoringRoleArn'].OutputValue\" --output text)")
-		fmt.Fprintf(currentStdout(ctx), "   dtctl update aws connection --name %q --roleArn \"$ROLE_ARN\"\n", connectionName)
+		fmt.Fprintf(currentStdout(ctx), "   dtctl update aws connection --name %q --role-arn \"$ROLE_ARN\"\n", connectionName)
 	}
 	fmt.Fprintln(currentStdout(ctx))
 	fmt.Fprintln(currentStdout(ctx), "The template is Dynatrace's source of truth for the required AWS read/describe")
@@ -263,10 +263,6 @@ func sanitizeRoleName(s string) string {
 func init() {
 	createAWSProviderCmd.AddCommand(createAWSConnectionCmd)
 	createAWSProviderCmd.AddCommand(createAWSMonitoringConfigCmd)
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
 }
 
 // Declared stable: the invocation and output contract of these commands is

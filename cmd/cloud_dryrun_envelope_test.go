@@ -57,7 +57,7 @@ func TestUpdateAWSConnectionDryRun_HumanLinesUnchanged(t *testing.T) {
 	code, out := runCLI(t,
 		"update", "aws", "connection",
 		"--name", "conn-1",
-		"--roleArn", "arn:aws:iam::1:role/new",
+		"--role-arn", "arn:aws:iam::1:role/new",
 		"--dry-run", "--no-agent")
 	require.Zero(t, code, out)
 
@@ -77,7 +77,7 @@ func TestUpdateAWSConnectionDryRun_AgentModeEmitsEnvelope(t *testing.T) {
 	code, out := runCLI(t,
 		"update", "aws", "connection",
 		"--name", "conn-1",
-		"--roleArn", "arn:aws:iam::1:role/new",
+		"--role-arn", "arn:aws:iam::1:role/new",
 		"--dry-run", "--agent")
 	require.Zero(t, code, out)
 
@@ -110,7 +110,7 @@ func TestCreateAWSConnectionDryRun_BothRenderings(t *testing.T) {
 	code, human := runCLI(t,
 		"create", "aws", "connection",
 		"--name", "conn-new",
-		"--roleArn", "arn:aws:iam::1:role/r",
+		"--role-arn", "arn:aws:iam::1:role/r",
 		"--dry-run", "--no-agent")
 	require.Zero(t, code, human)
 	require.Equal(t,
@@ -120,7 +120,7 @@ func TestCreateAWSConnectionDryRun_BothRenderings(t *testing.T) {
 	code, agent := runCLI(t,
 		"create", "aws", "connection",
 		"--name", "conn-new",
-		"--roleArn", "arn:aws:iam::1:role/r",
+		"--role-arn", "arn:aws:iam::1:role/r",
 		"--dry-run", "--agent")
 	require.Zero(t, code, agent)
 

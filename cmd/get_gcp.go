@@ -116,7 +116,7 @@ func newGetGCPConnectionPrincipalCmd() *cobra.Command {
 			principal, err := handler.GetDynatracePrincipal()
 			if err != nil {
 				if strings.Contains(strings.ToLower(err.Error()), "not found") {
-					return fmt.Errorf("dynatrace gcp principal not found yet; run 'dtctl create gcp connection <name> --serviceAccountId <service-account-email>' to initialize it")
+					return fmt.Errorf("dynatrace gcp principal not found yet; run 'dtctl create gcp connection <name> --service-account-id <service-account-email>' to initialize it")
 				}
 				return err
 			}

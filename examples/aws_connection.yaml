@@ -9,7 +9,7 @@ value:
 
   awsRoleBasedAuthentication:
     # AWS IAM role ARN. May be left empty at creation time and patched later
-    # via 'dtctl update aws connection --name <name> --roleArn <arn>'.
+    # via 'dtctl update aws connection --name <name> --role-arn <arn>'.
     # Pattern: arn:aws:iam::<account-id|aws>:role/<role-name>
     roleArn: "arn:aws:iam::123456789012:role/DynatraceMonitoringRole"
 

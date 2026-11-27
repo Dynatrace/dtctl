@@ -258,7 +258,7 @@ This document tracks the current implementation status of dtctl. For future plan
 - [x] Get by name or object ID: `dtctl get azure connections <name-or-id>`
 - [x] Describe connection: `dtctl describe azure connection <id>`
 - [x] Create connection: `dtctl create azure connection --name <name> --type <federatedIdentityCredential|clientSecret>`
-- [x] Update connection: `dtctl update azure connection --name <name> --directoryId <tenant-id> --applicationId <client-id>`
+- [x] Update connection: `dtctl update azure connection --name <name> --directory-id <tenant-id> --application-id <client-id>`
 - [x] Delete by name or ID: `dtctl delete azure connection <name-or-id>`
 - [x] Apply from manifest (idempotent): `dtctl apply -f azure_connection.yaml`
 
@@ -269,8 +269,8 @@ This document tracks the current implementation status of dtctl. For future plan
 - [x] Describe config: `dtctl describe azure monitoring <id-or-name>`
 - [x] Runtime status in describe (Smartscape, metrics, recent events)
 - [x] Create config (created as disabled): `dtctl create azure monitoring --name <name> --credentials <connection-name-or-id>`
-- [x] Enable config (update connection + enable): `dtctl enable azure monitoring --name <name> [--directoryId <tenant-id>] [--applicationId <client-id>]`
-- [x] Update config: `dtctl update azure monitoring --name <name> [--locationFiltering ...] [--featureSets ...]`
+- [x] Enable config (update connection + enable): `dtctl enable azure monitoring --name <name> [--directory-id <tenant-id>] [--application-id <client-id>]`
+- [x] Update config: `dtctl update azure monitoring --name <name> [--locations ...] [--feature-sets ...]`
 - [x] Delete by name or ID: `dtctl delete azure monitoring <name-or-id>`
 - [x] Apply from manifest (idempotent): `dtctl apply -f azure_monitoring_config.yaml`
 - [x] Schema helpers: `dtctl get azure monitoring-locations`, `dtctl get azure monitoring-feature-sets`
@@ -280,9 +280,9 @@ This document tracks the current implementation status of dtctl. For future plan
 - [ ] Filter connection list with dedicated flags
 - [x] Get by name or object ID: `dtctl get aws connections <name-or-id>`
 - [x] Describe connection: `dtctl describe aws connection <id>`
-- [x] Create connection (role-based): `dtctl create aws connection --name <name> [--roleArn <arn>]`
+- [x] Create connection (role-based): `dtctl create aws connection --name <name> [--role-arn <arn>]`
 - [x] Post-create hint with IAM trust policy + AWS CLI snippet (using `objectId` as `sts:ExternalId`, Principal account auto-selected per Dynatrace tenant URL)
-- [x] Update connection: `dtctl update aws connection --name <name> --roleArn <arn>`
+- [x] Update connection: `dtctl update aws connection --name <name> --role-arn <arn>`
 - [x] Delete by name or ID: `dtctl delete aws connection <name-or-id>`
 - [x] Apply from manifest (idempotent): `dtctl apply -f aws_connection.yaml`
 
@@ -293,8 +293,8 @@ This document tracks the current implementation status of dtctl. For future plan
 - [x] Describe config: `dtctl describe aws monitoring <id-or-name>`
 - [x] Runtime status in describe (Smartscape, metrics, recent events)
 - [x] Create config (created as disabled): `dtctl create aws monitoring --name <name> --credentials <connection-name-or-id> --regions <csv>`
-- [x] Enable config (optionally patch roleArn + enable): `dtctl enable aws monitoring --name <name> [--roleArn <arn>]`
-- [x] Update config: `dtctl update aws monitoring --name <name> [--regions ...] [--featureSets ...]`
+- [x] Enable config (optionally patch roleArn + enable): `dtctl enable aws monitoring --name <name> [--role-arn <arn>]`
+- [x] Update config: `dtctl update aws monitoring --name <name> [--regions ...] [--feature-sets ...]`
 - [x] Delete by name or ID: `dtctl delete aws monitoring <name-or-id>`
 - [x] Apply from manifest (idempotent): `dtctl apply -f aws_monitoring_config.yaml`
 - [x] Schema helpers: `dtctl get aws monitoring-regions`, `dtctl get aws monitoring-feature-sets`
@@ -304,8 +304,8 @@ This document tracks the current implementation status of dtctl. For future plan
 - [ ] Filter connections
 - [x] Get by name or ID: `dtctl get gcp connections <name-or-id>`
 - [x] Describe connection: `dtctl describe gcp connection <id>`
-- [x] Create connection: `dtctl create gcp connection --name <name> --serviceAccountId <service-account-email>`
-- [x] Update connection: `dtctl update gcp connection --name <name> --serviceAccountId <service-account-email>`
+- [x] Create connection: `dtctl create gcp connection --name <name> --service-account-id <service-account-email>`
+- [x] Update connection: `dtctl update gcp connection --name <name> --service-account-id <service-account-email>`
 - [x] Delete by name or ID: `dtctl delete gcp connection <name-or-id>`
 - [x] Apply from manifest (idempotent): `dtctl apply -f gcp_connection.yaml`
 - [x] Dynatrace GCP principal is auto-created by backend on first HAS connection
@@ -317,8 +317,8 @@ This document tracks the current implementation status of dtctl. For future plan
 - [x] Describe config: `dtctl describe gcp monitoring <id-or-name>`
 - [x] Runtime status in describe (Smartscape, metrics, recent events)
 - [x] Create config (created as disabled): `dtctl create gcp monitoring --name <name> --credentials <connection-name-or-id>`
-- [x] Enable config (update connection + enable): `dtctl enable gcp monitoring --name <name> [--serviceAccountId <email>]`
-- [x] Update config: `dtctl update gcp monitoring --name <name> [--locationFiltering ...] [--featureSets ...]`
+- [x] Enable config (update connection + enable): `dtctl enable gcp monitoring --name <name> [--service-account-id <email>]`
+- [x] Update config: `dtctl update gcp monitoring --name <name> [--locations ...] [--feature-sets ...]`
 - [x] Delete by name or ID: `dtctl delete gcp monitoring <name-or-id>`
 - [x] Apply from manifest (idempotent): `dtctl apply -f gcp_monitoring_config.yaml`
 - [x] Schema helpers: `dtctl get gcp monitoring-locations`, `dtctl get gcp monitoring-feature-sets`

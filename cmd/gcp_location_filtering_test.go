@@ -94,7 +94,7 @@ func gcpLocationFiltering(t *testing.T, body map[string]any) (any, bool) {
 // Regression test for #573: an explicit list of every schema location makes
 // the GCP Smartscape poller build a Cloud Asset query GCP rejects ("Query has
 // too many alternations"), so no resources are ever discovered. Without
-// --locationFiltering the created config must not filter by location at all.
+// --locations the created config must not filter by location at all.
 func TestCreateGCPMonitoringWithoutLocationFilteringDoesNotFilter(t *testing.T) {
 	body := runGCPMonitoringWrite(t, func() error {
 		_ = createGCPMonitoringConfigCmd.Flags().Set("name", "new-gcp-monitoring")
@@ -105,14 +105,14 @@ func TestCreateGCPMonitoringWithoutLocationFilteringDoesNotFilter(t *testing.T) 
 	// No filter is sent by omitting the field, like the other empty filter
 	// lists; the backend reads an absent list as "every location".
 	locations, present := gcpLocationFiltering(t, body)
-	require.False(t, present, "create without --locationFiltering must not filter by location, got %v", locations)
+	require.False(t, present, "create without --locations must not filter by location, got %v", locations)
 }
 
 func TestCreateGCPMonitoringWithLocationFilteringSendsThem(t *testing.T) {
 	body := runGCPMonitoringWrite(t, func() error {
 		_ = createGCPMonitoringConfigCmd.Flags().Set("name", "new-gcp-monitoring")
 		_ = createGCPMonitoringConfigCmd.Flags().Set("credentials", mockGCPConnectionName)
-		_ = createGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "us-central1, europe-west1")
+		_ = createGCPMonitoringConfigCmd.Flags().Set("locations", "us-central1, europe-west1")
 		return createGCPMonitoringConfigCmd.RunE(createGCPMonitoringConfigCmd, nil)
 	})
 
@@ -126,14 +126,14 @@ func TestCreateGCPMonitoringWithLocationFilteringSendsThem(t *testing.T) {
 func TestUpdateGCPMonitoringLocationFilteringAllClearsFilter(t *testing.T) {
 	body := runGCPMonitoringWrite(t, func() error {
 		_ = updateGCPMonitoringConfigCmd.Flags().Set("name", mockGCPConfigName)
-		_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "all")
+		_ = updateGCPMonitoringConfigCmd.Flags().Set("locations", "all")
 		return updateGCPMonitoringConfigCmd.RunE(updateGCPMonitoringConfigCmd, nil)
 	})
 
 	// No filter is sent by omitting the field, like the other empty filter
 	// lists; the backend reads an absent list as "every location".
 	locations, present := gcpLocationFiltering(t, body)
-	require.False(t, present, "--locationFiltering all must clear the location filter, got %v", locations)
+	require.False(t, present, "--locations all must clear the location filter, got %v", locations)
 }
 
 func TestUpdateGCPMonitoringLocationFilteringAllCannotBeCombined(t *testing.T) {
@@ -141,7 +141,7 @@ func TestUpdateGCPMonitoringLocationFilteringAllCannotBeCombined(t *testing.T) {
 	t.Cleanup(resetCloudFlagVars)
 	resetCloudFlagVars()
 	_ = updateGCPMonitoringConfigCmd.Flags().Set("name", mockGCPConfigName)
-	_ = updateGCPMonitoringConfigCmd.Flags().Set("locationFiltering", "all,us-central1")
+	_ = updateGCPMonitoringConfigCmd.Flags().Set("locations", "all,us-central1")
 
 	err := updateGCPMonitoringConfigCmd.RunE(updateGCPMonitoringConfigCmd, nil)
 	require.ErrorContains(t, err, `"all"`)

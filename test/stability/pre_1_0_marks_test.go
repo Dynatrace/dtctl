@@ -25,44 +25,36 @@ type pre10Demotion struct {
 // is exactly why this list is a test: the mark has to be provably in effect,
 // not merely written down.
 var pre10Demotions = []pre10Demotion{
-	// breaking-changes/cloud-flags-kebab-case.md — every cloud flag becomes
-	// kebab-case and the spelling aliases (including the `aplicationID` typo)
-	// are removed.
-	{"create aws connection", "--roleArn", "cloud-flags-kebab-case"},
-	{"update aws connection", "--roleArn", "cloud-flags-kebab-case"},
-	{"enable aws monitoring", "--roleArn", "cloud-flags-kebab-case"},
-	{"create aws monitoring", "--featureSets", "cloud-flags-kebab-case"},
-	{"update aws monitoring", "--featureSets", "cloud-flags-kebab-case"},
+	// breaking-changes/cloud-flags-kebab-case.md — the cloud flags are the
+	// kebab-case names that first shipped in 0.48.0 (the camelCase names and
+	// the spelling aliases, including the `aplicationID` typo, are gone). They
+	// are new and not yet proven, so they are experimental, not stable.
+	{"create aws connection", "--role-arn", "cloud-flags-kebab-case"},
+	{"update aws connection", "--role-arn", "cloud-flags-kebab-case"},
+	{"enable aws monitoring", "--role-arn", "cloud-flags-kebab-case"},
+	{"create aws monitoring", "--feature-sets", "cloud-flags-kebab-case"},
+	{"update aws monitoring", "--feature-sets", "cloud-flags-kebab-case"},
 
-	{"create azure connection", "--directoryId", "cloud-flags-kebab-case"},
-	{"create azure connection", "--applicationId", "cloud-flags-kebab-case"},
-	{"create azure connection", "--clientSecret", "cloud-flags-kebab-case"},
-	{"update azure connection", "--directoryId", "cloud-flags-kebab-case"},
-	{"update azure connection", "--directoryID", "cloud-flags-kebab-case"},
-	{"update azure connection", "--applicationId", "cloud-flags-kebab-case"},
-	{"update azure connection", "--applicationID", "cloud-flags-kebab-case"},
-	{"update azure connection", "--aplicationID", "cloud-flags-kebab-case"},
-	{"update azure connection", "--clientSecret", "cloud-flags-kebab-case"},
-	{"enable azure monitoring", "--directoryId", "cloud-flags-kebab-case"},
-	{"enable azure monitoring", "--applicationId", "cloud-flags-kebab-case"},
-	{"create azure monitoring", "--locationFiltering", "cloud-flags-kebab-case"},
-	{"create azure monitoring", "--featureSets", "cloud-flags-kebab-case"},
-	{"create azure monitoring", "--featuresets", "cloud-flags-kebab-case"},
-	{"update azure monitoring", "--locationFiltering", "cloud-flags-kebab-case"},
-	{"update azure monitoring", "--featureSets", "cloud-flags-kebab-case"},
-	{"update azure monitoring", "--featuresets", "cloud-flags-kebab-case"},
+	{"create azure connection", "--directory-id", "cloud-flags-kebab-case"},
+	{"create azure connection", "--application-id", "cloud-flags-kebab-case"},
+	{"create azure connection", "--client-secret", "cloud-flags-kebab-case"},
+	{"update azure connection", "--directory-id", "cloud-flags-kebab-case"},
+	{"update azure connection", "--application-id", "cloud-flags-kebab-case"},
+	{"update azure connection", "--client-secret", "cloud-flags-kebab-case"},
+	{"enable azure monitoring", "--directory-id", "cloud-flags-kebab-case"},
+	{"enable azure monitoring", "--application-id", "cloud-flags-kebab-case"},
+	{"create azure monitoring", "--locations", "cloud-flags-kebab-case"},
+	{"create azure monitoring", "--feature-sets", "cloud-flags-kebab-case"},
+	{"update azure monitoring", "--locations", "cloud-flags-kebab-case"},
+	{"update azure monitoring", "--feature-sets", "cloud-flags-kebab-case"},
 
-	{"create gcp connection", "--serviceAccountId", "cloud-flags-kebab-case"},
-	{"create gcp connection", "--serviceaccountid", "cloud-flags-kebab-case"},
-	{"update gcp connection", "--serviceAccountId", "cloud-flags-kebab-case"},
-	{"update gcp connection", "--serviceaccountid", "cloud-flags-kebab-case"},
-	{"enable gcp monitoring", "--serviceAccountId", "cloud-flags-kebab-case"},
-	{"create gcp monitoring", "--locationFiltering", "cloud-flags-kebab-case"},
-	{"create gcp monitoring", "--featureSets", "cloud-flags-kebab-case"},
-	{"create gcp monitoring", "--featuresets", "cloud-flags-kebab-case"},
-	{"update gcp monitoring", "--locationFiltering", "cloud-flags-kebab-case"},
-	{"update gcp monitoring", "--featureSets", "cloud-flags-kebab-case"},
-	{"update gcp monitoring", "--featuresets", "cloud-flags-kebab-case"},
+	{"create gcp connection", "--service-account-id", "cloud-flags-kebab-case"},
+	{"update gcp connection", "--service-account-id", "cloud-flags-kebab-case"},
+	{"enable gcp monitoring", "--service-account-id", "cloud-flags-kebab-case"},
+	{"create gcp monitoring", "--locations", "cloud-flags-kebab-case"},
+	{"create gcp monitoring", "--feature-sets", "cloud-flags-kebab-case"},
+	{"update gcp monitoring", "--locations", "cloud-flags-kebab-case"},
+	{"update gcp monitoring", "--feature-sets", "cloud-flags-kebab-case"},
 
 	// breaking-changes/short-flag-f.md — `-f` means `--file` on every command,
 	// so these lose their short form or the whole flag.
@@ -264,22 +256,23 @@ func manifestFlagLevels(t *testing.T, manifest string) map[string]string {
 }
 
 // pre10DemotedCommands are the commands the audit demoted whole, because every
-// path through them requires a flag an accepted breaking change takes away.
+// path through them requires a flag that is experimental (an accepted breaking
+// change takes it away, or it is a new name not yet proven stable).
 //
 // A flag-level mark is the right tool when a usable stable invocation survives
 // it — `create azure connection --type federatedIdentityCredential` still works
 // with the three clientSecret flags hidden. It is the wrong tool here: with the
 // flags hidden, `dtctl update azure connection --help` offers only `--name`,
-// and every invocation then fails with "at least one of --directoryId,
-// --applicationId, or --clientSecret is required" — three flags the floor just
+// and every invocation then fails with "at least one of --directory-id,
+// --application-id, or --client-secret is required" — three flags the floor just
 // removed from the help. Demoting the command turns that dead end into a
 // `stability_blocked` error that names the exception which would admit it.
 var pre10DemotedCommands = map[string]string{
-	"update aws connection":   "--roleArn is required",
-	"update azure connection": "needs one of --directoryId/--applicationId/--clientSecret",
-	"update azure monitoring": "needs one of --locationFiltering/--featureSets",
-	"update gcp connection":   "--serviceAccountId is required",
-	"update gcp monitoring":   "needs one of --locationFiltering/--featureSets",
+	"update aws connection":   "--role-arn is required",
+	"update azure connection": "needs one of --directory-id/--application-id/--client-secret",
+	"update azure monitoring": "needs one of --locations/--feature-sets",
+	"update gcp connection":   "--service-account-id is required",
+	"update gcp monitoring":   "needs one of --locations/--feature-sets",
 
 	// The other reason to demote a command: the break is not in any flag but
 	// in what the command does with no flags at all, so there is nothing
@@ -292,14 +285,14 @@ var pre10DemotedCommands = map[string]string{
 // with their demoted flags hidden, so they stay stable on purpose. Pinning them
 // stops a well-meaning blanket demotion of everything the cloud rename touches.
 var pre10SurvivingCommands = map[string]string{
-	"create aws connection":   "--roleArn is optional",
+	"create aws connection":   "--role-arn is optional",
 	"create azure connection": "the federatedIdentityCredential path needs none of them",
-	"create gcp connection":   "--serviceAccountId is optional",
+	"create gcp connection":   "--service-account-id is optional",
 	"create aws monitoring":   "--regions is not renamed",
 	"update aws monitoring":   "--regions satisfies the one-of",
-	"enable aws monitoring":   "--roleArn is optional",
+	"enable aws monitoring":   "--role-arn is optional",
 	"enable azure monitoring": "the credential flags are optional",
-	"enable gcp monitoring":   "--serviceAccountId is optional",
+	"enable gcp monitoring":   "--service-account-id is optional",
 	"diff":                    "--format replaces the removed -o",
 	"wait query":              "--verbose only adds progress output",
 	"exec copilot":            "--context only adds conversation context",

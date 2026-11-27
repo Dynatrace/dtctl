@@ -38,13 +38,13 @@ func newEnableAzureMonitoringCmd() *cobra.Command {
 		Long: `Enable an Azure monitoring configuration by optionally updating the linked connection
 credentials and then enabling the monitoring config in a single step.
 
-If --directoryId and/or --applicationId are provided, the linked Azure connection
+If --directory-id and/or --application-id are provided, the linked Azure connection
 will be updated with the specified credentials before enabling the monitoring config.
 If the connection credentials are already set, these flags can be omitted.
 
 Examples:
-  dtctl enable azure monitoring --name "my-azure-monitoring" --directoryId "$TENANT_ID" --applicationId "$CLIENT_ID"
-  dtctl enable azure monitoring <id> --directoryId "$TENANT_ID" --applicationId "$CLIENT_ID"
+  dtctl enable azure monitoring --name "my-azure-monitoring" --directory-id "$TENANT_ID" --application-id "$CLIENT_ID"
+  dtctl enable azure monitoring <id> --directory-id "$TENANT_ID" --application-id "$CLIENT_ID"
   dtctl enable azure monitoring --name "my-azure-monitoring"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -182,10 +182,10 @@ Examples:
 		},
 	}
 	c.Flags().StringVar(&enableAzureMonitoringName, "name", "", "Monitoring config name/description (used when ID argument is not provided)")
-	c.Flags().StringVar(&enableAzureMonitoringDirectoryID, "directoryId", "", "Directory (tenant) ID to set on the linked connection (optional)")
-	c.Flags().StringVar(&enableAzureMonitoringApplicationID, "applicationId", "", "Application (client) ID to set on the linked connection (optional)")
-	stability.MarkFlag(c, "directoryId", stability.Experimental, pre10Since)
-	stability.MarkFlag(c, "applicationId", stability.Experimental, pre10Since)
+	c.Flags().StringVar(&enableAzureMonitoringDirectoryID, "directory-id", "", "Directory (tenant) ID to set on the linked connection (optional)")
+	c.Flags().StringVar(&enableAzureMonitoringApplicationID, "application-id", "", "Application (client) ID to set on the linked connection (optional)")
+	stability.MarkFlag(c, "directory-id", stability.Experimental, cloudFlagsKebabSince)
+	stability.MarkFlag(c, "application-id", stability.Experimental, cloudFlagsKebabSince)
 	stability.MarkStable(c)
 	return c
 }
@@ -194,8 +194,6 @@ func init() {
 	enableCmd.AddCommand(enableAzureProviderCmd)
 
 	enableAzureProviderCmd.AddCommand(enableAzureMonitoringCmd)
-	// Renamed to kebab-case in 1.0 (contrib breaking-changes/cloud-flags-kebab-case.md);
-	// the spelling aliases are removed outright.
 }
 
 // Declared stable: the invocation and output contract of these commands is
