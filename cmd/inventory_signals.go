@@ -54,7 +54,8 @@ reduces the scan itself and not merely the result. Sampling only ever drops
 records, so a sampled match still proves data is arriving; what it costs is
 precision, so the volume becomes an estimate and last-seen a lower bound, and
 both are labelled as such. A sampled probe that matches nothing stays 'unknown'
-and reports the population it can rule out — it is never read as absence. A
+and is never read as absence; when the response confirms that it sampled, the
+evidence reports the population the miss can rule out. A
 sample of fewer than 30 records proves arrival but cannot date when a source
 stopped, so such a signal is 'live' or 'unknown' and never 'stale'. Pass
 --no-sample to skip the fallback and take the plain 'unknown' instead.

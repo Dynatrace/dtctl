@@ -380,10 +380,12 @@ walk:
 				// does not show the original capped query running again: a
 				// refused rung reads everything, and reading everything is
 				// what hit the cap. A sample too thin to read a single record
-				// may come back without the flag as well. Under either reading
-				// this rung is empty rather than refused, and the next one is
-				// still worth asking. It lends no bound: nothing in the
-				// response confirms that the window was sampled at this ratio.
+				// may come back without the flag as well, and under that
+				// reading the next rung is worth asking. Under the other, a
+				// complete unsampled scan has matched nothing and the next
+				// rung will say so again; the walk cannot tell the two apart
+				// and asks. The rung lends no bound either way: nothing in the
+				// response confirms that the window was sampled at all.
 				continue
 			}
 			// The response looks like the original capped query run again, so
