@@ -94,7 +94,7 @@ Examples:
 	c.Flags().Bool("validate", false, "validate input without executing")
 	c.Flags().Bool("wait", true, "wait for analyzer execution to complete")
 	stability.MarkFlag(c, "wait", stability.Experimental, pre10Since)
-	timeoutFlagVar(c.Flags(), 5*time.Minute, "timeout when waiting for completion (a duration such as 5m)")
+	strictTimeoutFlagVar(c.Flags(), 5*time.Minute, "timeout when waiting for completion (a duration such as 5m; rounded up to whole seconds)")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)
 	c.Flags().String("series", "full", `how to render timeseries embedded in the result (agent mode only):
 full = every datapoint; summary = per-series min/avg/max/p95/last/n and a sparkline;

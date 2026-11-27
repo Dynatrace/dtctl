@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -84,7 +85,9 @@ Examples:
 
 			// Get timeout from flags
 			timeout, _ := cmd.Flags().GetDuration("timeout")
-			timeoutMs := int(timeout.Milliseconds())
+			// Round a positive sub-millisecond value up: 0 would make the SDK
+			// omit the poll timeout parameter.
+			timeoutMs := int(math.Ceil(float64(timeout) / float64(time.Millisecond)))
 
 			// Poll for results with exponential backoff
 			fmt.Fprintf(currentStdout(cmdContext(cmd)), "Polling for evaluation results...\n")
@@ -142,7 +145,7 @@ Examples:
 			}
 		},
 	}
-	timeoutFlagVar(c.Flags(), 30*time.Second, "timeout when polling for evaluation results (a duration such as 30s)")
+	strictTimeoutFlagVar(c.Flags(), 30*time.Second, "timeout when polling for evaluation results (a duration such as 30s)")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)
 	stability.MarkStable(c)
 	return c

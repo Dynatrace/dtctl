@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // Every flag named "timeout" in the command tree is a duration.
@@ -50,18 +52,6 @@ func TestTimeoutFlagParsing(t *testing.T) {
 		t.Errorf("parsed = %v", got)
 	}
 
-	// Zero stays valid: `wait query` reads it as unlimited.
-	if err := newFS(time.Minute).Parse([]string{"--timeout=0"}); err != nil {
-		t.Errorf("0: %v", err)
-	}
-	for _, neg := range []string{"-5s", "-1m"} {
-		err := newFS(time.Minute).Parse([]string{"--timeout=" + neg})
-		want := `invalid --timeout "` + neg + `": must not be negative; use a duration such as 60s`
-		if err == nil || enhanceFlagError(rootCmd, err).Error() != want {
-			t.Errorf("%q: error = %v, want %q", neg, err, want)
-		}
-	}
-
 	for _, bad := range []string{"60", "abc", ""} {
 		err := newFS(time.Minute).Parse([]string{"--timeout=" + bad})
 		if err == nil {
@@ -71,6 +61,68 @@ func TestTimeoutFlagParsing(t *testing.T) {
 		want := `invalid --timeout "` + bad + `": use a duration such as 60s`
 		if got := enhanceFlagError(rootCmd, err).Error(); got != want {
 			t.Errorf("%q: error = %q, want %q", bad, got, want)
+		}
+	}
+}
+
+// The flags that used to be integers reject a unit-less 0 and negatives; the
+// others keep their previous parsing (wait query: 0 and negatives = unlimited).
+func TestStrictTimeoutFlag(t *testing.T) {
+	strictFS := func() *pflag.FlagSet {
+		fs := pflag.NewFlagSet("x", pflag.ContinueOnError)
+		strictTimeoutFlagVar(fs, time.Minute, "u")
+		return fs
+	}
+	for _, v := range []string{"0", "-5s"} {
+		err := strictFS().Parse([]string{"--timeout=" + v})
+		if err == nil || !strings.Contains(enhanceFlagError(rootCmd, err).Error(), "invalid --timeout") {
+			t.Errorf("%q: error = %v", v, err)
+		}
+	}
+	if err := strictFS().Parse([]string{"--timeout=0"}); err == nil || !strings.Contains(err.Error(), `use a duration such as 60s`) {
+		t.Errorf("bare 0: %v", err)
+	}
+	if err := strictFS().Parse([]string{"--timeout=0s"}); err != nil {
+		t.Errorf("0s: %v", err)
+	}
+	for _, path := range []string{"wait query"} {
+		c, _, err := rootCmd.Find(strings.Fields(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range []string{"0", "-1s"} {
+			if err := c.Flags().Set("timeout", v); err != nil {
+				t.Errorf("%s --timeout %s must stay valid: %v", path, v, err)
+			}
+		}
+		_ = c.Flags().Set("timeout", c.Flags().Lookup("timeout").DefValue)
+	}
+	for _, path := range [][]string{{"exec", "analyzer"}, {"exec", "slo"}} {
+		c, _, _ := rootCmd.Find(path)
+		for _, v := range []string{"0", "-1s"} {
+			if err := c.Flags().Set("timeout", v); err == nil {
+				t.Errorf("%v --timeout %s must be rejected", path, v)
+			}
+		}
+	}
+}
+
+// A bad --timeout is invalid input: usage exit code, validation_error envelope,
+// also when --agent follows the bad value and pflag never reaches it.
+func TestTimeoutErrorIsUsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"exec", "slo", "x", "--timeout", "60", "--agent"},
+		{"exec", "slo", "x", "--agent", "--timeout", "60"},
+		{"exec", "analyzer", "a", "--timeout=0", "-A"},
+	} {
+		isolatedConfig(t, "contexts: []\n")
+		code, out := captureRun(t, args, RunOptions{})
+		if code != client.ExitUsageError {
+			t.Errorf("%v: exit = %d, want %d", args, code, client.ExitUsageError)
+		}
+		env := parseErrorEnvelope(t, out)
+		if env.Error.Code != "validation_error" || !strings.Contains(env.Error.Message, "invalid --timeout") {
+			t.Errorf("%v: envelope = %+v", args, env.Error)
 		}
 	}
 }

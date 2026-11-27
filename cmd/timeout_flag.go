@@ -15,6 +15,10 @@ import (
 type timeoutFlag struct {
 	name string
 	d    *time.Duration
+	// strict is set on the flags that used to take integer seconds
+	// (exec analyzer, exec slo): a unit-less 0 is the old integer spelling and
+	// is rejected like any bare integer, and a negative value is an error.
+	strict bool
 }
 
 // timeoutValueError is the error a --timeout flag returns for a bad value.
@@ -37,7 +41,10 @@ func (t *timeoutFlag) Set(s string) error {
 	if err != nil {
 		return &timeoutValueError{flag: t.name, value: s}
 	}
-	if d < 0 {
+	if t.strict && s == "0" {
+		return &timeoutValueError{flag: t.name, value: s}
+	}
+	if t.strict && d < 0 {
 		return &timeoutValueError{flag: t.name, value: s, negative: true}
 	}
 	*t.d = d
@@ -57,6 +64,18 @@ func (t *timeoutFlag) Type() string { return "duration" }
 func timeoutFlagVar(fs *pflag.FlagSet, def time.Duration, usage string) {
 	d := def
 	fs.Var(&timeoutFlag{name: "timeout", d: &d}, "timeout", usage)
+}
+
+// strictTimeoutFlagVar is timeoutFlagVar for the flags whose type changed from
+// integer seconds: it also rejects a bare 0 and negative durations.
+func strictTimeoutFlagVar(fs *pflag.FlagSet, def time.Duration, usage string) {
+	d := def
+	fs.Var(&timeoutFlag{name: "timeout", d: &d, strict: true}, "timeout", usage)
+}
+
+func isTimeoutValueError(err error) bool {
+	_, ok := asTimeoutValueError(err)
+	return ok
 }
 
 // asTimeoutValueError unwraps a --timeout parse error from pflag's wrapper.

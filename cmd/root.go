@@ -317,7 +317,8 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 			var unknownCmd *suggest.CommandError
 			if errors.As(err, &maskedProfile) || errors.As(err, &maskedUnsupported) ||
 				errors.As(err, &maskedStability) || errors.As(err, &unknownFlag) ||
-				errors.As(err, &unknownCmd) || errors.Is(err, errEmptyFlagValue) {
+				errors.As(err, &unknownCmd) || errors.Is(err, errEmptyFlagValue) ||
+				isTimeoutValueError(err) {
 				structuredError = hasRawFlag(spanArgs, "--agent") ||
 					hasShortFlagLetter(spanArgs, 'A') ||
 					hasRawFlag(spanArgs, "--plain") ||
@@ -990,6 +991,14 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// A bad --timeout value is invalid input, not a timeout.
+	if isTimeoutValueError(err) {
+		return &output.ErrorDetail{
+			Code:    "validation_error",
+			Message: err.Error(),
+		}
+	}
+
 	// A value the command itself found invalid, typed so the code does not
 	// depend on how the message happens to be worded.
 	var invalidInput *invalidInputError
@@ -1356,6 +1365,10 @@ func exitCodeForError(err error) int {
 	}
 
 	if errors.Is(err, errEmptyFlagValue) {
+		return client.ExitUsageError
+	}
+
+	if isTimeoutValueError(err) {
 		return client.ExitUsageError
 	}
 
