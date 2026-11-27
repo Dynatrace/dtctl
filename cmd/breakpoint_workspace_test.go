@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -274,6 +275,30 @@ func TestBreakpoint_NotFoundNamesTheWorkspace(t *testing.T) {
 			code, stdout, _ := runRepoScoped(append(argv, "--agent"), RunOptions{})
 			require.NotZero(t, code)
 			require.Contains(t, agentError(t, stdout).Message, " in workspace "+filepath.Base(filepath.Dir(filepath.Dir(mustGetwd(t))))+"/ledger")
+		})
+	}
+}
+
+// An identifier of nothing but spaces names no breakpoint. It is refused
+// before anything is read, rather than sent as a rule id and reported done.
+func TestBreakpoint_ABlankIdentifierNamesNothing(t *testing.T) {
+	for _, argv := range [][]string{
+		{"update", "breakpoint", "   ", "--enabled=false"},
+		{"update", "breakpoint", "", "--condition", "a==1"},
+		{"delete", "breakpoint", "   ", "--yes"},
+		{"delete", "breakpoint", "", "--dry-run"},
+		{"describe", "breakpoint", "   "},
+		{"get", "snapshots", " "},
+	} {
+		t.Run(strings.Join(argv[:2], " ")+" "+strconv.Quote(argv[2]), func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readwrite-all")
+			chdirTestRepo(t, breakpointScope)
+
+			code, stdout, _ := runRepoScoped(append(slices.Clone(argv), "--agent"), RunOptions{})
+			require.Equal(t, 2, code, stdout)
+			require.Equal(t, "validation_error", agentError(t, stdout).Code)
+			require.Equal(t, "the breakpoint identifier is empty: name a breakpoint by its id or as filename:line", agentError(t, stdout).Message)
+			require.Empty(t, srv.ops())
 		})
 	}
 }

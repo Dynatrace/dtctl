@@ -207,6 +207,9 @@ Examples:
 			condition, _ := cmd.Flags().GetString("condition")
 			logMessage, _ := cmd.Flags().GetString("log-message")
 			identifier := strings.TrimSpace(args[0])
+			if err := requireBreakpointIdentifier(identifier); err != nil {
+				return err
+			}
 
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -277,7 +280,7 @@ Examples:
 
 			if conditionChanged || logMessageChanged {
 				if len(targetRules) == 0 {
-					return fmt.Errorf("breakpoint %q not found in workspace %s", identifier, workspace)
+					return breakpointNotFound("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				for _, rule := range targetRules {
 					ruleSettings, err := buildEditBreakpointSettings(rule, condition, conditionChanged, logMessage, logMessageChanged)
@@ -310,7 +313,7 @@ Examples:
 					ruleIDs = append(ruleIDs, identifier)
 				}
 				if len(ruleIDs) == 0 {
-					return fmt.Errorf("breakpoint %q not found in workspace %s", identifier, workspace)
+					return breakpointNotFound("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				enableResp, err := handler.EnableOrDisableBreakpoints(workspaceID, ruleIDs, !enabled)
 				if err != nil {
@@ -353,7 +356,7 @@ func resolveBreakpointRulesForEdit(rules []livedebugger.BreakpointRule, identifi
 	if fileName, lineNumber, err := parseBreakpoint(identifier); err == nil {
 		matches := findBreakpointRulesByLocation(rules, fileName, lineNumber)
 		if len(matches) == 0 {
-			return nil, "", false, fmt.Errorf("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
+			return nil, "", false, breakpointNotFound("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 		}
 		return matches, fmt.Sprintf("%s:%d", fileName, lineNumber), false, nil
 	}

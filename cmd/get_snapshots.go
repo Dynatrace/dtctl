@@ -59,6 +59,9 @@ Use -o json / -o yaml for structured output.`,
 			if listShapeFields(cmdContext(cmd)) != "" {
 				return fmt.Errorf("--fields is not supported by get snapshots; project fields in DQL instead: dtctl query 'fetch application.snapshots | fields ...'")
 			}
+			if err := requireBreakpointIdentifier(args[0]); err != nil {
+				return err
+			}
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -109,7 +112,7 @@ Use -o json / -o yaml for structured output.`,
 				return err
 			}
 			if len(matchedRules) == 0 {
-				return fmt.Errorf("no breakpoint found with identifier %q in workspace %s", identifier, workspace)
+				return breakpointNotFound("no breakpoint found with identifier %q in workspace %s", identifier, workspace)
 			}
 
 			rule := matchedRules[0]
