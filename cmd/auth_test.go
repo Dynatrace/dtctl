@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/Dynatrace/dtctl/pkg/auth"
+	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/diagnostic"
 )
@@ -1909,11 +1910,11 @@ func TestAuthLogin_EmptySafetyLevelIsRejected(t *testing.T) {
 	}
 }
 
-// TestAuthLogin_InvalidSafetyLevelFlagHasOneAgentCode: a value that is not a
-// level is refused with the valid ones, and the agent-mode code of the refusal
-// must not depend on the value. As a plain error it was classified by its
-// text, and the text quotes the value.
-func TestAuthLogin_InvalidSafetyLevelFlagHasOneAgentCode(t *testing.T) {
+// TestAuthLogin_InvalidSafetyLevelFlagIsInvalidInput: a value that is not a
+// level is refused with the valid ones, as invalid input: the usage exit code
+// and one agent-mode code, the same as an empty value of the flag. As a plain
+// error it exited 1 and was classified by its text, which quotes the value.
+func TestAuthLogin_InvalidSafetyLevelFlagIsInvalidInput(t *testing.T) {
 	const envURL = "https://abc12345.apps.dynatrace.com"
 	for _, value := range []string{"bogus", "timeout", "my-config", "no context"} {
 		t.Run(value, func(t *testing.T) {
@@ -1925,18 +1926,17 @@ func TestAuthLogin_InvalidSafetyLevelFlagHasOneAgentCode(t *testing.T) {
 			if granted {
 				t.Errorf("a token was requested\n%s", stderr)
 			}
-			var diagErr *diagnostic.Error
-			if !errors.As(runErr, &diagErr) {
-				t.Fatalf("err = %T %v, want a diagnostic.Error", runErr, runErr)
+			if runErr == nil {
+				t.Fatalf("no error\n%s", stderr)
 			}
-			if want := fmt.Sprintf("--safety-level %q is not a valid value (valid values: readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)", value); diagErr.Message != want {
-				t.Errorf("message = %q\nwant      %q", diagErr.Message, want)
+			if want := fmt.Sprintf("invalid safety level %q (valid values: readonly, readwrite-mine, readwrite-all, dangerously-unrestricted)", value); runErr.Error() != want {
+				t.Errorf("error = %q\nwant    %q", runErr, want)
 			}
-			if diagErr.Operation != "auth login" {
-				t.Errorf("operation = %q, want %q", diagErr.Operation, "auth login")
+			if detail := errorToDetail(context.Background(), runErr); detail.Code != "validation_error" {
+				t.Errorf("code %q, want %q", detail.Code, "validation_error")
 			}
-			if detail := errorToDetail(context.Background(), runErr); detail.Code != "error" {
-				t.Errorf("code %q, want %q", detail.Code, "error")
+			if got := exitCodeForError(runErr); got != client.ExitUsageError {
+				t.Errorf("exit code %d, want %d", got, client.ExitUsageError)
 			}
 		})
 	}
