@@ -515,6 +515,10 @@ func TestDiscover_Match(t *testing.T) {
 	}, r.Verdicts)
 	assert.False(t, r.Partial)
 	assert.Equal(t, p.Sent, r.Sent)
+	// The report's list is its own: a caller that edits one does not edit
+	// the plan another run would send.
+	r.Sent[0] = "edited"
+	assert.NotEqual(t, "edited", p.Sent[0])
 
 	require.Len(t, r.Candidates, 1, "the logs row joins the spans row of the same workload")
 	assert.Equal(t, Candidate{

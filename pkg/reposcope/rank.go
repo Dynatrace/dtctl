@@ -883,7 +883,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		r.note(n)
 	}
 	for i, c := range all {
-		c.tier, c.cluster, c.sources, c.named, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, "", nil, nil, "", 0, false, false
+		c.tier, c.cluster, c.sources, c.named, c.matched, c.rate, c.logsMissed, c.logsChecked, c.unfinished = 0, "", nil, nil, "", 0, false, false, nil
 		r.Candidates[i] = *c
 	}
 	// A sample can have missed a second candidate, as its note says, so what

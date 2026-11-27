@@ -540,8 +540,9 @@ const (
 	VerdictNone      Verdict = "none"
 )
 
-// DiscoveryReport is the outcome of Discover, and the agent envelope's
-// result as is.
+// DiscoveryReport is the outcome of Discover. The command prints a list of
+// them, one per unit, as the agent envelope's result, after adding each
+// candidate's set line and the notes that qualify it.
 type DiscoveryReport struct {
 	Environment string `json:"environment" yaml:"environment"`
 	// Dir and Unit are the plan's.
@@ -617,7 +618,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 			}
 			continue
 		}
-		r.Sent = p.Sent
+		r.Sent = slices.Clone(p.Sent)
 		if q.fallback() {
 			r.runFallback(ctx, runner, q, d)
 		} else {
