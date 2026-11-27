@@ -5,10 +5,11 @@ import (
 	"fmt"
 
 	"errors"
-	"github.com/Dynatrace/dtctl/pkg/util/template"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 
 	"github.com/spf13/cobra"
 )

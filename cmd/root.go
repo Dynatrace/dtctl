@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Dynatrace/dtctl/pkg/util/template"
 	"net"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Dynatrace/dtctl/pkg/util/template"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
