@@ -30,7 +30,7 @@ var entryNotes = []string{
 	"repo scope checkout's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label",
 	"repo scope checkout binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters",
 	"repo scope checkout's filter segments are not applied: a workspace is filtered by labels and takes no segment, so the filters are wider than the entry's queries",
-	"repo scope checkout sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>",
+	"repo scope checkout sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl --context c describe breakpoint <id> --repo-scope checkout",
 }
 
 // workspaceNote is the line a command that changes something in a workspace

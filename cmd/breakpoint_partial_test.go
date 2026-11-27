@@ -84,7 +84,7 @@ func TestCreateBreakpoint_SaysWhatItChangedWhenTheCreateFails(t *testing.T) {
 			// After them, only what was said about the entry's filters.
 			notes := []string{}
 			if tc.args[0] == "--repo-scope" {
-				notes = []string{"repo scope ledger sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>"}
+				notes = []string{"repo scope ledger sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl --context c describe breakpoint <id> --repo-scope ledger"}
 			}
 			require.Equal(t, notes, detail.Suggestions[len(tc.suggest):])
 			require.Equal(t, []string{"GetOrCreateWorkspaceV2", "UpdateWorkspaceV2", "CreateRule"}, srv.ops(), "nothing is rolled back")

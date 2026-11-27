@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
@@ -36,12 +37,12 @@ const (
 // states of it. An entry that renders no filter set is an error, as on
 // query: the caller asked for that entry's filters, and sending none would
 // clear the workspace's.
-func namedBreakpointFilters(workspace breakpointWorkspace) (sets []map[string][]string, notes []string, err error) {
+func namedBreakpointFilters(workspace breakpointWorkspace, selectors []string) (sets []map[string][]string, notes []string, err error) {
 	sets, ok, reason := workspace.scope.LiveDebuggerFilterSets()
 	if !ok {
 		return nil, nil, &reposcope.InvalidError{Source: "--" + repoScopeFlag, Msg: reason}
 	}
-	return sets, entryFilterNotes(workspace.scope.Entry), nil
+	return sets, entryFilterNotes(workspace.scope.Entry, selectors), nil
 }
 
 // entryFilterNotes says how the filters set from e differ from e, one line
@@ -50,8 +51,12 @@ func namedBreakpointFilters(workspace breakpointWorkspace) (sets []map[string][]
 // queries the entry narrows, and they carry service.name, which nothing has
 // shown a workspace to honour. Every path that sets, or previews setting,
 // filters from an entry says these before it asks or writes, and an agent
-// gets them in context.warnings (sayBreakpointWarnings).
-func entryFilterNotes(e *reposcope.Entry) []string {
+// gets them in context.warnings (sayBreakpointWarnings). The check the last
+// line advises names the entry, and carries selectors (breakpointSelectors):
+// the filters were set in the workspace --repo-scope named, in one
+// environment, which is not where a bare describe looks unless that entry
+// covers the working directory and that context is current.
+func entryFilterNotes(e *reposcope.Entry, selectors []string) []string {
 	var notes []string
 	if len(e.Services) > 0 {
 		notes = append(notes, fmt.Sprintf("repo scope %s's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label", e.Name))
@@ -63,7 +68,8 @@ func entryFilterNotes(e *reposcope.Entry) []string {
 		notes = append(notes, fmt.Sprintf("repo scope %s's filter segments are not applied: a workspace is filtered by labels and takes no segment, so the filters are wider than the entry's queries", e.Name))
 	}
 	if len(e.ServiceNames) > 0 {
-		notes = append(notes, fmt.Sprintf("repo scope %s sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>", e.Name))
+		notes = append(notes, fmt.Sprintf("repo scope %s sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with %s <id> --%s %s",
+			e.Name, breakpointCommandLine(selectors, "describe", "breakpoint"), repoScopeFlag, exec.ShellQuote(e.Name)))
 	}
 	return notes
 }

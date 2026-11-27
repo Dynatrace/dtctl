@@ -461,6 +461,31 @@ func TestCreateBreakpoint_HintKeepsTheContext(t *testing.T) {
 	require.Empty(t, prod.ops(), "nothing reaches the config's current context")
 }
 
+// The check a create from a named entry advises looks where the filters were
+// set: run with the breakpoint's id, under another current context and from
+// a directory another entry covers, it asks the same environment for the
+// workspace the create worked in.
+func TestCreateBreakpoint_AdvisedCheckLooksInTheWorkspaceItChanged(t *testing.T) {
+	prod := newLiveDebuggerStub(t, "readwrite-all")
+	staging := newLiveDebuggerStub(t, "readwrite-all")
+	staging.rules = []interface{}{ruleAt("A.java", 1, "")}
+	writeIsolatedConfig(t, twoContextConfig(staging, prod))
+	repo := filepath.Base(chdirTestRepo(t, breakpointScope))
+
+	code, stdout, stderr := runRepoScoped([]string{"--context", "staging", "create", "breakpoint", "A.java:1", "--repo-scope", "ledger", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []string{repo + "/ledger"}, staging.workedIn())
+	warnings := agentEnvelope(t, stdout).Context.Warnings
+	_, line, ok := strings.Cut(warnings[len(warnings)-1], "; check with ")
+	require.True(t, ok, warnings)
+	require.Equal(t, "dtctl --context staging describe breakpoint <id> --repo-scope ledger", line)
+
+	staging.reset()
+	require.Zero(t, runSuggested(t, strings.Replace(line, "<id>", "dtctl-rule-0001", 1), "--agent"))
+	require.Equal(t, []string{repo + "/ledger"}, staging.projectPaths())
+	require.Empty(t, prod.ops(), "nothing reaches the config's current context")
+}
+
 // Where the hint is off, a workspace without filters fails as it did before
 // repo scopes existed. create breakpoint has no --no-repo-scope: there is no
 // default to turn off.
@@ -533,7 +558,7 @@ func TestCreateBreakpoint_NamedRepoScopeSendsEverySet(t *testing.T) {
 	require.Equal(t, []string{"GetOrCreateWorkspaceV2", "UpdateWorkspaceV2", "CreateRule"}, srv.ops())
 	require.JSONEq(t, filterSetsJSON(splitWorkloadSet, splitServiceSet), srv.sentFilterSets(t))
 	require.Equal(t, "repo scope split's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label\n"+
-		"repo scope split sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>\n",
+		"repo scope split sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl --context c describe breakpoint <id> --repo-scope split\n",
 		afterWorkspaceNote(t, stderr, repo+"/split"))
 	require.Contains(t, stdout, "workspace filters set from repo scope split: k8s.namespace.name:payments,k8s.workload.name:split; service.name:split")
 }
@@ -544,7 +569,7 @@ func TestBreakpoint_NamedRepoScope(t *testing.T) {
 
 	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain", "--repo-scope", "ledger", "--yes"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Equal(t, "repo scope ledger sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>\n",
+	require.Equal(t, "repo scope ledger sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl --context c describe breakpoint <id> --repo-scope ledger\n",
 		afterWorkspaceNote(t, stderr, repo+"/ledger"))
 	require.JSONEq(t, filterSetsJSON(ledgerSetJSON), srv.sentFilterSets(t), "a named entry replaces filters the workspace has")
 	require.Contains(t, stdout, "workspace filters set from repo scope ledger: service.name:ledger")
