@@ -1441,6 +1441,11 @@ func exitCodeForError(err error) int {
 	if errors.As(err, &repoScopeInvalid) {
 		return client.ExitUsageError
 	}
+	// A breakpoint that is not found, for the same reason.
+	var breakpointNotFound *breakpointNotFoundError
+	if errors.As(err, &breakpointNotFound) {
+		return client.ExitNotFoundError
+	}
 
 	var flagErr *suggest.FlagError
 	if errors.As(err, &flagErr) {

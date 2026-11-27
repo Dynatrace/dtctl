@@ -281,7 +281,7 @@ func TestBreakpoint_NotFoundNamesTheWorkspace(t *testing.T) {
 
 // The error names the workspace, and a workspace is named after a directory:
 // the agent code of a breakpoint that is not found is one code whatever the
-// directory is called, and the exit code is the one it always was.
+// directory is called, and the exit code is the one that code has.
 func TestBreakpoint_NotFoundHasOneCodeInEveryDirectory(t *testing.T) {
 	for _, argv := range [][]string{
 		{"describe", "breakpoint", "B.java:9"},
@@ -299,7 +299,7 @@ func TestBreakpoint_NotFoundHasOneCodeInEveryDirectory(t *testing.T) {
 				chdirSubdir(t, dir)
 
 				code, stdout, _ := runRepoScoped(append(slices.Clone(argv), "--agent"), RunOptions{})
-				require.Equal(t, 1, code, stdout)
+				require.Equal(t, 4, code, stdout)
 				detail := agentError(t, stdout)
 				require.Equal(t, "not_found", detail.Code)
 				require.True(t, strings.HasSuffix(detail.Message, " in workspace "+dir), detail.Message)
