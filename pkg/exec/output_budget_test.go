@@ -307,6 +307,11 @@ func TestShellQuote(t *testing.T) {
 		"/tmp/$(rm -rf ~)/q.jsonl":                       "'/tmp/$(rm -rf ~)/q.jsonl'",
 		"/tmp/it's/q.jsonl":                              `'/tmp/it'\''s/q.jsonl'`,
 		"":                                               "''",
+		// zsh expands a leading = to the path of the command it names.
+		"=sh":   "'=sh'",
+		"a=b":   "a=b",
+		"~/x":   "'~/x'",
+		"--k=v": "--k=v",
 	} {
 		if got := ShellQuote(in); got != want {
 			t.Errorf("ShellQuote(%q) = %s, want %s", in, got, want)
