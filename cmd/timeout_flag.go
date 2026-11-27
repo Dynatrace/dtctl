@@ -26,13 +26,13 @@ type timeoutFlag struct {
 type timeoutValueError struct {
 	flag  string
 	value string
-	// negative marks a well-formed duration below zero.
-	negative bool
+	// nonPositive marks a well-formed duration that is zero or below.
+	nonPositive bool
 }
 
 func (e *timeoutValueError) Error() string {
-	if e.negative {
-		return fmt.Sprintf("invalid --%s %q: must not be negative; use a duration such as 60s", e.flag, e.value)
+	if e.nonPositive {
+		return fmt.Sprintf("invalid --%s %q: must be greater than zero; use a duration such as 60s", e.flag, e.value)
 	}
 	return fmt.Sprintf("invalid --%s %q: use a duration such as 60s", e.flag, e.value)
 }
@@ -48,8 +48,8 @@ func (t *timeoutFlag) Set(s string) error {
 	if err != nil {
 		return &timeoutValueError{flag: t.name, value: s}
 	}
-	if t.strict && d < 0 {
-		return &timeoutValueError{flag: t.name, value: s, negative: true}
+	if t.strict && d <= 0 {
+		return &timeoutValueError{flag: t.name, value: s, nonPositive: true}
 	}
 	*t.d = d
 	return nil

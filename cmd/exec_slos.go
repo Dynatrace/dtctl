@@ -150,11 +150,3 @@ Examples:
 	stability.MarkStable(c)
 	return c
 }
-
-func init() {
-}
-
-// Declared stable: the invocation and output contract of this command is
-// additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
-func init() {
-}

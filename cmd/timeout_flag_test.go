@@ -65,7 +65,7 @@ func TestTimeoutFlagParsing(t *testing.T) {
 	}
 }
 
-// The flags that used to be integers reject a unit-less 0 and negatives; the
+// The flags that used to be integers reject unit-less numbers, zero and negatives; the
 // others keep their previous parsing (wait query: 0 and negatives = unlimited).
 func TestStrictTimeoutFlag(t *testing.T) {
 	strictFS := func() *pflag.FlagSet {
@@ -82,8 +82,15 @@ func TestStrictTimeoutFlag(t *testing.T) {
 	if err := strictFS().Parse([]string{"--timeout=0"}); err == nil || !strings.Contains(err.Error(), `use a duration such as 60s`) {
 		t.Errorf("bare 0: %v", err)
 	}
-	if err := strictFS().Parse([]string{"--timeout=0s"}); err != nil {
-		t.Errorf("0s: %v", err)
+	for _, v := range []string{"0s", "0m", "-0s", "-1s"} {
+		err := strictFS().Parse([]string{"--timeout=" + v})
+		want := `invalid --timeout "` + v + `": must be greater than zero; use a duration such as 60s`
+		if err == nil || enhanceFlagError(rootCmd, err).Error() != want {
+			t.Errorf("%q: error = %v, want %q", v, err, want)
+		}
+	}
+	if err := strictFS().Parse([]string{"--timeout=1ms"}); err != nil {
+		t.Errorf("1ms: %v", err)
 	}
 	for _, path := range []string{"wait query"} {
 		c, _, err := rootCmd.Find(strings.Fields(path))
@@ -99,7 +106,7 @@ func TestStrictTimeoutFlag(t *testing.T) {
 	}
 	for _, path := range [][]string{{"exec", "analyzer"}, {"exec", "slo"}} {
 		c, _, _ := rootCmd.Find(path)
-		for _, v := range []string{"0", "-1s"} {
+		for _, v := range []string{"0", "0s", "-1s"} {
 			if err := c.Flags().Set("timeout", v); err == nil {
 				t.Errorf("%v --timeout %s must be rejected", path, v)
 			}
