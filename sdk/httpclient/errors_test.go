@@ -12,8 +12,11 @@ func TestAPIError_Error(t *testing.T) {
 	}
 
 	e = NewAPIError(400, "bad request", "field X is required")
-	if got := e.Error(); got != "API error (400): bad request - field X is required" {
+	if got := e.Error(); got != "API error (400): bad request" {
 		t.Errorf("got %q", got)
+	}
+	if e.Details != "field X is required" {
+		t.Errorf("Details = %q, want it kept for callers that opt in", e.Details)
 	}
 }
 

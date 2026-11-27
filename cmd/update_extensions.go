@@ -168,7 +168,7 @@ Examples:
 				name := ext.ExtensionName
 				activatedVersion, err := resolveAndActivate(cmdContext(cmd), handler, name, "", latest, hubLatest, withConfigs)
 				if err != nil {
-					output.FprintHumanError(currentStderr(cmdContext(cmd)), "  %-60s  FAILED: %v", name, err)
+					output.FprintHumanError(currentStderr(cmdContext(cmd)), "  %-60s  FAILED: %v", name, errorText(err))
 					failed++
 					continue
 				}

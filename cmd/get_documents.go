@@ -478,7 +478,7 @@ Examples:
 				for _, docID := range args {
 					doc, err := handler.Get(docID)
 					if err != nil {
-						output.FprintWarning(currentStderr(cmdContext(cmd)), "Could not get document %s: %v", docID, err)
+						output.FprintWarning(currentStderr(cmdContext(cmd)), "Could not get document %s: %s", docID, errorText(err))
 						docNames = append(docNames, docID)
 					} else {
 						docNames = append(docNames, fmt.Sprintf("%s %q", doc.Type, doc.Name))
@@ -497,7 +497,7 @@ Examples:
 			for _, docID := range args {
 				err := handler.Delete(docID)
 				if err != nil {
-					fmt.Fprintf(currentStderr(cmdContext(cmd)), "Failed to delete document %s: %v\n", docID, err)
+					fmt.Fprintf(currentStderr(cmdContext(cmd)), "Failed to delete document %s: %s\n", docID, errorText(err))
 					continue
 				}
 

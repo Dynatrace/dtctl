@@ -109,7 +109,7 @@ func TestFunctionExecutor_Execute_ErrorEnvelope(t *testing.T) {
 				return
 			}
 
-			if tt.wantErr && tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+			if tt.wantErr && tt.errContains != "" && !strings.Contains(errWithDetails(err), tt.errContains) {
 				t.Errorf("Execute() error = %q, want it to contain %q", err.Error(), tt.errContains)
 			}
 		})
@@ -190,7 +190,7 @@ func TestFunctionExecutor_Execute_ValidationErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("Execute() expected error, got nil")
 			}
-			if !strings.Contains(err.Error(), tt.errContains) {
+			if !strings.Contains(errWithDetails(err), tt.errContains) {
 				t.Errorf("Execute() error = %q, want it to contain %q", err.Error(), tt.errContains)
 			}
 		})

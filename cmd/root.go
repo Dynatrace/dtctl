@@ -200,7 +200,7 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 
 		expanded, isShell, err := resolveAlias(cmdContext(root), argv, cfg)
 		if err != nil {
-			output.FprintHumanError(currentStderr(cmdContext(root)), "%s", err)
+			output.FprintHumanError(currentStderr(cmdContext(root)), "%s", errorText(err))
 			return 1
 		}
 
@@ -223,7 +223,7 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 	// --- End alias resolution ---
 
 	if code, err := applySurface(root, spanArgs, devEnabled); err != nil {
-		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", err)
+		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", errorText(err))
 		return code
 	}
 
@@ -336,7 +336,7 @@ func executeTree(root, get *cobra.Command, argv []string) int {
 			return exitCodeForError(err)
 		}
 
-		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", err)
+		output.FprintHumanError(currentStderr(cmdContext(root)), "%s", errorText(err))
 		if len(allHints) > 0 {
 			fmt.Fprintln(currentStderr(cmdContext(root)))
 			for _, hint := range allHints {
@@ -939,7 +939,7 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 		detail := &output.ErrorDetail{
 			Code:       code,
-			Message:    queryErr.Error(),
+			Message:    errorText(queryErr),
 			StatusCode: queryErr.StatusCode,
 		}
 		addQueryErrorHints(detail, queryErr)
@@ -1091,7 +1091,7 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 		return &output.ErrorDetail{
 			Code:        "task_log_unavailable",
-			Message:     taskLogErr.Error(),
+			Message:     taskLogErrorText(taskLogErr),
 			Suggestions: suggestions,
 		}
 	}
@@ -1103,7 +1103,7 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 	if errors.As(err, &apiErr) {
 		return &output.ErrorDetail{
 			Code:       output.ClassifyHTTPError(apiErr.StatusCode),
-			Message:    err.Error(),
+			Message:    errorText(err),
 			StatusCode: apiErr.StatusCode,
 			// The same troubleshooting advice a diagnostic.Error carries for the
 			// same status: without it an SDK failure reaches a caller with a code

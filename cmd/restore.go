@@ -459,7 +459,7 @@ Examples:
 				// Get document info first
 				doc, err := handler.Get(docID)
 				if err != nil {
-					fmt.Fprintf(currentStdout(cmdContext(cmd)), "Error getting document %s: %v\n", docID, err)
+					fmt.Fprintf(currentStdout(cmdContext(cmd)), "Error getting document %s: %s\n", docID, errorText(err))
 					continue
 				}
 
@@ -474,7 +474,7 @@ Examples:
 
 				err = handler.Restore(docID, opts)
 				if err != nil {
-					fmt.Fprintf(currentStderr(cmdContext(cmd)), "Failed to restore document %s: %v\n", docID, err)
+					fmt.Fprintf(currentStderr(cmdContext(cmd)), "Failed to restore document %s: %s\n", docID, errorText(err))
 					continue
 				}
 

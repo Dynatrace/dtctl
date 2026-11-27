@@ -128,7 +128,7 @@ func (h *Handler) Get(id string) (*AzureConnection, error) {
 				ExistingObject: true,
 			})
 		}
-		return nil, fmt.Errorf("failed to get azure_connection: %s", resp.String())
+		return nil, fmt.Errorf("failed to get azure_connection: %w", httpclient.CheckResponse(resp))
 	}
 
 	// Populate flattened fields
@@ -166,7 +166,7 @@ func (h *Handler) List() ([]AzureConnection, error) {
 					Body:       resp.String(),
 				})
 			}
-			return nil, fmt.Errorf("failed to list azure_connections: %s", resp.String())
+			return nil, fmt.Errorf("failed to list azure_connections: %w", httpclient.CheckResponse(resp))
 		}
 
 		for i := range result.Items {
@@ -199,7 +199,7 @@ func (h *Handler) Delete(id string) error {
 				ExistingObject: true,
 			})
 		}
-		return fmt.Errorf("failed to delete azure_connection: status %d: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("failed to delete azure_connection: %w", httpclient.CheckResponse(resp))
 	}
 	return nil
 }
@@ -277,7 +277,7 @@ func (h *Handler) Create(req AzureConnectionCreate) (*AzureConnection, error) {
 	if resp.IsError() {
 		switch resp.StatusCode() {
 		case 400:
-			return nil, fmt.Errorf("invalid azure_connection: %s", resp.String())
+			return nil, fmt.Errorf("invalid azure_connection: %w", httpclient.CheckResponse(resp))
 		case 403:
 			return nil, diagnostic.SettingsForbidden(diagnostic.SettingsDenial{
 				Operation:  "create azure_connection",
@@ -290,7 +290,7 @@ func (h *Handler) Create(req AzureConnectionCreate) (*AzureConnection, error) {
 		case 409:
 			return nil, fmt.Errorf("azure_connection already exists or conflicts with existing connection")
 		default:
-			return nil, fmt.Errorf("failed to create azure_connection: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to create azure_connection: %w", httpclient.CheckResponse(resp))
 		}
 	}
 
@@ -336,7 +336,7 @@ func (h *Handler) Update(objectID string, value Value) (*AzureConnection, error)
 	if resp.IsError() {
 		switch resp.StatusCode() {
 		case 400:
-			return nil, fmt.Errorf("invalid azure_connection: %s", resp.String())
+			return nil, fmt.Errorf("invalid azure_connection: %w", httpclient.CheckResponse(resp))
 		case 403:
 			return nil, diagnostic.SettingsForbidden(diagnostic.SettingsDenial{
 				Operation:      fmt.Sprintf("update azure_connection %q", objectID),
@@ -350,7 +350,7 @@ func (h *Handler) Update(objectID string, value Value) (*AzureConnection, error)
 		case 409, 412:
 			return nil, fmt.Errorf("azure_connection version conflict (connection was modified)")
 		default:
-			return nil, fmt.Errorf("failed to update azure_connection: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to update azure_connection: %w", httpclient.CheckResponse(resp))
 		}
 	}
 

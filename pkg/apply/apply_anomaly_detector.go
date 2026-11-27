@@ -7,6 +7,7 @@ import (
 
 	"github.com/Dynatrace/dtctl/pkg/resources/anomalydetector"
 	"github.com/Dynatrace/dtctl/pkg/safety"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // applyAnomalyDetector applies a custom anomaly detector resource.
@@ -131,7 +132,7 @@ func (a *Applier) dryRunAnomalyDetector(data []byte) (ApplyResult, error) {
 	switch {
 	case validationErr == nil:
 	case errors.As(validationErr, &unavailable):
-		warnings = append(warnings, fmt.Sprintf("schema validation skipped: %v", unavailable.Err))
+		warnings = append(warnings, fmt.Sprintf("schema validation skipped: %s", httpclient.ErrorText(unavailable.Err)))
 	default:
 		return nil, validationErr
 	}

@@ -209,7 +209,7 @@ func (h *Handler) GetLatestVersion() (string, error) {
 		return "", ErrExtensionNotInEnvironment
 	}
 	if resp.IsError() {
-		return "", fmt.Errorf("failed to fetch extension versions: %s", resp.String())
+		return "", fmt.Errorf("failed to fetch extension versions: %w", httpclient.CheckResponse(resp))
 	}
 
 	versions := make([]string, 0, len(result.Items))
@@ -238,7 +238,7 @@ func (h *Handler) AddToEnvironment() error {
 		return fmt.Errorf("failed to add extension %s to environment: %w", ExtensionName, err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("failed to add extension %s to environment: status %d: %s", ExtensionName, resp.StatusCode(), resp.String())
+		return fmt.Errorf("failed to add extension %s to environment: %w", ExtensionName, httpclient.CheckResponse(resp))
 	}
 	return nil
 }
@@ -327,7 +327,7 @@ func (h *Handler) fetchLatestSchema() (*ExtensionSchemaResponse, error) {
 		return nil, fmt.Errorf("failed to fetch extension schema: %w", err)
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to fetch extension schema: %s", resp.String())
+		return nil, fmt.Errorf("failed to fetch extension schema: %w", httpclient.CheckResponse(resp))
 	}
 	return &schema, nil
 }
@@ -347,7 +347,7 @@ func (h *Handler) Get(id string) (*AWSMonitoringConfig, error) {
 		return nil, err
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to get aws_monitoring_config: %s", resp.String())
+		return nil, fmt.Errorf("failed to get aws_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 	flatten(&result)
 	return &result, nil
@@ -372,7 +372,7 @@ func (h *Handler) List() ([]AWSMonitoringConfig, error) {
 			return nil, err
 		}
 		if resp.IsError() {
-			return nil, fmt.Errorf("failed to list aws_monitoring_configs: %s", resp.String())
+			return nil, fmt.Errorf("failed to list aws_monitoring_configs: %w", httpclient.CheckResponse(resp))
 		}
 		for i := range result.Items {
 			flatten(&result.Items[i])
@@ -417,7 +417,7 @@ func (h *Handler) Create(data []byte) (*AWSMonitoringConfig, error) {
 		return nil, fmt.Errorf("failed to create aws_monitoring_config: %w", err)
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to create aws_monitoring_config: %s", resp.String())
+		return nil, fmt.Errorf("failed to create aws_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 	return &result, nil
 }
@@ -433,7 +433,7 @@ func (h *Handler) Update(id string, data []byte) (*AWSMonitoringConfig, error) {
 		return nil, fmt.Errorf("failed to update aws_monitoring_config: %w", err)
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to update aws_monitoring_config: %s", resp.String())
+		return nil, fmt.Errorf("failed to update aws_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 	return &result, nil
 }
@@ -444,7 +444,7 @@ func (h *Handler) Delete(id string) error {
 		return err
 	}
 	if resp.IsError() {
-		return fmt.Errorf("failed to delete aws_monitoring_config: status %d: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("failed to delete aws_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 	return nil
 }

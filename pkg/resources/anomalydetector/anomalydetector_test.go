@@ -250,7 +250,7 @@ func TestGet_StatusMapping(t *testing.T) {
 		{status: 404, wantErr: "not found"},
 		// 403 now surfaces the server's reason instead of swallowing it (#476).
 		{status: 403, wantErr: "get anomaly detector \"obj-1\" (HTTP 403): error"},
-		{status: 500, wantErr: "failed to get anomaly detector: status 500"},
+		{status: 500, wantErr: "failed to get anomaly detector: API error (500)"},
 	}
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("status_%d", tc.status), func(t *testing.T) {
@@ -463,7 +463,7 @@ func TestCreate_StatusMapping(t *testing.T) {
 		{status: 400, wantErr: "invalid anomaly detector"},
 		{status: 403, wantErr: "create anomaly detector (HTTP 403): boom"},
 		{status: 404, wantErr: fmt.Sprintf("schema %q not found", SchemaID)},
-		{status: 500, wantErr: "failed to create anomaly detector: status 500"},
+		{status: 500, wantErr: "failed to create anomaly detector: API error (500)"},
 	}
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("status_%d", tc.status), func(t *testing.T) {
@@ -525,7 +525,7 @@ func TestUpdate_StatusMapping(t *testing.T) {
 		{status: 404, wantErr: "not found"},
 		{status: 409, wantErr: "version conflict"},
 		{status: 412, wantErr: "version conflict"},
-		{status: 500, wantErr: "failed to update anomaly detector: status 500"},
+		{status: 500, wantErr: "failed to update anomaly detector: API error (500)"},
 	}
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("status_%d", tc.status), func(t *testing.T) {
@@ -577,7 +577,7 @@ func TestDelete_StatusMapping(t *testing.T) {
 	}{
 		{status: 403, wantErr: "delete anomaly detector \"obj-1\" (HTTP 403): boom"},
 		{status: 404, wantErr: "not found"},
-		{status: 500, wantErr: "failed to delete anomaly detector: status 500"},
+		{status: 500, wantErr: "failed to delete anomaly detector: API error (500)"},
 	}
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("status_%d", tc.status), func(t *testing.T) {

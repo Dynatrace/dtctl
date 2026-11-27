@@ -2,8 +2,8 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -33,12 +33,6 @@ type WorkflowExecutionResponse struct {
 	ID       string `json:"id"`
 	Workflow string `json:"workflow"`
 	State    string `json:"state"`
-}
-
-type apiErrorEnvelope struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
 }
 
 // Execute executes a workflow
@@ -125,12 +119,9 @@ func (e *WorkflowExecutor) GetStatus(executionID string) (*ExecutionStatus, erro
 }
 
 func formatWorkflowAPIError(prefix string, statusCode int, body string) error {
-	var envelope apiErrorEnvelope
-	if err := json.Unmarshal([]byte(body), &envelope); err == nil && envelope.Error.Message != "" {
-		return fmt.Errorf("%s: status %d: %s", prefix, statusCode, envelope.Error.Message)
-	}
-
-	return fmt.Errorf("%s: status %d: %s", prefix, statusCode, body)
+	// Same parsing as CheckResponse: envelope message plus details, else the
+	// capped body in Details. The body never enters the message.
+	return fmt.Errorf("%s: %w", prefix, httpclient.ParseAPIError(statusCode, http.StatusText(statusCode), []byte(body)))
 }
 
 // WaitOptions configures the wait behavior

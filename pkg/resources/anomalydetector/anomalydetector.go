@@ -5,6 +5,7 @@ package anomalydetector
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -336,7 +337,7 @@ func (h *Handler) List(opts ListOptions) ([]AnomalyDetector, error) {
 					Body:       resp.String(),
 				})
 			}
-			return nil, fmt.Errorf("failed to list anomaly detectors: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to list anomaly detectors: %w", httpclient.CheckResponse(resp))
 		}
 
 		allItems = append(allItems, result.Items...)
@@ -390,7 +391,7 @@ func (h *Handler) Get(objectID string) (*AnomalyDetector, error) {
 				ExistingObject: true,
 			})
 		default:
-			return nil, fmt.Errorf("failed to get anomaly detector: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to get anomaly detector: %w", httpclient.CheckResponse(resp))
 		}
 	}
 
@@ -505,7 +506,7 @@ func (h *Handler) Create(data []byte) (*AnomalyDetector, error) {
 		case 404:
 			return nil, fmt.Errorf("schema %q not found", SchemaID)
 		default:
-			return nil, fmt.Errorf("failed to create anomaly detector: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to create anomaly detector: %w", httpclient.CheckResponse(resp))
 		}
 	}
 
@@ -563,7 +564,7 @@ func (h *Handler) Update(objectID string, data []byte) (*AnomalyDetector, error)
 		case 409, 412:
 			return nil, fmt.Errorf("anomaly detector version conflict (object was modified)")
 		default:
-			return nil, fmt.Errorf("failed to update anomaly detector: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to update anomaly detector: %w", httpclient.CheckResponse(resp))
 		}
 	}
 
@@ -589,7 +590,7 @@ func (h *Handler) Delete(objectID string) error {
 		case 404:
 			return fmt.Errorf("anomaly detector %q not found", objectID)
 		default:
-			return fmt.Errorf("failed to delete anomaly detector: status %d: %s", resp.StatusCode(), resp.String())
+			return fmt.Errorf("failed to delete anomaly detector: %w", httpclient.CheckResponse(resp))
 		}
 	}
 	return nil
@@ -680,7 +681,7 @@ func settingsValidationError(body []byte) error {
 	if detail := describeSettingsError(body); detail != "" {
 		return fmt.Errorf("%s", detail)
 	}
-	return fmt.Errorf("invalid anomaly detector: %s", body)
+	return fmt.Errorf("invalid anomaly detector: %w", httpclient.NewAPIErrorFromBody(http.StatusBadRequest, string(body)))
 }
 
 // flattenedToAPIValue converts the human-friendly YAML format into the API's value shape.

@@ -660,7 +660,7 @@ func runUnshareDocument(cmd *cobra.Command, args []string) error {
 			if err := handler.RemoveDirectShareRecipients(share.ID, recipientIDs); err != nil {
 				// Log but continue - recipient might not be in this share
 				if verbosity(cmdContext(cmd)) > 0 {
-					output.FprintInfo(currentStderr(cmdContext(cmd)), "Note: could not remove from share %s: %v", share.ID, err)
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "Note: could not remove from share %s: %s", share.ID, errorText(err))
 				}
 				continue
 			}
@@ -798,7 +798,7 @@ func visibilityError(err error, documentID, state string) error {
 	return &diagnostic.Error{
 		Operation:   fmt.Sprintf("make document %q %s", documentID, state),
 		StatusCode:  apiErr.StatusCode,
-		Message:     "access denied: " + err.Error(),
+		Message:     "access denied: " + errorText(err),
 		Err:         err,
 		Suggestions: []string{"Only the document's owner can make it public or private (an admin also on ready-made documents)"},
 	}
@@ -816,7 +816,7 @@ func environmentShareScopeError(err error, cfg *config.Config, operation string,
 	return &diagnostic.Error{
 		Operation:  operation,
 		StatusCode: apiErr.StatusCode,
-		Message:    "access denied: " + err.Error(),
+		Message:    "access denied: " + errorText(err),
 		Err:        err,
 		Suggestions: append(loginScopeAdvice(cfg, scopes),
 			"Platform token: create it with "+strings.Join(scopes, ", "),

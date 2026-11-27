@@ -401,7 +401,7 @@ func (h *Handler) Cancel(ctx context.Context, requestToken string) error {
 		return fmt.Errorf("failed to cancel query: %w", err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("cancel failed with status %d: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("cancel failed: %w", httpclient.CheckResponse(resp))
 	}
 	return nil
 }
@@ -838,16 +838,20 @@ func parseError(statusCode int, body []byte) error {
 	}
 	// Keep the fallback typed: callers branch on QueryError.StatusCode (the
 	// 401-refresh path), and Error() renders the same message either way.
-	return &QueryError{StatusCode: statusCode, Message: string(body)}
+	return &QueryError{StatusCode: statusCode, Message: http.StatusText(statusCode), Details: httpclient.TruncateBody(string(body))}
 }
 
 // QueryError is a structured error from the DQL Query API.
 type QueryError struct {
 	StatusCode int
 	Message    string
-	ErrorType  string
-	Detail     string
-	Arguments  []string
+	// Details is the capped raw response body of an error the API did not
+	// answer in its error envelope. Like APIError.Details it is not part of
+	// Error(); user-facing output opts in.
+	Details   string
+	ErrorType string
+	Detail    string
+	Arguments []string
 	// Query is the query the backend parsed, and Position the offending span
 	// within it (1-based line/column, end inclusive). Both are empty when the
 	// backend reported no position, e.g. for errors that are not about the

@@ -12,6 +12,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	sdkquery "github.com/Dynatrace/dtctl/sdk/api/query"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // WaitConfig configures the wait operation
@@ -161,7 +162,7 @@ func (w *QueryWaiter) Wait(ctx context.Context) (*Result, error) {
 			if isPermanentQueryError(err) {
 				elapsed := time.Since(startTime)
 				if !w.config.Quiet {
-					fmt.Fprintf(w.config.ProgressOut, "\nQuery error (not retryable): %v\n", err)
+					fmt.Fprintf(w.config.ProgressOut, "\nQuery error (not retryable): %s\n", httpclient.ErrorText(err))
 					fmt.Fprintf(w.config.ProgressOut, "Elapsed: %s\n", elapsed.Round(100*time.Millisecond))
 				}
 				return &Result{

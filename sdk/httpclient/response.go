@@ -2,8 +2,11 @@ package httpclient
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -13,48 +16,64 @@ import (
 // successful responses.
 //
 // It attempts to parse the Dynatrace error response body for a human-readable
-// message. If parsing fails, the raw response body is included as details.
+// message. Whenever no further details can be parsed, the raw response body
+// (capped, see [TruncateBody]) is kept in Details; it is never part of the
+// message or of Error().
 func CheckResponse(resp *resty.Response) error {
 	if resp == nil || !resp.IsError() {
 		return nil
 	}
 
-	msg := resp.Status()
+	return ParseAPIError(resp.StatusCode(), resp.Status(), resp.Body())
+}
+
+// ParseAPIError builds an [*APIError] from a raw error response body: the
+// Dynatrace error envelope supplies the message and details, and fallbackMsg
+// is used when none is found. When nothing is parsed, the capped body is kept
+// in Details. It is what [CheckResponse] uses, for callers that hold only the
+// status and body.
+func ParseAPIError(statusCode int, fallbackMsg string, body []byte) *APIError {
+	msg := fallbackMsg
 	details := ""
 
 	// Try to extract message from Dynatrace error envelope.
-	// Common shapes: {"error":{"message":"...","details":{...}}} or {"message":"..."}
+	// Common shapes: {"error":{"message":"...","details":{...}}} or {"message":"..."}.
+	// Settings validation failures put the violations next to the message:
+	// {"error":{"message":"Constraints violated.","constraintViolations":[...]}}.
 	var envelope struct {
 		Error *struct {
-			Message string          `json:"message"`
-			Details json.RawMessage `json:"details"`
+			Message              string          `json:"message"`
+			Details              json.RawMessage `json:"details"`
+			ConstraintViolations json.RawMessage `json:"constraintViolations"`
 		} `json:"error"`
 		Message string `json:"message"`
 	}
-	const maxDetails = 1024
-	if err := json.Unmarshal(resp.Body(), &envelope); err == nil {
+	if err := json.Unmarshal(body, &envelope); err == nil {
 		if envelope.Error != nil && envelope.Error.Message != "" {
 			msg = envelope.Error.Message
 			// The top-level message is often generic (e.g. "Constraints
-			// violated."); the actionable specifics live in "details".
+			// violated."); the actionable specifics live in "details" or in
+			// a sibling "constraintViolations".
 			details = formatErrorDetails(envelope.Error.Details)
-			if len(details) > maxDetails {
-				details = details[:maxDetails] + "... (truncated)"
+			if len(envelope.Error.ConstraintViolations) > 0 {
+				if cv := formatErrorDetails(json.RawMessage(`{"constraintViolations":` + string(envelope.Error.ConstraintViolations) + `}`)); cv != "" {
+					if details != "" {
+						details += "; "
+					}
+					details += cv
+				}
 			}
 		} else if envelope.Message != "" {
 			msg = envelope.Message
 		}
-	} else {
-		// If we can't parse JSON, include raw body as details (truncated to 1KB).
-		if body := resp.String(); body != "" {
-			if len(body) > maxDetails {
-				body = body[:maxDetails] + "... (truncated)"
-			}
-			details = body
-		}
+	}
+	details = TruncateBody(details)
+	// Nothing parsed out: keep the raw body (capped) so no explanation is lost.
+	if details == "" {
+		details = TruncateBody(strings.TrimSpace(string(body)))
 	}
 
-	return NewAPIError(resp.StatusCode(), msg, details)
+	return NewAPIError(statusCode, msg, details)
 }
 
 // formatErrorDetails renders the "details" of a Dynatrace platform error
@@ -65,7 +84,7 @@ func CheckResponse(resp *resty.Response) error {
 // is joined as "path: message; ..." entries. For non-standard shapes the raw
 // JSON bytes are returned as-is. Returns "" when empty.
 func formatErrorDetails(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
+	if t := strings.TrimSpace(string(raw)); t == "" || t == "null" || t == "{}" {
 		return ""
 	}
 
@@ -108,4 +127,43 @@ func formatErrorDetails(raw json.RawMessage) string {
 
 	// Non-standard or malformed: dump the raw JSON so nothing is hidden.
 	return strings.TrimSpace(string(raw))
+}
+
+// MaxBodyDetails caps how much of a response body is carried in
+// [APIError.Details].
+const MaxBodyDetails = 1024
+
+// TruncateBody caps s at [MaxBodyDetails] bytes (without splitting a rune) and
+// marks the cut. Use it for any response body that goes into [APIError.Details].
+func TruncateBody(s string) string {
+	if len(s) <= MaxBodyDetails {
+		return s
+	}
+	cut := MaxBodyDetails
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "... (truncated)"
+}
+
+// NewAPIErrorFromBody builds an [*APIError] for a response whose body could not
+// be (or was not) parsed into a message: the status text is the message and the
+// capped body is the details.
+func NewAPIErrorFromBody(statusCode int, body string) *APIError {
+	return NewAPIError(statusCode, http.StatusText(statusCode), TruncateBody(body))
+}
+
+// ErrorText renders err together with the response body of the first
+// [*APIError] in its chain, which Error() deliberately leaves out. It is the
+// opt-in for user-facing output (CLI messages, hints that match on body text).
+func ErrorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Details != "" && !strings.Contains(text, apiErr.Details) {
+		return text + " - " + apiErr.Details
+	}
+	return text
 }

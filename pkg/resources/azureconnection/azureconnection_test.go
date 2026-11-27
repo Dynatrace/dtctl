@@ -185,7 +185,7 @@ func TestHandlerCreateSuccessAndStatuses(t *testing.T) {
 			{status: 403, wantErr: "create azure_connection (HTTP 403): boom"},
 			{status: 404, wantErr: fmt.Sprintf("schema %q not found", SchemaID)},
 			{status: 409, wantErr: "already exists"},
-			{status: 500, wantErr: "failed to create azure_connection: status 500"},
+			{status: 500, wantErr: "failed to create azure_connection: API error (500)"},
 		}
 		for _, tc := range tests {
 			t.Run(fmt.Sprintf("status_%d", tc.status), func(t *testing.T) {
@@ -278,7 +278,7 @@ func TestHandlerUpdateSuccessAndStatuses(t *testing.T) {
 			{status: 404, wantErr: "azure_connection \"obj-1\" not found"},
 			{status: 409, wantErr: "version conflict"},
 			{status: 412, wantErr: "version conflict"},
-			{status: 500, wantErr: "failed to update azure_connection: status 500"},
+			{status: 500, wantErr: "failed to update azure_connection: API error (500)"},
 		}
 		for _, tc := range tests {
 			h, server := newHandler(t, func(w http.ResponseWriter, r *http.Request) {

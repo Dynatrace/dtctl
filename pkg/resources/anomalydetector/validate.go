@@ -268,8 +268,8 @@ func interpretValidationResponse(status int, body []byte) error {
 		if detail := describeSettingsError(body); detail != "" {
 			return fmt.Errorf("%s", detail)
 		}
-		return fmt.Errorf("invalid anomaly detector: %s", body)
+		return fmt.Errorf("invalid anomaly detector: %w", httpclient.NewAPIErrorFromBody(status, string(body)))
 	default:
-		return &ValidationUnavailableError{Err: fmt.Errorf("status %d: %s", status, body)}
+		return &ValidationUnavailableError{Err: httpclient.NewAPIErrorFromBody(status, string(body))}
 	}
 }

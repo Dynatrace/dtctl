@@ -124,8 +124,8 @@ func TestList(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -220,8 +220,8 @@ func TestGet(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -337,8 +337,8 @@ func TestCreate(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -450,8 +450,8 @@ func TestUpdate(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -529,8 +529,8 @@ func TestDelete(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -600,8 +600,8 @@ func TestTruncate(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {

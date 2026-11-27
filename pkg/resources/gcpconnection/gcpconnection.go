@@ -129,7 +129,7 @@ func (h *Handler) listBySchema(schemaID string) ([]GCPConnection, error) {
 					Body:       resp.String(),
 				})
 			}
-			return nil, fmt.Errorf("failed to list gcp_connections for schema %q: %s", schemaID, resp.String())
+			return nil, fmt.Errorf("failed to list gcp_connections for schema %q: %w", schemaID, httpclient.CheckResponse(resp))
 		}
 
 		for i := range result.Items {
@@ -162,7 +162,7 @@ func (h *Handler) Get(id string) (*GCPConnection, error) {
 				ExistingObject: true,
 			})
 		}
-		return nil, fmt.Errorf("failed to get gcp_connection: %s", resp.String())
+		return nil, fmt.Errorf("failed to get gcp_connection: %w", httpclient.CheckResponse(resp))
 	}
 
 	flattenConnection(&result)
@@ -201,7 +201,7 @@ func (h *Handler) Delete(id string) error {
 				ExistingObject: true,
 			})
 		}
-		return fmt.Errorf("failed to delete gcp_connection: status %d: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("failed to delete gcp_connection: %w", httpclient.CheckResponse(resp))
 	}
 	return nil
 }
@@ -299,7 +299,7 @@ func (h *Handler) Create(req GCPConnectionCreate) (*GCPConnection, error) {
 	if resp.IsError() {
 		switch resp.StatusCode() {
 		case 400:
-			return nil, fmt.Errorf("invalid gcp_connection: %s", resp.String())
+			return nil, fmt.Errorf("invalid gcp_connection: %w", httpclient.CheckResponse(resp))
 		case 403:
 			return nil, diagnostic.SettingsForbidden(diagnostic.SettingsDenial{
 				Operation:  "create gcp_connection",
@@ -312,7 +312,7 @@ func (h *Handler) Create(req GCPConnectionCreate) (*GCPConnection, error) {
 		case 409:
 			return nil, fmt.Errorf("gcp_connection already exists or conflicts with existing connection")
 		default:
-			return nil, fmt.Errorf("failed to create gcp_connection: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to create gcp_connection: %w", httpclient.CheckResponse(resp))
 		}
 	}
 
@@ -347,7 +347,7 @@ func (h *Handler) Update(objectID string, value Value) (*GCPConnection, error) {
 	if resp.IsError() {
 		switch resp.StatusCode() {
 		case 400:
-			return nil, fmt.Errorf("invalid gcp_connection: %s", resp.String())
+			return nil, fmt.Errorf("invalid gcp_connection: %w", httpclient.CheckResponse(resp))
 		case 403:
 			return nil, diagnostic.SettingsForbidden(diagnostic.SettingsDenial{
 				Operation:      fmt.Sprintf("update gcp_connection %q", objectID),
@@ -361,7 +361,7 @@ func (h *Handler) Update(objectID string, value Value) (*GCPConnection, error) {
 		case 409, 412:
 			return nil, fmt.Errorf("gcp_connection version conflict (connection was modified)")
 		default:
-			return nil, fmt.Errorf("failed to update gcp_connection: status %d: %s", resp.StatusCode(), resp.String())
+			return nil, fmt.Errorf("failed to update gcp_connection: %w", httpclient.CheckResponse(resp))
 		}
 	}
 

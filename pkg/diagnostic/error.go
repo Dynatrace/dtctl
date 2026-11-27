@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // Error represents an enhanced diagnostic error with contextual help
@@ -37,7 +38,7 @@ func (e *Error) Error() string {
 	if e.Message != "" {
 		sb.WriteString(e.Message)
 	} else if e.Err != nil {
-		sb.WriteString(e.Err.Error())
+		sb.WriteString(httpclient.ErrorText(e.Err))
 	}
 
 	// Add request ID if available

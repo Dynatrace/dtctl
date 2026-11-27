@@ -141,7 +141,7 @@ func (h *Handler) GetLatestVersion() (string, error) {
 		return "", fmt.Errorf("failed to fetch extension versions: %w", err)
 	}
 	if resp.IsError() {
-		return "", fmt.Errorf("failed to fetch extension versions: %s", resp.String())
+		return "", fmt.Errorf("failed to fetch extension versions: %w", httpclient.CheckResponse(resp))
 	}
 
 	versions := make([]string, 0, len(result.Items))
@@ -203,7 +203,7 @@ func (h *Handler) ListAvailableLocations() ([]Location, error) {
 		return nil, fmt.Errorf("failed to fetch extension schema: %w", err)
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to fetch extension schema: %s", resp.String())
+		return nil, fmt.Errorf("failed to fetch extension schema: %w", httpclient.CheckResponse(resp))
 	}
 
 	locationEnum, ok := schema.Enums["dynatrace.datasource.azure:location"]
@@ -238,7 +238,7 @@ func (h *Handler) ListAvailableFeatureSets() ([]FeatureSet, error) {
 		return nil, fmt.Errorf("failed to fetch extension schema: %w", err)
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to fetch extension schema: %s", resp.String())
+		return nil, fmt.Errorf("failed to fetch extension schema: %w", httpclient.CheckResponse(resp))
 	}
 
 	featureSetEnum, ok := schema.Enums["FeatureSetsType"]
@@ -280,7 +280,7 @@ func (h *Handler) Get(id string) (*AzureMonitoringConfig, error) {
 		return nil, err
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to get azure_monitoring_config: %s", resp.String())
+		return nil, fmt.Errorf("failed to get azure_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 
 	result.Description = result.Value.Description
@@ -309,7 +309,7 @@ func (h *Handler) List() ([]AzureMonitoringConfig, error) {
 			return nil, err
 		}
 		if resp.IsError() {
-			return nil, fmt.Errorf("failed to list azure_monitoring_configs: %s", resp.String())
+			return nil, fmt.Errorf("failed to list azure_monitoring_configs: %w", httpclient.CheckResponse(resp))
 		}
 
 		for i := range result.Items {
@@ -355,7 +355,7 @@ func (h *Handler) Create(data []byte) (*AzureMonitoringConfig, error) {
 		return nil, fmt.Errorf("failed to create azure_monitoring_config: %w", err)
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to create azure_monitoring_config: %s", resp.String())
+		return nil, fmt.Errorf("failed to create azure_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 
 	return &result, nil
@@ -374,7 +374,7 @@ func (h *Handler) Update(id string, data []byte) (*AzureMonitoringConfig, error)
 		return nil, fmt.Errorf("failed to update azure_monitoring_config: %w", err)
 	}
 	if resp.IsError() {
-		return nil, fmt.Errorf("failed to update azure_monitoring_config: %s", resp.String())
+		return nil, fmt.Errorf("failed to update azure_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 
 	return &result, nil
@@ -387,7 +387,7 @@ func (h *Handler) Delete(id string) error {
 		return err
 	}
 	if resp.IsError() {
-		return fmt.Errorf("failed to delete azure_monitoring_config: status %d: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("failed to delete azure_monitoring_config: %w", httpclient.CheckResponse(resp))
 	}
 	return nil
 }

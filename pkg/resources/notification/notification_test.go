@@ -136,8 +136,8 @@ func TestListEventNotifications(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -224,8 +224,8 @@ func TestGetEventNotification(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -309,8 +309,8 @@ func TestCreateEventNotification(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -383,8 +383,8 @@ func TestDeleteEventNotification(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -487,8 +487,8 @@ func TestListResourceNotifications(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -566,8 +566,8 @@ func TestGetResourceNotification(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {
@@ -632,8 +632,8 @@ func TestDeleteResourceNotification(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(errWithDetails(err), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, errWithDetails(err))
 				}
 			} else {
 				if err != nil {

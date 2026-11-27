@@ -10,6 +10,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/resources/azureconnection"
 	"github.com/Dynatrace/dtctl/pkg/resources/azuremonitoringconfig"
+	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
 // azureConnectionItem holds the envelope fields an Azure connection payload
@@ -132,11 +133,9 @@ func (a *Applier) applyAzureConnection(data []byte) ([]ApplyResult, error) {
 			// Update
 			_, err := handler.Update(objectID, value)
 			if err != nil {
-				errMsg := err.Error()
-
 				// Catch generic validation error that happens when Azure side is not ready/configured
 				// "was unable to be validated with validator .../azureConfiguration"
-				if strings.Contains(errMsg, "azureConfiguration") && strings.Contains(errMsg, "unable to be validated") {
+				if isAzureConfigValidationError(err) {
 					// Check if we have incomplete configuration (missing app/directory ID)
 					if value.Type == "federatedIdentityCredential" {
 						fedCred := value.FederatedIdentityCredential
@@ -148,7 +147,7 @@ func (a *Applier) applyAzureConnection(data []byte) ([]ApplyResult, error) {
 				}
 
 				// Check for Federated Identity error (AADSTS70025 or AADSTS700213)
-				if strings.Contains(errMsg, "AADSTS70025") || strings.Contains(errMsg, "AADSTS700213") {
+				if isAzureFederationError(err) {
 					if value.FederatedIdentityCredential != nil && value.FederatedIdentityCredential.ApplicationID != "" {
 						a.printFederatedErrorSnippet(a.baseURL, objectID, value.FederatedIdentityCredential.ApplicationID, issuerOverride)
 						return nil, fmt.Errorf("azure connection requires federation setup on Azure side: %w", err)
@@ -419,4 +418,21 @@ func (a *Applier) dryRunAzureMonitoringConfig(data []byte) (ApplyResult, error) 
 	}
 
 	return monitoringConfigDryRun("azure_monitoring_config", objectID, config.Value.Description, config.Scope, warnings), nil
+}
+
+// The Azure hints match on text the Settings API puts in the response body,
+// which APIError.Error() does not carry.
+
+// isAzureConfigValidationError matches the generic validation failure raised
+// while the Azure side is not ready or configured.
+func isAzureConfigValidationError(err error) bool {
+	text := httpclient.ErrorText(err)
+	return strings.Contains(text, "azureConfiguration") && strings.Contains(text, "unable to be validated")
+}
+
+// isAzureFederationError matches the AADSTS70025 / AADSTS700213 federated
+// identity errors.
+func isAzureFederationError(err error) bool {
+	text := httpclient.ErrorText(err)
+	return strings.Contains(text, "AADSTS70025") || strings.Contains(text, "AADSTS700213")
 }
