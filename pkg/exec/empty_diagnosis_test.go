@@ -426,6 +426,29 @@ func TestEmptyResultAdvice_MetricTypo(t *testing.T) {
 	}
 }
 
+// A query that ran under segments a caller added lists the metric keys under
+// the same segments: a near match from the whole catalog may be a key the
+// query could not have returned. A request that is the user's own lists them
+// as it always did.
+func TestEmptyResultAdvice_MetricListingStaysInTheSegments(t *testing.T) {
+	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return metricCatalog("dt.host.cpu.usage"), nil }}
+	e := &DQLExecutor{probe: p.run}
+	const query = `timeseries avg(dt.host.cpu.usge)`
+	result := metricResult("dt.host.cpu.usge", "2026-06-21T00:00:00Z", "2026-06-22T00:00:00Z")
+	segments := []FilterSegmentRef{{ID: "plain-1"}}
+
+	e.emptyResultAdvice(query, result, nil, DQLExecuteOptions{TypedQuery: query, Segments: segments})
+	if len(p.opts) != 1 || !reflect.DeepEqual(p.opts[0].Segments, segments) {
+		t.Errorf("the listing must carry the segments the query was sent with: %+v", p.opts)
+	}
+
+	p.calls, p.opts = nil, nil
+	e.emptyResultAdvice(query, result, nil, DQLExecuteOptions{Segments: segments})
+	if len(p.opts) != 1 || p.opts[0].Segments != nil {
+		t.Errorf("control: an unscoped listing carries no segments: %+v", p.opts)
+	}
+}
+
 func TestEmptyResultAdvice_MetricKnownKeepsWindowAdvice(t *testing.T) {
 	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return metricCatalog("dt.host.cpu.usage"), nil }}
 	e := &DQLExecutor{probe: p.run}

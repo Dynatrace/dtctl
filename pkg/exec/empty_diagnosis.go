@@ -253,7 +253,9 @@ func queriedMetricKeys(result *DQLQueryResponse) []string {
 
 // diagnoseMetricKeys lists the metric keys with series in the query window
 // (clamped to its last emptyProbeMetricWindow) and reports queried keys that
-// are not among them.
+// are not among them. For a caller that changed the request
+// (opts.TypedQuery) the listing carries the filter segments the query was
+// sent with, so a near match is a key the query could have returned.
 func diagnoseMetricKeys(ctx context.Context, probe probeFunc, keys []string, result *DQLQueryResponse, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
 	meta := result.GetMetadata()
 	if meta == nil || meta.AnalysisTimeframe == nil {
@@ -273,6 +275,10 @@ func diagnoseMetricKeys(ctx context.Context, probe probeFunc, keys []string, res
 	probeOpts.MaxResultRecords = emptyProbeMaxMetricKeys
 	probeOpts.DefaultTimeframeStart = from
 	probeOpts.DefaultTimeframeEnd = to
+	if opts.TypedQuery != "" {
+		// As in diagnoseFields: the listing is taken where the query ran.
+		probeOpts.Segments = opts.Segments
+	}
 	resp, err := probe(ctx, "metrics | summarize n = count(), by:{metric.key} | fields metric.key", probeOpts)
 	if err != nil || resp == nil || probeIsPartial(resp) {
 		return nil, nil
