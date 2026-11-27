@@ -323,6 +323,8 @@ func TestDecode_RefusesADocumentKeyInAnotherCase(t *testing.T) {
 		"apiVersion: V1\nenvironments:\n" + entries:               `apiVersion "V1" on line 1 must be written "v1"`,
 		"environment:\n" + entries:                                `holds no "environments" key, so nothing in it is applied; unknown key "environment" on line 1 (a typo, or written by a newer dtctl)`,
 		"kind: RepoScope\n":                                       `holds no "environments" key, so nothing in it is applied; unknown key "kind" on line 1`,
+		"environments: {}\nenvironment:\n" + entries:              `holds no entry, so nothing in it is applied; unknown key "environment" on line 2 (a typo, or written by a newer dtctl)`,
+		"envs:\n" + entries + "environments: {}\n":                `holds no entry, so nothing in it is applied; unknown key "envs" on line 1`,
 	} {
 		_, err := decode([]byte(doc))
 		require.NotNil(t, err, doc)

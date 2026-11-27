@@ -96,10 +96,15 @@ func read(data []byte) (*File, *InvalidError) {
 	if err := r.document(root, f); err != nil {
 		return nil, err
 	}
-	if _, has := mappingValue(root, "environments"); !has && len(f.unknown) > 0 {
+	if len(f.unknown) > 0 && entryCount(f) == 0 {
 		// The keys would be a warning on the queries the entries scope, and
 		// there are none: nothing would ever say that the file is not read.
-		return nil, invalid(`holds no "environments" key, so nothing in it is applied; `+unknownKeys(f.unknown),
+		// An "environments" key that holds nothing is the same file.
+		what := "entry"
+		if _, has := mappingValue(root, "environments"); !has {
+			what = `"environments" key`
+		}
+		return nil, invalid("holds no "+what+", so nothing in it is applied; "+unknownKeys(f.unknown),
 			"write the environments under the key environments")
 	}
 	if len(r.narrowing) > 0 {
@@ -578,4 +583,13 @@ func encode(f *File) ([]byte, error) {
 		return nil, fmt.Errorf("encode %s: %w", FileName, err)
 	}
 	return buf.Bytes(), nil
+}
+
+// entryCount is how many entries the document holds over all environments.
+func entryCount(f *File) int {
+	n := 0
+	for _, entries := range f.Environments {
+		n += len(entries)
+	}
+	return n
 }

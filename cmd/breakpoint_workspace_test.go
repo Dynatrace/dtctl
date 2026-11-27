@@ -118,22 +118,22 @@ func TestBreakpoint_AScopeFileForAnotherEnvironmentNamesNoWorkspace(t *testing.T
 }
 
 // unusableScopes are scope files that were meant to say something and from
-// which no entry can be taken. The first does not load: its one document
-// key is misspelled, which the reader refuses with the spelling to use. The
-// second loads and holds nothing: its environments are empty beside a key
-// this dtctl does not know, so whatever that key was meant to hold is not
-// read. said is what the commands say of each.
+// which no entry can be taken. Neither loads. The first has its one document
+// key misspelled, which the reader refuses with the spelling to use. The
+// second has empty environments beside a key this dtctl does not know, so
+// whatever that key was meant to hold is not read. said is what the commands
+// say of each.
 var unusableScopes = []struct {
 	name, content, said string
 }{
 	{"a misspelled document key", "Environments:\n  127.0.0.1:\n    - name: checkout\n      service-names: [checkout]\n",
 		`.dtctl-repo-scope.yaml: key "Environments" on line 1 must be written "environments"`},
 	{"no entry beside an unknown key", "environments: {}\nworkloads:\n  - name: checkout\n",
-		`.dtctl-repo-scope.yaml: no entry was read from it, and it holds unknown key "workloads" on line 2 (a typo, or written by a newer dtctl)`},
+		`.dtctl-repo-scope.yaml: holds no entry, so nothing in it is applied; unknown key "workloads" on line 2 (a typo, or written by a newer dtctl)`},
 }
 
 // A file no entry can be taken from, though it was meant to hold some, would
-// have named a workspace. Whether it fails to load or loads empty, every
+// have named a workspace. Neither loads, and every
 // change is refused, its dry run included, before anything is sent: neither
 // file leaves a change to the working directory's workspace.
 func TestBreakpoint_AScopeFileThatReadNoEntryRefusesEveryChange(t *testing.T) {
@@ -163,9 +163,6 @@ func TestBreakpoint_AScopeFileThatReadNoEntryRefusesEveryChange(t *testing.T) {
 					case !slices.Contains(tc.argv, "--repo-scope"):
 						require.Equal(t, "validation_error", detail.Code)
 						require.Equal(t, scope.said+"; it decides which Live Debugger workspace this command works in, so nothing was changed", detail.Message)
-					case strings.Contains(scope.said, "no entry was read"):
-						// The file loaded, so the name is looked up in it, and is not there.
-						require.Equal(t, "not_found", detail.Code)
 					default:
 						require.Equal(t, "validation_error", detail.Code)
 						require.Equal(t, scope.said+"; --repo-scope ledger names an entry of it, so nothing was sent", detail.Message)
@@ -178,7 +175,7 @@ func TestBreakpoint_AScopeFileThatReadNoEntryRefusesEveryChange(t *testing.T) {
 }
 
 // A read under such a file carries on in the working directory's workspace
-// and says so, whether the file failed to load or loaded empty.
+// and says so, whichever of the two the file is.
 func TestBreakpoint_AScopeFileThatReadNoEntryWarnsEveryRead(t *testing.T) {
 	for _, scope := range unusableScopes {
 		warning := scope.said + "; reading workspace src, the one named after the working directory, not the one the file would name"

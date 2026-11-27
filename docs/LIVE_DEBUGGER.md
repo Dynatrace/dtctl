@@ -181,10 +181,9 @@ A workspace is one environment's, so a context that does not exist or has no
 environment URL fails every breakpoint command, dry runs included.
 
 A scope file that is there and does not load (invalid YAML, an unknown key
-inside an entry, a newer `apiVersion`) names no workspace, and `dtctl` does not
-guess one. The same holds for a file that loads with no entry at all and a
-top-level key `dtctl` does not know, which is what a misspelled
-`environments:` looks like:
+inside an entry, a newer `apiVersion`, or no entry at all beside a top-level
+key `dtctl` does not know, which is what a misspelled `environments:` looks
+like) names no workspace, and `dtctl` does not guess one:
 
 - `create`, `update` and `delete breakpoint`, and their dry runs, fail with
   what is wrong with the file and send nothing. Working in the directory's

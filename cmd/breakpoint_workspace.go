@@ -96,13 +96,9 @@ func resolveBreakpointWorkspace(cmd *cobra.Command, cfg *config.Config) (breakpo
 		return breakpointWorkspace{name: workingDirectoryWorkspace(ctx)}, nil
 	case name == "" && len(scope.file.Entries(scope.host)) == 0:
 		// A file that says nothing about this environment moves nobody's
-		// breakpoints and is not spoken of, unless it says nothing at all
-		// and was meant to.
-		ws := breakpointWorkspace{name: workingDirectoryWorkspace(ctx)}
-		if warning := scope.file.Warning(); warning != "" && scope.file.Empty() {
-			ws.unusable = reposcope.FileName + ": no entry was read from it, and it holds " + warning
-		}
-		return ws, nil
+		// breakpoints and is not spoken of. One that says nothing at all
+		// beside a key this dtctl does not know never loads.
+		return breakpointWorkspace{name: workingDirectoryWorkspace(ctx)}, nil
 	}
 	status, err := scope.resolve(name)
 	if err != nil {
