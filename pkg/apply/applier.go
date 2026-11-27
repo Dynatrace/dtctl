@@ -900,6 +900,11 @@ func injectID(data []byte, id string) ([]byte, error) {
 	if _, err := dec.Token(); err != nil {
 		return nil, err
 	}
+	// Reject trailing data so malformed input is not accepted as a truncated
+	// document (json.Unmarshal enforces the same).
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("invalid JSON: unexpected data after top-level object")
+	}
 	out.WriteByte('}')
 	return out.Bytes(), nil
 }
