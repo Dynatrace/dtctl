@@ -48,9 +48,10 @@ func newRepoScopeCmd() *cobra.Command {
 The link is .dtctl-repo-scope.yaml at the repository root: per environment, the
 Kubernetes workloads, service names, process groups and services that run the
 repository's code, and the filter segments to query under. Inside a linked
-repository 'dtctl query', 'wait query' and 'verify query' narrow 'fetch logs'
-and 'fetch spans' to them and say so on stderr. Commit the file to share it.
-Nothing here writes to Dynatrace.
+repository 'dtctl query' narrows 'fetch logs' and 'fetch spans' to them and
+says so on stderr; 'verify query' and 'wait query' do so only under
+--repo-scope <name>. Commit the file to share it. Nothing here writes to
+Dynatrace.
 
 When called without a subcommand, lists the entries for the current context's
 environment.
@@ -108,7 +109,8 @@ func newRepoScopeSetCmd() *cobra.Command {
 
 Writes the named entry to .dtctl-repo-scope.yaml at the repository root, under
 the current context's environment host. 'set' replaces the whole entry, so pass
-every binding it should keep. Every value is checked before anything is
+every binding it should keep; the entry's annotations, which no flag writes,
+are kept. Every value is checked before anything is
 written, and the new file is renamed over the old one, so a reader never sees
 half of it. Nothing is sent to Dynatrace.
 

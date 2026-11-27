@@ -22,10 +22,12 @@ const FileName = ".dtctl-repo-scope.yaml"
 // empty apiVersion means the same thing.
 const apiVersion = "v1"
 
-// File is the on-disk document. Environments is keyed by environment host
-// (urls.Host of a context's environment URL): context names are local to a
-// machine, hosts are not, which is the same reasoning the config contract
-// applies to token bindings.
+// File is the on-disk document. Environments is keyed by environment host:
+// urls.Host of a context's environment URL, without the dot that ends a
+// fully qualified name, which urls.Host keeps and no key of the file may
+// carry. Resolve looks up the host it is given as it is, so a caller trims
+// the dot. Context names are local to a machine, hosts are not, which is the
+// same reasoning the config contract applies to token bindings.
 type File struct {
 	APIVersion   string
 	Environments map[string][]Entry

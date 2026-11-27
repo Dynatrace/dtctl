@@ -38,8 +38,9 @@ type Location struct {
 // startDir is resolved with filepath.EvalSymlinks first: a logical $PWD
 // through a symlink would otherwise miss the .git. ok is false, the ordinary
 // "not in a repository" case, when no .git is found and also when a stat
-// fails for another reason: an unreadable parent must not fail the query,
-// the same choice the local .dtctl.yaml lookup makes. err is reserved for a
+// fails for another reason: an unreadable parent must not fail the query.
+// (The local .dtctl.yaml lookup does not fail on one either, but keeps
+// walking up past it; this walk stops there.) err is reserved for a
 // scope file that is there but cannot be inspected; loc is then where it is,
 // so the caller can report the file as unusable rather than as absent.
 func Locate(startDir string) (loc Location, ok bool, err error) {

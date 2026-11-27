@@ -170,7 +170,7 @@ dtctl repo-scope set checkout --namespace payments --workload checkout --service
 OK Repo scope "checkout" saved to .dtctl-repo-scope.yaml for abc12345.apps.dynatrace.com (commit the file to share it)
 ```
 
-The entry is filed under the current context's environment host. `set` always replaces the whole entry, so pass every binding it should keep. Every value is validated before anything is written, so a refused `set` leaves the file exactly as it was. A workload or a segment given twice is refused rather than written twice. The new file is written beside the old one and renamed over it, which on Linux and macOS is atomic; on Windows the rename can fail while another program holds the file open, and leaves the old file in place when it does.
+The entry is filed under the current context's environment host. `set` always replaces the whole entry, so pass every binding it should keep. Every value is validated before anything is written, so a refused `set` leaves the file exactly as it was. A workload or a segment given twice is refused rather than written twice, and so is a second `--namespace` or `--cluster-uid`, since each qualifies every `--workload` of the command. `--path` names a directory below the root (leave it out for the whole repository) that is not inside a checkout of its own: a submodule or a vendored clone has its own `.git`, and a query run there reads that checkout's scope file, never this one. The new file is written beside the old one and renamed over it, which on Linux and macOS is atomic; on Windows the rename can fail while another program holds the file open, and leaves the old file in place when it does.
 
 | Flag | Binds | Format |
 |---|---|---|
@@ -281,7 +281,7 @@ The value says what kind of answer it is in `code`, so a program need not read `
 | `invalid_file` | the file is there and does not load: it fails validation or cannot be read |
 | `not_a_repository` | the working directory is in no git repository |
 
-`current` exits 0 with every one of these. A command that names an entry (`describe <name>`, `delete <name>`, `--repo-scope <name>`) exits 4 when the environment does not define it, and a value or a file that is refused exits 2.
+`current` exits 0 with every one of these. A command that names an entry (`describe <name>`, `delete <name>`, `--repo-scope <name>`) exits 4 when the environment does not define it or the repository has no scope file, and a value or a file that is refused exits 2. A scope file that cannot be read at all (its permissions, say) exits 1 for `list`, `set`, `delete` and `describe <name>`; `current` still exits 0, with `invalid_file`.
 
 ## Monorepos
 
@@ -304,7 +304,7 @@ A Gradle build is discovered by what it deploys: a module that holds a Dockerfil
 dtctl repo-scope set webproxy --namespace edge --workload webproxy --path webproxy
 ```
 
-A library module resolves to the deployable whose closure of `project(":x")`, `project(path: ":x")` or `projects.x` references (outside test configurations such as `testImplementation`) holds it, read from the build files when the command runs, so the entry follows the build as it changes; `repo-scope current` says so. Discovery from a library module proposes the entry of the one deployable that depends on it. A module the deployables of several entries depend on resolves to none of them, so a query from there runs unscoped until you pick one with `--repo-scope <name>`, and discovery from it, or from the settings directory, runs for each deployable: each is a run of its own, with its own queries, scans and 60-second bound (in agent mode `result` is then a list and `context.total` its length). A `projectDir` remap is not read, so run from such a module with `--repo-scope <name>`. Maven modules stay units of their own until field data shows a Maven build should be read the same way.
+A library module resolves to the deployable whose closure of `project(":x")`, `project(path: ":x")` or `projects.x` references (outside test configurations such as `testImplementation`) holds it, read from the build files when the command runs, so the entry follows the build as it changes; `repo-scope current` says so. Discovery from a library module proposes the entry of the one deployable that depends on it. A module the deployables of several entries depend on resolves to none of them, so a query from there runs unscoped until you pick one with `--repo-scope <name>`, and discovery from it, or from the settings directory, runs for each deployable: each is a run of its own, with its own queries, scans and 60-second bound (in agent mode `result` is then a list and `context.total` its length). A literal `project(":billing-api")` names the module at that path alone; only the accessor form is matched by its words (`projects.billingApi` for `billing-api`). An entry is selected through the build only when the build was read whole: when a build file of it could not be read, lies deeper than the walk goes, or the build holds more files than are read, an entry whose own path covers the directory still applies and no other does, and `repo-scope current` says why. A `projectDir` remap is not read, so run from such a module with `--repo-scope <name>`. Maven modules stay units of their own until field data shows a Maven build should be read the same way.
 
 ## Several environments
 
@@ -384,7 +384,7 @@ What a file may hold is bounded, and a file outside the bounds is not applied, l
 - **Each value once.** A service name, an id, a workload or a segment value listed twice in one entry is refused, and so is a workload listed with a cluster and without one: without one it already selects every cluster.
 - **`variables`** of a segment is a map from name to values, so a variable cannot be given twice. That differs from `--segments-file`, which takes the list the platform's API takes.
 
-`apiVersion: v1` is defined by its first release. A file written by a development build from before that release may hold something the release refuses; correct it by hand, or delete the entry and `set` it again.
+`apiVersion: v1` is defined by its first release. A file written by a development build from before that release may hold something the release refuses; correct it by hand: `set` and `delete` load the whole file first, and refuse it too.
 
 Hand edits are fine; `set` and `delete` rewrite the file in a canonical layout without your comments. A key this dtctl does not know is a typo, or one a newer dtctl wrote, and where it sits decides what happens. Beside `apiVersion` and `environments` it is reported by `current`, `describe` and every scoped query, and the entries apply without it; `set` and `delete` refuse to rewrite the file rather than drop it. Inside an entry, on the entry or on one of its workloads or segments, the file is not applied at all, as with a value that fails its format: such a key may be a constraint (`cluster_uid` for `cluster-uid`), and an entry applied without its constraint would select more than the file says while reporting that it was applied. Queries then run unscoped with a warning naming the key, until it is corrected or dtctl is upgraded.
 
