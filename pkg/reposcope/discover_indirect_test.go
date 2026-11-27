@@ -389,3 +389,20 @@ func TestDiscover_RanksOwnNamesBeforeIndirectOnes(t *testing.T) {
 	assert.Equal(t, []string{"checkout exact", "envoy exact", "acme-checkout-canary segment"}, order)
 	assert.NotEmpty(t, r.Candidates[1].Indirect)
 }
+
+// A name too short to be looked for inside a workload name is not found
+// inside an entity name either: it matches whole, or only as a substring,
+// which no line binds.
+func TestDiscover_ShortNameInsideAnEntityName(t *testing.T) {
+	d := newDiscovery(&Plan{tokens: []token{{kind: kindModule, value: "cart", variants: []string{"cart"}},
+		{kind: kindModule, value: "checkout", variants: []string{"checkout"}}}})
+	for name, want := range map[string]tier{
+		"cart":                       tierExact,
+		"other-team-cart-legacy":     tierSubstring,
+		"other-team-checkout-legacy": tierSegment,
+	} {
+		got, matched := d.entityMatch(name)
+		require.Len(t, matched, 1, name)
+		assert.Equal(t, want, got, name)
+	}
+}

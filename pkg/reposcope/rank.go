@@ -490,6 +490,9 @@ func (d *discovery) addEntity(object string, rec map[string]interface{}) {
 	d.entities = append(d.entities, c)
 }
 
+// A name too short to be looked for inside a workload name (see segmentable)
+// is not a segment match here either.
+//
 // entityMatch finds the best tier at which an entity name matches a sent
 // value, and every matcher that matches at it, the longest first: the
 // evidence cites that one, and each is a file that names the entity. It is exact when the whole name is the value, as written or as its
@@ -505,7 +508,7 @@ func (d *discovery) entityMatch(name string) (best tier, matched []matcher) {
 		switch {
 		case lower == m.value || normal == m.value:
 			t = tierExact
-		case containsSegment(lower, m.value):
+		case segmentable(m.value) && containsSegment(lower, m.value):
 			t = tierSegment
 		case strings.Contains(lower, m.value):
 			t = tierSubstring
