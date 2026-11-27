@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -132,4 +133,99 @@ func TestQueryRepoScope_AdviceUnderANameCanBeFollowed(t *testing.T) {
 			require.Len(t, srv.queries(), sent)
 		})
 	}
+}
+
+// A repair dtctl offers for a scoped query the platform refused is a command
+// line, and running it must ask for what the failed run asked for: the typed
+// text repaired, under the same entry. Built from the text that was sent, it
+// carried the inserted filter as if the user had written it, and dropped the
+// name, so the replay ran under whichever entry covers the directory.
+func TestQueryRepoScope_RepairKeepsTheScope(t *testing.T) {
+	const typed = "fetch logs | head 1"
+	unknownHead := func(_ *http.Request, query string) (int, string) {
+		if !strings.Contains(query, "| head 1") {
+			return http.StatusOK, oneRecord
+		}
+		// Grail reports the position in the text it was sent.
+		line, column := 1, strings.Index(query, "head")+1
+		if at := strings.LastIndex(query, "\n"); at >= 0 {
+			line, column = 2, strings.Index(query[at+1:], "head")+1
+		}
+		body, err := json.Marshal(map[string]any{"error": map[string]any{"code": 400, "message": "'head' isn't a valid command.", "details": map[string]any{
+			"errorType": "UNKNOWN_COMMAND", "arguments": []string{"head"}, "queryString": query,
+			"syntaxErrorPosition": map[string]any{
+				"start": map[string]int{"line": line, "column": column},
+				"end":   map[string]int{"line": line, "column": column + 3},
+			},
+		}}})
+		require.NoError(t, err)
+		return http.StatusBadRequest, string(body)
+	}
+	firstCommand := func(t *testing.T, stdout string) []string {
+		t.Helper()
+		suggestions := agentError(t, stdout).Suggestions
+		require.NotEmpty(t, suggestions)
+		_, command, found := strings.Cut(suggestions[0], ": dtctl ")
+		require.True(t, found, suggestions[0])
+		query, flags, found := strings.Cut(strings.TrimPrefix(command, "query '"), "'")
+		require.True(t, found, command)
+		return append([]string{"query", query}, strings.Fields(flags)...)
+	}
+
+	t.Run("named", func(t *testing.T) {
+		srv := segmentRecorder(t, unknownHead)
+		repo := chdirTestRepo(t, segmentScope)
+		writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
+		chdirSubdir(t, "tools")
+
+		code, stdout, _ := runRepoScoped([]string{"query", typed, "--agent", "--repo-scope", "checkout"}, RunOptions{})
+		require.NotZero(t, code)
+		failed, _ := srv.executed(t)
+		require.Contains(t, failed, segmentsSent)
+
+		repair := firstCommand(t, stdout)
+		require.Equal(t, []string{"query", "fetch logs | limit 1", "--repo-scope", "checkout"}, repair)
+		srv.reset()
+		code, stdout, stderr := runRepoScoped(append(repair, "--agent"), RunOptions{})
+		require.Zero(t, code, stderr)
+		replayed := srv.requests()[len(srv.requests())-1]
+		require.Equal(t, strings.Replace(failed, "| head 1", "| limit 1", 1), replayed,
+			"the repair asks for what the failed run asked for, repaired")
+		require.Equal(t, "checkout", repoScopeContext(t, stdout).Name)
+	})
+
+	t.Run("unnamed", func(t *testing.T) {
+		srv := segmentRecorder(t, unknownHead)
+		chdirTestRepo(t, segmentScope)
+
+		code, stdout, _ := runRepoScoped([]string{"query", typed, "--agent"}, RunOptions{})
+		require.NotZero(t, code)
+		failed, _ := srv.executed(t)
+		repair := firstCommand(t, stdout)
+		require.Equal(t, []string{"query", "fetch logs | limit 1"}, repair)
+		srv.reset()
+		code, _, stderr := runRepoScoped(append(repair, "--agent"), RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, strings.Replace(failed, "| head 1", "| limit 1", 1), srv.requests()[len(srv.requests())-1])
+	})
+
+	t.Run("an entry that sends only segments", func(t *testing.T) {
+		srv := segmentRecorder(t, unknownHead)
+		chdirTestRepo(t, segmentScope)
+
+		code, stdout, _ := runRepoScoped([]string{"query", typed, "--agent", "--repo-scope", "tools"}, RunOptions{})
+		require.NotZero(t, code)
+		require.Equal(t, []string{"query", "fetch logs | limit 1", "--repo-scope", "tools"}, firstCommand(t, stdout))
+		require.Len(t, srv.queries(), 1)
+	})
+
+	t.Run("without a scope the repair is main's", func(t *testing.T) {
+		segmentRecorder(t, unknownHead)
+		chdirTestRepo(t, segmentScope)
+
+		code, stdout, _ := runRepoScoped([]string{"query", typed, "--agent", "--no-repo-scope"}, RunOptions{})
+		require.NotZero(t, code)
+		require.Equal(t, "DQL spells these commands limit, filter, fields, fieldsAdd and summarize count(), by:{…}: dtctl query 'fetch logs | limit 1'",
+			agentError(t, stdout).Suggestions[0])
+	})
 }
