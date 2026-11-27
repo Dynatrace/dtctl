@@ -54,6 +54,12 @@ func (s *dqlRecorder) requestLog() []string {
 // list request ever precedes the query. Each row runs in every situation
 // that turns scoping off, and once more with scoping on as the control that
 // the fixture can scope at all.
+//
+// The sequences above are the reduced log, which is what a person can check
+// against main's source. Beyond them each situation is held, whole, to the
+// same row run outside any repository, where no scope code is reached: every
+// request with its full body, stdout, stderr and the exit code. Request
+// headers are not compared: the recorder keeps none.
 func TestQuery_ScopingOffSendsWhatMainSends(t *testing.T) {
 	const (
 		listSegments = "GET /platform/storage/filter-segments/v1/filter-segments?add-fields=VARIABLES"
@@ -92,12 +98,17 @@ func TestQuery_ScopingOffSendsWhatMainSends(t *testing.T) {
 		args      []string
 		env       string
 	}{
-		{name: "outside a repository"},
 		{name: "a repository without a scope file", linked: true},
 		{name: "--no-repo-scope", linked: true, scopeFile: segmentScope, args: []string{"--no-repo-scope"}},
 		{name: "DTCTL_NO_REPO_SCOPE", linked: true, scopeFile: segmentScope, env: "1"},
 	}
-	run := func(t *testing.T, linked bool, scopeFile, env string, granted []string, args ...string) (int, string, []string) {
+	// ran is everything one run can differ in.
+	type ran struct {
+		code           int
+		stdout, stderr string
+		requests, log  []string
+	}
+	run := func(t *testing.T, linked bool, scopeFile, env string, granted []string, args ...string) ran {
 		t.Helper()
 		srv := newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
 		srv.segments = map[string]int{"seg-1": http.StatusOK, "Ab3dEf9hIjk": http.StatusOK, "plain-1": http.StatusOK}
@@ -110,40 +121,48 @@ func TestQuery_ScopingOffSendsWhatMainSends(t *testing.T) {
 		if granted != nil {
 			withGrantedScopes(t, granted, true)
 		}
-		code, _, stderr := runRepoScoped(append([]string{"query", repoScopeTypedQuery}, args...), RunOptions{})
-		return code, stderr, srv.requestLog()
+		code, stdout, stderr := runRepoScoped(append([]string{"query", repoScopeTypedQuery}, args...), RunOptions{})
+		// Each run has a server of its own; its address is the one thing
+		// two equal runs may print differently.
+		anyServer := strings.NewReplacer(srv.URL, "<environment>", strings.TrimPrefix(srv.URL, "http://"), "<environment>")
+		return ran{code, anyServer.Replace(stdout), anyServer.Replace(stderr), srv.requests(), srv.requestLog()}
 	}
 
 	for _, row := range rows {
+		var reference ran
+		t.Run(row.name+"/outside a repository", func(t *testing.T) {
+			reference = run(t, false, "", "", row.granted, row.args...)
+			require.Equal(t, row.requests, reference.log, "stderr: %s", reference.stderr)
+			if row.stderr == "" {
+				require.Zero(t, reference.code, reference.stderr)
+				require.Empty(t, reference.stderr)
+				return
+			}
+			require.NotZero(t, reference.code)
+			require.Contains(t, reference.stderr, row.stderr)
+		})
 		for _, sit := range situations {
 			t.Run(row.name+"/"+sit.name, func(t *testing.T) {
-				code, stderr, requests := run(t, sit.linked, sit.scopeFile, sit.env, row.granted, append(sit.args, row.args...)...)
-				require.Equal(t, row.requests, requests, "stderr: %s", stderr)
-				require.NotContains(t, stderr, "repo scope")
-				if row.stderr == "" {
-					require.Zero(t, code, stderr)
-					require.Empty(t, stderr)
-					return
-				}
-				require.NotZero(t, code)
-				require.Contains(t, stderr, row.stderr)
+				got := run(t, sit.linked, sit.scopeFile, sit.env, row.granted, append(sit.args, row.args...)...)
+				require.Equal(t, reference.requests, got.requests, "every request, with its whole body")
+				require.Equal(t, reference.stdout, got.stdout)
+				require.Equal(t, reference.stderr, got.stderr)
+				require.Equal(t, reference.code, got.code)
 			})
 		}
 		// The control: the same line in the same repository, scoping on. A
 		// flag refused before any request is refused before the scope reads
 		// its segments or says anything, too.
 		t.Run(row.name+"/scoped", func(t *testing.T) {
-			code, stderr, requests := run(t, true, segmentScope, "", row.granted, row.args...)
+			got := run(t, true, segmentScope, "", row.granted, row.args...)
 			if row.stderr != "" {
-				require.NotZero(t, code)
-				require.Contains(t, stderr, row.stderr)
-				require.Equal(t, row.requests, requests, "a refused command line sends what it sends unscoped")
-				require.NotContains(t, stderr, "applying repo scope", "nothing was applied")
+				require.Equal(t, reference, got, "a refused command line is what it is unscoped, to the byte")
 				return
 			}
-			require.Zero(t, code, stderr)
-			require.Contains(t, stderr, "applying repo scope checkout")
-			require.Contains(t, strings.Join(requests, "\n"), "plain-1", "the entry's segments are read and sent")
+			require.Zero(t, got.code, got.stderr)
+			require.Contains(t, got.stderr, "applying repo scope checkout")
+			require.Contains(t, strings.Join(got.log, "\n"), "plain-1", "the entry's segments are read and sent")
+			require.NotEqual(t, reference.requests, got.requests)
 		})
 	}
 }
