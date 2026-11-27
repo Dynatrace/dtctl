@@ -441,8 +441,8 @@ func TestQueryRepoScope_SegmentVarForASegmentGivenByName(t *testing.T) {
 }
 
 // wait query, under a named entry, sends its segments on every attempt and
-// reads them once. verify query checks the text alone, and says the segments are not
-// part of what it checked.
+// reads them once. verify query, under one, checks the text alone, and says
+// the segments are not part of what it checked.
 func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
 	chdirTestRepo(t, segmentScope)
@@ -455,27 +455,19 @@ func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 	require.Contains(t, stderr, " with segments "+entrySegmentRefs+"; ")
 
 	srv = segmentRecorder(t, answer(http.StatusOK, `{"valid":true}`))
-	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery}, RunOptions{})
+	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery, "--repo-scope", "checkout"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, repoScopeScopedQuery, srv.first(t))
 	for _, r := range srv.requests() {
 		require.NotContains(t, r, "filter-segments", "verification reads no segment")
 		require.NotContains(t, r, "filterSegments")
 	}
-	require.True(t, strings.HasPrefix(stderr, repoScopeApplying+"\n"+
+	require.True(t, strings.HasPrefix(stderr, strings.TrimSuffix(repoScopeApplying, " (use --no-repo-scope to ignore it)")+"\n"+
 		"repo scope checkout: its segments "+entrySegmentRefs+" are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
 
 	// An entry that is only segments has nothing verify query applies.
-	repo := chdirTestRepo(t, segmentScope)
-	writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
-	chdirSubdir(t, "tools")
-	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery}, RunOptions{})
-	require.Zero(t, code, stderr)
-	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
-	require.NotContains(t, stderr, "applying repo scope")
-
-	// Named, it is the same: verifying is not refused, and nothing says
-	// that a scope was applied.
+	// Named, verifying is not refused, and nothing says that a scope was
+	// applied.
 	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery, "--repo-scope", "tools"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)

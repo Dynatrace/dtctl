@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
@@ -146,11 +147,19 @@ Examples:
 				query = rendered
 			}
 
-			// Verify what `query` would send. The human output points carets
-			// into this text, so it must be the scoped one as well.
+			// A scope is applied only when it is named: the canonical text,
+			// the positions and the exit code are read by programs, and must
+			// be those of the text that was typed unless the caller asked
+			// otherwise. Without a name the command is the one it always was,
+			// and says in one line when the directory's entry would have
+			// narrowed the query. Named, the human output points its carets
+			// into the scoped text, which is the one verified.
 			scoped, err := applyRepoScope(cmd, cfg, query)
 			if err != nil {
 				return err
+			}
+			if hint := repoScopeHint(cmd, cfg, query, false); hint != "" {
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
 			}
 			// Verifying scans nothing, so the line has no scan limit to weigh,
 			// and takes the text alone, so the entry's segments stay behind.
@@ -236,7 +245,7 @@ Examples:
 useful for AI agents or scripts to declare their intent (e.g. "root-cause-analysis")`)
 	stability.MarkStable(c)
 	rejectEmptyFlag(c, "file")
-	addRepoScopeFlags(c, queryRepoScopeUsage, queryNoRepoScopeUsage)
+	addRepoScopeFlags(c, namedRepoScopeUsage, "")
 	return c
 }
 

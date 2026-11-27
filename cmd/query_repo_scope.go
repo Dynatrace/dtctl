@@ -75,9 +75,10 @@ const (
 	queryRepoScopeUsage = `narrow fetch logs/spans to this entry of the repository's .dtctl-repo-scope.yaml
 default: the entry covering the working directory`
 	queryNoRepoScopeUsage = "run the query exactly as typed, ignoring the repository's .dtctl-repo-scope.yaml (env: " + noRepoScopeEnv + "=1)"
-	// wait query has no default: its outcome is an exit code, read where
-	// nobody reads the line that says a scope was applied.
-	waitRepoScopeUsage = `narrow fetch logs/spans to this entry of the repository's .dtctl-repo-scope.yaml
+	// wait query and verify query have no default: what they return (an
+	// exit code, a canonical text) is read by programs, where nobody reads
+	// the line that says a scope was applied.
+	namedRepoScopeUsage = `narrow fetch logs/spans to this entry of the repository's .dtctl-repo-scope.yaml
 default: none, the query runs exactly as typed`
 )
 
@@ -140,7 +141,7 @@ type repoScopeResolution struct {
 //
 //	--no-repo-scope, or DTCTL_NO_REPO_SCOPE without a name → off
 //	no name, and the stability floor hides either flag     → off
-//	no name, on a command without --no-repo-scope          → off (wait query)
+//	no name, on a command without --no-repo-scope          → off (wait query, verify query)
 //	context has no environment URL                         → off (--repo-scope: the error)
 //	HostWorkingDirectory not granted, a session            → off (--repo-scope: CapabilityError)
 //	no .git at or above the working directory              → off (--repo-scope: InvalidError)
@@ -492,7 +493,10 @@ func (q *repoScopedQuery) changedRequest() bool {
 // stability floor hides the flag the line names, outside a linked repository,
 // for a file or an entry that offers this query nothing, and for an entry
 // that, named, would refuse it.
-func repoScopeHint(cmd *cobra.Command, cfg *config.Config, query string) string {
+//
+// sendsSegments says whether the command sends an entry's filter segments. A
+// command that does not is offered nothing by an entry that has only those.
+func repoScopeHint(cmd *cobra.Command, cfg *config.Config, query string, sendsSegments bool) string {
 	ctx := cmdContext(cmd)
 	if name, _ := cmd.Flags().GetString(repoScopeFlag); name != "" || truthyEnv(ctx, noRepoScopeEnv) || !repoScopeAdmitted(cmd, repoScopeFlag) {
 		return ""
@@ -508,7 +512,11 @@ func repoScopeHint(cmd *cobra.Command, cfg *config.Config, query string) string 
 	// The line names a command, so it is printed only for one that runs:
 	// named, an entry whose filter cannot be inserted is an error.
 	would := &repoScopedQuery{Query: query, typed: query}
-	if refused := would.rewrite(status); slices.Contains(repoScopeRefusals, refused) || !would.changedRequest() {
+	refused := would.rewrite(status)
+	if !sendsSegments {
+		would.withoutSegments()
+	}
+	if slices.Contains(repoScopeRefusals, refused) || !would.changedRequest() {
 		return ""
 	}
 	return fmt.Sprintf("repo scope %s covers this directory and is not applied: %s applies a scope only when it is named, with --%s %s",

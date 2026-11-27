@@ -303,13 +303,14 @@ and `note` says so, because a count over 2h reads exactly like a count over
 
 Inside a git repository linked to the entities that run its code by a
 `.dtctl-repo-scope.yaml` at its root (see `dtctl repo-scope --help`),
-`dtctl query` and `verify query` narrow `fetch logs` and
+`dtctl query` narrows `fetch logs` and
 `fetch spans` to the entry covering the working directory, by inserting one
-`| filter (...)` after the `fetch` stage. `wait query` does the same only
-under `--repo-scope <name>`: its answer is an exit code, so it applies no
-scope it was not asked for, and without the name it prints one line on stderr
-when an entry covers the directory (`repo scope <name> covers this directory
-and is not applied: ...`). `dtctl query`'s envelope says what was applied;
+`| filter (...)` after the `fetch` stage. `wait query` and `verify query` do
+the same only under `--repo-scope <name>`: their answers are read by programs
+(an exit code, a canonical text, positions), so they apply no scope they were
+not asked for, and without the name they print one line on stderr when an
+entry covers the directory (`repo scope <name> covers this directory and is
+not applied: ...`). `dtctl query`'s envelope says what was applied;
 `wait query` and `verify query` have no agent envelope, and report the scope
 only in the stderr line every scoped run prints:
 
@@ -375,8 +376,9 @@ file says, so `applied` is false: `code` is the refusal's (one of the codes
 above), `filter` is absent, `reason` ends with `the entry's filter segments
 were sent`, and `segments` lists them. A segment the
 command line also gives (`--segment`) is the caller's: it is sent with the
-caller's variables and is not listed under `segments`. `wait query` sends
-the segments too; `verify query` does not, and says so on stderr.
+caller's variables and is not listed under `segments`. A named `wait query`
+sends the segments too; a named `verify query` does not, and says so on
+stderr.
 
 When the scope file holds document keys this dtctl does not know (a typo, or a
 newer dtctl's), the entry still applies and `reason` names the keys. An unknown

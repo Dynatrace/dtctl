@@ -169,7 +169,7 @@ Examples:
 			invocation := cmdContext(cmd)
 			ctx := invocation
 			if !quiet {
-				if hint := repoScopeHint(cmd, cfg, query); hint != "" {
+				if hint := repoScopeHint(cmd, cfg, query, true); hint != "" {
 					output.FprintInfo(currentStderr(ctx), "%s", hint)
 				}
 			}
@@ -310,7 +310,7 @@ Examples:
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
-	addRepoScopeFlags(c, waitRepoScopeUsage, "")
+	addRepoScopeFlags(c, namedRepoScopeUsage, "")
 	rejectEmptyFlag(c, "file")
 	return c
 }
