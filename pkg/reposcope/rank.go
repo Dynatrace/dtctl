@@ -569,7 +569,6 @@ func (d *discovery) explain(c *Candidate) {
 	if cluster != "" {
 		c.Evidence = append(c.Evidence, cluster)
 	}
-	ownWorkload := false // a name of the unit's own is the workload's
 	// The namespace leads its workload, as in namespace/name.
 	var named []token
 	for _, t := range d.namespaces {
@@ -596,7 +595,6 @@ func (d *discovery) explain(c *Candidate) {
 			c.ServiceNameOwn = own
 			continue
 		}
-		ownWorkload = own
 		// The names inside the workload's are evidence when none names it
 		// whole, and the unit's own among them also when only an indirect
 		// name does.
@@ -612,10 +610,11 @@ func (d *discovery) explain(c *Candidate) {
 			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(inside[0].token), tierSegment))
 		}
 	}
-	// Told apart from the segment tier, which looks only for names long
-	// enough to be searched for: here the service name already found the
-	// row, and any name of the unit's inside the workload's ties the two.
-	c.WorkloadUnnamed = c.Workload != "" && c.ServiceNameOwn && !ownWorkload &&
+	// A name of the unit's own that is the workload's, or a run of its
+	// segments, names it. Unlike the segment tier this takes a name of any
+	// length: the service name already found the row, so a short name
+	// inside the workload's ties the two rather than finding noise.
+	c.WorkloadUnnamed = c.Workload != "" && c.ServiceNameOwn &&
 		!slices.ContainsFunc(d.matchers, func(m matcher) bool { return m.own() && containsSegment(c.Workload, m.value) })
 	if c.tier == tierSubstring {
 		c.Evidence = append(c.Evidence, fmt.Sprintf("neither its %s nor its %s is a name discovery sent", fieldWorkload, fieldServiceName))

@@ -470,6 +470,12 @@ func TestDiscover_ServiceNameAloneDoesNotSettleItsWorkload(t *testing.T) {
 		assert.Equal(t, VerdictMatch, r.Verdict, name)
 	}
 
+	// A workload only an indirect name names is not named by the unit.
+	withCache := fstest.MapFS{"go.mod": file("module example.invalid/acme/checkout\n"), "deploy/redis.yaml": file(deployment("redis-cache", "redis:7.2"))}
+	r = discoverOne(t, withCache, ".", nil, row("redis-cache"))
+	assert.True(t, r.Candidates[0].WorkloadUnnamed)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+
 	// A term that spells the service name says nothing of the workload.
 	r = discoverOne(t, fstest.MapFS{}, ".", []string{"checkout"}, row("edge-gateway"))
 	assert.True(t, r.Candidates[0].WorkloadUnnamed)
