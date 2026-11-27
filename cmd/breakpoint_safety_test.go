@@ -235,7 +235,7 @@ func TestBreakpoint_DryRunNeedsItsEnvironment(t *testing.T) {
 
 				code, stdout, _ := runRepoScoped(append(slices.Clone(argv), "--agent", "--dry-run", "--context", "nope"), RunOptions{})
 				require.NotZero(t, code, stdout)
-				require.Contains(t, agentError(t, stdout).Message, `"nope"`)
+				require.Contains(t, agentError(t, stdout).Message, `context "nope" not found`)
 
 				writeIsolatedConfig(t, safetyLevelConfig(`""`, "readwrite-all"))
 				code, stdout, _ = runRepoScoped(append(slices.Clone(argv), "--agent", "--dry-run"), RunOptions{})
