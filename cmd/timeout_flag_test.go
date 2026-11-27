@@ -73,7 +73,7 @@ func TestStrictTimeoutFlag(t *testing.T) {
 		strictTimeoutFlagVar(fs, time.Minute, "u")
 		return fs
 	}
-	for _, v := range []string{"0", "-5s"} {
+	for _, v := range []string{"0", "+0", "-0", "1.5", "-5s"} {
 		err := strictFS().Parse([]string{"--timeout=" + v})
 		if err == nil || !strings.Contains(enhanceFlagError(rootCmd, err).Error(), "invalid --timeout") {
 			t.Errorf("%q: error = %v", v, err)
@@ -146,5 +146,40 @@ func TestTimeoutBareIntegerRejectedOnCommands(t *testing.T) {
 			t.Errorf("%v: Set(60s): %v", path, err)
 		}
 		_ = c.Flags().Set("timeout", c.Flags().Lookup("timeout").DefValue)
+	}
+}
+
+// wait query / exec workflow keep their accepted values, but a bad duration
+// gets the same migration hint, usage exit code and envelope.
+func TestPlainDurationTimeoutGetsHint(t *testing.T) {
+	for _, args := range [][]string{
+		{"wait", "query", "fetch logs", "--timeout", "60", "--agent"},
+		{"exec", "workflow", "wf", "--wait", "--timeout=60", "-A"},
+	} {
+		isolatedConfig(t, "contexts: []\n")
+		code, out := captureRun(t, args, RunOptions{})
+		if code != client.ExitUsageError {
+			t.Errorf("%v: exit = %d", args, code)
+		}
+		env := parseErrorEnvelope(t, out)
+		want := `invalid --timeout "60": use a duration such as 60s`
+		if env.Error.Code != "validation_error" || env.Error.Message != want {
+			t.Errorf("%v: envelope = %+v", args, env.Error)
+		}
+	}
+}
+
+// --agent=false after a bad value is an explicit opt-out: human error text.
+func TestTimeoutErrorRespectsAgentOptOut(t *testing.T) {
+	for _, flag := range []string{"--agent=false", "--plain=false"} {
+		isolatedConfig(t, "contexts: []\n")
+		_, out := captureRun(t, []string{"exec", "slo", "x", "--timeout", "60", flag}, RunOptions{})
+		if strings.HasPrefix(strings.TrimSpace(out), "{") {
+			t.Errorf("%s: got a structured envelope: %s", flag, out)
+		}
+	}
+	if !rawBoolFlagEnabled([]string{"--agent"}, "--agent") || !rawBoolFlagEnabled([]string{"--agent=true"}, "--agent") ||
+		rawBoolFlagEnabled([]string{"--agent=false"}, "--agent") || rawBoolFlagEnabled(nil, "--agent") {
+		t.Error("rawBoolFlagEnabled misparses")
 	}
 }

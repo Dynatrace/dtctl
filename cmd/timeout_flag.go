@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -37,11 +38,14 @@ func (e *timeoutValueError) Error() string {
 }
 
 func (t *timeoutFlag) Set(s string) error {
+	// A unit-less number (0, +0, -0, 60, 1.5) is an old integer spelling.
+	if t.strict {
+		if _, err := strconv.ParseFloat(s, 64); err == nil {
+			return &timeoutValueError{flag: t.name, value: s}
+		}
+	}
 	d, err := time.ParseDuration(s)
 	if err != nil {
-		return &timeoutValueError{flag: t.name, value: s}
-	}
-	if t.strict && s == "0" {
 		return &timeoutValueError{flag: t.name, value: s}
 	}
 	if t.strict && d < 0 {
