@@ -69,6 +69,7 @@ Examples:
   # Output as JSON
   dtctl get license-settings -o json
 `,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

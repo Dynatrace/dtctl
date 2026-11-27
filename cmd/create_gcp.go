@@ -165,6 +165,7 @@ func newCreateGCPMonitoringConfigCmd() *cobra.Command {
 Examples:
   dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "my-gcp-connection"
   dtctl create gcp monitoring --name "my-gcp-monitoring" --credentials "<connection-id>" --locationFiltering "us-central1,europe-west1"`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)

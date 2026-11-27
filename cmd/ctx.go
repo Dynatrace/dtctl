@@ -120,6 +120,7 @@ func newCtxCurrentCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "current",
 		Short: "Display the current context name",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {

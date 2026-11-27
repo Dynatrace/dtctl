@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/prompt"
@@ -32,12 +30,13 @@ func validateAutomationChunkSize(chunk int64) error {
 	return nil
 }
 
-// titleCase converts s to title case using golang.org/x/text/cases. A new
-// Caser is allocated per call because cases.Caser is stateful and not safe
-// for concurrent use.
-func titleCase(s string) string {
-	return cases.Title(language.Und).String(s)
-}
+// Permitted values of the enum filters of get workflows and
+// get workflow-executions.
+var (
+	workflowTypes         = []string{"STANDARD", "SIMPLE"}
+	executionStates       = []string{"RUNNING", "SUCCESS", "ERROR", "CANCELLED", "UNKNOWN"}
+	executionTriggerTypes = []string{"Manual", "Schedule", "Event", "Workflow"}
+)
 
 // getWorkflowsCmd retrieves workflows
 var getWorkflowsCmd = newGetWorkflowsCmd()
@@ -62,7 +61,16 @@ Examples:
   # List only my workflows
   dtctl get workflows --mine
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "mine", "filter", "type"); err != nil {
+				return err
+			}
+			workflowType, err := enumFlagValue(cmd, "type", workflowTypes)
+			if err != nil {
+				return err
+			}
+
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -89,8 +97,6 @@ Examples:
 			// List workflows with filters
 			mineOnly, _ := cmd.Flags().GetBool("mine")
 			filterStr, _ := cmd.Flags().GetString("filter")
-			typeStr, _ := cmd.Flags().GetString("type")
-			triggerStr, _ := cmd.Flags().GetString("trigger")
 			limit, _ := cmd.Flags().GetInt64("limit")
 			limit = agentPageLimit(cmd, limit)
 
@@ -100,12 +106,8 @@ Examples:
 			}
 
 			filters := workflow.WorkflowFilters{
-				Search:      filterStr,
-				TriggerType: titleCase(strings.ToLower(triggerStr)),
-			}
-
-			if typeStr != "" {
-				filters.Type = strings.ToUpper(typeStr)
+				Search: filterStr,
+				Type:   workflowType,
 			}
 
 			// If --mine flag is set, get current user ID and filter by owner
@@ -162,9 +164,7 @@ Examples:
 	}
 	c.Flags().Bool("mine", false, "Show only workflows owned by current user")
 	c.Flags().String("filter", "", "Search workflows by title")
-	c.Flags().String("type", "", "Filter by workflow type: standard or simple")
-	c.Flags().String("trigger", "", "Filter by trigger type: Manual, Schedule, Event")
-	stability.MarkFlag(c, "trigger", stability.Experimental, pre10Since)
+	c.Flags().String("type", "", "Filter by workflow type: "+strings.ToLower(strings.Join(workflowTypes, " or ")))
 	c.Flags().Int64("limit", 0, "Maximum number of workflows to return (0 = unlimited)")
 	stability.MarkStable(c)
 	addWatchFlags(c)
@@ -197,7 +197,20 @@ Examples:
   # Output as JSON
   dtctl get wfe -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "workflow", "state", "trigger", "started-since", "started-until", "limit"); err != nil {
+				return err
+			}
+			state, err := enumFlagValue(cmd, "state", executionStates)
+			if err != nil {
+				return err
+			}
+			trigger, err := enumFlagValue(cmd, "trigger", executionTriggerTypes)
+			if err != nil {
+				return err
+			}
+
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -222,8 +235,6 @@ Examples:
 
 			// List executions (optionally filtered)
 			limit, _ := cmd.Flags().GetInt64("limit")
-			stateStr, _ := cmd.Flags().GetString("state")
-			triggerStr, _ := cmd.Flags().GetString("trigger")
 			sinceStr, _ := cmd.Flags().GetString("started-since")
 			untilStr, _ := cmd.Flags().GetString("started-until")
 
@@ -238,8 +249,8 @@ Examples:
 
 			list, err := handler.List(workflow.ExecutionFilters{
 				WorkflowID:   workflowFilter,
-				State:        strings.ToUpper(stateStr),
-				TriggerType:  titleCase(strings.ToLower(triggerStr)),
+				State:        state,
+				TriggerType:  trigger,
 				StartedSince: since,
 				StartedUntil: until,
 			}, limit)
@@ -269,8 +280,8 @@ Examples:
 	}
 	c.Flags().StringVarP(&workflowFilter, "workflow", "w", "", "Filter executions by workflow ID")
 	c.Flags().Int64("limit", 100, "Maximum number of executions to return (max 1000)")
-	c.Flags().String("state", "", "Filter by state: RUNNING, SUCCESS, ERROR, CANCELLED, UNKNOWN")
-	c.Flags().String("trigger", "", "Filter by trigger type: Manual, Schedule, Event, Workflow")
+	c.Flags().String("state", "", "Filter by state: "+strings.Join(executionStates, ", "))
+	c.Flags().String("trigger", "", "Filter by trigger type: "+strings.Join(executionTriggerTypes, ", "))
 	c.Flags().String("started-since", "", "Show executions started at or after this time (a duration ago such as 7d, YYYY-MM-DD or ISO 8601)")
 	c.Flags().String("started-until", "", "Show executions started at or before this time (YYYY-MM-DD = end of day 23:59:59, or ISO 8601)")
 	stability.MarkStable(c)

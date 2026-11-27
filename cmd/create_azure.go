@@ -47,6 +47,7 @@ func newCreateAzureConnectionCmd() *cobra.Command {
 Examples:
   dtctl create azure connection --name "siwek" --type "federatedIdentityCredential"
   dtctl create azure connection --name "siwek" --type "clientSecret" --directoryId "$TENANT_ID" --applicationId "$CLIENT_ID" --clientSecret "$CLIENT_SECRET"`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if createAzureConnectionName == "" || createAzureConnectionType == "" {
 				missing := make([]string, 0, 2)
@@ -158,6 +159,7 @@ func newCreateAzureMonitoringConfigCmd() *cobra.Command {
 Examples:
   dtctl create azure monitoring --name "siwek" --credentials "siwek" --locationFiltering "eastus,northcentralus" --featureSets "microsoft_apimanagement.service_essential,microsoft_cache.redis_essential"
   dtctl create azure monitoring --name "siwek" --credentials "<connection-id>"`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)

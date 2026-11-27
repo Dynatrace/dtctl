@@ -140,6 +140,7 @@ Examples:
   # Output as JSON (includes messageToken for feedback)
   dtctl exec copilot nl2dql "find hosts with high CPU" -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
@@ -207,6 +208,7 @@ Examples:
   # Output as JSON
   dtctl exec copilot dql2nl "fetch logs | limit 10" -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
@@ -278,6 +280,7 @@ Examples:
   # Output as JSON
   dtctl exec copilot document-search "kubernetes" --collections notebooks -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {

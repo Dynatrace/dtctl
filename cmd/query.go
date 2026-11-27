@@ -232,6 +232,7 @@ Examples:
   # Apply segments with variables from a YAML file
   dtctl query "fetch logs | limit 10" --segments-file segments.yaml
 `,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !isSupportedQueryOutputFormat(outputFormat(cmdContext(cmd))) {
 				return fmt.Errorf("unsupported output format %q for query", outputFormat(cmdContext(cmd)))

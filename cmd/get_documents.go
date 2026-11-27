@@ -43,7 +43,11 @@ Examples:
   # List only my dashboards
   dtctl get dashboards --mine
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
+				return err
+			}
 			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -120,7 +124,11 @@ Examples:
   # List only my notebooks
   dtctl get notebooks --mine
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
+				return err
+			}
 			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -202,6 +210,7 @@ Examples:
   # Output as JSON
   dtctl get trash -o json
 `,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -569,7 +578,11 @@ Examples:
   # Output as JSON
   dtctl get documents -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "type", "types", "name", "mine", "filter", "sort", "add-fields", "admin-access"); err != nil {
+				return err
+			}
 			cfg, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err

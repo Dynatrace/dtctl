@@ -30,9 +30,9 @@ func TestGetActions_RejectsUnusableInput(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"--app with an id", []string{id, "--app", "other.app"}, "--app is a list filter and cannot be combined with an action id"},
-		{"--name with an id", []string{id, "--name", "jira"}, "--name is a list filter and cannot be combined with an action id"},
-		{"--filter with an id", []string{id, "--filter", "app.id = 'x'"}, "--filter is a list filter and cannot be combined with an action id"},
+		{"--app with an id", []string{id, "--app", "other.app"}, "--app is a list filter and cannot be combined with an id"},
+		{"--name with an id", []string{id, "--name", "jira"}, "--name is a list filter and cannot be combined with an id"},
+		{"--filter with an id", []string{id, "--filter", "app.id = 'x'"}, "--filter is a list filter and cannot be combined with an id"},
 		// An explicitly empty value is still a value the user typed.
 		{"empty --app with an id", []string{id, "--app", ""}, "--app is a list filter"},
 		{"a second id", []string{id, "example.app:other"}, "accepts at most 1 arg(s), received 2"},

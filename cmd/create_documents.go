@@ -50,6 +50,7 @@ Examples:
   dtctl create document -f launchpad.json --type launchpad --dry-run
 `,
 		Aliases: []string{"doc"},
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Determine the document type
 			docType, _ := cmd.Flags().GetString("type")
@@ -122,6 +123,7 @@ Examples:
   dtctl create notebook -f notebook.yaml --dry-run
 `,
 		Aliases: []string{"nb"},
+		Args:    cobra.NoArgs,
 		RunE:    createDocumentRunE("notebook"),
 	}
 	c.Flags().StringP("file", "f", "", "file containing notebook definition, or - for stdin (required)")
@@ -178,6 +180,7 @@ See also:
   dtctl get dashboard --help    # For exporting dashboards
 `,
 		Aliases: []string{"db"},
+		Args:    cobra.NoArgs,
 		RunE:    createDocumentRunE("dashboard"),
 	}
 	c.Flags().StringP("file", "f", "", "file containing dashboard definition, or - for stdin (required)")

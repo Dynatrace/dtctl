@@ -53,6 +53,7 @@ Examples:
   # List all lookups with additional columns
   dtctl get lookups -o wide
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

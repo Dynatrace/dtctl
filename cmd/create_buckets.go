@@ -36,6 +36,7 @@ Examples:
   dtctl create bucket --name custom_logs --table logs --retention 35 --dry-run
 `,
 		Aliases: []string{"bkt"},
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 			name, _ := cmd.Flags().GetString("name")

@@ -161,6 +161,11 @@ dtctl query "fetch logs | filter environment == '{{ .env }}' | limit {{ .n }}" \
   --set env=production --set n=50
 ```
 
+A template variable needs a value or a default (`{{ .n | default 50 }}`), and
+every `--set` must be used by the template. A variable with neither, and a
+`--set` that names no variable in the template (usually a typo), are errors
+that name the variable.
+
 Large dataset downloads:
 
 ```bash

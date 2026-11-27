@@ -32,6 +32,7 @@ Examples:
   # Output as JSON
   dtctl get apps -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -79,6 +80,7 @@ Examples:
   # Output as JSON
   dtctl get sdk-versions -o json
 `,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

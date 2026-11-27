@@ -110,6 +110,7 @@ Examples:
     exit 1
   fi
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputFmt, _ := cmd.Flags().GetString("output")
 			if !isSupportedVerifyOutputFormat(outputFmt) {

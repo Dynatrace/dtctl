@@ -23,6 +23,7 @@ Displays the account UUID in use, whether a token is stored in the keyring
 from 'dtctl account login', when it expires, and whether DTCTL_ACCOUNT_TOKEN
 is overriding the stored token.`,
 		Example: `  dtctl account status`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {

@@ -31,7 +31,11 @@ Examples:
   # Output as JSON
   dtctl get analyzers -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "filter"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -80,6 +84,7 @@ Examples:
   # Output as JSON
   dtctl get copilot-skills -o json
 `,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

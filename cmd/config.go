@@ -114,6 +114,7 @@ func newConfigViewCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "view",
 		Short: "Display the current configuration",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -157,6 +158,7 @@ Note that once a .dtctl.yaml exists, config writes target it rather than your
 global config. Pass --global to 'config set-context' / 'config set-credentials'
 to create the global binding this file needs.
 `,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check if .dtctl.yaml already exists
 			configPath := config.LocalConfigName
@@ -257,6 +259,7 @@ Examples:
   # List contexts with descriptions
   dtctl config get-contexts -o wide
 `,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return listContexts(cmdContext(cmd))
 		},
@@ -272,6 +275,7 @@ func newConfigCurrentContextCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "current-context",
 		Short: "Display the current context",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -571,6 +575,7 @@ This command moves tokens stored in ~/.config/dtctl/config to:
   - Windows: Credential Manager
 
 After migration, tokens are removed from the config file and stored securely.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !config.IsKeyringAvailable() {
 				return fmt.Errorf("keyring not available on this system. Tokens will remain in config file")

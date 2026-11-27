@@ -30,7 +30,11 @@ Examples:
   # Output as JSON
   dtctl get hub-extensions -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "filter"); err != nil {
+				return err
+			}
 			filter, _ := cmd.Flags().GetString("filter")
 
 			_, c, printer, err := setup(cmdContext(cmd))

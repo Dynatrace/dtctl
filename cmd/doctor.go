@@ -53,6 +53,7 @@ Checks performed:
 
   # Run checks for a specific context
   dtctl doctor --context production`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			results := runDoctorChecks(cmdContext(cmd))
 			printDoctorResults(cmdContext(cmd), results)

@@ -35,7 +35,11 @@ Examples:
   # Output as JSON
   dtctl get slos -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "filter"); err != nil {
+				return err
+			}
 			filter, _ := cmd.Flags().GetString("filter")
 
 			_, c, printer, err := setup(cmdContext(cmd))
@@ -98,7 +102,11 @@ Examples:
   # Output as JSON
   dtctl get slo-templates -o json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "filter"); err != nil {
+				return err
+			}
 			filter, _ := cmd.Flags().GetString("filter")
 
 			_, c, printer, err := setup(cmdContext(cmd))

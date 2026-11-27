@@ -58,6 +58,7 @@ Examples:
   # Pin SDK major versions from a file (or @- for stdin)
   dtctl exec function -f script.js --sdk-major-versions @sdk-versions.json
 `,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Get flags
 			method, _ := cmd.Flags().GetString("method")

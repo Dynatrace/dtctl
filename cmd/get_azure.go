@@ -59,6 +59,7 @@ func newGetAzureConnectionCmd() *cobra.Command {
 		Aliases: []string{"connection"},
 		Short:   "Get Azure connections",
 		Long:    `Get one or more Azure connections (authentication credentials).`,
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -116,6 +117,7 @@ func newGetAzureMonitoringConfigCmd() *cobra.Command {
 		Aliases: []string{"monitoring-config", "monitoring-configs"},
 		Short:   "Get Azure monitoring configurations",
 		Long:    `Get one or more Azure monitoring configurations.`,
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -162,6 +164,7 @@ func newGetAzureMonitoringConfigLocationsCmd() *cobra.Command {
 		Aliases: []string{"monitoring-location"},
 		Short:   "Get available Azure monitoring config locations",
 		Long:    `Get available Azure regions for Azure monitoring configuration based on the latest extension schema.`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -191,6 +194,7 @@ func newGetAzureMonitoringConfigFeatureSetsCmd() *cobra.Command {
 		Aliases: []string{"monitoring-feature-set"},
 		Short:   "Get available Azure monitoring config feature sets",
 		Long:    `Get available FeatureSetsType values for Azure monitoring configuration based on the latest extension schema.`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

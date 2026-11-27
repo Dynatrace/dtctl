@@ -76,6 +76,7 @@ Examples:
   dtctl inventory arrivals --since 5m --scope 'log.source == "batch-import"' \
       --signals logs --require logs
 `,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Usage is validated before the client is set up: a mistyped --since
 			// or signal name is the user's typo, and reporting it as an auth

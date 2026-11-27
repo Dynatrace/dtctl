@@ -3,8 +3,10 @@ package template
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 	"text/template"
+	"text/template/parse"
 )
 
 // ParseSetFlags parses --set flags into a map
@@ -32,7 +34,12 @@ func ParseSetFlags(setFlags []string) (map[string]interface{}, error) {
 }
 
 // RenderTemplate renders a template string with the provided variables
-// Uses Go's text/template syntax with support for default values
+// Uses Go's text/template syntax with support for default values.
+//
+// Input the template cannot use is an error, not output: a variable the
+// template reads that has no value and no default (it would render as
+// "<no value>"), and a variable that is given but never read (a typo in
+// --set). Both errors name the variable.
 func RenderTemplate(templateStr string, vars map[string]interface{}) (string, error) {
 	// Create custom function map with 'default' function
 	funcMap := template.FuncMap{
@@ -53,6 +60,10 @@ func RenderTemplate(templateStr string, vars map[string]interface{}) (string, er
 	tmpl, err := template.New("query").Funcs(funcMap).Option("missingkey=zero").Parse(templateStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	if err := checkVariables(tmpl, vars); err != nil {
+		return "", err
 	}
 
 	// Execute the template
@@ -142,4 +153,114 @@ func ValidateTemplate(templateStr string) ([]string, error) {
 	}
 
 	return vars, nil
+}
+
+// checkVariables compares the variables the template reads with the ones given.
+func checkVariables(tmpl *template.Template, vars map[string]interface{}) error {
+	used := map[string]bool{}      // every top-level variable the template reads
+	defaulted := map[string]bool{} // those read through the default function
+	for _, t := range tmpl.Templates() {
+		if t.Tree != nil && t.Tree.Root != nil {
+			collectFields(t.Tree.Root, used, defaulted)
+		}
+	}
+
+	var missing, unused []string
+	for name := range used {
+		if _, ok := vars[name]; !ok && !defaulted[name] {
+			missing = append(missing, name)
+		}
+	}
+	for name := range vars {
+		if !used[name] {
+			unused = append(unused, name)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(unused)
+
+	if len(missing) > 0 {
+		return fmt.Errorf("template variable %s has no value and no default; "+
+			"pass --set %s=<value> or give it a default ({{.%s | default \"...\"}})",
+			quoteNames(missing), missing[0], missing[0])
+	}
+	if len(unused) > 0 {
+		return fmt.Errorf("--set variable %s is not used by the template (check the spelling)", quoteNames(unused))
+	}
+	return nil
+}
+
+func quoteNames(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = fmt.Sprintf("%q", n)
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// collectFields records the top-level fields (.Name, .Name.sub, $.Name) read
+// by the nodes under n. A field inside range or with reads the rebound dot,
+// not a variable, so those bodies are not searched; their pipelines are.
+func collectFields(n parse.Node, used, defaulted map[string]bool) {
+	switch n := n.(type) {
+	case *parse.ListNode:
+		if n == nil {
+			return
+		}
+		for _, c := range n.Nodes {
+			collectFields(c, used, defaulted)
+		}
+	case *parse.ActionNode:
+		collectFields(n.Pipe, used, defaulted)
+	case *parse.IfNode:
+		collectFields(n.Pipe, used, defaulted)
+		collectFields(n.List, used, defaulted)
+		collectFields(n.ElseList, used, defaulted)
+	case *parse.RangeNode:
+		collectFields(n.Pipe, used, defaulted)
+	case *parse.WithNode:
+		collectFields(n.Pipe, used, defaulted)
+	case *parse.TemplateNode:
+		collectFields(n.Pipe, used, defaulted)
+	case *parse.PipeNode:
+		if n == nil {
+			return
+		}
+		hasDefault := false
+		var fields []string
+		var walkArgs func(p *parse.PipeNode)
+		walkArgs = func(p *parse.PipeNode) {
+			for _, cmd := range p.Cmds {
+				for _, arg := range cmd.Args {
+					switch a := arg.(type) {
+					case *parse.IdentifierNode:
+						if a.Ident == "default" {
+							hasDefault = true
+						}
+					case *parse.FieldNode:
+						if len(a.Ident) > 0 {
+							fields = append(fields, a.Ident[0])
+						}
+					case *parse.VariableNode:
+						if len(a.Ident) > 1 && a.Ident[0] == "$" {
+							fields = append(fields, a.Ident[1])
+						}
+					case *parse.ChainNode:
+						if f, ok := a.Node.(*parse.FieldNode); ok && len(f.Ident) > 0 {
+							fields = append(fields, f.Ident[0])
+						}
+					case *parse.PipeNode:
+						walkArgs(a)
+					}
+				}
+			}
+		}
+		walkArgs(n)
+		for _, f := range fields {
+			used[f] = true
+			if hasDefault {
+				defaulted[f] = true
+			}
+		}
+	}
 }

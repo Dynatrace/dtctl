@@ -41,6 +41,7 @@ Examples:
   dtctl account list token -o json
 `,
 		Aliases: []string{"tokens"},
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			accClient, accountUUID, err := setupAccount(cmdContext(cmd))
 			if err != nil {
@@ -101,6 +102,7 @@ Examples:
   # Dry run to preview
   dtctl account create token --name ci-pipeline --scope account-idm-read --dry-run
 `,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
 			rawScopes, _ := cmd.Flags().GetStringArray("scope")

@@ -90,6 +90,7 @@ an AI agent's system prompt or context.
 Examples:
   dtctl commands howto
   dtctl commands howto | pbcopy    # Copy to clipboard on macOS`,
+		Args: cobra.NoArgs,
 		RunE: runHowto,
 	}
 	stability.MarkStable(c)

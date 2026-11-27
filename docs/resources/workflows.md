@@ -64,7 +64,16 @@ dtctl get workflows -o json
 
 # Watch for changes in real time
 dtctl get workflows --watch
+
+# Filter by type (standard or simple) or title
+dtctl get workflows --type simple
+dtctl get workflows --filter deploy
+
+# Executions of one workflow, in one state (RUNNING, SUCCESS, ERROR, CANCELLED, UNKNOWN)
+dtctl get workflow-executions --workflow workflow-123 --state ERROR
 ```
+
+An unknown `--type`, `--state` or `--trigger` value is a usage error that lists the permitted values. List filters (`--type`, `--mine`, `--state`, ...) cannot be combined with an id.
 
 Inspect a single workflow by name (interactive disambiguation if multiple match) or by ID:
 

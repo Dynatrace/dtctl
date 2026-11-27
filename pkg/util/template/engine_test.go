@@ -1,6 +1,7 @@
 package template
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -107,10 +108,10 @@ func TestRenderTemplate(t *testing.T) {
 			want:     "fetch logs | limit 10",
 		},
 		{
-			name:     "missing variable outputs no value marker",
+			name:     "missing variable is an error",
 			template: "fetch logs | filter host = \"{{.host}}\"",
 			vars:     map[string]interface{}{},
-			want:     "fetch logs | filter host = \"<no value>\"",
+			wantErr:  true,
 		},
 		{
 			name:     "invalid template syntax",
@@ -464,4 +465,39 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestRenderTemplate_RejectsUnusableVariables(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		template string
+		vars     map[string]interface{}
+		wantErr  string // substring naming the variable; "" means success
+	}{
+		{"missing variable is named", `a {{.host}} b {{.port}}`, map[string]interface{}{"port": "1"}, `"host"`},
+		{"missing nested variable is named", `{{.cfg.name}}`, map[string]interface{}{}, `"cfg"`},
+		{"unused --set variable is named", `a {{.host}}`, map[string]interface{}{"host": "h", "hots": "x"}, `"hots"`},
+		{"unused variable with no placeholders", `plain text`, map[string]interface{}{"x": "1"}, `"x"`},
+		{"default covers a missing variable", `{{.t | default "1h"}}`, map[string]interface{}{}, ""},
+		{"default as function call", `{{default "1h" .t}}`, map[string]interface{}{}, ""},
+		{"default does not excuse an unused --set", `{{.t | default "1h"}}`, map[string]interface{}{"u": "1"}, `"u"`},
+		{"variable read only in a condition counts as used", `{{if .on}}x{{end}}`, map[string]interface{}{"on": "1"}, ""},
+		{"variable read inside range body is not a variable", `{{range .items}}{{.name}}{{end}}`, map[string]interface{}{"items": []map[string]string{{"name": "a"}}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := RenderTemplate(tt.template, tt.vars)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("RenderTemplate() error = %v, want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("RenderTemplate() error = %v, want it to name %s", err, tt.wantErr)
+			}
+		})
+	}
 }
