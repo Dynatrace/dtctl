@@ -1,0 +1,5 @@
+[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = https://git.example.invalid/acme/web-proxy.git
+	fetch = +refs/heads/*:refs/remotes/origin/*

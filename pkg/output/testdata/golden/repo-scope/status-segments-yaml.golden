@@ -1,0 +1,32 @@
+linked: true
+code: linked
+file: .dtctl-repo-scope.yaml
+environment: abc12345.apps.dynatrace.com
+dir: services/ledger
+entry:
+  name: ledger
+  path: services/ledger
+  workloads:
+    - namespace: payments
+      name: ledger
+  segments:
+    - id: Ab3dEf9hIjk
+      variables:
+        environment:
+          - production
+          - staging
+    - id: plain-1
+selected: directory
+filters:
+  logs: (k8s.namespace.name == "payments" and k8s.workload.name == "ledger")
+  spans: (k8s.namespace.name == "payments" and k8s.workload.name == "ledger")
+liveDebuggerFilters:
+  - k8s.namespace.name:
+      - payments
+    k8s.workload.name:
+      - ledger
+others:
+  - checkout
+hosts:
+  - abc12345.apps.dynatrace.com
+  - stg98765.apps.dynatrace.com

@@ -279,6 +279,30 @@ type DQLExecuteOptions struct {
 
 	// Decorate amends the agent envelope context; records is nil when rows streamed to disk.
 	Decorate func(ctx *output.ResponseContext, result *DQLQueryResponse, records []map[string]interface{})
+
+	// OnResult, when set, is called with the number of records and the
+	// response they came from on every path that reports a result: once per
+	// query here, always before Decorate (before the rows on the buffered
+	// path, after them on the streaming path), and once per attempt under
+	// wait's polling, which prints no response itself. On the streaming path
+	// the response's records were streamed, not kept, so n is the count to
+	// read; a result small enough to stay buffered still carries them, and
+	// so does a streamed result of exactly one row.
+	// Unlike Decorate it runs for every output format.
+	OnResult func(n int, result *DQLQueryResponse)
+
+	// TypedQuery is the query as the user wrote it, when the caller sends a
+	// rewritten one, or sends it with filter segments the user did not give.
+	// Empty-result diagnosis reads the fields it checks from it, so it never
+	// blames a field the caller inserted, and samples under what the caller
+	// added: the stages inserted after fetch, and Segments.
+	TypedQuery string
+}
+
+func (opts DQLExecuteOptions) report(n int, result *DQLQueryResponse) {
+	if opts.OnResult != nil {
+		opts.OnResult(n, result)
+	}
 }
 
 // DQLVerifyOptions configures DQL query verification
@@ -385,6 +409,7 @@ func (e *DQLExecutor) ExecuteWithContext(ctx context.Context, query string, opts
 	if result == nil {
 		return nil // context was cancelled; message already printed to stderr
 	}
+	opts.report(len(result.GetRecords()), result)
 	return e.printResults(query, result, opts)
 }
 
@@ -524,6 +549,28 @@ func isQueryError(err error, target **QueryError) bool {
 	return errors.As(err, target)
 }
 
+// SegmentVariableError is a query the platform refused because a filter
+// segment sent with it requires a variable that was given no value. Its text
+// advises the flags that bind one; a caller that sent the segment for the
+// user reads Segment and Variable and says where its values come from.
+type SegmentVariableError struct {
+	Segment, Variable string
+}
+
+func (e *SegmentVariableError) Error() string {
+	return fmt.Sprintf("segment %s requires variable %q\n\n"+
+		"Bind the variable inline on -S using URL-query syntax:\n\n"+
+		"  dtctl query \"...\" -S \"%s?%s=your-value-here\"\n\n"+
+		"Or use --segments-file with a YAML file for complex cases:\n\n"+
+		"  # segments.yaml\n"+
+		"  - id: %s\n"+
+		"    variables:\n"+
+		"      - name: %s\n"+
+		"        values: [\"your-value-here\"]\n\n"+
+		"  dtctl query \"...\" --segments-file segments.yaml",
+		e.Segment, e.Variable, e.Segment, e.Variable, e.Segment, e.Variable)
+}
+
 // formatSegmentVariableError produces a helpful error message when a segment
 // requires variable bindings, including ready-to-use -S inline and --segments-file examples.
 func formatSegmentVariableError(qErr *QueryError) error {
@@ -536,18 +583,7 @@ func formatSegmentVariableError(qErr *QueryError) error {
 	if len(args) >= 3 {
 		variableName = strings.TrimPrefix(args[2], "$")
 	}
-
-	return fmt.Errorf("segment %s requires variable %q\n\n"+
-		"Bind the variable inline on -S using URL-query syntax:\n\n"+
-		"  dtctl query \"...\" -S \"%s?%s=your-value-here\"\n\n"+
-		"Or use --segments-file with a YAML file for complex cases:\n\n"+
-		"  # segments.yaml\n"+
-		"  - id: %s\n"+
-		"    variables:\n"+
-		"      - name: %s\n"+
-		"        values: [\"your-value-here\"]\n\n"+
-		"  dtctl query \"...\" --segments-file segments.yaml",
-		segmentID, variableName, segmentID, variableName, segmentID, variableName)
+	return &SegmentVariableError{Segment: segmentID, Variable: variableName}
 }
 
 // formatSingleQuoteError produces a helpful error when a query uses single

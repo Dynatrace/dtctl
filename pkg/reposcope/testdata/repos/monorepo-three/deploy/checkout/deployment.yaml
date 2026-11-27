@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: shop
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: registry.example.invalid/shop/checkout@sha256:0000000000000000000000000000000000000000000000000000000000000000

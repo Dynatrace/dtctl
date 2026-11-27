@@ -238,7 +238,11 @@ def render_resource_page(resource: str, ops: list[dict], catalog: dict, display_
 def render_commands_matrix(catalog: dict) -> str:
     out = ["# COMMANDS\n",
            "Generated reference of every dtctl verb and the resources it operates on, "
-           "with required token scopes.\n"]
+           "with required token scopes.\n",
+           "`mutating` and `read-only` say whether a verb changes anything in the environment. "
+           "A read-only verb can still write files on this machine: `alias`, `config` and `ctx` "
+           "write dtctl's configuration, and `repo-scope set` and `repo-scope delete` write the "
+           "repository's `.dtctl-repo-scope.yaml`.\n"]
     verbs = catalog.get("verbs", {})
     for verb in sorted(verbs.keys()):
         info = verbs[verb]

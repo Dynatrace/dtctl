@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-mobile
+  namespace: orders
+spec:
+  template:
+    spec:
+      containers:
+        - name: orders-mobile
+          image: registry.example.invalid/acme/orders-mobile:3.1

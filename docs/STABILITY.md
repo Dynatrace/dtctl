@@ -210,9 +210,9 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 ## Summary
 
-- commands: 269 stable, 22 experimental, 16 development
+- commands: 269 stable, 29 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 979
+- entries below (commands + flags): 1007
 
 ## Surface
 
@@ -377,6 +377,7 @@ create azure monitoring              stable
 create breakpoint                    experimental  since 0.39.0
   --dry-run                          experimental
   --filters                          experimental
+  --repo-scope                       experimental  since 0.48.0  (declared)
   --yes                              experimental
 create bucket                        stable
   --display-name                     stable
@@ -502,6 +503,7 @@ delete azure monitoring              stable
 delete breakpoint                    experimental  since 0.39.0
   --all                              experimental
   --dry-run                          experimental
+  --repo-scope                       experimental  since 0.48.0  (declared)
   --yes                              experimental
 delete bucket                        stable
   --confirm                          stable
@@ -570,6 +572,7 @@ describe azure                       stable
 describe azure connection            stable
 describe azure monitoring            stable
 describe breakpoint                  experimental  since 0.39.0
+  --repo-scope                       experimental  since 0.48.0  (declared)
 describe bucket                      stable
 describe dashboard                   stable
 describe document                    stable
@@ -782,6 +785,7 @@ get azure monitoring                 stable
 get azure monitoring-feature-sets    stable
 get azure monitoring-locations       stable
 get breakpoints                      experimental  since 0.39.0
+  --repo-scope                       experimental  since 0.48.0  (declared)
 get buckets                          stable
 get copilot-skills                   stable
 get dashboards                       stable
@@ -866,6 +870,7 @@ get snapshots                        experimental  since 0.39.0
   --max-result-records               experimental
   --metadata                         experimental
   --no-progress                      experimental
+  --repo-scope                       experimental  since 0.48.0  (declared)
 get trash                            stable
   --deleted-after                    stable
   --deleted-before                   stable
@@ -975,7 +980,9 @@ query                                stable
   --metadata                         stable
   --no-progress                      stable
   --no-query-limits                  stable
+  --no-repo-scope                    experimental  since 0.48.0  (declared)
   --precision                        experimental  since 0.40.0  (declared)
+  --repo-scope                       experimental  since 0.48.0  (declared)
   --segment                          stable
   --segment-var                      stable
   --segments-file                    stable
@@ -988,6 +995,24 @@ query                                stable
   --timezone                         stable
   --typed                            stable
   --width                            stable
+repo-scope                           experimental  since 0.48.0
+repo-scope current                   experimental
+repo-scope delete                    experimental
+repo-scope describe                  experimental
+repo-scope discover                  experimental
+  --dry-run                          experimental
+  --path                             experimental
+  --term                             experimental
+repo-scope list                      experimental
+repo-scope set                       experimental
+  --cluster-uid                      experimental
+  --namespace                        experimental
+  --path                             experimental
+  --process-group                    experimental
+  --segment                          experimental
+  --service                          experimental
+  --service-name                     experimental
+  --workload                         experimental
 restore                              stable
 restore dashboard                    stable
   --dry-run                          stable
@@ -1111,6 +1136,7 @@ update breakpoint                    experimental  since 0.39.0
   --enabled                          experimental
   --filters                          experimental
   --log-message                      experimental
+  --repo-scope                       experimental  since 0.48.0  (declared)
   --yes                              experimental
 update document                      stable
   --create-snapshot                  stable
@@ -1170,6 +1196,7 @@ verify query                         stable
   --fail-on-warn                     stable
   --file                             stable
   --locale                           stable
+  --repo-scope                       experimental  since 0.48.0  (declared)
   --set                              stable
   --timezone                         stable
 version                              stable
@@ -1192,6 +1219,7 @@ wait query                           stable
   --min-interval                     stable
   --no-query-limits                  stable
   --quiet                            stable
+  --repo-scope                       experimental  since 0.48.0  (declared)
   --set                              stable
   --timeout                          stable
   --timezone                         stable

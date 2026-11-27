@@ -1,0 +1,17 @@
+[2]:
+  - name: checkout
+    path: services/checkout
+    processGroups[1]: PROCESS_GROUP-FEDCBA9876543210
+    serviceNames[1]: checkout
+    services[1]: SERVICE-0123456789ABCDEF
+    workloads[1]{clusterUid,name,namespace}:
+      11111111-2222-3333-4444-555555555555,checkout,payments
+  - name: ledger
+    path: services/ledger
+    segments[2]:
+      - id: Ab3dEf9hIjk
+        variables:
+          environment[2]: production,staging
+      - id: plain-1
+    workloads[1]{name,namespace}:
+      ledger,payments

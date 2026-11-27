@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dynatrace/dtctl/pkg/dql"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/suggest"
 )
@@ -69,10 +70,15 @@ func (e *DQLExecutor) probeRunner() probeFunc {
 // for the agent envelope. On a non-empty result it returns nothing and runs no
 // probe. When no near-match finding explains the emptiness, the suggestions
 // include today's windowAdvice unchanged. A result cut short by a limit is
-// not diagnosed: the limit may be why it is empty.
+// not diagnosed: the limit may be why it is empty. The diagnosis reads
+// opts.TypedQuery when it is set, not the query that was sent.
 func (e *DQLExecutor) emptyResultAdvice(query string, result *DQLQueryResponse, records []map[string]interface{}, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
 	if !isEmptyResult(records) {
 		return nil, nil
+	}
+	sent := query
+	if opts.TypedQuery != "" {
+		query = opts.TypedQuery
 	}
 	var reason *output.EmptyReason
 	var suggestions []string
@@ -82,7 +88,7 @@ func (e *DQLExecutor) emptyResultAdvice(query string, result *DQLQueryResponse, 
 		if keys := queriedMetricKeys(result); len(keys) > 0 {
 			reason, suggestions = diagnoseMetricKeys(ctx, probe, keys, result, opts)
 		} else if obj, fields := referencedFields(query); obj != "" && len(fields) > 0 {
-			reason, suggestions = diagnoseFields(ctx, probe, query, obj, fields, opts)
+			reason, suggestions = diagnoseFields(ctx, probe, query, sent, obj, fields, opts)
 		}
 	}
 	if reason == nil {
@@ -117,8 +123,15 @@ func probeIsPartial(r *DQLQueryResponse) bool {
 
 // diagnoseFields samples the user's fetch stage and reports referenced fields
 // that occur in none of the sampled records.
-func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, fields []string, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
+//
+// For a caller that sent a rewritten text (opts.TypedQuery), the sample is
+// taken where the query ran: under the stage the caller inserted after
+// fetch (insertedHead), and with the filter segments it sent. A field absent from the whole
+// data object may be present on every record the query could return, and the
+// other way round.
+func diagnoseFields(ctx context.Context, probe probeFunc, query, sent, object string, fields []string, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
 	stages := splitStages(query)
+	head, sampled := stages[0], "the query's fetch stage"
 	probeOpts := baseProbeOptions(opts)
 	probeOpts.MaxResultRecords = emptyProbeSampleRecords
 	// The sample covers the same window as the user's query: the fetch stage is
@@ -126,7 +139,17 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	// timeframe flags are passed through.
 	probeOpts.DefaultTimeframeStart = opts.DefaultTimeframeStart
 	probeOpts.DefaultTimeframeEnd = opts.DefaultTimeframeEnd
-	resp, err := probe(ctx, fmt.Sprintf("%s | limit %d", stages[0], emptyProbeSampleRecords), probeOpts)
+	if opts.TypedQuery != "" {
+		probeOpts.Segments = opts.Segments
+		if sent != query {
+			var ok bool
+			if head, ok = insertedHead(query, sent); !ok {
+				return nil, nil
+			}
+			sampled += " and the stage inserted after it"
+		}
+	}
+	resp, err := probe(ctx, fmt.Sprintf("%s | limit %d", head, emptyProbeSampleRecords), probeOpts)
 	// A sample cut short by a limit is skewed toward whatever was read first,
 	// so it is not used as evidence.
 	if err != nil || resp == nil || probeIsPartial(resp) {
@@ -167,11 +190,48 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 				DataObject: object,
 				DidYouMean: near,
 				SampleSize: n,
-				Evidence:   fmt.Sprintf("`%s` is absent from all %d sampled `%s` records (the query's fetch stage with `| limit %d`); the near match is present in the sample", f, n, object, emptyProbeSampleRecords),
+				Evidence:   fmt.Sprintf("`%s` is absent from all %d sampled `%s` records (%s with `| limit %d`); the near match is present in the sample", f, n, object, sampled, emptyProbeSampleRecords),
 			}
 		}
 	}
 	return reason, suggestions
+}
+
+// scanLimitParameter is the fetch parameter that sets a query's own scan
+// limit, in lower case.
+const scanLimitParameter = "scanlimitgbytes"
+
+// insertedHead returns the head of the sample for a query its caller
+// rewrote: sent up to the end of the one stage inserted after typed's fetch
+// stage. ok is false, and no sample is taken, when
+//
+//   - sent is not typed plus exactly that stage, as dql.Scan reads both.
+//     splitStages cannot say: it does not know a block comment, and a head
+//     that ends before the inserted stage samples outside the scope while
+//     the evidence says inside;
+//   - the fetch stage sets its own scan limit. The head is copied into the
+//     probe, where that parameter replaces the probe's 1 GB default, and the
+//     sample filters before its limit, so it reads until enough records match
+//     instead of stopping at the first ones.
+func insertedHead(typed, sent string) (head string, ok bool) {
+	before, scanned := dql.Scan(typed)
+	after, scannedSent := dql.Scan(sent)
+	if !scanned || !scannedSent || len(after.Segments) != len(before.Segments)+1 {
+		return "", false
+	}
+	at, added := before.Segments[0].End, len(sent)-len(typed)
+	if added <= 0 || sent[:at] != typed[:at] || sent[at+added:] != typed[at:] {
+		return "", false
+	}
+	// The added run is one stage: white space at most, then its pipe.
+	run := sent[at : at+added]
+	if after.Segments[0].End != at+len(run)-len(strings.TrimLeft(run, " \t\r\n")) {
+		return "", false
+	}
+	if strings.Contains(strings.ToLower(after.Code[:after.Segments[0].End]), scanLimitParameter) {
+		return "", false
+	}
+	return strings.TrimRight(sent[:at+added], " \t\r\n"), true
 }
 
 // queriedMetricKeys returns the metric keys Grail reports for a timeseries
@@ -193,7 +253,9 @@ func queriedMetricKeys(result *DQLQueryResponse) []string {
 
 // diagnoseMetricKeys lists the metric keys with series in the query window
 // (clamped to its last emptyProbeMetricWindow) and reports queried keys that
-// are not among them.
+// are not among them. For a caller that changed the request
+// (opts.TypedQuery) the listing carries the filter segments the query was
+// sent with, so a near match is a key the query could have returned.
 func diagnoseMetricKeys(ctx context.Context, probe probeFunc, keys []string, result *DQLQueryResponse, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
 	meta := result.GetMetadata()
 	if meta == nil || meta.AnalysisTimeframe == nil {
@@ -213,6 +275,10 @@ func diagnoseMetricKeys(ctx context.Context, probe probeFunc, keys []string, res
 	probeOpts.MaxResultRecords = emptyProbeMaxMetricKeys
 	probeOpts.DefaultTimeframeStart = from
 	probeOpts.DefaultTimeframeEnd = to
+	if opts.TypedQuery != "" {
+		// As in diagnoseFields: the listing is taken where the query ran.
+		probeOpts.Segments = opts.Segments
+	}
 	resp, err := probe(ctx, "metrics | summarize n = count(), by:{metric.key} | fields metric.key", probeOpts)
 	if err != nil || resp == nil || probeIsPartial(resp) {
 		return nil, nil

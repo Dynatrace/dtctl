@@ -127,6 +127,12 @@ var ResourceScopes = map[string]AccessScopes{
 	// same Grail read surface as `query`, no managed resource of its own.
 	"arrivals": {Read: QueryScopes},
 
+	// `repo-scope discover` reads aggregates of spans and logs. When those
+	// find nothing it searches the entity tables too, and a token that cannot
+	// read them gets a note instead of an error, so storage:entities:read is
+	// not required.
+	"discover": {Read: []string{"storage:spans:read", "storage:logs:read"}},
+
 	// Grail storage. Buckets are managed through the bucket definitions of
 	// Storage Management (/platform/storage/management/v1/bucket-definitions),
 	// whose operations declare the storage:bucket-definitions:* scopes; the

@@ -160,6 +160,11 @@ type ResponseContext struct {
 	// metadata states it, or the window a profiling analysis covered.
 	Window *TimeWindow `json:"window,omitempty"`
 
+	// RepoScope reports what the working directory's repo scope did to the
+	// query. Absent when no repo scope resolved for the invocation: the query
+	// ran exactly as typed.
+	RepoScope *RepoScope `json:"repo_scope,omitempty"`
+
 	// Profile describes the analysis behind an `exec profiling` result, so a
 	// reader gets the entity, kind and sample totals as fields rather than
 	// parsing them out of suggestion text.
@@ -201,6 +206,41 @@ type TimeWindow struct {
 	Span string `json:"span,omitempty"`
 	// Note says the window is the default one: the query named none.
 	Note string `json:"note,omitempty"`
+}
+
+// RepoScope is the repo scope a query ran under (see docs/AGENT_MODE.md). The
+// opt-out flag is named in context.suggestions, not here, so this stays a
+// statement of fact rather than advice.
+type RepoScope struct {
+	// Name is the entry that resolved; empty when none did (code no_entry,
+	// ambiguous_entry, invalid_file).
+	Name        string `json:"name,omitempty"`
+	File        string `json:"file"`
+	Environment string `json:"environment"`
+	// Applied says everything the entry holds went out: its filter, and its
+	// filter segments when it references any. When false the query ran as
+	// typed, unless Segments lists segments: an entry whose filter was
+	// refused still sends those, and is not applied because the rows are
+	// then wider than the entry says.
+	Applied    bool   `json:"applied"`
+	DataObject string `json:"data_object,omitempty"`
+	// Filter is the expression inserted after the fetch stage; empty when
+	// none was.
+	Filter string `json:"filter,omitempty"`
+	// Segments are the filter segments the entry references that were sent
+	// with the query.
+	Segments []RepoScopeSegment `json:"segments,omitempty"`
+	// Code is "applied", or why the scope was not applied; docs/AGENT_MODE.md
+	// lists every code.
+	Code   string `json:"code"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// RepoScopeSegment is one filter segment a repo scope entry sent with a
+// query: its id, and the values of its variables by name.
+type RepoScopeSegment struct {
+	ID        string              `json:"id"`
+	Variables map[string][]string `json:"variables,omitempty"`
 }
 
 // MarkFieldsClipped records on the context that values in fields were clipped

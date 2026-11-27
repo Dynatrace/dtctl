@@ -46,6 +46,29 @@ func TestSuggest_HabitRewrites(t *testing.T) {
 			match: "single-quotes",
 		},
 		{
+			name: "a single-quoted string that holds a #",
+			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
+				Query: "fetch logs | filter content == 'issue #12' | limit 1", Span: span(32, 42)},
+			want:  `fetch logs | filter content == "issue #12" | limit 1`,
+			match: "single-quotes",
+		},
+		{
+			// The scanner knows the triple-quoted string; its quotes, its //
+			// and its single quotes are data and must come back unchanged.
+			name: "single quotes beside a triple-quoted string that holds some",
+			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
+				Query: `fetch logs | fieldsAdd x = """a" // 'keep' "b""" | filter level == 'warn'`, Span: span(68, 73)},
+			want:  `fetch logs | fieldsAdd x = """a" // 'keep' "b""" | filter level == "warn"`,
+			match: "single-quotes",
+		},
+		{
+			name: "single quotes beside an identifier that holds one after an escaped backtick",
+			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
+				Query: "fetch logs | filter `a\\`'b` == 'x'", Span: span(33, 35)},
+			want:  "fetch logs | filter `a\\`'b` == \"x\"",
+			match: "single-quotes",
+		},
+		{
 			name: "single quotes with an SQL-escaped quote",
 			err: Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
 				Query: "fetch logs | filter loglevel == 'ERROR' and content != 'it''s'", Span: span(60, 62)},
@@ -157,6 +180,21 @@ func TestSuggest_HabitRewrites(t *testing.T) {
 			want:  "fetch logs | fieldsAdd x = 1 | limit 1",
 			match: "command-synonym",
 		},
+		{
+			// A blank stage has no command word to rewrite; the others are.
+			name: "head before a blank last stage",
+			err: Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+				Query: "fetch logs | head 1 | ", Span: span(14, 17)},
+			want:  "fetch logs | limit 1 | ",
+			match: "command-synonym",
+		},
+		{
+			name: "head between a triple-quoted string and a blank last stage",
+			err: Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+				Query: `fetch logs | fieldsAdd note = """a"b""" | head 1 |  `, Span: span(43, 46)},
+			want:  `fetch logs | fieldsAdd note = """a"b""" | limit 1 |  `,
+			match: "command-synonym",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -201,6 +239,10 @@ func TestSuggest_HabitsConservative(t *testing.T) {
 			Query: "fetch logs | count by log.source", Span: span(14, 18)}},
 		{"an unknown command with no DQL synonym", Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"groupby"},
 			Query: "fetch logs | groupby log.source", Span: span(14, 20)}},
+		// The scan reads a # as masked text, so the command it reports for
+		// the last stage does not start where the stage's text does.
+		{"a # typed before a later command word", Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+			Query: "fetch logs | head 1 | #where x == 1", Span: span(14, 17)}},
 		{"unterminated single quote", Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
 			Query: "fetch logs | filter a == 'x", Span: span(26, 27)}},
 	}

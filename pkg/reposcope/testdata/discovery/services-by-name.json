@@ -1,0 +1,5 @@
+[
+  {"id": "SERVICE-0000000000000C01", "entity.name": "checkout-api-gateway"},
+  {"id": "SERVICE-0000000000000C02", "entity.name": "Checkout"},
+  {"id": "SERVICE-0000000000000C03", "entity.name": "precheckouts"}
+]

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/util/template"
 )
@@ -116,7 +117,7 @@ Examples:
 				return fmt.Errorf("unsupported output format %q for verify query (supported: json, yaml, toon)", outputFmt)
 			}
 
-			_, c, err := setupClient(cmdContext(cmd))
+			cfg, c, err := setupClient(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
@@ -145,6 +146,26 @@ Examples:
 
 				query = rendered
 			}
+
+			// A scope is applied only when it is named: the canonical text,
+			// the positions and the exit code are read by programs, and must
+			// be those of the text that was typed unless the caller asked
+			// otherwise. Without a name the command is the one it always was,
+			// and says in one line when the directory's entry would have
+			// narrowed the query. Named, the human output points its carets
+			// into the scoped text, which is the one verified.
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+			if hint := repoScopeHint(cmd, cfg, query, false); hint != "" {
+				output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
+			}
+			// Verifying scans nothing, so the line has no scan limit to weigh,
+			// and takes the text alone, so the entry's segments stay behind.
+			scoped.withoutSegments()
+			scoped.announce(nil)
+			query = scoped.Query
 
 			// Get verify options
 			canonical, _ := cmd.Flags().GetBool("canonical")
@@ -224,6 +245,7 @@ Examples:
 useful for AI agents or scripts to declare their intent (e.g. "root-cause-analysis")`)
 	stability.MarkStable(c)
 	rejectEmptyFlag(c, "file")
+	addRepoScopeFlags(c, namedRepoScopeUsage, "")
 	return c
 }
 

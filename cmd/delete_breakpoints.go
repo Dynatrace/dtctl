@@ -63,26 +63,27 @@ Examples:
 				return err
 			}
 
-			ctx, err := cfg.CurrentContextObj()
-			if err != nil {
-				return err
-			}
-
 			if err := checkDeleteBreakpointSafety(cmdContext(cmd), cfg); err != nil {
 				return err
 			}
 
-			c, err := newClientFromConfig(cmdContext(cmd), cfg)
+			ws, err := resolveBreakpointWorkspace(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			if err := ws.requireScopeFile(); err != nil {
+				return err
+			}
+			workspace := ws.shown()
+			// Said before the confirmation and before anything is sent.
+			ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), ws.changeNotes()...)
+
+			handler, err := liveDebuggerHandler(ctx, cfg)
 			if err != nil {
 				return err
 			}
 
-			handler, err := livedebugger.NewHandler(c, ctx.Environment)
-			if err != nil {
-				return err
-			}
-
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -114,27 +115,28 @@ Examples:
 			}
 
 			if deleteAll {
-				return runDeleteAllBreakpointsWithOps(cmdContext(cmd), handler, workspaceID, rows, yes, verbose, ops)
+				return runDeleteAllBreakpointsWithOps(ctx, handler, workspaceID, workspace, rows, yes, verbose, ops)
 			}
 
 			identifier := args[0]
 			if fileName, lineNumber, err := parseBreakpoint(identifier); err == nil {
 				targets := findBreakpointRowsByLocation(rows, fileName, lineNumber)
 				if len(targets) == 0 {
-					return fmt.Errorf("no breakpoints found at %s:%d", fileName, lineNumber)
+					return breakpointNotFound("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 				}
-				return runDeleteBreakpointRowsWithOps(cmdContext(cmd), handler, workspaceID, targets, yes, verbose, ops)
+				return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, targets, yes, verbose, ops)
 			}
 
 			if row, ok := findBreakpointRowByID(rows, identifier); ok {
-				return runDeleteBreakpointRowsWithOps(cmdContext(cmd), handler, workspaceID, []breakpointRow{row}, yes, verbose, ops)
+				return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, []breakpointRow{row}, yes, verbose, ops)
 			}
 
-			return runDeleteBreakpointRowsWithOps(cmdContext(cmd), handler, workspaceID, []breakpointRow{{ID: identifier}}, yes, verbose, ops)
+			return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, []breakpointRow{{ID: identifier}}, yes, verbose, ops)
 		},
 	}
 	c.Flags().Bool("all", false, "Delete all breakpoints in the current workspace")
 	c.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	addRepoScopeFlags(c, breakpointWorkspaceRepoScopeUsage, "")
 	markPrompts(c, "yes")
 	markLiveDebuggerExperimental(c)
 	return c
@@ -157,27 +159,27 @@ func validateDeleteBreakpointArgs(cmd *cobra.Command, args []string) error {
 		return cobra.ExactArgs(1)(cmd, args)
 	}
 
-	return nil
+	return requireBreakpointIdentifier(args[0])
 }
 
-func runDeleteAllBreakpoints(ctx context.Context, handler *livedebugger.Handler, workspaceID string, rows []breakpointRow, yes bool, verbose bool) error {
-	return runDeleteAllBreakpointsWithOps(ctx, handler, workspaceID, rows, yes, verbose, defaultBreakpointDeleteOps())
+func runDeleteAllBreakpoints(ctx context.Context, handler *livedebugger.Handler, workspaceID, workspace string, rows []breakpointRow, yes bool, verbose bool) error {
+	return runDeleteAllBreakpointsWithOps(ctx, handler, workspaceID, workspace, rows, yes, verbose, defaultBreakpointDeleteOps())
 }
 
-func runDeleteAllBreakpointsWithOps(ctx context.Context, handler *livedebugger.Handler, workspaceID string, rows []breakpointRow, yes bool, verbose bool, ops breakpointDeleteOps) error {
+func runDeleteAllBreakpointsWithOps(ctx context.Context, handler *livedebugger.Handler, workspaceID, workspace string, rows []breakpointRow, yes bool, verbose bool, ops breakpointDeleteOps) error {
 	if len(rows) == 0 {
-		return printBreakpointMessage(ctx, "delete", "No breakpoints found in the current workspace")
+		return printBreakpointMessage(ctx, "delete", "No breakpoints found in workspace "+workspace)
 	}
 
 	if !yes && !plainMode(ctx) {
-		confirmMsg := fmt.Sprintf("Delete ALL %d breakpoint(s) in the current workspace?", len(rows))
+		confirmMsg := fmt.Sprintf("Delete ALL %d breakpoint(s) in workspace %s?", len(rows), workspace)
 		if !prompt.ConfirmWith(currentStdin(ctx), currentStdout(ctx), confirmMsg) {
 			return printBreakpointMessage(ctx, "delete", "Deletion cancelled")
 		}
 	}
 
 	if dryRun(ctx) {
-		return printBreakpointMessage(ctx, "delete", fmt.Sprintf("Dry run: would delete %d breakpoint(s) from the current workspace", len(rows)))
+		return printBreakpointMessage(ctx, "delete", fmt.Sprintf("Dry run: would delete %d breakpoint(s) from workspace %s", len(rows), workspace))
 	}
 
 	deleteResp, err := ops.deleteAll(handler, workspaceID)
@@ -198,17 +200,17 @@ func runDeleteAllBreakpointsWithOps(ctx context.Context, handler *livedebugger.H
 		return err
 	}
 	if len(deletedIDs) == 0 {
-		return printBreakpointMessage(ctx, "delete", "Deleted 0 breakpoints")
+		return printBreakpointMessage(ctx, "delete", inWorkspace("Deleted 0 breakpoints", workspace))
 	}
 
-	return printBreakpointMessage(ctx, "delete", fmt.Sprintf("Deleted %d breakpoint(s)", len(deletedIDs)))
+	return printBreakpointMessage(ctx, "delete", inWorkspace(fmt.Sprintf("Deleted %d breakpoint(s)", len(deletedIDs)), workspace))
 }
 
-func runDeleteBreakpointRows(ctx context.Context, handler *livedebugger.Handler, workspaceID string, rows []breakpointRow, yes bool, verbose bool) error {
-	return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, rows, yes, verbose, defaultBreakpointDeleteOps())
+func runDeleteBreakpointRows(ctx context.Context, handler *livedebugger.Handler, workspaceID, workspace string, rows []breakpointRow, yes bool, verbose bool) error {
+	return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, rows, yes, verbose, defaultBreakpointDeleteOps())
 }
 
-func runDeleteBreakpointRowsWithOps(ctx context.Context, handler *livedebugger.Handler, workspaceID string, rows []breakpointRow, yes bool, verbose bool, ops breakpointDeleteOps) error {
+func runDeleteBreakpointRowsWithOps(ctx context.Context, handler *livedebugger.Handler, workspaceID, workspace string, rows []breakpointRow, yes bool, verbose bool, ops breakpointDeleteOps) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -229,7 +231,7 @@ func runDeleteBreakpointRowsWithOps(ctx context.Context, handler *livedebugger.H
 
 	if dryRun(ctx) {
 		for _, row := range rows {
-			if err := printBreakpointMessage(ctx, "delete", fmt.Sprintf("Dry run: would delete breakpoint %s (%s)", row.ID, formatBreakpointLocation(row))); err != nil {
+			if err := printBreakpointMessage(ctx, "delete", inWorkspace(fmt.Sprintf("Dry run: would delete breakpoint %s (%s)", row.ID, formatBreakpointLocation(row)), workspace)); err != nil {
 				return err
 			}
 		}
@@ -256,11 +258,11 @@ func runDeleteBreakpointRowsWithOps(ctx context.Context, handler *livedebugger.H
 	}
 
 	if len(deletedRows) == 1 {
-		if err := printBreakpointMessage(ctx, "delete", fmt.Sprintf("Deleted breakpoint %s (%s)", deletedRows[0].ID, formatBreakpointLocation(deletedRows[0]))); err != nil {
+		if err := printBreakpointMessage(ctx, "delete", inWorkspace(fmt.Sprintf("Deleted breakpoint %s (%s)", deletedRows[0].ID, formatBreakpointLocation(deletedRows[0])), workspace)); err != nil {
 			return err
 		}
 	} else if len(deletedRows) > 1 {
-		if err := printBreakpointMessage(ctx, "delete", fmt.Sprintf("Deleted %d breakpoint(s) at %s", len(deletedRows), formatBreakpointLocation(deletedRows[0]))); err != nil {
+		if err := printBreakpointMessage(ctx, "delete", inWorkspace(fmt.Sprintf("Deleted %d breakpoint(s) at %s", len(deletedRows), formatBreakpointLocation(deletedRows[0])), workspace)); err != nil {
 			return err
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/vfs"
 )
 
@@ -59,6 +60,11 @@ type invocation struct {
 	stdin  io.Reader
 
 	tracingCtx context.Context
+
+	// stability is the policy the floor applied to this invocation's tree. A
+	// command that changes its default behaviour behind an experimental flag
+	// reads it, so the behaviour is off wherever the flag is hidden.
+	stability stability.Policy
 
 	// flags holds the root persistent flag values for this invocation. On the
 	// concurrent path newCommandTree binds the tree's root flags here, so cobra
@@ -185,6 +191,17 @@ func currentCaps(ctx context.Context) Capabilities {
 	return caps
 }
 
+// currentWorkDir is the directory this invocation runs in. Only the CLI has
+// one: the process working directory is host state, so an invocation without
+// HostWorkingDirectory, or one serving a session, gets a CapabilityError
+// instead of the server's directory.
+func currentWorkDir(ctx context.Context) (string, error) {
+	if !currentCaps(ctx).HostWorkingDirectory || currentSession(ctx) != nil {
+		return "", &CapabilityError{Feature: "the working directory"}
+	}
+	return os.Getwd()
+}
+
 // currentSession resolves the invocation's session override, or nil for
 // ordinary config-file resolution.
 func currentSession(ctx context.Context) *Session {
@@ -219,6 +236,26 @@ func setCurrentTracingCtx(ctx, tracing context.Context) {
 		return
 	}
 	tracingRootCtx = tracing
+}
+
+// currentStabilityPolicy resolves the stability policy in force for this
+// invocation. Without an invocation it is the zero Policy: the default floor
+// and no exceptions, which is what a command run outside Run gets.
+func currentStabilityPolicy(ctx context.Context) stability.Policy {
+	if inv := current(ctx); inv != nil {
+		return inv.stability
+	}
+	return stability.Policy{}
+}
+
+// setCurrentStabilityPolicy records p as the policy in force for the
+// invocation ctx carries. Unlike the tracing context it has no package-level
+// fallback: without an invocation there is no tree-specific floor to record,
+// and currentStabilityPolicy then reports the default.
+func setCurrentStabilityPolicy(ctx context.Context, p stability.Policy) {
+	if inv := current(ctx); inv != nil {
+		inv.stability = p
+	}
 }
 
 // getenv reads an environment variable through the invocation's overlay.

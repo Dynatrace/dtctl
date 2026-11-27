@@ -14,6 +14,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
+	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/resources/resolver"
@@ -293,9 +294,17 @@ Examples:
 				query = rendered
 			}
 
+			// Resolving the repo scope reads the disk and sends nothing. What
+			// it sends, and what it says, comes after the checks below.
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+
 			// Fail fast, before any request, when the query provably needs a
 			// storage scope the token lacks — instead of one NOT_AUTHORIZED_FOR_TABLE
-			// per query an agent fans out.
+			// per query an agent fans out. The typed text is checked: the
+			// filter a scope inserts fetches nothing new.
 			if err := dqlScopePrecheck(cmdContext(cmd), query); err != nil {
 				return err
 			}
@@ -371,66 +380,19 @@ Examples:
 				}
 			}
 
-			// Parse filter segments
-			segmentFlags, _ := cmd.Flags().GetStringArray("segment")
-			segmentsFile, _ := cmd.Flags().GetString("segments-file")
-			segmentVarFlags, _ := cmd.Flags().GetStringArray("segment-var")
-
-			var segments []exec.FilterSegmentRef
-			if len(segmentFlags) > 0 || segmentsFile != "" {
-				var flagRefs, fileRefs []exec.FilterSegmentRef
-
-				// Track original (pre-resolution) IDs so --segment-var can
-				// reference segments by the same name/UID the user typed.
-				origIDs := make(map[string]string) // resolved UID -> original flag value
-
-				if len(segmentFlags) > 0 {
-					flagRefs, err = parseSegmentFlags(segmentFlags)
-					if err != nil {
-						return err
-					}
-
-					// Resolve segment names to UIDs for --segment flag values.
-					// IDs from --segments-file are assumed to be UIDs already (the file
-					// format mirrors the API and should use UIDs).
-					res := resolver.NewResolver(c)
-					for i, ref := range flagRefs {
-						orig := ref.ID
-						resolved, resolveErr := res.ResolveID(resolver.TypeSegment, ref.ID)
-						if resolveErr != nil {
-							return fmt.Errorf("failed to resolve segment %q: %w", ref.ID, resolveErr)
-						}
-						flagRefs[i].ID = resolved
-						origIDs[resolved] = orig
-					}
-				}
-
-				if segmentsFile != "" {
-					fileRefs, err = parseSegmentsFile(cmdContext(cmd), segmentsFile)
-					if err != nil {
-						return err
-					}
-				}
-
-				segments = mergeSegmentRefs(flagRefs, fileRefs)
-
-				// Apply --segment-var bindings
-				if len(segmentVarFlags) > 0 {
-					varMap, varErr := parseSegmentVarFlags(segmentVarFlags)
-					if varErr != nil {
-						return varErr
-					}
-					segments, err = applySegmentVars(segments, varMap, origIDs)
-					if err != nil {
-						return err
-					}
-				}
-
-				if len(segments) > maxSegmentsPerQuery {
-					return fmt.Errorf("too many segments: %d specified, maximum is %d per query", len(segments), maxSegmentsPerQuery)
-				}
-			} else if len(segmentVarFlags) > 0 {
-				return fmt.Errorf("--segment-var requires at least one --segment or --segments-file")
+			// The command line's segments. Between resolving them and
+			// binding --segment-var, a binding aimed at a segment only the
+			// entry references is refused with the spelling that works.
+			segments, origIDs, err := querySegmentRefs(cmd, c)
+			if err != nil {
+				return err
+			}
+			if err := scoped.refuseSegmentVars(cmd, segments, origIDs); err != nil {
+				return err
+			}
+			segments, err = bindSegmentVars(cmd, segments, origIDs)
+			if err != nil {
+				return err
 			}
 
 			clientContext, _ := cmd.Flags().GetString("client-context")
@@ -462,6 +424,31 @@ Examples:
 			for _, w := range bounds.Warnings {
 				output.FprintWarning(currentStderr(cmdContext(cmd)), "%s", w)
 			}
+			// Refused here, not where live mode starts: every local check
+			// comes before the scope's first request and its line.
+			if live && !currentCaps(cmdContext(cmd)).LongRunningStreams {
+				return &CapabilityError{Feature: "live mode"}
+			}
+			// Every local check has passed. The scope now reads the entry's
+			// segments, which is its first request, and says what it applied;
+			// so a command line refused above sends and prints exactly what
+			// it does without a scope. A segment the user also named is
+			// theirs: the entry's copy is neither read nor reported.
+			if err := scoped.yieldTo(segments); err != nil {
+				return err
+			}
+			if err := scoped.checkSegments(ctx, c); err != nil {
+				return err
+			}
+			if live {
+				if err := scoped.requireSegments("query --live does not refresh unscoped"); err != nil {
+					return err
+				}
+			}
+			segments = scoped.withSegments(segments)
+			query = scoped.Query
+			scoped.announce(&queryLimits)
+
 			spillTenantID, spillContextName := spillProvenance(cfg)
 			// A Parquet spill derives its columnar schema from DQL types, so request
 			// them even when the displayed output format does not — same reasoning as
@@ -513,7 +500,10 @@ Examples:
 				Decorate: func(ctx *output.ResponseContext, result *exec.DQLQueryResponse, _ []map[string]interface{}) {
 					named := defaultTimeframeStart != "" || defaultTimeframeEnd != "" || queryNamesWindow(query)
 					ctx.Window = queryWindowContext(result, named)
+					scoped.decorate(ctx, result)
 				},
+				OnResult:   scoped.onResult,
+				TypedQuery: scoped.typedIfScoped(),
 				// The progress bar is a user-facing affordance of the `query`
 				// command only; opt in here (subject to --no-progress) so internal
 				// query callers stay silent by default.
@@ -522,9 +512,6 @@ Examples:
 
 			// Handle live mode
 			if live {
-				if !currentCaps(cmdContext(cmd)).LongRunningStreams {
-					return &CapabilityError{Feature: "live mode"}
-				}
 				// Warn about flags that are not meaningfully applicable in live mode
 				if len(metadataFields) > 0 {
 					output.FprintWarning(currentStderr(cmdContext(cmd)), "--metadata is ignored in live mode (metadata is not displayed during live updates)")
@@ -572,7 +559,7 @@ Examples:
 				fetcher := func(fetchCtx context.Context) (interface{}, error) {
 					result, err := executor.ExecuteQueryWithContext(fetchCtx, query, opts)
 					if err != nil {
-						return nil, err
+						return nil, scoped.wrapError(err)
 					}
 					if result == nil {
 						return nil, nil // context cancelled; message already printed
@@ -599,7 +586,7 @@ Examples:
 				return livePrinter.RunLive(ctx, fetcher)
 			}
 
-			return executor.ExecuteWithContext(ctx, query, opts)
+			return scoped.wrapError(executor.ExecuteWithContext(ctx, query, opts))
 		},
 	}
 	c.Flags().StringP("file", "f", "", "read query from file")
@@ -670,6 +657,7 @@ default: never for a bare command, auto in agent mode`)
 	stability.MarkStable(c)
 	addQueryLimitFlags(c)
 	addQuerySeriesFlags(c)
+	addRepoScopeFlags(c, queryRepoScopeUsage, queryNoRepoScopeUsage)
 	registerFlagCompletion(c, "metadata", metadataFieldCompletion)
 	registerFlagCompletion(c, "decode-snapshots", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
 		return []string{
@@ -695,6 +683,85 @@ default: never for a bare command, auto in agent mode`)
 
 // maxSegmentsPerQuery is the maximum number of filter segments allowed per query (Dynatrace limit).
 const maxSegmentsPerQuery = 10
+
+// querySegmentRefs is the filter segments the command line names with
+// --segment and --segments-file, before --segment-var is applied. A --segment
+// is resolved to its UID, which is the one request made here; origIDs maps
+// each resolved UID back to what was typed, so --segment-var can name a
+// segment either way.
+func querySegmentRefs(cmd *cobra.Command, c *client.Client) (refs []exec.FilterSegmentRef, origIDs map[string]string, err error) {
+	segmentFlags, _ := cmd.Flags().GetStringArray("segment")
+	segmentsFile, _ := cmd.Flags().GetString("segments-file")
+	if len(segmentFlags) == 0 && segmentsFile == "" {
+		return nil, nil, nil
+	}
+	var flagRefs, fileRefs []exec.FilterSegmentRef
+
+	// Track original (pre-resolution) IDs so --segment-var can
+	// reference segments by the same name/UID the user typed.
+	origIDs = make(map[string]string) // resolved UID -> original flag value
+
+	if len(segmentFlags) > 0 {
+		flagRefs, err = parseSegmentFlags(segmentFlags)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Resolve segment names to UIDs for --segment flag values.
+		// IDs from --segments-file are assumed to be UIDs already (the file
+		// format mirrors the API and should use UIDs).
+		res := resolver.NewResolver(c)
+		for i, ref := range flagRefs {
+			orig := ref.ID
+			resolved, resolveErr := res.ResolveID(resolver.TypeSegment, ref.ID)
+			if resolveErr != nil {
+				return nil, nil, fmt.Errorf("failed to resolve segment %q: %w", ref.ID, resolveErr)
+			}
+			flagRefs[i].ID = resolved
+			origIDs[resolved] = orig
+		}
+	}
+
+	if segmentsFile != "" {
+		fileRefs, err = parseSegmentsFile(cmdContext(cmd), segmentsFile)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return mergeSegmentRefs(flagRefs, fileRefs), origIDs, nil
+}
+
+// bindSegmentVars applies the --segment-var bindings to the segments
+// querySegmentRefs returned, and holds them to what a query takes.
+func bindSegmentVars(cmd *cobra.Command, segments []exec.FilterSegmentRef, origIDs map[string]string) ([]exec.FilterSegmentRef, error) {
+	segmentFlags, _ := cmd.Flags().GetStringArray("segment")
+	segmentsFile, _ := cmd.Flags().GetString("segments-file")
+	segmentVarFlags, _ := cmd.Flags().GetStringArray("segment-var")
+	if len(segmentFlags) == 0 && segmentsFile == "" {
+		if len(segmentVarFlags) > 0 {
+			return nil, fmt.Errorf("--segment-var requires at least one --segment or --segments-file")
+		}
+		return nil, nil
+	}
+
+	// Apply --segment-var bindings
+	if len(segmentVarFlags) > 0 {
+		varMap, err := parseSegmentVarFlags(segmentVarFlags)
+		if err != nil {
+			return nil, err
+		}
+		segments, err = applySegmentVars(segments, varMap, origIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(segments) > maxSegmentsPerQuery {
+		return nil, fmt.Errorf("too many segments: %d specified, maximum is %d per query", len(segments), maxSegmentsPerQuery)
+	}
+	return segments, nil
+}
 
 // parseSegmentFlags parses --segment flag values into FilterSegmentRef entries.
 // Each value can be a plain segment ID/name, or include inline variable bindings

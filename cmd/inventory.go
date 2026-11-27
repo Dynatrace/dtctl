@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -166,6 +167,10 @@ type inventoryRunner struct {
 	// platform, as before the flag existed. The record cap does not bound the
 	// size of a row, so a custom probe can return a large body without it.
 	maxResultBytes int64
+	// clientContext names the command the queries are sent for, in the
+	// request's client context, which is what an environment's query audit
+	// attributes them by. Empty is inventory, the runner's first user.
+	clientContext string
 }
 
 func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.RunResult, error) {
@@ -174,13 +179,15 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 		DefaultScanLimitGbytes: r.scanLimitGB,
 		MaxResultRecords:       inventoryMaxResultRecords,
 		MaxResultBytes:         r.maxResultBytes,
-		ClientContext:          "inventory",
+		ClientContext:          cmp.Or(r.clientContext, "inventory"),
 	})
 	if err != nil {
 		return nil, err
 	}
 	if resp == nil {
-		return nil, context.Canceled
+		// The executor returns nothing for a context that ended. Why it
+		// ended is the context's to say: a deadline is not a cancellation.
+		return nil, cmp.Or(ctx.Err(), context.Canceled)
 	}
 	cause := inventory.FirstTruncationCause(resp.GetNotifications())
 	// Sampled comes from the response, never from what the probe asked for:
@@ -188,16 +195,20 @@ func (r *inventoryRunner) RunQuery(ctx context.Context, dql string) (*inventory.
 	// down to a power of ten, reporting both as a warning on a 200. This flag
 	// is what keeps the SDK from extrapolating a count that was never sampled.
 	sampled := false
+	var scanned int64
 	if meta := resp.GetMetadata(); meta != nil {
 		sampled = meta.Sampled
+		scanned = meta.ScannedBytes
 	}
 	return &inventory.RunResult{
 		Records:         resp.GetRecords(),
 		Seconds:         time.Since(start).Seconds(),
 		Truncated:       cause != "",
 		TruncationCause: cause,
+		Truncations:     inventory.TruncationsOf(resp.GetNotifications()),
 		ColumnTypes:     inventory.ColumnTypesOf(resp.GetTypes()),
 		Sampled:         sampled,
+		ScannedBytes:    scanned,
 	}, nil
 }
 

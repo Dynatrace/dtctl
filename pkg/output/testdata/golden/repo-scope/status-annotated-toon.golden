@@ -1,0 +1,20 @@
+code: linked
+dir: .
+entry:
+  annotations:
+    "example.invalid/owner": team-payments
+    note: moved from the monolith
+  name: checkout
+  workloads[1]{clusterUid,name,namespace}:
+    11111111-2222-3333-4444-555555555555,checkout,payments
+environment: abc12345.apps.dynatrace.com
+file: .dtctl-repo-scope.yaml
+filters:
+  logs: "(k8s.cluster.uid == \"11111111-2222-3333-4444-555555555555\" and k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")"
+  spans: "(k8s.cluster.uid == \"11111111-2222-3333-4444-555555555555\" and k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")"
+hosts[1]: abc12345.apps.dynatrace.com
+linked: true
+liveDebuggerFilters[1]:
+  - k8s.namespace.name[1]: payments
+    k8s.workload.name[1]: checkout
+selected: directory

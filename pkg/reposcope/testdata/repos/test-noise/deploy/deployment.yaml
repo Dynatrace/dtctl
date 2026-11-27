@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-service
+  namespace: platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: platform-service
+          image: registry.example.invalid/acme/platform-service:2.0
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-platform-service-smoke
+  namespace: platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: smoke
+          image: registry.example.invalid/acme/test-runner:2.0

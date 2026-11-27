@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/Dynatrace/dtctl/pkg/dql"
 )
 
 // bareArg is arg i without the backticks some error types quote it in.
@@ -19,27 +21,27 @@ func sqlAggregation(c *queryContext) (hint, bool) {
 	}
 	switch {
 	case c.arg(0) == "`as`" && wordAt(c.code, c.start, "as"):
-		if seg.cmd != "stats" && !slices.Contains(assigningCommands, seg.cmd) {
+		if seg.Command != "stats" && !slices.Contains(assigningCommands, seg.Command) {
 			return hint{}, false
 		}
 	case c.arg(0) == "`by`" && wordAt(c.code, c.start, "by"):
 		// summarize … by is byParameter's; only the stats spelling is ours.
-		if seg.cmd != "stats" {
+		if seg.Command != "stats" {
 			return hint{}, false
 		}
 	case strings.TrimSpace(c.q[c.start:min(c.end+1, len(c.q))]) == "stats":
-		if seg.cmd != "stats" {
+		if seg.Command != "stats" {
 			return hint{}, false
 		}
 	default:
 		return hint{}, false
 	}
 
-	text := c.q[seg.start:seg.end]
-	code := c.code[seg.start:seg.end]
+	text := c.q[seg.Start:seg.End]
+	code := c.code[seg.Start:seg.End]
 	lead := len(text) - len(strings.TrimLeft(text, " \t\r\n"))
 	tail := trailingSpace.FindString(text)
-	bodyStart := lead + len(seg.cmd)
+	bodyStart := lead + len(seg.Command)
 	bodyEnd := len(text) - len(tail)
 	if bodyStart > bodyEnd {
 		return hint{}, false
@@ -48,7 +50,7 @@ func sqlAggregation(c *queryContext) (hint, bool) {
 	// The grouping clause: a trailing top-level `by`.
 	aggEnd, fields := bodyEnd, ""
 	for i := bodyStart; i < bodyEnd; i++ {
-		if c.depth[seg.start+i] == 0 && wordAt(code, i, "by") {
+		if c.depth[seg.Start+i] == 0 && wordAt(code, i, "by") {
 			rest := strings.TrimSpace(text[i+len("by") : bodyEnd])
 			rest = strings.TrimSpace(strings.TrimPrefix(rest, ":"))
 			if strings.HasPrefix(rest, "{") && strings.HasSuffix(rest, "}") {
@@ -67,7 +69,7 @@ func sqlAggregation(c *queryContext) (hint, bool) {
 	var unnamed [][2]string // original and DQL spelling of each unnamed column
 	from := bodyStart
 	for i := bodyStart; i <= aggEnd; i++ {
-		if i < aggEnd && (code[i] != ',' || c.depth[seg.start+i] != 0) {
+		if i < aggEnd && (code[i] != ',' || c.depth[seg.Start+i] != 0) {
 			continue
 		}
 		item := strings.TrimSpace(text[from:i])
@@ -98,7 +100,7 @@ func sqlAggregation(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 
-	cmd := seg.cmd
+	cmd := seg.Command
 	if cmd == "stats" {
 		cmd = "summarize"
 	}
@@ -106,13 +108,13 @@ func sqlAggregation(c *queryContext) (hint, bool) {
 	if fields != "" {
 		out += ", by:{" + fields + "}"
 	}
-	edits := []edit{{seg.start, seg.end, out + tail}}
+	edits := []edit{{seg.Start, seg.End, out + tail}}
 	// Later commands sorting or filtering on an unnamed column need its expression as name.
 	for _, u := range unnamed {
 		if !strings.HasSuffix(u[0], ")") {
 			continue
 		}
-		for off := seg.end; ; {
+		for off := seg.End; ; {
 			i := strings.Index(c.code[off:], u[0])
 			if i < 0 {
 				break
@@ -143,33 +145,42 @@ var commandSynonyms = map[string]string{
 // commandSynonym rewrites every foreign command word so the retry does not fail on the next.
 func commandSynonym(c *queryContext) (hint, bool) {
 	seg := c.segmentAt(c.start)
-	if seg == nil || !wordAt(c.code, c.start, seg.cmd) {
+	if seg == nil || !wordAt(c.code, c.start, seg.Command) {
 		return hint{}, false
 	}
-	if _, ok := commandSynonyms[seg.cmd]; !ok && !slices.Contains([]string{"distinct", "unique", "count"}, seg.cmd) {
+	if _, ok := commandSynonyms[seg.Command]; !ok && !slices.Contains([]string{"distinct", "unique", "count"}, seg.Command) {
 		return hint{}, false
 	}
 	var edits []edit
 	for _, seg := range c.segs {
-		text := c.q[seg.start:seg.end]
+		if seg.Command == "" {
+			continue // a blank stage (a trailing pipe) has no word to rewrite
+		}
+		text := c.q[seg.Start:seg.End]
 		lead := len(text) - len(strings.TrimLeft(text, " \t\r\n"))
+		if !strings.HasPrefix(text[lead:], seg.Command) {
+			// The scan found the command word past something that is not
+			// white space, a typed # for one. Every offset below is measured
+			// from the word, so there is no repair to offer.
+			return hint{}, false
+		}
 		tail := trailingSpace.FindString(text)
-		body := strings.TrimSpace(text[lead+len(seg.cmd) : len(text)-len(tail)])
+		body := strings.TrimSpace(text[lead+len(seg.Command) : len(text)-len(tail)])
 		var out string
-		switch to, ok := commandSynonyms[seg.cmd]; {
+		switch to, ok := commandSynonyms[seg.Command]; {
 		case ok:
-			out = to + text[lead+len(seg.cmd):len(text)-len(tail)]
-		case seg.cmd == "distinct" || seg.cmd == "unique":
+			out = to + text[lead+len(seg.Command):len(text)-len(tail)]
+		case seg.Command == "distinct" || seg.Command == "unique":
 			if !fieldListRe.MatchString(body) {
 				return hint{}, false
 			}
 			out = " summarize count(), by:{" + strings.Join(fieldSplitRe.Split(body, -1), ", ") + "}"
-		case seg.cmd == "count" && body == "":
+		case seg.Command == "count" && body == "":
 			out = " summarize count()"
 		default:
 			continue
 		}
-		edits = append(edits, edit{seg.start + lead, seg.end - len(tail), strings.TrimLeft(out, " ")})
+		edits = append(edits, edit{seg.Start + lead, seg.End - len(tail), strings.TrimLeft(out, " ")})
 	}
 	if len(edits) == 0 {
 		return hint{}, false
@@ -184,20 +195,19 @@ func commandSynonym(c *queryContext) (hint, bool) {
 var asAliasRe = regexp.MustCompile(`\s+as\s+(` + fieldName + `)$`)
 
 // singleQuotes: DQL strings take double quotes; a doubled single quote is SQL's escape.
+//
+// It walks the masked view, so a literal is copied whole as the scanner read
+// it, a """…""" string and an identifier with an escaped backtick included,
+// and only a single quote outside every literal starts a repair.
 func singleQuotes(c *queryContext) (hint, bool) {
 	q := c.q
 	var out strings.Builder
 	changed := false
 	for i := 0; i < len(q); i++ {
-		switch q[i] {
+		switch c.code[i] {
 		case '"', '`':
-			j := i + 1
-			for ; j < len(q) && q[j] != q[i]; j++ {
-				if q[j] == '\\' && q[i] == '"' {
-					j++
-				}
-			}
-			if j >= len(q) {
+			j := literalEnd(c.code, i)
+			if j < 0 {
 				return hint{}, false
 			}
 			out.WriteString(q[i : j+1])
@@ -233,6 +243,21 @@ func singleQuotes(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	return hint{reason: "DQL strings take double quotes", query: out.String()}, true
+}
+
+// literalEnd returns the offset of the last byte of the literal that opens at
+// code[open], or -1. code is the masked view: a literal's contents are
+// masked, so the next quote of its kind closes it.
+func literalEnd(code string, open int) int {
+	quote, from := code[open:open+1], open+1
+	if strings.HasPrefix(code[open:], `"""`) {
+		quote, from = `"""`, open+3
+	}
+	end := strings.Index(code[from:], quote)
+	if end < 0 {
+		return -1
+	}
+	return from + end + len(quote) - 1
 }
 
 // functionSynonyms maps exact renames only; arguments stay as they are.
@@ -319,7 +344,7 @@ func foldingEdit(c *queryContext, nameStart, open int, target string) (edit, boo
 			}
 		}
 	}
-	if seg := c.segmentAt(nameStart); seg == nil || isFilterCommand(seg.cmd) {
+	if seg := c.segmentAt(nameStart); seg == nil || isFilterCommand(seg.Command) {
 		return edit{}, false
 	}
 	return edit{nameStart, open, target}, true
@@ -346,16 +371,16 @@ func aggregationReference(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	at := c.segmentAt(c.start)
-	if at == nil || slices.Contains(groupingCommands, at.cmd) {
+	if at == nil || slices.Contains(groupingCommands, at.Command) {
 		return hint{}, false
 	}
 	// The aggregating command before it must produce that column unnamed.
 	agg := -1
 	for i := range c.segs {
-		if c.segs[i].start >= at.start {
+		if c.segs[i].Start >= at.Start {
 			break
 		}
-		if slices.Contains(groupingCommands, c.segs[i].cmd) {
+		if slices.Contains(groupingCommands, c.segs[i].Command) {
 			agg = i
 		}
 	}
@@ -363,7 +388,7 @@ func aggregationReference(c *queryContext) (hint, bool) {
 		return hint{}, false
 	}
 	var edits []edit
-	for off := c.segs[agg].end; ; {
+	for off := c.segs[agg].End; ; {
 		i := strings.Index(c.code[off:], ref)
 		if i < 0 {
 			break
@@ -385,15 +410,15 @@ func aggregationReference(c *queryContext) (hint, bool) {
 
 // producesUnnamed reports whether seg lists ref as a top-level column with no
 // `name =` in front of it.
-func producesUnnamed(c *queryContext, seg segment, ref string) bool {
-	for off := seg.start; ; {
-		i := strings.Index(c.code[off:seg.end], ref)
+func producesUnnamed(c *queryContext, seg dql.Segment, ref string) bool {
+	for off := seg.Start; ; {
+		i := strings.Index(c.code[off:seg.End], ref)
 		if i < 0 {
 			return false
 		}
 		s := off + i
 		if c.depth[s] == 0 && (s == 0 || !isIdentByte(c.code[s-1])) {
-			before := strings.TrimRight(c.code[seg.start:s], " \t\r\n")
+			before := strings.TrimRight(c.code[seg.Start:s], " \t\r\n")
 			if !strings.HasSuffix(before, "=") {
 				return true
 			}
@@ -415,11 +440,11 @@ var entityFetchRe = regexp.MustCompile(`^\s*fetch\s+dt\.entity\.[a-z_]+\b`)
 func entityField(c *queryContext) (hint, bool) {
 	field := c.bareArg(0)
 	target, ok := entityFieldNames[field]
-	if !ok || !wordAt(c.code, c.start, field) || !entityFetchRe.MatchString(c.code[c.segs[0].start:c.segs[0].end]) {
+	if !ok || !wordAt(c.code, c.start, field) || !entityFetchRe.MatchString(c.code[c.segs[0].Start:c.segs[0].End]) {
 		return hint{}, false
 	}
 	var edits []edit
-	for off := c.segs[0].end; ; {
+	for off := c.segs[0].End; ; {
 		i := strings.Index(c.code[off:], field)
 		if i < 0 {
 			break
@@ -471,27 +496,27 @@ func windowOutsideFetch(c *queryContext) (hint, bool) {
 	}
 	seg := c.segmentAt(c.start)
 	first := c.segs[0]
-	if seg == nil || seg == &c.segs[0] || first.cmd != "fetch" || slices.Contains(groupingCommands, seg.cmd) {
+	if seg == nil || seg == &c.segs[0] || first.Command != "fetch" || slices.Contains(groupingCommands, seg.Command) {
 		return hint{}, false
 	}
-	param := strings.TrimSpace(c.q[c.start:min(c.end+1, seg.end)])
+	param := strings.TrimSpace(c.q[c.start:min(c.end+1, seg.End)])
 	// Drop the parameter with the comma before it.
 	cut := c.start
-	for cut > seg.start && (c.code[cut-1] == ' ' || c.code[cut-1] == '\t') {
+	for cut > seg.Start && (c.code[cut-1] == ' ' || c.code[cut-1] == '\t') {
 		cut--
 	}
-	if cut == seg.start || c.code[cut-1] != ',' {
+	if cut == seg.Start || c.code[cut-1] != ',' {
 		return hint{}, false
 	}
 	cut--
 	end := c.start + len(param)
-	if strings.TrimSpace(c.code[end:seg.end]) != "" && !strings.HasPrefix(strings.TrimSpace(c.code[end:seg.end]), ",") {
+	if strings.TrimSpace(c.code[end:seg.End]) != "" && !strings.HasPrefix(strings.TrimSpace(c.code[end:seg.End]), ",") {
 		return hint{}, false
 	}
-	if fetchWindowRe.MatchString(c.code[first.start:first.end]) {
+	if fetchWindowRe.MatchString(c.code[first.Start:first.End]) {
 		return hint{}, false // fetch already names a window
 	}
-	insert := first.start + len(strings.TrimRight(c.q[first.start:first.end], " \t\r\n"))
+	insert := first.Start + len(strings.TrimRight(c.q[first.Start:first.End], " \t\r\n"))
 	return hint{
 		reason: "the time window is a parameter of fetch: fetch …, " + param,
 		query:  apply(c.q, []edit{{insert, insert, ", " + param}, {cut, end, ""}}),

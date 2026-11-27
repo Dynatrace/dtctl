@@ -1,0 +1,1501 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+
+	"github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
+)
+
+// The repo-scope flow end to end, against a mock environment: discover what a
+// checkout runs as, save it with the line discovery printed, and read it back.
+// It lives here rather than in test/e2e because every file there runs against
+// a live environment; this one has to pin exact queries and exact output.
+
+const (
+	flowService      = "SERVICE-0123456789ABCDEF"
+	flowProcessGroup = "PROCESS_GROUP-FEDCBA9876543210"
+	flowSetCommand   = "dtctl --context c repo-scope set checkout --cluster-uid " + flowClusterUID + " --namespace payments --workload checkout"
+)
+
+// checkoutRows are the aggregates an environment running the checkout
+// workload returns: spans carry the service id, logs only the process group.
+// flowClusterUID is the cluster the checkout workload's records name, and
+// flowCluster the two columns a record query returns for it.
+const (
+	flowClusterUID = "11111111-2222-3333-4444-555555555555"
+	flowCluster    = `"k8s.cluster.uid":"` + flowClusterUID + `","clusterName":"prod-eu",`
+)
+
+var checkoutRows = map[string]string{
+	"spans": `{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"12400",` +
+		`"serviceCount":"1","services":["` + flowService + `"],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`,
+	"logs": `{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"88000",` +
+		`"serviceCount":"0","services":[],"processGroupCount":"1","processGroups":[["` + flowProcessGroup + `"]]}`,
+}
+
+// sampledCheckoutRows are what the sampled retries of the record queries
+// return for the checkout workload: records counts what the sample matched.
+var sampledCheckoutRows = map[string]string{
+	"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"12",` +
+		`"serviceCount":"1","services":["` + flowService + `"],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`,
+	"logs": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"30",` +
+		`"serviceCount":"0","services":[],"processGroupCount":"1","processGroups":[["` + flowProcessGroup + `"]]}`,
+}
+
+// cappedThenSampled is an environment where a day of spans or logs scans
+// past the cap: each record query is stopped by it with no rows, and each
+// sampled retry returns rows for its data object, sampled, having read
+// 100 MB.
+func cappedThenSampled(rows map[string]string) func(*http.Request, string) (int, string) {
+	return func(r *http.Request, query string) (int, string) {
+		object := strings.TrimSuffix(strings.Fields(query + " ,")[1], ",")
+		switch {
+		case strings.Contains(query, "samplingRatio:"):
+			return http.StatusOK, fmt.Sprintf(`{"state":"SUCCEEDED","result":{"records":[%s],"metadata":{"grail":{"sampled":true,"scannedBytes":100000000}}}}`, rows[object])
+		case object == "spans" || object == "logs":
+			return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[],"metadata":{"grail":{"notifications":[` +
+				`{"notificationType":"SCAN_LIMIT_GBYTES","severity":"WARN","message":"Scan limit of 5 gigabytes reached"}]}}}}`
+		}
+		return rowsByObject(nil)(r, query)
+	}
+}
+
+// manyIDRows is a workload that runs as 200 service ids, of which the record
+// query collects 51: one more than discovery reads, which is how it shows
+// that there are more.
+func manyIDRows() map[string]string {
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = fmt.Sprintf(`"SERVICE-%016X"`, 0xC000+i)
+	}
+	return map[string]string{"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"5400000",` +
+		`"serviceCount":"200","services":[` + strings.Join(ids, ",") + `],"processGroupCount":"1","processGroups":["` + flowProcessGroup + `"]}`}
+}
+
+// chdirCheckoutRepo is a single-service repository whose go.mod and
+// Kubernetes manifest both name it checkout.
+func chdirCheckoutRepo(t *testing.T) string {
+	t.Helper()
+	repo := chdirTestRepo(t, "")
+	writeRepoFiles(t, repo, map[string]string{
+		"go.mod": "module example.invalid/checkout\n\ngo 1.22\n",
+		"deploy/k8s/deployment.yaml": `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: payments
+spec:
+  template:
+    spec:
+      containers:
+        - name: checkout
+          image: registry.example.invalid/checkout:1.4.2
+`,
+	})
+	return repo
+}
+
+func writeRepoFiles(t *testing.T, repo string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		p := filepath.Join(repo, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+}
+
+// listing is every path under each dir with its mode, and each regular
+// file's sha256, so a test can prove a command wrote nothing at all: no new
+// file, not the scope file nor a temp file beside it, and no change to one
+// that was there.
+func listing(t *testing.T, dirs ...string) []string {
+	t.Helper()
+	var entries []string
+	for _, dir := range dirs {
+		require.NoError(t, filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			entry := fmt.Sprintf("%s %s", p, info.Mode())
+			if info.Mode().IsRegular() {
+				data, err := os.ReadFile(p)
+				if err != nil {
+					return err
+				}
+				entry += fmt.Sprintf(" %x", sha256.Sum256(data))
+			}
+			entries = append(entries, entry)
+			return nil
+		}))
+	}
+	sort.Strings(entries)
+	return entries
+}
+
+// The no-write assertions rest on listing: a rewritten or re-permissioned
+// file keeps its path, so the path set alone would not see it.
+func TestListingSeesChangedFiles(t *testing.T) {
+	dir := t.TempDir()
+	goMod := filepath.Join(dir, "go.mod")
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.invalid/checkout\n"), 0o644))
+	before := listing(t, dir)
+
+	require.NoError(t, os.WriteFile(goMod, []byte("module example.invalid/checkout\n// appended\n"), 0o644))
+	rewritten := listing(t, dir)
+	require.NotEqual(t, before, rewritten, "a rewritten file")
+
+	// Windows only honors the owner-write bit. Read-only changes the mode
+	// on every platform, unlike changing group/other read permissions.
+	t.Cleanup(func() { _ = os.Chmod(goMod, 0o644) })
+	require.NoError(t, os.Chmod(goMod, 0o444))
+	require.NotEqual(t, rewritten, listing(t, dir), "a changed mode")
+}
+
+// recordQuery is the text discovery sends for spans or logs when the only
+// value is "checkout".
+func recordQuery(object string) string {
+	return "fetch " + object + ", from:now()-24h, scanLimitGBytes:5\n" +
+		`| filter in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")) or contains(k8s.workload.name, "checkout")` + "\n" +
+		"| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n" +
+		"    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n" +
+		"    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n" +
+		"    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n" +
+		`| fieldsAdd workloadSegments = concat("-", replaceString(k8s.workload.name, ".", "-"), "-"),` + "\n" +
+		`    nameTier = if(in(k8s.workload.name, array("checkout")) or in(service.name, array("checkout")), 0, else:1)` + "\n" +
+		`| filter nameTier == 0 or contains(workloadSegments, "-checkout-")` + "\n" +
+		"| sort nameTier asc, records desc\n" +
+		"| limit 200\n" +
+		"| fieldsRemove workloadSegments, nameTier"
+}
+
+// discoverReport runs `repo-scope discover --agent` and decodes its report.
+func discoverReport(t *testing.T, args ...string) (*reposcope.DiscoveryReport, []string) {
+	t.Helper()
+	code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "discover", "--agent"}, args...), RunOptions{})
+	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+	// The result is a list of reports also when one unit was discovered.
+	var reports []reposcope.DiscoveryReport
+	resp := agentResult(t, stdout, &reports)
+	require.Len(t, reports, 1)
+	return &reports[0], resp.Context.Suggestions
+}
+
+// Structured output has one shape: a list of reports, one per unit, also
+// when the run discovered a single unit, and a dry run's payload is a list
+// of plans in the same way. A reader that handles the list handles both.
+func TestRepoScopeDiscoverStructuredOutputIsAlwaysAList(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	chdirCheckoutRepo(t)
+	for _, format := range []string{"json", "yaml"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", format}, RunOptions{})
+		require.Zero(t, code, stderr)
+		var reports []reposcope.DiscoveryReport
+		if format == "json" {
+			require.NoError(t, json.Unmarshal([]byte(stdout), &reports), stdout)
+		} else {
+			require.NoError(t, yaml.Unmarshal([]byte(stdout), &reports), stdout)
+		}
+		require.Len(t, reports, 1, format)
+		require.Equal(t, ".", reports[0].Unit)
+	}
+
+	// A dry run asked for a structured format prints the plans in it, the
+	// list the agent envelope carries as its payload, and sends nothing.
+	srv := newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	for _, format := range []string{"json", "yaml"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "-o", format}, RunOptions{})
+		require.Zero(t, code, stderr)
+		var plans []reposcope.Plan
+		if format == "json" {
+			require.NoError(t, json.Unmarshal([]byte(stdout), &plans), stdout)
+		} else {
+			require.NoError(t, yaml.Unmarshal([]byte(stdout), &plans), stdout)
+		}
+		require.Len(t, plans, 1, format)
+		require.Equal(t, ".", plans[0].Unit)
+		require.Equal(t, []string{"checkout"}, plans[0].Sent)
+		require.Len(t, plans[0].Queries, 11)
+		require.Contains(t, plans[0].Queries[0].DQL, "fetch spans")
+	}
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "-o", "toon"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.NotContains(t, stdout, "Dry run:")
+	require.Contains(t, stdout, "unit: .")
+	require.Empty(t, srv.queries())
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plans := agentEnvelope(t, stdout).Result.(map[string]interface{})["payload"].([]interface{})
+	require.Len(t, plans, 1)
+	plan := plans[0].(map[string]interface{})
+	require.Equal(t, ".", plan["unit"])
+	require.Len(t, plan["queries"], 11)
+}
+
+// TestRepoScopeFlow is the first-use path, in a readonly context: discover
+// proposes, set saves, and current reads back what was saved.
+func TestRepoScopeFlow(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	repo := chdirCheckoutRepo(t)
+	before := listing(t, repo)
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, `Sending to 127.0.0.1: "checkout" (compared to k8s.workload.name, service.name, entity.name); nothing else leaves this machine`+"\n", stderr)
+	require.Contains(t, stdout, "\n  "+flowSetCommand+"\n")
+	// The record queries found the workload, so the entity-name fallbacks
+	// were never sent.
+	require.Equal(t, []string{recordQuery("spans"), recordQuery("logs")}, srv.queries())
+	require.Equal(t, before, listing(t, repo), "discover never writes")
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Equal(t, []string{"checkout"}, report.Sent)
+	require.Len(t, report.Candidates, 1)
+	require.Equal(t, flowSetCommand, report.Candidates[0].SetCommand)
+	require.Equal(t, "confirm with the user, then: "+flowSetCommand, suggestions[0])
+	require.Equal(t, before, listing(t, repo), "discover never writes, in agent mode either")
+
+	// Running the proposed line is the confirmation.
+	runSetCommand(t, flowSetCommand)
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "checkout  (whole repository · 127.0.0.1)\n", stdout)
+	require.Len(t, srv.queries(), 4, "only discover talks to the environment")
+}
+
+// lockedBuffer is a stream a test reads while the command still writes it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Every value is named before it is sent, in every output mode: agent mode is
+// detected, not chosen, so an agent's user is owed the line as much as anyone.
+// It goes to stderr, so the envelope on stdout stays one JSON document.
+func TestRepoScopeDiscoverNamesEveryValueBeforeSendingIt(t *testing.T) {
+	const line = `Sending to 127.0.0.1: "checkout" (compared to k8s.workload.name, service.name, entity.name); nothing else leaves this machine` + "\n"
+	for _, mode := range [][]string{{"--agent"}, {"-o", "json"}, {"-o", "yaml"}, {"--plain"}} {
+		t.Run(strings.Join(mode, " "), func(t *testing.T) {
+			var stdout bytes.Buffer
+			stderr := &lockedBuffer{}
+			atFirstQuery := ""
+			var once sync.Once
+			respond := rowsByObject(checkoutRows)
+			newDQLRecorder(t, "readonly", func(r *http.Request, query string) (int, string) {
+				once.Do(func() { atFirstQuery = stderr.String() })
+				return respond(r, query)
+			})
+			chdirCheckoutRepo(t)
+
+			code := Run(append([]string{"repo-scope", "discover"}, mode...), RunOptions{Stdout: &stdout, Stderr: stderr})
+			require.Zero(t, code, stderr.String())
+			require.Equal(t, line, atFirstQuery, "what stderr held when the first query arrived")
+			require.Equal(t, line, stderr.String())
+			require.NotContains(t, stdout.String(), "Sending to")
+			if mode[0] == "--agent" {
+				require.True(t, agentEnvelope(t, stdout.String()).OK)
+			}
+		})
+	}
+}
+
+// The terminal output of discover, from reports the mock environment
+// produced, with a fixed duration.
+func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
+	ledger := `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout-ledger","service.name":"checkout-ledger","records":"40"}`
+	for _, tc := range []struct {
+		golden  string
+		respond func(*http.Request, string) (int, string)
+	}{
+		{"discover-match", rowsByObject(checkoutRows)},
+		{"discover-logs-by-process-group", workloadlessLogs},
+		{"discover-sampled", cappedThenSampled(sampledCheckoutRows)},
+		{"discover-sampled-empty", cappedThenSampled(nil)},
+		{"discover-many-ids", rowsByObject(manyIDRows())},
+		{"discover-ambiguous", rowsByObject(map[string]string{"spans": checkoutRows["spans"] + "," + ledger})},
+		{"discover-prefixed-workload", rowsByObject(map[string]string{
+			"spans": `{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"acme-prod-checkout","records":"900"}`})},
+		{"discover-two-clusters", rowsByObject(map[string]string{
+			"spans": checkoutRows["spans"] + "," + otherCluster(checkoutRows["spans"]),
+			"logs":  checkoutRows["logs"] + "," + otherCluster(checkoutRows["logs"])})},
+		{"discover-cluster-on-spans-only", rowsByObject(map[string]string{
+			"spans": checkoutRows["spans"], "logs": strings.Replace(checkoutRows["logs"], flowCluster, "", 1)})},
+		{"discover-none", rowsByObject(nil)},
+		{"discover-entity-name", rowsByObject(map[string]string{
+			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"eu-checkout-frontend"}`})},
+		{"discover-entity-name-exact", rowsByObject(map[string]string{
+			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"checkout"}`})},
+		{"discover-partial", func(r *http.Request, query string) (int, string) {
+			if strings.HasPrefix(query, "fetch spans") {
+				return http.StatusBadRequest, `{"error":{"code":400,"message":"Scan limit exceeded.","details":{"errorType":"SCAN_LIMIT"}}}`
+			}
+			return rowsByObject(checkoutRows)(r, query)
+		}},
+	} {
+		t.Run(tc.golden, func(t *testing.T) {
+			newDQLRecorder(t, "readonly", tc.respond)
+			chdirCheckoutRepo(t)
+			testutil.AssertGolden(t, "repo-scope/"+tc.golden, discoveryStdout(t))
+		})
+	}
+}
+
+// discoveryStdout is what `repo-scope discover` prints to a terminal: the
+// command's own stdout, lines with the context it ran in, and only the time
+// it took replaced, since no two runs take the same.
+func discoveryStdout(t *testing.T, args ...string) string {
+	t.Helper()
+	code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "discover", "--plain"}, args...), RunOptions{})
+	require.Zero(t, code, stderr)
+	took := regexp.MustCompile(`queries ran in [0-9]+\.[0-9]s\.`)
+	require.Regexp(t, took, stdout)
+	return took.ReplaceAllString(stdout, "queries ran in 0.6s.")
+}
+
+// otherCluster is row as a second cluster reports it: the same namespace,
+// workload and service name under another cluster uid.
+func otherCluster(row string) string {
+	row = strings.Replace(row, flowClusterUID, "66666666-7777-8888-9999-000000000000", 1)
+	return strings.Replace(row, "prod-eu", "prod-us", 1)
+}
+
+// processGroupLogsQuery is the text discovery sends to find a candidate's
+// logs by the process group its spans carried.
+func processGroupLogsQuery(id string) string {
+	return "fetch logs, from:now()-24h, scanLimitGBytes:5\n" +
+		`| filter in(dt.entity.process_group, array("` + id + `"))` + "\n" +
+		"| summarize records = count(), by:{dt.entity.process_group}\n" +
+		"| limit 200"
+}
+
+// workloadlessLogs is an environment whose logs carry the process group and
+// neither the workload nor a service name: the logs record query matches
+// nothing, and the lookup by process group finds them.
+func workloadlessLogs(r *http.Request, query string) (int, string) {
+	switch {
+	case strings.HasPrefix(query, "fetch logs") && strings.Contains(query, "by:{dt.entity.process_group}"):
+		return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[{"dt.entity.process_group":"` + flowProcessGroup + `","records":"5012"}]}}`
+	case strings.HasPrefix(query, "fetch logs"):
+		return rowsByObject(nil)(r, query)
+	}
+	return rowsByObject(checkoutRows)(r, query)
+}
+
+// A workload binding reaches no log that does not carry the workload. When
+// the candidate's spans matched and its logs are found only by the process
+// group those spans carried, the proposed line binds the process group too,
+// and saving it gives an entry that filters logs on it.
+func TestRepoScopeDiscoverBindsTheProcessGroupLogsCarry(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", workloadlessLogs)
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, []string{recordQuery("spans"), recordQuery("logs"), processGroupLogsQuery(flowProcessGroup)}, srv.queries())
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Equal(t, int64(5012), report.Candidates[0].LogsByProcessGroup)
+	const line = flowSetCommand + " --process-group " + flowProcessGroup
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	require.Equal(t, "confirm with the user, then: "+line, suggestions[0])
+	require.Contains(t, report.Notes, "candidate 1 has spans, but no logs carry its k8s.workload.name or service.name; its logs carry the process group, so a process-group binding is what reaches them")
+
+	runSetCommand(t, line)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, `fetch logs   | filter (in(dt.entity.process_group, array("`+flowProcessGroup+`")) or `)
+}
+
+// Spans that name a cluster beside logs that name none are one candidate.
+// Its line leaves --cluster-uid out and says why: with it the entry would
+// return every span and no log, and the saved entry has to reach both.
+func TestRepoScopeDiscoverClusterOnSpansOnly(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": checkoutRows["spans"], "logs": strings.Replace(checkoutRows["logs"], flowCluster, "", 1)}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Len(t, report.Candidates, 1)
+	const line = "dtctl --context c repo-scope set checkout --namespace payments --workload checkout"
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	const leftOut = "candidate 1's line leaves --cluster-uid out: its logs carry no k8s.cluster.uid, so a binding with it would return none of them; " +
+		"without it the entry selects payments/checkout in any cluster"
+	require.Contains(t, suggestions, leftOut)
+	require.Equal(t, []string{leftOut}, report.Notes)
+
+	// Outside agent mode there are no suggestions, so the report itself has
+	// to say what its line leaves out.
+	for _, format := range []string{"json", "yaml", "toon"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", format, "--plain"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Contains(t, stdout, "leaves --cluster-uid out", format)
+	}
+
+	runSetCommand(t, line)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, `fetch logs   | filter ((k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))`)
+}
+
+// One workload in two clusters is two candidates, each line binding one. The
+// report also says how to bind both, which no line does.
+func TestRepoScopeDiscoverTwoClustersSaysHowToBindBoth(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": checkoutRows["spans"] + "," + otherCluster(checkoutRows["spans"])}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.Contains(t, suggestions, "candidates 1 and 2 are payments/checkout in different clusters, and each line binds one; "+
+		"to bind the workload in every cluster, run either line without --cluster-uid; "+
+		"to bind some of several, list the workload once per cluster-uid under workloads in .dtctl-repo-scope.yaml")
+}
+
+// A cluster value a scope file cannot hold is said to be that, not to be
+// missing.
+func TestRepoScopeDiscoverClusterValueTheFileRefuses(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": `{"k8s.cluster.uid":"PROD","k8s.namespace.name":"payments","k8s.workload.name":"checkout","records":"900"},` +
+			`{` + flowCluster + `"k8s.namespace.name":"payments","k8s.workload.name":"checkout","records":"500"}`}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Len(t, report.Candidates, 2)
+	var refused reposcope.Candidate
+	for _, c := range report.Candidates {
+		if c.ClusterRefused != "" {
+			refused = c
+		}
+	}
+	require.Equal(t, "PROD", refused.ClusterRefused)
+	require.Empty(t, refused.SetCommand)
+	require.Contains(t, suggestions, fmt.Sprintf(`candidate %d has no set line: its records carry k8s.cluster.uid "PROD", which is not a cluster uid a scope file can hold (a lowercase UUID), `+
+		"and another candidate runs the same namespace and workload, so a binding without --cluster-uid would select both", refused.Rank))
+	for _, s := range suggestions {
+		require.NotContains(t, s, "its records name no cluster")
+	}
+}
+
+// What Grail says about a cut result reaches discovery whole: each
+// notification of the response, in the order it came. A typed result limit is
+// a cut page however short the page. The message alone is one too, unless a
+// row shows the id array longer than a binding takes that Grail words the
+// same way. The scan cap decides whether a sampled retry runs wherever it
+// stands in the list.
+func TestRepoScopeDiscoverReadsEveryNotification(t *testing.T) {
+	const (
+		typedLimit = `{"notificationType":"RESULT_LIMIT_BYTES","severity":"WARN","message":"The result was truncated"}`
+		message    = `{"severity":"WARN","message":"The result has been limited to 50 values."}`
+		scanCap    = `{"notificationType":"SCAN_LIMIT_GBYTES","severity":"WARN","message":"Scan limit of 5 gigabytes reached"}`
+	)
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = fmt.Sprintf(`"SERVICE-%016X"`, i)
+	}
+	clippedRow := `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"900",` +
+		`"serviceCount":"80","services":[` + strings.Join(ids, ",") + `],"processGroupCount":"0","processGroups":[]}`
+	spansWith := func(notifications string, clipped bool) func(*http.Request, string) (int, string) {
+		return func(r *http.Request, query string) (int, string) {
+			if strings.HasPrefix(query, "fetch spans, from:now()-24h, scanLimitGBytes:5\n") {
+				row := checkoutRows["spans"]
+				if clipped {
+					row = clippedRow
+				}
+				return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[` + row +
+					`],"metadata":{"grail":{"notifications":[` + notifications + `]}}}}`
+			}
+			if strings.Contains(query, "samplingRatio:") {
+				return cappedThenSampled(checkoutRows)(r, query)
+			}
+			return rowsByObject(checkoutRows)(r, query)
+		}
+	}
+	for name, tc := range map[string]struct {
+		notifications string
+		queries       int
+		partial       bool
+		note          string
+		clipped       bool
+	}{
+		"the message alone":                        {message, 2, true, "spans stopped at Grail's result limit, so the result is partial", false},
+		"the message beside the array it is about": {message, 2, false, "", true},
+		"a typed result limit":                     {notifications: typedLimit, queries: 2, partial: true, note: "spans stopped at Grail's result limit, so the result is partial"},
+		"the scan cap after a message":             {notifications: message + "," + scanCap, queries: 3, note: "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
+		"the scan cap before a limit":              {notifications: scanCap + "," + typedLimit, queries: 3, note: "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := newDQLRecorder(t, "readonly", spansWith(tc.notifications, tc.clipped))
+			chdirCheckoutRepo(t)
+			report, _ := discoverReport(t)
+			require.Len(t, srv.queries(), tc.queries)
+			require.Equal(t, tc.partial, report.Partial)
+			if tc.note == "" {
+				require.Equal(t, reposcope.VerdictMatch, report.Verdicts["workload"])
+				require.NotContains(t, strings.Join(report.Notes, "\n"), "Grail")
+			} else {
+				require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+				require.Contains(t, report.Notes, tc.note)
+			}
+		})
+	}
+}
+
+// A sampled answer is complete at its floor, but a quieter candidate could
+// sit below it: the verdict is ambiguous, the line binds the workload alone,
+// since that candidate could share the service name, and the floor is said
+// to the agent too. A sampled candidate with no workload gets no line, and a
+// note says why.
+func TestRepoScopeDiscoverSampledCandidateProposesOnlyTheWorkload(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", cappedThenSampled(sampledCheckoutRows))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Len(t, srv.queries(), 4, "each record query and its first rung")
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.False(t, report.Partial)
+	require.True(t, report.Candidates[0].Sampled)
+	const line = "dtctl --context c repo-scope set checkout --namespace payments --workload checkout"
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	require.Equal(t, "show the user the candidates and ask which runs this code, then run its setCommand", suggestions[0])
+	var sampling []string
+	for _, n := range report.Notes {
+		if strings.Contains(n, "so they were sampled 1-in-") {
+			sampling = append(sampling, n)
+			require.Contains(t, suggestions, n, "the floor a candidate may sit below is the agent's to pass on")
+		}
+	}
+	require.Len(t, sampling, 2)
+	require.Equal(t, sampling, report.SamplingNotes())
+
+	newDQLRecorder(t, "readonly", cappedThenSampled(map[string]string{
+		"spans": `{"service.name":"checkout","records":"12","serviceCount":"1","services":["` + flowService + `"]}`,
+	}))
+	report, suggestions = discoverReport(t)
+	require.Len(t, report.Candidates, 1)
+	require.Empty(t, report.Candidates[0].SetCommand, "neither a service name nor an id from a sample")
+	require.True(t, strings.HasPrefix(suggestions[1], "link by hand: "), suggestions[1])
+	require.Contains(t, suggestions, "candidate 1 has no set line: it was found by sampling, which can miss another candidate sharing its service name or ids, so only --namespace with --workload is proposed, and its records name no workload")
+}
+
+// -o wide is the table, as everywhere else in dtctl, and -o csv is refused
+// before anything is sent: a report is a nested document, and csv printed its
+// Go value.
+func TestRepoScopeDiscoverWideAndCSV(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	chdirCheckoutRepo(t)
+	elapsed := regexp.MustCompile(`ran in [0-9.]+s`)
+	run := func(args ...string) string {
+		code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "discover", "--plain"}, args...), RunOptions{})
+		require.Zero(t, code, stderr)
+		return elapsed.ReplaceAllString(stdout, "ran")
+	}
+	table := run()
+	require.Contains(t, table, "#  CLUSTER")
+	require.Equal(t, table, run("-o", "wide"))
+
+	before := len(srv.queries())
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain", "-o", "csv"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, stdout+stderr, "a discovery report is not rows; use -o table, -o json, -o yaml or -o toon")
+	require.Len(t, srv.queries(), before, "refused before the first query")
+	require.NotContains(t, stderr, "Sending to")
+}
+
+// A repository nothing in the environment matches: every query is tried, and
+// the agent is pointed at the flags that widen the search.
+func TestRepoScopeDiscoverNoMatch(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", rowsByObject(nil))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Len(t, srv.queries(), 4, "the entity-name fallbacks run when the records find nothing")
+	require.Equal(t, reposcope.VerdictNone, report.Verdict)
+	require.Equal(t, repoScopeNarrowHint, suggestions[0])
+}
+
+// One entity named exactly like the repository, and no span or log in the
+// window: the entity table shows that it existed, not that it runs. It is a
+// candidate to confirm, and the verdict line says why.
+func TestRepoScopeDiscoverEntityNameAlone(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"dt.entity.service": `{"id":"` + flowService + `","entity.name":"checkout"}`}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.False(t, report.Partial)
+	// The caveat is the report's own and the agent's first instruction, not
+	// a sentence of the terminal alone, and nothing tells an agent to run
+	// the line of an entity that may have stopped long ago.
+	require.Contains(t, report.Notes, repoScopeEntityNameNote)
+	require.Equal(t, "tell the user that "+repoScopeEntityNameNote+"; show the candidates, and offer a setCommand only for one the user says runs this code", suggestions[0])
+	require.NotContains(t, strings.Join(suggestions, "\n"), "then run its setCommand")
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its entity name alone (see the notes)\n")
+	require.Contains(t, stdout, "\nNote: "+repoScopeEntityNameNote+"\n")
+	require.Contains(t, stdout, "No repo scope was saved. If it is what runs this code, save it with:\n  dtctl --context c repo-scope set checkout --service "+flowService+"\n")
+}
+
+// --path picks another directory of a monorepo, and --term adds a name; both
+// are held to what they may carry.
+func TestRepoScopeDiscoverPathAndTerm(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	repo := chdirTestRepo(t, "")
+	writeRepoFiles(t, repo, map[string]string{
+		"services/ledger/Dockerfile":   "FROM scratch\n",
+		"services/checkout/Dockerfile": "FROM scratch\n",
+	})
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--path", "services/ledger/", "--term", "billing.engine", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+	require.Equal(t, map[string]interface{}{"unit": "services/ledger", "sent": "billing-engine, billing.engine, billing_engine, billingengine, ledger"}, plan["details"])
+
+	for flag, value := range map[string]string{
+		"--path": "../elsewhere",
+		"--term": `ledger" or true or "`,
+	} {
+		code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", flag, value, "--dry-run", "--agent"}, RunOptions{})
+		require.NotZero(t, code)
+		detail := agentError(t, stdout)
+		require.Equal(t, "validation_error", detail.Code)
+		require.True(t, strings.HasPrefix(detail.Message, flag+": "), detail.Message)
+	}
+	// A generic word is refused like a malformed one, with the way to link
+	// a service that is really called that.
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", "--term", "api", "--dry-run", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	detail := agentError(t, stdout)
+	require.Equal(t, "validation_error", detail.Code)
+	require.Contains(t, detail.Message, `--term: "api" is not looked for`)
+	require.Equal(t, []string{"a service that is really named so is linked by hand: dtctl repo-scope set <name> --service-name api"}, detail.Suggestions)
+
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", "--path", "services/billing", "--dry-run", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, "validation_error", agentError(t, stdout).Code)
+}
+
+// A --path is taken in the spelling the repository holds the directory in.
+// On a volume that ignores case, Services/Checkout opens services/checkout,
+// but the unit is found by comparing paths, so the typed spelling lost the
+// unit and sent "Checkout" as a name of the whole repository.
+func TestRepoScopeDiscoverPathInAnotherCase(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	repo := chdirTestRepo(t, "")
+	writeRepoFiles(t, repo, map[string]string{
+		"go.mod":                   "module example.invalid/platform\n",
+		"services/checkout/go.mod": "module example.invalid/checkout-service\n",
+	})
+	for _, dir := range []string{"services/checkout", "Services/Checkout", "SERVICES/checkout/"} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--path", dir, "--dry-run", "--agent"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+		require.Equal(t, map[string]interface{}{"unit": "services/checkout",
+			"sent": "checkout, checkout-service, checkout.service, checkout_service, checkoutservice"}, plan["details"], dir)
+	}
+}
+
+func TestRepoScopeOnDiskDir(t *testing.T) {
+	repo := fstest.MapFS{
+		"services/checkout/go.mod": {Data: []byte("module example.invalid/checkout\n")},
+		"Docs/a.md":                {Data: []byte("x\n")},
+		"docs/b.md":                {Data: []byte("x\n")},
+		"link":                     {Mode: fs.ModeSymlink, Data: []byte("services")},
+		"README":                   {Data: []byte("x\n")},
+	}
+	for dir, want := range map[string]string{
+		".":                 ".",
+		"services":          "services",
+		"Services/CHECKOUT": "services/checkout",
+		"docs":              "docs",
+		"Docs":              "Docs",
+	} {
+		got, err := repoScopeOnDiskDir(repo, dir)
+		require.NoError(t, err, dir)
+		require.Equal(t, want, got, dir)
+	}
+	for dir, want := range map[string]string{
+		"DOCS":                     `"DOCS" is not a directory of this repository`, // two directories differ from it only in case
+		"services/ledger":          `"services/ledger" is not a directory of this repository`,
+		"README":                   `"README" is not a directory of this repository`,
+		"README/x":                 `"README/x" is not a directory of this repository`,
+		"../elsewhere":             `"../elsewhere" is not a directory of this repository`,
+		"/services":                `"/services" is not a directory of this repository`,
+		"link":                     `"link" is a symbolic link, which is not followed; name the directory it points to`,
+		"link/checkout":            `"link" is a symbolic link, which is not followed; name the directory it points to`,
+		"services/checkout/go.mod": `"services/checkout/go.mod" is not a directory of this repository`,
+	} {
+		_, err := repoScopeOnDiskDir(repo, dir)
+		require.EqualError(t, err, want, dir)
+	}
+}
+
+// A --path that is a symbolic link is refused. The walk does not follow
+// links, so the directory behind one was never read: its name was sent with
+// the root's names, as a name of the whole repository.
+func TestRepoScopeDiscoverRefusesASymlinkedPath(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	repo := chdirCheckoutRepo(t)
+	writeRepoFiles(t, repo, map[string]string{"services/ledger/go.mod": "module example.invalid/ledger\n"})
+	if err := os.Symlink(filepath.Join("services", "ledger"), filepath.Join(repo, "linkdir")); err != nil {
+		t.Skipf("cannot create a symbolic link here: %v", err)
+	}
+	code, stdout, _ := runRepoScoped([]string{"repo-scope", "discover", "--path", "linkdir", "--dry-run", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	detail := agentError(t, stdout)
+	require.Equal(t, "validation_error", detail.Code)
+	require.Equal(t, `--path: "linkdir" is a symbolic link, which is not followed; name the directory it points to`, detail.Message)
+}
+
+// A repository with more source files than discovery reads: the dry run says
+// so with the values, since those are then not all the repository's names.
+func TestRepoScopeDiscoverDryRunSaysWhatWasNotRead(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	repo := chdirCheckoutRepo(t)
+	files := map[string]string{}
+	for i := 0; i <= 2000; i++ {
+		files[fmt.Sprintf("conf/f%04d.yaml", i)] = "a: b\n"
+	}
+	writeRepoFiles(t, repo, files)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "\nThe repository holds more than 2000 build files, Dockerfiles and manifests, and discovery reads that many, so names in the rest were not sent; add one with --term\n")
+}
+
+// --dry-run is the disclosure: it prints every query and value and sends
+// nothing, so it works before there is a token, and without a context at all.
+func TestRepoScopeDiscoverDryRunNeedsNoToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("a dry run sent %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+	writeIsolatedConfig(t, fmt.Sprintf("current-context: c\ncontexts:\n  - name: c\n    context:\n      environment: %s\n", srv.URL))
+	repo := chdirCheckoutRepo(t)
+	before := listing(t, repo)
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "\n   "+strings.ReplaceAll(recordQuery("spans"), "\n", "\n   ")+"\n")
+	require.Contains(t, stdout, "\n2. spans by workload or service name (sampled 1-in-100000 over 1h) (only if the scan cap stops query 1)\n")
+	require.Contains(t, stdout, "\n8. logs by workload or service name (sampled 1-in-1000 over 24h) (only if the scan cap stops query 5)\n")
+	require.Contains(t, stdout, "\n9. services by entity name (only if the record queries find nothing)\n")
+	require.Contains(t, stdout, "\n11. logs by process group (only if a candidate's spans match and no logs do; the ids are the ones the environment returned)\n"+
+		"   fetch logs, from:now()-24h, scanLimitGBytes:5\n"+
+		"   | filter in(dt.entity.process_group, array(<process groups the candidate's spans carried>))\n")
+
+	code, stdout, stderr = runRepoScoped([]string{"--dry-run", "repo-scope", "discover", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+	require.Equal(t, true, plan["dry_run"])
+	require.Len(t, plan["payload"], 1, "one plan, in a list")
+	payload := plan["payload"].([]interface{})[0].(map[string]interface{})["queries"].([]interface{})
+	require.Len(t, payload, 11)
+	require.Equal(t, recordQuery("spans"), payload[0].(map[string]interface{})["dql"])
+
+	t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	code, _, stderr = runRepoScoped([]string{"repo-scope", "discover", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, before, listing(t, repo))
+}
+
+// The names discovery holds back as test fixtures are named in the dry run,
+// so the drop is never silent, and a --term that sends one takes it off the
+// list.
+func TestRepoScopeDiscoverDryRunNamesHeldBackNames(t *testing.T) {
+	fixture, err := filepath.Abs(filepath.Join("..", "pkg", "reposcope", "testdata", "repos", "test-noise"))
+	require.NoError(t, err)
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "Names that look like test fixtures are not sent: \"test-platform-service-smoke\", \"test-runner\"; use --term to send one\n")
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+	details := plan["details"].(map[string]interface{})
+	require.Equal(t, "test-platform-service-smoke, test-runner", details["dropped"])
+	for _, q := range plan["payload"].([]interface{})[0].(map[string]interface{})["queries"].([]interface{}) {
+		require.NotContains(t, q.(map[string]interface{})["dql"], "test-platform-service-smoke", "a held-back name is in no query")
+	}
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--term", "test-runner", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	details = agentEnvelope(t, stdout).Result.(map[string]interface{})["details"].(map[string]interface{})
+	require.Equal(t, "test-platform-service-smoke", details["dropped"])
+	require.Contains(t, details["sent"], "test-runner")
+}
+
+// A Gradle build with two deployables: discovery from a library one of them
+// depends on proposes that deployable's entry, which covers the library
+// through the build, and from a library both depend on, or the settings
+// directory, discovers each deployable.
+func TestRepoScopeDiscoverGradleDeployables(t *testing.T) {
+	fixture := gradleMultiRepo(t)
+	srv := newDQLRecorder(t, "readonly", spansByName(map[string]string{
+		"admin":    `{"k8s.namespace.name":"edge","k8s.workload.name":"admin","service.name":"admin","records":"40"}`,
+		"webproxy": `{"k8s.namespace.name":"edge","k8s.workload.name":"webproxy","service.name":"webproxy","records":"100"}`,
+	}))
+	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+
+	t.Chdir(filepath.Join(repo, "webproxy-api"))
+	report, _ := discoverReport(t)
+	const line = "dtctl --context c repo-scope set webproxy --namespace edge --workload webproxy --path webproxy"
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	runSetCommand(t, line)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "webproxy  (webproxy · 127.0.0.1; covered through the Gradle build: \"webproxy\" depends on \"webproxy-api\")\n", stdout)
+
+	// Each deployable is a discovery of its own, with its own queries.
+	for _, dir := range []string{"webproxy-core", "."} {
+		t.Chdir(filepath.Join(repo, dir))
+		before := len(srv.queries())
+		code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--agent"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		var reports []reposcope.DiscoveryReport
+		resp := agentResult(t, stdout, &reports)
+		require.Equal(t, 2, *resp.Context.Total)
+		require.Len(t, reports, 2)
+		require.Equal(t, "dtctl --context c repo-scope set admin --namespace edge --workload admin --path admin", reports[0].Candidates[0].SetCommand)
+		require.Equal(t, line, reports[1].Candidates[0].SetCommand)
+		require.Equal(t, "admin: confirm with the user, then: "+reports[0].Candidates[0].SetCommand, resp.Context.Suggestions[0])
+		require.Contains(t, resp.Context.Suggestions, "webproxy: confirm with the user, then: "+line)
+		require.Len(t, srv.queries()[before:], 4, "both record queries, once per deployable")
+	}
+
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "Unit: admin\n")
+	require.Contains(t, stdout, "--path admin\n")
+	require.Contains(t, stdout, "\n  "+line+"\n")
+
+	before := len(srv.queries())
+	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	plan := agentEnvelope(t, stdout).Result.(map[string]interface{})
+	require.Equal(t, map[string]interface{}{"units": "admin, webproxy"}, plan["details"])
+	require.Len(t, plan["payload"], 2)
+	require.Len(t, srv.queries(), before, "a dry run sends nothing")
+
+	// A term would be found by every deployable's discovery, and proposed
+	// for each of them.
+	code, stdout, _ = runRepoScoped([]string{"repo-scope", "discover", "--term", "billing-engine", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, agentError(t, stdout).Message, "--term: a term is looked up for one deployable")
+}
+
+// One workload found for two deployables of a run would be saved under one
+// name by both lines, and set replaces an entry of the same name: running the
+// second line would undo the first. The later line is named after its unit,
+// so running both leaves both entries.
+func TestRepoScopeDiscoverGradleDeployablesSharingAName(t *testing.T) {
+	fixture := gradleMultiRepo(t)
+	const row = `{"k8s.namespace.name":"edge","k8s.workload.name":"admin-webproxy","records":"40"}`
+	newDQLRecorder(t, "readonly", spansByName(map[string]string{"admin": row, "webproxy": row}))
+	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var reports []reposcope.DiscoveryReport
+	agentResult(t, stdout, &reports)
+	require.Len(t, reports, 2)
+	first, second := reports[0].Candidates[0], reports[1].Candidates[0]
+	require.Equal(t, "dtctl --context c repo-scope set admin-webproxy --namespace edge --workload admin-webproxy --path admin", first.SetCommand)
+	require.Equal(t, "dtctl --context c repo-scope set webproxy-admin-webproxy --namespace edge --workload admin-webproxy --path webproxy", second.SetCommand)
+	require.Equal(t, "webproxy-admin-webproxy", second.Name)
+	const renamed = `candidate 1 is saved as "webproxy-admin-webproxy": the line for admin saves an entry named "admin-webproxy", and a second set under that name would replace it`
+	require.NotContains(t, reports[0].Notes, renamed)
+	require.Contains(t, reports[1].Notes, renamed)
+
+	runSetCommand(t, first.SetCommand)
+	runSetCommand(t, second.SetCommand)
+	require.ElementsMatch(t, []string{"admin-webproxy", "webproxy-admin-webproxy"}, loadScopeFile(t, repo).Names(repoScopeTestHost))
+}
+
+// From a library two entries' deployables depend on, neither entry applies:
+// the envelope says the entries tie rather than that none covers it, and
+// the suggestion names them.
+func TestRepoScopeGradleTie(t *testing.T) {
+	fixture := gradleMultiRepo(t)
+	newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+	repo := chdirTestRepo(t, `environments:
+  127.0.0.1:
+    - name: webproxy
+      path: webproxy
+      service-names: [webproxy]
+    - name: admin
+      path: admin
+      service-names: [admin]
+`)
+	require.NoError(t, os.CopyFS(repo, os.DirFS(fixture)))
+	t.Chdir(filepath.Join(repo, "webproxy-core"))
+	const reason = "covered by entries webproxy and admin; pick one with --repo-scope <name>"
+
+	_, stdout, stderr := runRepoScoped([]string{"query", "fetch logs", "--agent"}, RunOptions{})
+	s := repoScopeContext(t, stdout)
+	require.Equal(t, "ambiguous_entry", s.Code)
+	require.Equal(t, reason, s.Reason)
+	require.Contains(t, stderr, "repo scope not applied: "+reason)
+
+	// The result carries the tie as data; the flag that picks an entry is
+	// the command's to name, in the suggestion.
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current", "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var status reposcope.Status
+	require.Equal(t, []string{reason}, agentResult(t, stdout, &status).Context.Suggestions)
+	require.Equal(t, reposcope.StatusAmbiguousEntry, status.Code)
+	require.Equal(t, []string{"webproxy", "admin"}, status.Tied)
+	require.Equal(t, "covered by entries webproxy and admin", status.Reason)
+}
+
+// A token that provably cannot read spans is refused before the first query
+// leaves. One that cannot read the entity tables still gets the record
+// queries' answer; the fallbacks are reported as unreadable, not sent.
+func TestRepoScopeDiscoverChecksScopes(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", rowsByObject(nil))
+	chdirCheckoutRepo(t)
+
+	withGrantedScopes(t, []string{"storage:logs:read", "storage:entities:read"}, true)
+	code, stdout, _ := runRepoScoped([]string{"repo-scope", "discover", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	detail := agentError(t, stdout)
+	require.Equal(t, "insufficient_scope", detail.Code)
+	require.Equal(t, []string{"storage:spans:read"}, detail.MissingScopes)
+	require.Empty(t, srv.queries())
+
+	withGrantedScopes(t, []string{"storage:logs:read", "storage:spans:read"}, true)
+	report, _ := discoverReport(t)
+	require.Equal(t, []string{recordQuery("spans"), recordQuery("logs")}, srv.queries())
+	require.Equal(t, []string{"auth", "auth"}, []string{report.Queries[8].Cause, report.Queries[9].Cause})
+	require.True(t, report.Partial)
+	// A query dtctl refused itself was never sent, and is not counted among
+	// those that ran.
+	require.True(t, report.Queries[8].Skipped && report.Queries[9].Skipped)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "  services by entity name            skipped (not authorized)  ")
+	require.Contains(t, stdout, "\n2 of 11 queries ran in ")
+}
+
+// An environment's query audit attributes a query by its client context.
+// Discovery's queries say they are discovery's, not inventory's, whose
+// runner they share.
+func TestRepoScopeDiscoverNamesItselfAsTheClient(t *testing.T) {
+	var mu sync.Mutex
+	var contexts []string
+	newDQLRecorder(t, "readonly", func(r *http.Request, query string) (int, string) {
+		mu.Lock()
+		contexts = append(contexts, r.Header.Get("dt-client-context"))
+		mu.Unlock()
+		return rowsByObject(checkoutRows)(r, query)
+	})
+	chdirCheckoutRepo(t)
+	discoverReport(t)
+	require.Len(t, contexts, 2)
+	for _, c := range contexts {
+		require.Contains(t, c, `"repo-scope-discover"`)
+		require.NotContains(t, c, "inventory")
+	}
+
+	// The runner as inventory builds it still says inventory.
+	var sent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = r.Header.Get("dt-client-context")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":{"records":[]}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := client.NewForTesting(srv.URL, "test-token")
+	require.NoError(t, err)
+	_, err = (&inventoryRunner{executor: exec.NewDQLExecutor(c), scanLimitGB: 5}).RunQuery(context.Background(), "fetch logs | limit 1")
+	require.NoError(t, err)
+	require.Contains(t, sent, `"context":"inventory"`)
+}
+
+// A run interrupted before its first query sent nothing, and says so rather
+// than printing an empty list of values.
+func TestRepoScopeDiscoveryNothingSent(t *testing.T) {
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Environment: "127.0.0.1", Verdict: reposcope.VerdictNone, Partial: true, Sent: []string{},
+		Queries: []reposcope.Query{{Purpose: "spans by workload or service name", DQL: "fetch spans", Skipped: true, Cause: "cancelled"}}}
+	var out bytes.Buffer
+	printRepoScopeDiscovery(&out, r, repoScopeProposal{}, 0)
+	require.NotContains(t, out.String(), "Values sent:")
+	require.Contains(t, out.String(), "No value was sent.\n0 of 1 queries ran in 0.0s. No repo scope was saved.\n")
+}
+
+// A plan lists every query a run could send, and no run sends them all: the
+// entity searches run when the records find nothing, the process-group
+// lookup when they found a candidate. The preview says how many at most.
+func TestRepoScopeDiscoverDryRunCountsWhatARunCanSend(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(nil))
+	chdirCheckoutRepo(t)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--dry-run", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, `Dry run: discovery for unit "." would send at most 10 of these 11 queries to the current context's environment; nothing was sent`)
+}
+
+// A run that outlives its deadline reports the queries that ran out of time,
+// through the real executor, and still exits 0 with what it found.
+func TestRepoScopeDiscoverTimeout(t *testing.T) {
+	newDQLRecorder(t, "readonly", func(r *http.Request, _ string) (int, string) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+		return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`
+	})
+	chdirCheckoutRepo(t)
+	require.Equal(t, time.Minute, repoScopeDiscoverBound(context.Background()), "the bound the docs state")
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--agent"}, RunOptions{
+		Context: context.WithValue(context.Background(), repoScopeDiscoverTimeoutKey{}, 200*time.Millisecond),
+	})
+	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+	var reports []reposcope.DiscoveryReport
+	agentResult(t, stdout, &reports)
+	require.Len(t, reports, 1)
+	report := reports[0]
+	require.Equal(t, "timeout", report.Queries[0].Cause)
+	require.True(t, report.Queries[4].Skipped, "the logs query")
+	require.True(t, report.Partial)
+}
+
+// Discovery keeps no state: it writes nothing to the repository, the config
+// directory or any XDG directory.
+func TestRepoScopeDiscoverKeepsNoState(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	repo := chdirCheckoutRepo(t)
+	dirs := []string{repo, filepath.Dir(os.Getenv("DTCTL_CONFIG"))}
+	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+		dir := t.TempDir()
+		t.Setenv(v, dir)
+		dirs = append(dirs, dir)
+	}
+	before := listing(t, dirs...)
+
+	discoverReport(t)
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "discover"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, before, listing(t, dirs...))
+}
+
+// Entries are filed under the environment host, so one file serves every
+// context and each context sees only its own.
+func TestRepoScopePerEnvironment(t *testing.T) {
+	writeIsolatedConfig(t, `current-context: prod
+contexts:
+  - name: prod
+    context:
+      environment: https://abc12345.apps.dynatrace.com
+  - name: staging
+    context:
+      environment: https://stg98765.apps.dynatrace.com
+`)
+	repo := chdirTestRepo(t, "")
+
+	code, _, stderr := runRepoScoped([]string{"--context", "staging", "repo-scope", "set", "checkout", "--service-name", "checkout-stg"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	code, _, stderr = runRepoScoped([]string{"repo-scope", "set", "checkout", "--service-name", "checkout"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []string{"abc12345.apps.dynatrace.com", "stg98765.apps.dynatrace.com"}, loadScopeFile(t, repo).Hosts())
+
+	for _, tc := range []struct {
+		opts RunOptions
+		want string
+	}{
+		{RunOptions{}, `service.name == "checkout"`},
+		{RunOptions{Env: map[string]string{"DTCTL_CONTEXT": "staging"}}, `service.name == "checkout-stg"`},
+	} {
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe", "-o", "json"}, tc.opts)
+		require.Zero(t, code, stderr)
+		var s reposcope.Status
+		require.NoError(t, json.Unmarshal([]byte(stdout), &s))
+		require.Equal(t, tc.want, s.Filters["spans"])
+	}
+
+	code, _, stderr = runRepoScoped([]string{"--context", "staging", "repo-scope", "delete", "checkout"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, []string{"abc12345.apps.dynatrace.com"}, loadScopeFile(t, repo).Hosts())
+}
+
+// runSetCommand runs a set line discovery proposed, exactly as given: split
+// into words the way a shell reads it.
+func runSetCommand(t *testing.T, line string, extra ...string) {
+	t.Helper()
+	words := shellWords(t, line)
+	require.Equal(t, "dtctl", words[0], line)
+	code, stdout, stderr := runRepoScoped(append(words[1:], extra...), RunOptions{})
+	require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+}
+
+// shellWords splits line as a POSIX shell does for the quoting
+// exec.ShellQuote writes: single quotes, and a backslash outside them.
+func shellWords(t *testing.T, line string) []string {
+	t.Helper()
+	var words []string
+	var word strings.Builder
+	inWord, quoted, escaped := false, false, false
+	for _, r := range line {
+		switch {
+		case escaped:
+			word.WriteRune(r)
+			escaped = false
+		case quoted:
+			if r == '\'' {
+				quoted = false
+			} else {
+				word.WriteRune(r)
+			}
+		case r == '\'':
+			quoted, inWord = true, true
+		case r == '\\':
+			escaped, inWord = true, true
+		case r == ' ':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
+		default:
+			word.WriteRune(r)
+			inWord = true
+		}
+	}
+	require.False(t, quoted || escaped, "unterminated quoting in %s", line)
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words
+}
+
+// The set line saves under the environment discovery asked, however its
+// context was chosen: run as given, with the config's current context
+// pointing elsewhere, it must not file the candidate under that one.
+func TestRepoScopeDiscoverKeepsTheContext(t *testing.T) {
+	srv := newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	cfg := fmt.Sprintf(`current-context: prod
+contexts:
+  - name: prod
+    context:
+      environment: https://abc12345.apps.dynatrace.com
+      token-ref: t
+  - name: staging
+    context:
+      environment: %[1]s
+      token-ref: t
+      safety-level: readonly
+  - name: payments staging
+    context:
+      environment: %[1]s
+      token-ref: t
+      safety-level: readonly
+tokens:
+  - name: t
+    token: dt0c01.EXAMPLE
+`, srv.URL)
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  map[string]string
+		// withConfig names the config with --config as well.
+		withConfig bool
+		want       string
+	}{
+		{name: "--context", args: []string{"--context", "staging"}, want: "--context staging"},
+		{name: "DTCTL_CONTEXT", env: map[string]string{"DTCTL_CONTEXT": "staging"}, want: "--context staging"},
+		{name: "--config", args: []string{"--context", "staging"}, withConfig: true, want: "--context staging"},
+		{name: "a context name a shell splits", args: []string{"--context", "payments staging"}, want: "--context 'payments staging'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeIsolatedConfig(t, cfg)
+			configPath := os.Getenv("DTCTL_CONFIG")
+			repo := chdirCheckoutRepo(t)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			// The config is carried whichever way it was chosen, and here
+			// DTCTL_CONFIG always chooses one.
+			args, want := tc.args, "dtctl --config "+exec.ShellQuote(configPath)+" "
+			if tc.withConfig {
+				args = append(args, "--config", configPath)
+			}
+			want += tc.want + " repo-scope set "
+			var out, errOut bytes.Buffer
+			code := Run(append([]string{"repo-scope", "discover", "--agent"}, args...), RunOptions{Stdout: &out, Stderr: &errOut})
+			require.Zero(t, code, errOut.String())
+			var reports []reposcope.DiscoveryReport
+			agentResult(t, out.String(), &reports)
+			line := reports[0].Candidates[0].SetCommand
+			require.True(t, strings.HasPrefix(line, want), line)
+
+			// A shell without the selection, and a config that no longer
+			// points at the current context through the environment.
+			t.Setenv("DTCTL_CONTEXT", "")
+			if tc.withConfig {
+				t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+			}
+			runSetCommand(t, line)
+			require.Equal(t, []string{repoScopeTestHost}, loadScopeFile(t, repo).Hosts())
+		})
+	}
+
+	// The config's own current context is named too: it is the one a
+	// `dtctl ctx` changes while the line is still on the screen.
+	staging := strings.Replace(cfg, "current-context: prod", "current-context: staging", 1)
+	writeIsolatedConfig(t, staging)
+	repo := chdirCheckoutRepo(t)
+	report, _ := discoverReport(t)
+	line := report.Candidates[0].SetCommand
+	require.Equal(t, strings.Replace(flowSetCommand, "--context c", "--context staging", 1), line)
+
+	writeIsolatedConfig(t, cfg)
+	runSetCommand(t, line)
+	require.Equal(t, []string{repoScopeTestHost}, loadScopeFile(t, repo).Hosts(), "saved for the environment discovery asked, not the one now current")
+}
+
+// Two namespaces, and a canary beside the main workload, run the same service
+// name. The set line for each binds its workload and leaves the service name
+// out, since that would select the others' records too, and says so; a
+// candidate no workload binding describes falls back to its entity ids.
+func TestRepoScopeDiscoverSharedServiceName(t *testing.T) {
+	const vmService = "SERVICE-00000000000000AA"
+	rows := map[string]string{"spans": `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"900"},` +
+		`{"k8s.namespace.name":"staging","k8s.workload.name":"checkout","service.name":"checkout","records":"500"},` +
+		`{"service.name":"checkout","serviceCount":"1","services":["` + vmService + `"],"records":"100"},` +
+		`{"k8s.namespace.name":"payments","k8s.workload.name":"checkout-canary","service.name":"checkout","records":"50"}`}
+	newDQLRecorder(t, "readonly", rowsByObject(rows))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	var lines []string
+	for _, c := range report.Candidates {
+		require.True(t, c.ServiceNameShared)
+		lines = append(lines, c.SetCommand)
+	}
+	require.Equal(t, []string{
+		"dtctl --context c repo-scope set checkout --namespace payments --workload checkout",
+		"dtctl --context c repo-scope set checkout --namespace staging --workload checkout",
+		"dtctl --context c repo-scope set checkout --service " + vmService,
+		"dtctl --context c repo-scope set checkout-canary --namespace payments --workload checkout-canary",
+	}, lines)
+	notes := repoScopeSharedNameNotes(report)
+	require.Len(t, notes, 1, "one note for the one shared name")
+	require.Contains(t, suggestions, notes[0])
+
+	require.Contains(t, report.Notes, notes[0], "the report says so itself, for a reader with no suggestions")
+	table := discoveryStdout(t)
+	require.Equal(t, 1, strings.Count(table, "Note: "+notes[0]+"\n"), table)
+
+	// The saved entry selects payments alone.
+	runSetCommand(t, lines[0])
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "describe", "-o", "json"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var s reposcope.Status
+	require.NoError(t, json.Unmarshal([]byte(stdout), &s))
+	require.Equal(t, `(k8s.namespace.name == "payments" and k8s.workload.name == "checkout")`, s.Filters["logs"])
+}
+
+// A monorepo with one build file at the root: every service directory is in
+// the root's unit. Discovery run for one of them proposes an entry for that
+// directory, not the whole repository, so the service beside it gets its own.
+func TestRepoScopeDiscoverRootUnitSubdirectory(t *testing.T) {
+	found := true
+	newDQLRecorder(t, "readonly", func(_ *http.Request, q string) (int, string) {
+		if !found || !strings.HasPrefix(q, "fetch spans") && !strings.HasPrefix(q, "fetch logs") {
+			return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`
+		}
+		name := "checkout"
+		if strings.Contains(q, `"ledger"`) {
+			name = "ledger"
+		}
+		return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[{"service.name":"` + name + `","records":"100"}]}}`
+	})
+	repo := chdirTestRepo(t, "")
+	writeRepoFiles(t, repo, map[string]string{
+		"go.mod":                    "module example.invalid/platform\n\ngo 1.22\n",
+		"services/ledger/main.go":   "package main\n",
+		"services/checkout/main.go": "package main\n",
+	})
+
+	t.Chdir(filepath.Join(repo, "services", "ledger"))
+	report, _ := discoverReport(t)
+	require.Equal(t, ".", report.Unit)
+	require.Equal(t, "services/ledger", report.Dir)
+	require.Equal(t, "dtctl --context c repo-scope set ledger --service-name ledger --path services/ledger", report.Candidates[0].SetCommand)
+	runSetCommand(t, report.Candidates[0].SetCommand)
+
+	// --path from the root proposes the same, for the other service.
+	t.Chdir(repo)
+	report, _ = discoverReport(t, "--path", "services/checkout")
+	require.Equal(t, "dtctl --context c repo-scope set checkout --service-name checkout --path services/checkout", report.Candidates[0].SetCommand)
+	runSetCommand(t, report.Candidates[0].SetCommand)
+
+	for dir, want := range map[string]string{"services/ledger": "ledger", "services/checkout": "checkout"} {
+		t.Chdir(filepath.Join(repo, filepath.FromSlash(dir)))
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, want+"  ("+dir+" · 127.0.0.1)\n", stdout)
+	}
+
+	// Positive control: from the root itself the entry covers the whole
+	// repository.
+	t.Chdir(repo)
+	report, _ = discoverReport(t, "--term", "ledger")
+	require.NotContains(t, report.Candidates[0].SetCommand, "--path")
+
+	// Nothing found for the directory: no candidate's name ties it to the
+	// lines for linking by hand, so they carry the context discovery ran in
+	// but no --path, and a separate line says how to cover the directory.
+	found = false
+	t.Chdir(filepath.Join(repo, "services", "ledger"))
+	report, suggestions := discoverReport(t, "--context", "c")
+	require.Equal(t, reposcope.VerdictNone, report.Verdict)
+	require.Equal(t, repoScopeNarrowHint, suggestions[0])
+	require.True(t, strings.HasPrefix(suggestions[1], "link by hand: dtctl --context c repo-scope set <name> "), suggestions[1])
+	require.NotContains(t, suggestions[1], "--path")
+	require.Contains(t, suggestions[2], "--path services/ledger")
+
+	code, stdout, stderr := runRepoScoped([]string{"--context", "c", "repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var links []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "  dtctl ") {
+			links = append(links, line)
+		}
+	}
+	require.Len(t, links, 3, stdout)
+	for _, l := range links {
+		require.True(t, strings.HasPrefix(l, "  dtctl --context c repo-scope set <name> "), l)
+		require.NotContains(t, l, "--path", l)
+	}
+	require.Contains(t, stdout, "--path services/ledger")
+}
+
+// A single-module repository: go.mod at the root names the service, and a
+// package directory below it is not one. Discovery run from that directory
+// still sends its name, but the candidate it finds is what go.mod and the
+// manifest named, so the entry covers the whole repository.
+func TestRepoScopeDiscoverSingleModuleSubdirectory(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	repo := chdirCheckoutRepo(t)
+	writeRepoFiles(t, repo, map[string]string{"internal/refunds/refunds.go": "package refunds\n"})
+	t.Chdir(filepath.Join(repo, "internal", "refunds"))
+
+	report, _ := discoverReport(t)
+	require.Equal(t, ".", report.Unit)
+	require.Equal(t, "internal/refunds", report.Dir)
+	require.Contains(t, report.Sent, "refunds", "the directory's name is looked for")
+	require.False(t, report.Candidates[0].MatchedDir)
+	require.Equal(t, flowSetCommand, report.Candidates[0].SetCommand)
+
+	runSetCommand(t, report.Candidates[0].SetCommand)
+	t.Chdir(repo)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "current"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Equal(t, "checkout  (whole repository · 127.0.0.1)\n", stdout)
+}
+
+// A match no binding selects alone, a workload whose records carry no
+// namespace, service name or entity id, has no line to save it. Discovery
+// offers what it offers when nothing matched, never an empty line.
+func TestRepoScopeDiscoverMatchWithoutABinding(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": `{"k8s.workload.name":"checkout","records":"10"}`}))
+	chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Len(t, report.Candidates, 1)
+	require.Empty(t, report.Candidates[0].SetCommand)
+	require.Equal(t, repoScopeNarrowHint, suggestions[0])
+	require.True(t, strings.HasPrefix(suggestions[1], "link by hand: dtctl --context c repo-scope set <name> "), suggestions[1])
+	for _, s := range suggestions {
+		require.False(t, strings.HasPrefix(s, "confirm with the user"), s)
+	}
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.NotContains(t, stdout, "Save it with")
+	// The records name a workload and no namespace, which is no workload a
+	// file can bind: the table says so, and the verdict names no kind.
+	require.Contains(t, stdout, "\n1  -        checkout (no namespace)  -  ")
+	require.Contains(t, stdout, "\nVerdict: match: one candidate, with no binding that selects it\n")
+	require.Equal(t, reposcope.VerdictNone, report.Verdicts["workload"])
+	require.NotContains(t, stdout, "\n  \n", "no empty line where a set line would be")
+	require.Contains(t, stdout, "\n  dtctl --context c repo-scope set <name> --namespace <namespace> --workload <workload>\n")
+}
+
+// Two namespaces report one service name and no workload, so no binding
+// selects either candidate alone. Discovery says so and offers the one line
+// there is, the service name, as selecting both.
+func TestRepoScopeDiscoverNothingTellsCandidatesApart(t *testing.T) {
+	const line = "dtctl --context c repo-scope set checkout --service-name checkout"
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": `{"k8s.namespace.name":"payments","service.name":"checkout","records":"90"},` +
+		`{"k8s.namespace.name":"staging","service.name":"checkout","records":"80"}`}))
+	repo := chdirCheckoutRepo(t)
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.Len(t, report.Candidates, 2)
+	for _, c := range report.Candidates {
+		require.Empty(t, c.SetCommand)
+	}
+	require.True(t, strings.HasSuffix(suggestions[0], ": "+line), suggestions[0])
+	notes := repoScopeSharedNameNotes(report)
+	require.Len(t, notes, 1)
+	require.NotContains(t, suggestions, notes[0], "there is no set line to leave the name out of")
+
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, ":\n  "+line+"\n")
+	require.NotContains(t, stdout, "no binding selects this candidate alone")
+	require.NotContains(t, stdout, notes[0])
+
+	runSetCommand(t, line)
+	require.Equal(t, []string{"checkout"}, loadScopeFile(t, repo).Entries(repoScopeTestHost)[0].ServiceNames)
+}

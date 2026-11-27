@@ -1,0 +1,1001 @@
+package reposcope
+
+import (
+	"fmt"
+	"io/fs"
+	"maps"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// fixture loads testdata/repos/<name> as a repository root. Fixtures spell
+// .git as _git, because git refuses to commit a path named .git.
+func fixture(t *testing.T, name string) fstest.MapFS {
+	t.Helper()
+	root := filepath.Join("testdata", "repos", name)
+	fsys := fstest.MapFS{}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if parts[0] == "_git" {
+			parts[0] = ".git"
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		fsys[strings.Join(parts, "/")] = &fstest.MapFile{Data: data}
+		return nil
+	})
+	require.NoError(t, err)
+	return fsys
+}
+
+// tokenLines renders tokens as "kind value source", one per token, so a
+// fixture's expectations read like the repository they describe.
+func tokenLines(tokens []token) []string {
+	out := make([]string, len(tokens))
+	for i, tk := range tokens {
+		out[i] = fmt.Sprintf("%s %s %s", tk.kind, tk.value, tk.source())
+	}
+	return out
+}
+
+func TestExtract_Fixtures(t *testing.T) {
+	dockerfile := &fstest.MapFile{Data: []byte("FROM scratch\n")}
+	webproxy := []string{
+		"dir webproxy webproxy/",
+		"workload webproxy deploy/webproxy/deployment.yaml:4",
+		"namespace edge deploy/webproxy/deployment.yaml:5",
+		"image webproxy deploy/webproxy/deployment.yaml:11",
+		"artifact webproxy-app webproxy/build.gradle.kts:6",
+	}
+	widget := []string{"chart widget-detect server/helm/Chart.yaml:2", "project platform-widget settings.gradle.kts:1"}
+	tests := []struct {
+		name string
+		// extra are files added to the fixture.
+		extra    fstest.MapFS
+		dir      string
+		unit     string
+		tokens   []string
+		dropped  []string
+		sharedBy []string
+	}{
+		{
+			name: "single-go",
+			dir:  ".",
+			unit: ".",
+			tokens: []string{
+				"entrypoint checkout Dockerfile:4",
+				"workload checkout deploy/k8s/deployment.yaml:4",
+				"namespace payments deploy/k8s/deployment.yaml:5",
+				"image checkout deploy/k8s/deployment.yaml:12",
+				"service-name checkout deploy/k8s/deployment.yaml:15",
+				"module checkout go.mod:1",
+				"remote checkout-service .git/config:6",
+			},
+		},
+		{
+			// No build file at or above the directory but the root's: the
+			// root is the unit, and the directory's own name joins it. The
+			// ledger manifest has no unit named like it and stays at the
+			// root; the checkout one belongs to services/checkout.
+			name: "monorepo-three",
+			dir:  "services/ledger",
+			unit: ".",
+			tokens: []string{
+				"dir ledger services/ledger/",
+				"workload ledger-close deploy/ledger/cronjob.yaml:4",
+				"namespace shop deploy/ledger/cronjob.yaml:5",
+				"image ledger deploy/ledger/cronjob.yaml:14",
+				"service-name ledger-close deploy/ledger/cronjob.yaml:17",
+				"module shop go.mod:1",
+				"remote shop .git/config:2",
+			},
+		},
+		{
+			name: "monorepo-three",
+			dir:  "services/checkout/internal",
+			unit: "services/checkout",
+			tokens: []string{
+				"dir checkout services/checkout/",
+				"workload checkout deploy/checkout/deployment.yaml:4",
+				"namespace shop deploy/checkout/deployment.yaml:5",
+				"image checkout deploy/checkout/deployment.yaml:11",
+				"entrypoint checkout-api services/checkout/Dockerfile:3",
+			},
+		},
+		{
+			name:   "helm-unrendered",
+			dir:    ".",
+			unit:   ".",
+			tokens: []string{"chart billing chart/Chart.yaml:2"},
+		},
+		{
+			name:   "camel-case",
+			dir:    "dotnet",
+			unit:   "dotnet",
+			tokens: []string{"assembly invoice-renderer dotnet/InvoiceRenderer.csproj"},
+		},
+		{
+			name:   "camel-case",
+			dir:    "java",
+			unit:   "java",
+			tokens: []string{"artifact payment-service java/pom.xml:8"},
+		},
+		{
+			name:   "camel-case",
+			dir:    "python",
+			unit:   "python",
+			tokens: []string{"project fraud-scoring python/pyproject.toml:5"},
+		},
+		{
+			name:   "no-signals",
+			dir:    ".",
+			unit:   ".",
+			tokens: []string{},
+		},
+		{
+			// One deployable (server holds the chart): the build is the
+			// one unit wherever discovery runs in it, and no module's
+			// directory name is sent. The settings file's include( spans
+			// several lines.
+			name:   "gradle-one-chart",
+			dir:    "server",
+			unit:   ".",
+			tokens: widget,
+		},
+		{
+			// A Dockerfile in the deployable does not split the build.
+			name:   "gradle-one-chart",
+			extra:  fstest.MapFS{"server/Dockerfile": dockerfile},
+			dir:    "logic-widget/src/main/java",
+			unit:   ".",
+			tokens: widget,
+		},
+		{
+			// Two deployables, each claimed by a manifest: each is a unit
+			// covering the modules it depends on.
+			name:   "gradle-multi",
+			dir:    "webproxy",
+			unit:   "webproxy",
+			tokens: webproxy,
+		},
+		{
+			// Only webproxy depends on the api module.
+			name:   "gradle-multi",
+			dir:    "webproxy-api",
+			unit:   "webproxy",
+			tokens: webproxy,
+		},
+		{
+			// Both depend on the core module: discovery runs for each
+			// deployable, and sends nothing for the module itself.
+			name:     "gradle-multi",
+			dir:      "webproxy-core/src/main/kotlin",
+			unit:     ".",
+			tokens:   []string{},
+			sharedBy: []string{"admin", "webproxy"},
+		},
+		{
+			// The settings directory is the whole build, which no entry
+			// of one deployable covers.
+			name:     "gradle-multi",
+			dir:      ".",
+			unit:     ".",
+			tokens:   []string{},
+			sharedBy: []string{"admin", "webproxy"},
+		},
+		{
+			// buildSrc is never entered: its settings file names the
+			// build logic, not the build, so it is the build's directory.
+			name:     "gradle-multi",
+			dir:      "buildSrc",
+			unit:     ".",
+			tokens:   []string{},
+			sharedBy: []string{"admin", "webproxy"},
+		},
+		{
+			// No module is deployed by name or by what it holds, so the
+			// build is the one unit, and app is not sent.
+			name: "gradle-app",
+			dir:  "app/src/main/java",
+			unit: ".",
+			tokens: []string{
+				"workload orders-mobile deploy/deployment.yaml:4",
+				"namespace orders deploy/deployment.yaml:5",
+				"image orders-mobile deploy/deployment.yaml:11",
+				"project orders-mobile settings.gradle.kts:1",
+			},
+		},
+		{
+			// A .git file points outside the repository: no remote.
+			name:   "worktree-gitfile",
+			dir:    ".",
+			unit:   ".",
+			tokens: []string{"module orders go.mod:1"},
+		},
+		{
+			// test.Dockerfile, deployment-e2e.yaml, test/, testdata/, e2e/
+			// and examples/ are not read; the dev overlay is. The smoke
+			// Job is read, but its test names are held back. (The fixture
+			// cannot hold a Dockerfile.test: .gitignore drops *.test.)
+			name: "test-noise",
+			dir:  ".",
+			unit: ".",
+			tokens: []string{
+				"entrypoint platform-service Dockerfile:3",
+				"workload platform-service deploy/deployment.yaml:4",
+				"namespace platform deploy/deployment.yaml:5",
+				"image platform-service deploy/deployment.yaml:11",
+				"namespace platform deploy/deployment.yaml:17",
+				"workload platform-service deploy/overlays/dev/deployment.yaml:4",
+				"namespace dev deploy/overlays/dev/deployment.yaml:5",
+				"module platform-service go.mod:1",
+			},
+			dropped: []string{"test-platform-service-smoke", "test-runner"},
+		},
+		{
+			// examples/ is on the way to the directory discovery was
+			// asked about, so it is read.
+			name: "test-noise",
+			dir:  "examples/checkout",
+			unit: "examples/checkout",
+			tokens: []string{
+				"dir checkout examples/checkout/",
+				"workload checkout examples/checkout/deploy.yaml:4",
+				"namespace shop examples/checkout/deploy.yaml:5",
+				"module checkout examples/checkout/go.mod:1",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"@"+tt.dir, func(t *testing.T) {
+			fsys := fixture(t, tt.name)
+			maps.Copy(fsys, tt.extra)
+			s, err := extract(fsys, tt.dir)
+			require.NoError(t, err)
+			assert.Equal(t, tt.unit, s.unit)
+			assert.Equal(t, tt.tokens, tokenLines(s.tokens))
+			assert.Equal(t, tt.dropped, s.dropped)
+			assert.Equal(t, tt.sharedBy, s.sharedBy)
+		})
+	}
+}
+
+func TestExtract_TokensCarryTheirVariants(t *testing.T) {
+	s, err := extract(fixture(t, "camel-case"), "java")
+	require.NoError(t, err)
+	require.Len(t, s.tokens, 1)
+	assert.Equal(t, []string{"payment-service", "payment_service", "payment.service", "paymentservice", "paymentService"}, s.tokens[0].variants,
+		"the repository's own spelling comes last")
+}
+
+func TestExtract_Limits(t *testing.T) {
+	// conf/ fills the cap before anything after it is reached.
+	overTheCap := func(files map[string]string) fstest.MapFS {
+		fsys := fstest.MapFS{}
+		for i := 0; i <= maxFiles; i++ {
+			fsys[fmt.Sprintf("conf/f%04d.yaml", i)] = &fstest.MapFile{Data: []byte("a: b\n")}
+		}
+		for name, data := range files {
+			fsys[name] = &fstest.MapFile{Data: []byte(data)}
+		}
+		return fsys
+	}
+	t.Run("too many files", func(t *testing.T) {
+		s, err := extract(overTheCap(map[string]string{
+			"deploy/zz.yaml": "kind: Deployment\nmetadata:\n  name: after-the-cap\n",
+		}), ".")
+		require.NoError(t, err)
+		assert.Empty(t, s.tokens)
+		assert.True(t, s.capped, "stopping at the cap is reported")
+	})
+	t.Run("a repository under the cap is read whole", func(t *testing.T) {
+		fsys := overTheCap(nil)
+		delete(fsys, "conf/f0000.yaml")
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.False(t, s.capped)
+	})
+	t.Run("the cap never loses the unit", func(t *testing.T) {
+		// The unit of the directory discovery was asked about is found by
+		// looking at that directory and the ones above it, whatever the
+		// walk reached. Without it the whole repository was the unit, and a
+		// line for it would have covered every service in it.
+		fsys := overTheCap(map[string]string{
+			"go.mod":               "module example.invalid/platform\n",
+			"zz/go.mod":            "module example.invalid/ledger-writer\n",
+			"zz/internal/store.go": "package store\n",
+			"zy/go.mod":            "module example.invalid/another-unit\n",
+		})
+		for _, dir := range []string{"zz", "zz/internal"} {
+			s, err := extract(fsys, dir)
+			require.NoError(t, err)
+			assert.Equal(t, "zz", s.unit, dir)
+			assert.Equal(t, []string{"module ledger-writer zz/go.mod:1"}, tokenLines(s.tokens), dir)
+			assert.True(t, s.capped, dir)
+		}
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.Equal(t, ".", s.unit)
+		assert.Equal(t, []string{"module platform go.mod:1"}, tokenLines(s.tokens))
+	})
+	t.Run("the cap does not lead into a dependency tree", func(t *testing.T) {
+		s, err := extract(overTheCap(map[string]string{"vendor/thing/go.mod": "module example.invalid/vendored-thing\n"}), "vendor/thing")
+		require.NoError(t, err)
+		assert.Equal(t, ".", s.unit)
+		assert.Equal(t, []string{"dir thing vendor/thing/"}, tokenLines(s.tokens))
+	})
+	t.Run("too deep", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"a/b/c/d/e/leaf/go.mod":        {Data: []byte("module example.invalid/shallow-enough\n")},
+			"a/b/c/d/e/leaf/deeper/go.mod": {Data: []byte("module example.invalid/too-deep\n")},
+		}
+		s, err := extract(fsys, "a/b/c/d/e/leaf")
+		require.NoError(t, err)
+		assert.Equal(t, "a/b/c/d/e/leaf", s.unit)
+		assert.Equal(t, []string{
+			"dir leaf a/b/c/d/e/leaf/",
+			"module shallow-enough a/b/c/d/e/leaf/go.mod:1",
+		}, tokenLines(s.tokens))
+	})
+	t.Run("the directory asked about is read however deep", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"a/b/c/d/e/f/g/go.mod":                 {Data: []byte("module example.invalid/ledger-writer\n")},
+			"a/b/c/d/e/f/g/deployment.yaml":        {Data: []byte("kind: Deployment\nmetadata:\n  name: ledger-writer-v2\n")},
+			"a/b/c/d/e/f/g/deeper/deployment.yaml": {Data: []byte("kind: Deployment\nmetadata:\n  name: below-the-asked-directory\n")},
+			"a/b/c/d/e/f/other/go.mod":             {Data: []byte("module example.invalid/beside-it\n")},
+		}
+		s, err := extract(fsys, "a/b/c/d/e/f/g")
+		require.NoError(t, err)
+		assert.Equal(t, "a/b/c/d/e/f/g", s.unit)
+		assert.Equal(t, []string{
+			"workload below-the-asked-directory a/b/c/d/e/f/g/deeper/deployment.yaml:3",
+			"workload ledger-writer-v2 a/b/c/d/e/f/g/deployment.yaml:3",
+			"module ledger-writer a/b/c/d/e/f/g/go.mod:1",
+		}, tokenLines(s.tokens), "and so is what lies below it, while what lies beside it is too deep")
+		assert.False(t, s.capped)
+	})
+	t.Run("too large", func(t *testing.T) {
+		big := "module example.invalid/huge\n" + strings.Repeat("// padding\n", maxFileBytes/10)
+		s, err := extract(fstest.MapFS{"go.mod": {Data: []byte(big)}}, ".")
+		require.NoError(t, err)
+		assert.Empty(t, s.tokens)
+	})
+	t.Run("dependency trees are not entered", func(t *testing.T) {
+		fsys := fstest.MapFS{}
+		for dir := range skippedDirs {
+			fsys[dir+"/sub/package.json"] = &fstest.MapFile{Data: []byte(`{"name": "vendored-thing"}`)}
+		}
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.Empty(t, s.tokens)
+	})
+}
+
+// openedFS records the files that are opened.
+type openedFS struct {
+	fstest.MapFS
+	opened map[string]bool
+}
+
+func (f openedFS) Open(name string) (fs.File, error) {
+	f.opened[name] = true
+	return f.MapFS.Open(name)
+}
+
+// The files read in place of the ones the walk did not reach count toward
+// the same bound: a directory that itself holds more build files than
+// discovery reads must not be read past it, and the unit is still found.
+func TestExtract_TheCapBoundsWhatIsRead(t *testing.T) {
+	sources := func(f openedFS) (n int) {
+		for name := range f.opened {
+			if sourceFor(name) != nil {
+				n++
+			}
+		}
+		return n
+	}
+	many := func(fsys fstest.MapFS, n int, name string, data string) {
+		for i := range n {
+			fsys[fmt.Sprintf(name, i)] = &fstest.MapFile{Data: []byte(data)}
+		}
+	}
+	t.Run("build files in the directory itself", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+25, "p%04d.csproj", "<Project/>\n")
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.True(t, s.capped)
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
+	t.Run("build files of the unit after the cap", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+100, "a/f%04d.yaml", "a: b\n")
+		many(fsys.MapFS, 500, "zz/p%04d.csproj", "<Project/>\n")
+		fsys.MapFS["zz/go.mod"] = &fstest.MapFile{Data: []byte("module example.invalid/ledger-writer\n")}
+		s, err := extract(fsys, "zz")
+		require.NoError(t, err)
+		assert.True(t, s.capped)
+		assert.Equal(t, "zz", s.unit)
+		assert.Contains(t, tokenLines(s.tokens), "module ledger-writer zz/go.mod:1")
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
+	t.Run("a build file the walk reached is read once", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+100, "a/f%04d.yaml", "a: b\n")
+		fsys.MapFS["Dockerfile"] = &fstest.MapFile{Data: []byte("FROM scratch\nENTRYPOINT [\"/app/order-api\"]\n")}
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.True(t, s.capped)
+		assert.Equal(t, []string{"entrypoint order-api Dockerfile:2"}, tokenLines(s.tokens))
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
+	t.Run("more build files above than discovery reads", func(t *testing.T) {
+		fsys := openedFS{fstest.MapFS{}, map[string]bool{}}
+		many(fsys.MapFS, maxFiles+25, "p%04d.csproj", "<Project/>\n")
+		fsys.MapFS["zz/go.mod"] = &fstest.MapFile{Data: []byte("module example.invalid/ledger-writer\n")}
+		s, err := extract(fsys, "zz")
+		require.NoError(t, err)
+		assert.Equal(t, "zz", s.unit, "the directory's own files are read before those above it")
+		assert.Equal(t, maxFiles, sources(fsys))
+	})
+}
+
+// Discovery asked about a directory reads what lies below it, to the same
+// depth it reads below the root, however deep the directory itself is.
+func TestExtract_ReadsBelowADeepDirectory(t *testing.T) {
+	fsys := fstest.MapFS{
+		"a/b/c/d/e/f/go.mod":                      {Data: []byte("module example.invalid/checkout\n")},
+		"a/b/c/d/e/f/deploy/deployment.yaml":      {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-api\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/deployment.yaml": {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-six-below\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/7/job.yaml":      {Data: []byte("kind: Job\nmetadata:\n  name: checkout-seven-below\n")},
+		"a/b/c/d/e/g/h/deployment.yaml":           {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-beside\n")},
+	}
+	p, err := PlanDiscovery(fsys, "a/b/c/d/e/f", nil)
+	require.NoError(t, err)
+	assert.Contains(t, p.Sent, "checkout-api")
+	assert.Contains(t, p.Sent, "checkout-six-below")
+	assert.NotContains(t, p.Sent, "checkout-seven-below")
+	assert.NotContains(t, p.Sent, "checkout-beside", "what lies beside the directory is still too deep")
+}
+
+// A walk that starts below the repository root counts its depth from where
+// it starts: a Gradle build six directories down is read with its modules.
+func TestListSourcesCountsDepthFromItsRoot(t *testing.T) {
+	fsys := fstest.MapFS{
+		"a/b/c/d/e/f/settings.gradle":                {Data: []byte("include ':app', ':lib'\n")},
+		"a/b/c/d/e/f/app/build.gradle":               {Data: []byte("dependencies {\n    implementation project(':lib')\n}\n")},
+		"a/b/c/d/e/f/lib/build.gradle":               {Data: []byte("plugins { id 'java-library' }\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/build.gradle":       {Data: []byte("\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/7/build.gradle":     {Data: []byte("\n")},
+		"a/b/c/d/e/f/lib/1/2/3/4/5/6/7/build.gradle": {Data: []byte("\n")},
+	}
+	files, capped, err := listSources(fsys, "a/b/c/d/e/f", "a/b/c/d/e/f/lib", func(f string) bool { return isGradleFile(path.Base(f)) })
+	require.NoError(t, err)
+	assert.False(t, capped)
+	assert.Equal(t, []string{
+		"a/b/c/d/e/f/1/2/3/4/5/6/build.gradle",
+		"a/b/c/d/e/f/app/build.gradle",
+		"a/b/c/d/e/f/lib/build.gradle",
+		"a/b/c/d/e/f/settings.gradle",
+	}, files)
+	b := gradleBuildAt(fsys, "a/b/c/d/e/f/lib")
+	require.NotNil(t, b)
+	assert.Equal(t, []string{"a/b/c/d/e/f/lib"}, b.modules["a/b/c/d/e/f/app"])
+}
+
+// A directory is compared in the composed form of its name, as an entry's
+// path is: a volume may hold the name decomposed where the caller composes
+// it.
+func TestListSourcesComparesComposedNames(t *testing.T) {
+	const decomposed, composed = "cafe\u0301", "caf\u00e9"
+	const below = "/1/2/3/4/5/6/7"
+	fsys := fstest.MapFS{decomposed + below + "/go.mod": {Data: []byte("module example.invalid/checkout\n")}}
+	files, _, err := listSources(fsys, ".", composed+below, func(string) bool { return true })
+	require.NoError(t, err)
+	assert.Equal(t, []string{decomposed + below + "/go.mod"}, files, "the directories on the way are entered however deep")
+}
+
+func TestExtract_TestContentIsNotRead(t *testing.T) {
+	dirs := []string{"Tests", "src/test/resources"}
+	for dir := range excludedDirs {
+		dirs = append(dirs, dir, "."+dir)
+	}
+	for _, dir := range dirs {
+		fsys := fstest.MapFS{dir + "/sub/package.json": {Data: []byte(`{"name": "stubbed-thing"}`)}}
+		s, err := extract(fsys, ".")
+		require.NoError(t, err)
+		assert.Empty(t, s.tokens, dir)
+	}
+}
+
+func TestExtract_ExcludedDirsOnThePathAreRead(t *testing.T) {
+	fsys := fstest.MapFS{
+		"examples/checkout/package.json":                {Data: []byte(`{"name": "checkout"}`)},
+		"examples/checkout/test/package.json":           {Data: []byte(`{"name": "checkout-harness"}`)},
+		"examples/checkout/deploy/deployment.yaml":      {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout\n")},
+		"examples/checkout/deploy/deployment-test.yaml": {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-load\n")},
+		"examples/ledger/package.json":                  {Data: []byte(`{"name": "ledger"}`)},
+	}
+	s, err := extract(fsys, "examples/checkout/deploy")
+	require.NoError(t, err)
+	assert.Equal(t, "examples/checkout", s.unit)
+	assert.Equal(t, []string{
+		"dir checkout examples/checkout/",
+		"workload checkout examples/checkout/deploy/deployment.yaml:3",
+		"package checkout examples/checkout/package.json:1",
+	}, tokenLines(s.tokens), "only the directories on the way are exempt, not what lies below them or test files in them")
+}
+
+func TestExtract_TestFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		test bool
+	}{
+		{"Dockerfile.test", true},
+		{"test.Dockerfile", true},
+		{"deployment-test.yaml", true},
+		{"deployment_e2e.yaml", true},
+		{"docker-compose.test.yml", true},
+		{"checkout.spec.yaml", true},
+		{"mock-deployment.yaml", true},
+		{"Billing.Tests.csproj", true},
+		{"Dockerfile", false},
+		{"deployment.yaml", false},
+		{"spec.yaml", false},
+		{"latest.yaml", false},
+		{"contest-deployment.yaml", false},
+		{"Dockerfile.dev", false},
+		{"go.mod", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.test, testFile(tt.name))
+		})
+	}
+}
+
+func TestExtract_Dockerfile(t *testing.T) {
+	tests := []struct {
+		name, dockerfile, want string
+	}{
+		{"exec-form binary", `ENTRYPOINT ["/usr/local/bin/order-api"]`, "order-api"},
+		{"a jar wins over the interpreter", `ENTRYPOINT ["java", "-Xmx512m", "-jar", "/app/billing-core.jar"]`, "billing-core"},
+		{"CMD extends ENTRYPOINT", "ENTRYPOINT [\"dotnet\"]\nCMD [\"Invoices.Web.dll\"]", "invoices-web"},
+		{"shell form", "CMD node dist/report-builder.js", "report-builder"},
+		{"an interpreter is skipped", `CMD ["python3", "scheduler.py"]`, "scheduler"},
+		{"what follows a flag may be its operand", `CMD ["python3", "-u", "scheduler.py"]`, ""},
+		{"a flag's operand is not a name", `CMD ["-c", "/etc/nginx/tenant-east.conf"]`, ""},
+		{"nor behind an entrypoint", "ENTRYPOINT [\"nginx\"]\nCMD [\"-c\", \"/etc/nginx/tenant-east.conf\"]", ""},
+		{"nor is a module an interpreter is told to run", `CMD ["python", "-m", "acme_secret_module"]`, ""},
+		{"nor inline code", `CMD ["python", "-c", "print(1)"]`, ""},
+		{"nor a directive in shell form", "CMD nginx -g daemon-off", ""},
+		{"nor a file an interpreter preloads", `CMD ["node", "--require", "./tracing.js", "ledger-writer.js"]`, ""},
+		{"nor what follows a supervisor's flag", `ENTRYPOINT ["tini", "-g", "--", "/app/order-api"]`, ""},
+		{"a bare -- is no flag", `ENTRYPOINT ["tini", "--", "/app/order-api"]`, "order-api"},
+		{"flags after the name do not unname it", `ENTRYPOINT ["/app/order-api", "--config", "/etc/tenant-east.yaml"]`, "order-api"},
+		{"a jar on the class path is not the artifact", `CMD ["java", "-cp", "/opt/lib/metrics-agent.jar", "com.example.Main"]`, ""},
+		{"a dll before any flag is the artifact", `CMD ["dotnet", "Invoices.Web.dll", "--urls", "http://0.0.0.0:8080"]`, "invoices-web"},
+		{"the last ENTRYPOINT counts", "ENTRYPOINT [\"/bin/first-thing\"]\nENTRYPOINT [\"/bin/second-thing\"]", "second-thing"},
+		{"nothing but an interpreter", `CMD ["bash"]`, ""},
+		{"a generic name is no token", `ENTRYPOINT ["/app/server"]`, ""},
+		{"a shell line in exec form is not a name", `CMD ["sh", "-c", "java -Dapi.key=secret123 -jar app.jar"]`, ""},
+		{"nor is one that runs a binary with a secret", `CMD ["sh", "-c", "/bin/order-api --db-pass=hunter2"]`, ""},
+		{"an assignment is not a name", "CMD API_KEY=secret123 /bin/order-api", "order-api"},
+		{"a flag that holds a jar is not the artifact", `ENTRYPOINT ["java", "-javaagent:/otel/opentelemetry-javaagent.jar", "-jar", "/app/billing-core.jar"]`, "billing-core"},
+		{"only a flag holds a jar", `ENTRYPOINT ["java", "-javaagent:/otel/opentelemetry-javaagent.jar"]`, ""},
+		{"a web server names nothing", `CMD ["nginx", "-g", "daemon off;"]`, ""},
+		{"a package script names nothing", `CMD ["npm", "start"]`, ""},
+		{"an application server names nothing", "CMD python -m uvicorn main:app", ""},
+		{"nor does its module file", `CMD ["gunicorn", "wsgi"]`, ""},
+		{"an entry file names nothing", "CMD node dist/index.js", ""},
+		{"a launch script names nothing", `ENTRYPOINT ["./run.sh"]`, ""},
+		{"what a launcher runs is read", `CMD ["uvicorn", "ledger.main:app"]`, "ledger"},
+		{"an interpreter is known by its stem", `CMD ["python3.12", "scheduler.py"]`, "scheduler"},
+		{"an array continued over lines", "ENTRYPOINT [\"java\", \\\n    \"-jar\", \\\r\n    \"/app/billing-core.jar\"]", "billing-core"},
+		{"shell form continued over lines", "CMD node \\\n    dist/report-builder.js", "report-builder"},
+		{"a quoted shell-form line names nothing", `CMD "/app/order-api" --verbose`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := dockerEntrypoint("FROM scratch\n"+tt.dockerfile+"\n", "Dockerfile")
+			assert.Equal(t, tt.want, got.value)
+		})
+	}
+}
+
+// What a Dockerfile's flags are given never leaves the machine: a
+// configuration file's name can identify a tenant, and it would count as the
+// unit's own name. Sent is every value the queries carry.
+func TestPlan_DockerfileFlagOperandsAreNotSent(t *testing.T) {
+	for _, dockerfile := range []string{
+		`CMD ["-c", "/etc/nginx/tenant-east.conf"]`,
+		"ENTRYPOINT [\"nginx\"]\nCMD [\"-c\", \"/etc/nginx/tenant-east.conf\"]",
+		`CMD ["python", "-m", "acme_secret_module"]`,
+		`CMD ["python", "-c", "print(1)"]`,
+		"CMD nginx -g daemon-off",
+		`CMD ["node", "--require", "./tracing.js", "server.js"]`,
+		`ENTRYPOINT ["tini", "-g", "--", "/app/order-api"]`,
+		"CMD python -m acme_secret_module",
+		`ENTRYPOINT ["--api-key", "SECRET999"]`,
+		`CMD ["gunicorn", "--host", "0.0.0.0"]`,
+		// An array continued on the next line is still an array, and a
+		// quoted script in shell form is one argument, not words.
+		"ENTRYPOINT [\"java\", \\\n  \"-Dapi.key=secret123\", \"-cp\", \"/app/lib\", \"com.example.Main\"]",
+		`CMD sh -c "java -Dapi.key=secret123 -jar /app/checkout.jar"`,
+		`CMD sh -c 'exec /app/order-api --db-pass hunter2'`,
+		`ENTRYPOINT ['/app/order-api']`,
+	} {
+		p, err := PlanDiscovery(fstest.MapFS{"Dockerfile": {Data: []byte("FROM scratch\n" + dockerfile + "\n")}}, ".", nil)
+		require.NoError(t, err)
+		assert.Empty(t, p.Sent, dockerfile)
+		assert.Empty(t, p.Queries, dockerfile)
+	}
+	p, err := PlanDiscovery(fstest.MapFS{"Dockerfile": {Data: []byte("FROM scratch\nENTRYPOINT [\"/app/order-api\", \"-c\", \"/etc/tenant-east.conf\"]\n")}}, ".", nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"order-api", "order.api", "order_api", "orderapi"}, p.Sent)
+	for _, q := range p.Queries {
+		assert.NotContains(t, q.DQL, "tenant", q.Purpose)
+	}
+}
+
+// Only the last stage of a Dockerfile is the image; what an earlier stage
+// runs is a build tool.
+func TestExtract_DockerfileReadsTheLastStage(t *testing.T) {
+	for name, tt := range map[string]struct {
+		dockerfile, want string
+		line             int
+	}{
+		"the build stage's entrypoint is not read": {
+			"FROM golang AS build\nENTRYPOINT [\"/bin/builder-tool\"]\nFROM scratch\nCOPY --from=build /out /\n", "", 0},
+		"the last stage's is": {
+			"FROM golang AS build\nENTRYPOINT [\"/bin/builder-tool\"]\nfrom scratch\nENTRYPOINT [\"/bin/order-api\"]\n", "order-api", 4},
+		"the same line in both stages is cited where it counts": {
+			"FROM golang AS build\nCMD [\"/bin/order-api\"]\nFROM scratch\nCMD [\"/bin/order-api\"]\n", "order-api", 4},
+		"no stage at all": {
+			"CMD [\"/bin/order-api\"]\n", "order-api", 1},
+		"an instruction after a continued one is cited on its own line": {
+			"FROM scratch\nRUN apk add \\\n    curl \\\n    jq\nENTRYPOINT [\"/bin/order-api\"]\n", "order-api", 5},
+		"a continued instruction is cited where it starts": {
+			"FROM scratch\nENTRYPOINT [ \\\n  \"/bin/order-api\"]\n", "order-api", 2},
+		"a FROM continued over lines starts a stage": {
+			"FROM golang AS build\nENTRYPOINT [\"/bin/builder-tool\"]\nFROM \\\n  scratch\n", "", 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, _ := dockerEntrypoint(tt.dockerfile, "Dockerfile")
+			assert.Equal(t, tt.want, got.value)
+			assert.Equal(t, tt.line, got.line)
+		})
+	}
+}
+
+func TestExtract_Gradle(t *testing.T) {
+	dockerfile := &fstest.MapFile{Data: []byte("FROM scratch\n")}
+	tests := []struct {
+		name     string
+		fsys     fstest.MapFS
+		dir      string
+		unit     string
+		tokens   []string
+		dropped  []string
+		sharedBy []string
+	}{
+		{
+			// Inside a settings build a module's build file names the
+			// build's one unit.
+			name: "Groovy DSL",
+			fsys: fstest.MapFS{
+				"settings.gradle":        {Data: []byte("rootProject.name = 'billing'\n")},
+				"invoicing/build.gradle": {Data: []byte("plugins { id 'java' }\n\narchivesBaseName = 'invoicing-service'\n")},
+			},
+			dir:    "invoicing",
+			unit:   ".",
+			tokens: []string{"artifact invoicing-service invoicing/build.gradle:3", "project billing settings.gradle:1"},
+		},
+		{
+			// Groovy's include and project(), a nested project path, and a
+			// module the settings file includes without a build file.
+			name: "Groovy references",
+			fsys: fstest.MapFS{
+				"settings.gradle":               {Data: []byte("include ':services:billing', ':services:orders'\ninclude ':libs:ledger-core', ':libs:audit'\n")},
+				"services/billing/build.gradle": {Data: []byte("dependencies {\n    implementation project(':libs:ledger-core')\n    // implementation project(':libs:audit')\n}\n")},
+				"services/billing/Dockerfile":   {Data: []byte("FROM scratch\n")},
+				"services/orders/Dockerfile":    {Data: []byte("FROM scratch\n")},
+			},
+			dir:    "libs/ledger-core/src",
+			unit:   "services/billing",
+			tokens: []string{"dir billing services/billing/"},
+		},
+		{
+			// Groovy's named path argument is a reference like the
+			// positional one.
+			name: "Groovy project(path:)",
+			fsys: fstest.MapFS{
+				"settings.gradle":       {Data: []byte("include ':checkout', ':ledger', ':core'\n")},
+				"checkout/build.gradle": {Data: []byte("dependencies {\n    implementation project(path: ':core')\n}\n")},
+				"checkout/Dockerfile":   dockerfile,
+				"ledger/build.gradle":   {Data: []byte("dependencies {\n    implementation project(':core')\n}\n")},
+				"ledger/Dockerfile":     dockerfile,
+				"core/build.gradle":     {Data: []byte("plugins { id 'java-library' }\n")},
+			},
+			dir:      "core",
+			unit:     ".",
+			tokens:   []string{},
+			sharedBy: []string{"checkout", "ledger"},
+		},
+		{
+			name: "Kotlin project(path =)",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":       {Data: []byte("include(\":checkout\", \":ledger\", \":core\")\n")},
+				"checkout/build.gradle.kts": {Data: []byte("dependencies {\n    implementation(project(path = \":core\"))\n}\n")},
+				"checkout/Dockerfile":       dockerfile,
+				"ledger/build.gradle.kts":   {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"ledger/Dockerfile":         dockerfile,
+			},
+			dir:      "core",
+			unit:     ".",
+			tokens:   []string{},
+			sharedBy: []string{"checkout", "ledger"},
+		},
+		{
+			// What only ledger's tests use is checkout's alone.
+			name: "a test configuration's reference",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":       {Data: []byte("include(\":checkout\", \":ledger\", \":core\")\n")},
+				"checkout/build.gradle.kts": {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"checkout/Dockerfile":       dockerfile,
+				"ledger/build.gradle.kts":   {Data: []byte("dependencies {\n    testImplementation(project(\":core\"))\n}\n")},
+				"ledger/Dockerfile":         dockerfile,
+			},
+			dir:    "core",
+			unit:   "checkout",
+			tokens: []string{"dir checkout checkout/"},
+		},
+		{
+			// The image a test module builds runs the tests: smoke-tests
+			// is no deployable, so checkout is the build's one.
+			name: "a test module with a Dockerfile",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":          {Data: []byte("include(\":checkout\", \":core\", \":smoke-tests\")\n")},
+				"checkout/build.gradle.kts":    {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"checkout/Dockerfile":          dockerfile,
+				"smoke-tests/build.gradle.kts": {Data: []byte("dependencies {\n    implementation(project(\":core\"))\n}\n")},
+				"smoke-tests/Dockerfile":       dockerfile,
+			},
+			dir:    "core",
+			unit:   ".",
+			tokens: []string{},
+		},
+		{
+			// Without a settings file every build file is a build.
+			name: "no settings file",
+			fsys: fstest.MapFS{
+				"services/billing/build.gradle": {Data: []byte("plugins { id 'java' }\n")},
+				"services/orders/build.gradle":  {Data: []byte("plugins { id 'java' }\n")},
+			},
+			dir:    "services/orders/src",
+			unit:   "services/orders",
+			tokens: []string{"dir orders services/orders/"},
+		},
+		{
+			name: "Kotlin DSL assignment",
+			fsys: fstest.MapFS{
+				"invoicing/build.gradle.kts": {Data: []byte("base {\n    archivesName = \"invoicing-service\"\n}\n")},
+			},
+			dir:    "invoicing",
+			unit:   "invoicing",
+			tokens: []string{"dir invoicing invoicing/", "artifact invoicing-service invoicing/build.gradle.kts:2"},
+		},
+		{
+			// The build root is the nearest settings file, not the
+			// repository root.
+			name: "build root below the repository root",
+			fsys: fstest.MapFS{
+				"go.mod":                  {Data: []byte("module example.invalid/tooling\n")},
+				"mobile/settings.gradle":  {Data: []byte("rootProject.name = 'orders-mobile'\n")},
+				"mobile/app/build.gradle": {Data: []byte("plugins { id 'com.android.application' }\n")},
+			},
+			dir:    "mobile/app/src/main",
+			unit:   "mobile",
+			tokens: []string{"dir mobile mobile/", "project orders-mobile mobile/settings.gradle:1"},
+		},
+		{
+			name: "a module's archives name is its build's",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":  {Data: []byte("rootProject.name = \"orders\"\n")},
+				"app/build.gradle.kts": {Data: []byte("base {\n    archivesName.set(\"orders-api\")\n}\n")},
+			},
+			dir:    "app",
+			unit:   ".",
+			tokens: []string{"artifact orders-api app/build.gradle.kts:2", "project orders settings.gradle.kts:1"},
+		},
+		{
+			name: "a one-line block",
+			fsys: fstest.MapFS{
+				"invoicing/build.gradle.kts": {Data: []byte("base { archivesName.set(\"invoicing-service\") }\n")},
+			},
+			dir:    "invoicing",
+			unit:   "invoicing",
+			tokens: []string{"dir invoicing invoicing/", "artifact invoicing-service invoicing/build.gradle.kts:1"},
+		},
+		{
+			// A directory with a build file of its own below a library
+			// module is its own unit, not the deployable that owns the
+			// library.
+			name: "a build unit below a library module",
+			fsys: fstest.MapFS{
+				"settings.gradle":                  {Data: []byte("rootProject.name = 'storefront'\ninclude ':app', ':web', ':core'\n")},
+				"app/build.gradle":                 {Data: []byte("dependencies {\n    implementation project(':core')\n}\n")},
+				"app/Dockerfile":                   dockerfile,
+				"web/build.gradle":                 {Data: []byte("plugins { id 'java' }\n")},
+				"web/Dockerfile":                   dockerfile,
+				"core/build.gradle":                {Data: []byte("plugins { id 'java-library' }\n")},
+				"core/tools/notifier/package.json": {Data: []byte(`{"name": "notifier"}`)},
+			},
+			dir:    "core/tools/notifier",
+			unit:   "core/tools/notifier",
+			tokens: []string{"dir notifier core/tools/notifier/", "package notifier core/tools/notifier/package.json:1"},
+		},
+		{
+			// A settings file may include a module the checkout does not
+			// hold. Nothing is deployed from a directory that is not there,
+			// whatever chart is named like it.
+			name: "an included module that is not on disk",
+			fsys: fstest.MapFS{
+				"settings.gradle":            {Data: []byte("rootProject.name = 'storefront'\ninclude ':checkout', ':ledger'\n")},
+				"charts/checkout/Chart.yaml": {Data: []byte("name: checkout\n")},
+				"charts/ledger/Chart.yaml":   {Data: []byte("name: ledger\n")},
+			},
+			dir:    ".",
+			unit:   ".",
+			tokens: []string{"chart checkout charts/checkout/Chart.yaml:1", "chart ledger charts/ledger/Chart.yaml:1", "project storefront settings.gradle:1"},
+		},
+		{
+			// Nor from a file that carries the module's name.
+			name: "an included module that is a file",
+			fsys: fstest.MapFS{
+				"settings.gradle":            {Data: []byte("rootProject.name = 'storefront'\ninclude ':checkout', ':ledger'\n")},
+				"checkout":                   {Data: []byte("x\n")},
+				"ledger":                     {Data: []byte("x\n")},
+				"charts/checkout/Chart.yaml": {Data: []byte("name: checkout\n")},
+				"charts/ledger/Chart.yaml":   {Data: []byte("name: ledger\n")},
+			},
+			dir:    ".",
+			unit:   ".",
+			tokens: []string{"chart checkout charts/checkout/Chart.yaml:1", "chart ledger charts/ledger/Chart.yaml:1", "project storefront settings.gradle:1"},
+		},
+		{
+			// A test module is part of its build, and its directory name is
+			// not sent.
+			name: "a test module",
+			fsys: fstest.MapFS{
+				"settings.gradle.kts":           {Data: []byte("rootProject.name = \"checkout\"\n")},
+				"test-harness/build.gradle.kts": {Data: []byte("plugins { java }\n")},
+			},
+			dir:    "test-harness",
+			unit:   ".",
+			tokens: []string{"project checkout settings.gradle.kts:1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := extract(tt.fsys, tt.dir)
+			require.NoError(t, err)
+			assert.Equal(t, tt.unit, s.unit)
+			assert.Equal(t, tt.tokens, tokenLines(s.tokens))
+			assert.Equal(t, tt.dropped, s.dropped)
+			assert.Equal(t, tt.sharedBy, s.sharedBy)
+		})
+	}
+}
+
+// listedFS records the directories that are listed.
+type listedFS struct {
+	fstest.MapFS
+	listed *[]string
+}
+
+func (f listedFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	*f.listed = append(*f.listed, name)
+	return f.MapFS.ReadDir(name)
+}
+
+// Resolving an entry with a path reads the Gradle build around the working
+// directory on every scoped query. Only that build's directory is walked, not
+// the repository from its root.
+func TestGradleBuildAtWalksOnlyTheBuild(t *testing.T) {
+	var listed []string
+	fsys := listedFS{fstest.MapFS{
+		"docs/guide/index.md":              {Data: []byte("x\n")},
+		"services/other/go.mod":            {Data: []byte("module example.invalid/other\n")},
+		"apps/shop/settings.gradle.kts":    {Data: []byte("include(\":web\", \":core\")\n")},
+		"apps/shop/web/build.gradle.kts":   {Data: []byte("dependencies { implementation(project(\":core\")) }\n")},
+		"apps/shop/core/build.gradle.kts":  {Data: []byte("plugins { java }\n")},
+		"apps/shop/build/build.gradle.kts": {Data: []byte("plugins { java }\n")},
+	}, &listed}
+	b := gradleBuildAt(fsys, "apps/shop/web")
+	require.NotNil(t, b)
+	assert.Equal(t, "apps/shop", b.dir)
+	assert.Equal(t, map[string][]string{"apps/shop/web": {"apps/shop/core"}, "apps/shop/core": nil}, b.modules)
+	assert.ElementsMatch(t, []string{"apps/shop", "apps/shop/web", "apps/shop/core"}, listed)
+
+	// A build inside a directory discovery never enters is none, as before.
+	require.Nil(t, gradleBuildAt(fstest.MapFS{
+		"vendor/lib/settings.gradle":   {Data: []byte("include ':a'\n")},
+		"vendor/lib/a/build.gradle":    {Data: []byte("\n")},
+		"build/gen/settings.gradle":    {Data: []byte("include ':a'\n")},
+		"node_modules/x/build.gradle":  {Data: []byte("\n")},
+		"node_modules/settings.gradle": {Data: []byte("\n")},
+	}, "vendor/lib/a"))
+}
+
+// noWalkFS fails the test when a directory is listed.
+type noWalkFS struct {
+	fstest.MapFS
+	t *testing.T
+}
+
+func (f noWalkFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	f.t.Errorf("listed %s", name)
+	return f.MapFS.ReadDir(name)
+}
+
+func TestGradleBuildAt(t *testing.T) {
+	t.Run("no settings file, no walk", func(t *testing.T) {
+		fsys := noWalkFS{fstest.MapFS{"web/package.json": {Data: []byte(`{"name": "storefront"}`)}}, t}
+		assert.Nil(t, gradleBuildAt(fsys, "web"))
+	})
+	t.Run("other sources do not count toward maxFiles", func(t *testing.T) {
+		fsys := fstest.MapFS{
+			"settings.gradle":        {Data: []byte("include ':invoicing'\n")},
+			"invoicing/build.gradle": {Data: []byte("plugins { id 'java' }\n")},
+		}
+		for i := range maxFiles {
+			fsys[fmt.Sprintf("conf/f%04d.yaml", i)] = &fstest.MapFile{Data: []byte("a: b\n")}
+		}
+		b := gradleBuildAt(fsys, "invoicing")
+		require.NotNil(t, b)
+		assert.Contains(t, b.modules, "invoicing")
+	})
+}
+
+// A namespace is never sent, so the test-name rule has nothing to hold back:
+// a test-named one stays in the evidence and is not reported as not sent.
+func TestExtract_TestNamedNamespaceIsKept(t *testing.T) {
+	s, err := extract(fstest.MapFS{"k8s.yaml": {Data: []byte(
+		"kind: Deployment\nmetadata:\n  name: payments\n  namespace: test-payments\n")}}, ".")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"workload payments k8s.yaml:3", "namespace test-payments k8s.yaml:4"}, tokenLines(s.tokens))
+	assert.Empty(t, s.dropped)
+}
+
+func TestExtract_ManifestKinds(t *testing.T) {
+	manifest := func(kind string) []byte {
+		return []byte("kind: " + kind + "\nmetadata:\n  name: invoice-worker\n")
+	}
+	for _, kind := range []string{"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Rollout"} {
+		s, err := extract(fstest.MapFS{"k8s.yaml": {Data: manifest(kind)}}, ".")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"workload invoice-worker k8s.yaml:3"}, tokenLines(s.tokens), kind)
+	}
+	for _, kind := range []string{"Service", "ConfigMap", "Ingress"} {
+		s, err := extract(fstest.MapFS{"k8s.yaml": {Data: manifest(kind)}}, ".")
+		require.NoError(t, err)
+		assert.Empty(t, s.tokens, kind)
+	}
+}

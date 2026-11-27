@@ -217,7 +217,7 @@ func TestResolveBreakpointRulesForEdit(t *testing.T) {
 		},
 	}
 
-	matches, description, allowDirectID, err := resolveBreakpointRulesForEdit(rules, "A.java:10")
+	matches, description, allowDirectID, err := resolveBreakpointRulesForEdit(rules, "A.java:10", "storefront")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestResolveBreakpointRulesForEdit(t *testing.T) {
 		t.Fatalf("unexpected location resolution result: len=%d desc=%q direct=%t", len(matches), description, allowDirectID)
 	}
 
-	matches, description, allowDirectID, err = resolveBreakpointRulesForEdit(rules, "bp-1")
+	matches, description, allowDirectID, err = resolveBreakpointRulesForEdit(rules, "bp-1", "storefront")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestResolveBreakpointRulesForEdit(t *testing.T) {
 		t.Fatalf("unexpected id resolution result: len=%d desc=%q direct=%t", len(matches), description, allowDirectID)
 	}
 
-	matches, description, allowDirectID, err = resolveBreakpointRulesForEdit(rules, "missing")
+	matches, description, allowDirectID, err = resolveBreakpointRulesForEdit(rules, "missing", "storefront")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

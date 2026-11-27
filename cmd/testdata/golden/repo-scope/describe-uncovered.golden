@@ -1,0 +1,5 @@
+Repo scope:     none
+Reason:         no entry covers "docs"; entries here cover services/checkout, services/ledger; pick one with --repo-scope <name>
+Environment:    abc12345.apps.dynatrace.com
+File:           .dtctl-repo-scope.yaml
+Entries:        checkout, ledger

@@ -1,0 +1,17 @@
+code: linked
+dir: services/checkout
+entry:
+  name: checkout
+  path: services/checkout
+  serviceNames[1]: checkout
+environment: abc12345.apps.dynatrace.com
+file: .dtctl-repo-scope.yaml
+filters:
+  logs: "service.name == \"checkout\""
+  spans: "service.name == \"checkout\""
+hosts[1]: abc12345.apps.dynatrace.com
+linked: true
+liveDebuggerFilters[1]:
+  - service.name[1]: checkout
+others[1]: ledger
+selected: directory

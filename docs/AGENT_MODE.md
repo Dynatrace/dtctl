@@ -86,6 +86,7 @@ Error codes are stable identifiers that agents can match on programmatically:
 | `validation_error` | Local input validation failed | Fix the file or flags |
 | `unknown_command` | Unknown command, resource type or flag | Follow the suggestion (a runnable command where dtctl can name one); re-read `dtctl commands` |
 | `context_error` | No active context, or the named context is missing | Select a context (`dtctl ctx <name>`) |
+| `repo_scope_segment_variable` | A query failed over a variable of a filter segment the repository's scope entry sent: one the entry gives no value, or one this query's data cannot supply. The message names the entry | Retry with `--no-repo-scope`; tell the user, who corrects the entry's `segments` in `.dtctl-repo-scope.yaml` |
 | `config_error` | The dtctl config could not be read or is invalid | Report it; needs human repair |
 | `spill_file_not_found` | The spilled result file is gone | `dtctl inspect --list`, or re-run the query |
 | `spill_file_unreadable` | The spill file exists but cannot be parsed | Re-run the query |
@@ -152,7 +153,7 @@ that do not parse the envelope:
 |---|---|---|
 | `0` | Success | -- |
 | `1` | General failure | every code not listed below |
-| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, `header_refused`, and `validation_error` for an empty flag value |
+| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, `header_refused`, and `validation_error` for an empty flag value, for a repo scope value or file that is refused, and for a breakpoint command's own refusals (a blank identifier, a misplaced `--enabled` value, `create breakpoint` in a workspace without filters) |
 | `3` | Not authenticated (HTTP 401) | `auth_required` |
 | `4` | Resource does not exist (HTTP 404) | `not_found` |
 | `5` | Not allowed (HTTP 403) | `permission_denied`, `insufficient_scope` |
@@ -297,6 +298,149 @@ and `note` says so, because a count over 2h reads exactly like a count over
 "window": {"from": "2026-01-01T08:00:00Z", "to": "2026-01-01T10:00:00Z", "span": "2h",
            "note": "the query names no window, so it read the default last 2h; widen it with fetch ..., from: now()-24h"}
 ```
+
+### Repo scope: `context.repo_scope`
+
+Inside a git repository linked to the entities that run its code by a
+`.dtctl-repo-scope.yaml` at its root (see `dtctl repo-scope --help`),
+`dtctl query` narrows `fetch logs` and
+`fetch spans` to the entry covering the working directory, by inserting one
+`| filter (...)` after the `fetch` stage. `wait query` and `verify query` do
+the same only under `--repo-scope <name>`: their answers are read by programs
+(an exit code, a canonical text, positions), so they apply no scope they were
+not asked for, and without the name they print one line on stderr when an
+entry covers the directory (`repo scope <name> covers this directory and is
+not applied: ...`). `dtctl query`'s envelope says what was applied;
+`wait query` and `verify query` have no agent envelope, and report the scope
+only in the stderr line every scoped run prints:
+
+```json
+"repo_scope": {"name": "checkout", "file": ".dtctl-repo-scope.yaml", "environment": "abc12345.apps.dynatrace.com",
+               "applied": true, "data_object": "logs",
+               "filter": "service.name == \"checkout\" or (k8s.namespace.name == \"payments\" and k8s.workload.name == \"checkout\")",
+               "code": "applied"}
+```
+
+and `context.suggestions` names the opt-out (`run unscoped: pass
+--no-repo-scope`). Under `--repo-scope <name>` every such suggestion says
+to put `--no-repo-scope` in the name's place, since the two flags exclude
+each other and dropping the name applies the covering entry. When an applied scope returns no records, the first
+suggestion is to run the same query with `--no-repo-scope`: a binding the
+records do not carry looks exactly like a quiet service. One suggestion says
+when nothing bounds an applied scope's scan, or, for a scan the limit
+stopped, points at the executor's scan-limit advice.
+
+`applied: true` means everything the entry holds went out as the entry holds
+it: its filter, and its filter segments when it references any. `applied:
+false` means the scope was not applied in full, and `code` and `reason` say
+why. `filter` is there only when the filter was inserted; without it the
+query text was sent exactly as typed, and it ran unscoped unless `segments`
+is there. An entry whose filter was refused still sends its filter segments,
+which `segments` lists and `reason` says, and it is not reported as applied
+because the rows are wider than the entry says. Neither is an entry one of
+whose segments `--segment` or `--segments-file` also gave (`user_segment`):
+that segment went out with the variables typed, not the ones committed, so
+`filter` and `segments` list what of the entry was still sent.
+
+| Code | The scope was not applied because |
+|---|---|
+| `not_fetch` | it does not start with `fetch <data object>` |
+| `unsupported_object` | repo scopes do not filter the fetched data object (they filter `logs` and `spans`) |
+| `no_binding` | the entry binds nothing that data object is filtered by; `reason` says which binding to add |
+| `user_filter` | a `filter`/`filterOut` stage compares a field the scope filters on, and the query's own filter wins |
+| `subquery` | the data object is fetched again inside `[...]`, which the scope cannot reach (a subquery on another data object, or literal `data` rows, does not refuse the scope and is not narrowed by it) |
+| `unscannable` | dtctl cannot read the text safely (an unterminated string or comment, unbalanced brackets, a single quote, a `#` outside a string, a fourth quote right after a triple-quoted string) |
+| `no_entry` | no entry covers the working directory; pick one with `--repo-scope <name>` |
+| `ambiguous_entry` | several entries cover the working directory as closely; `reason` names them; pick one with `--repo-scope <name>` |
+| `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
+| `segment_unavailable` | a filter segment the entry references could not be read (deleted, not shared with you, or the token lacks `storage:filter-segments:read`); `reason` names it |
+| `user_segment` | the command line gave a filter segment the entry references, and that one was sent as typed in place of the entry's; `reason` names it and says what of the entry was still sent (nothing, for an entry that references only segments when every one was given) |
+| `segments_not_sent` | the entry references only filter segments, and the command sends none (`verify query` checks the query text only) |
+
+An entry may also reference existing filter segments, which the query then
+sends as if `--segment` had been typed. `segments` lists the ones sent, each
+with its `id` and its `variables` by name:
+
+```json
+"repo_scope": {"name": "checkout", "file": ".dtctl-repo-scope.yaml", "environment": "abc12345.apps.dynatrace.com",
+               "applied": true, "data_object": "logs", "filter": "service.name == \"checkout\"",
+               "segments": [{"id": "Ab3dEf9hIjk", "variables": {"environment": ["production"]}}],
+               "code": "applied"}
+```
+
+`applied` is true when everything the entry holds went out with the query:
+its filter, and its segments when it references any. An entry that references
+only segments has no `filter`. When an entry has both and the filter could not
+be inserted, the segments are still sent, but the rows are wider than the
+file says, so `applied` is false: `code` is the refusal's (one of the codes
+above), `filter` is absent, `reason` ends with `the entry's filter segments
+were sent`, and `segments` lists them. A segment the
+command line also gives (`--segment`) is the caller's: it is sent with the
+caller's variables and is not listed under `segments`. A named `wait query`
+sends the segments too; a named `verify query` does not, and says so on
+stderr.
+
+When the scope file holds document keys this dtctl does not know (a typo, or a
+newer dtctl's), the entry still applies and `reason` names the keys. An unknown
+key inside an entry is `invalid_file`: it could be a constraint, so the entry
+is not applied without it.
+
+There is no `repo_scope` key at all outside a linked repository, in a
+repository whose file has no entry for the active context's environment, with
+`--no-repo-scope`, with `DTCTL_NO_REPO_SCOPE=1` and no `--repo-scope`; without
+`--repo-scope` in a context whose stability floor hides either repo-scope flag
+on the command (`min-stability: stable` without an exception for each); and in
+server mode, which has no working directory. Every run that resolved a scope
+also prints a line about it on stderr, in every mode.
+
+Naming an entry with `--repo-scope <name>` makes resolution an error rather
+than a notice: `not_found` for a name, file or environment that does not
+resolve (`suggestions` lists the names that do), `validation_error` for a scope
+file that fails validation or a working directory outside a git repository,
+and `capability_disabled` where the working directory is not available. An
+entry that resolves but cannot narrow the query is a `validation_error` too,
+and nothing is sent: the message names the code (`not_fetch`,
+`unsupported_object`, `no_binding`, `subquery` or `unscannable`) and the
+reason. `user_filter` is not an error: the query runs as typed, with
+`applied: false`, because the query's own filter on a scoped field is what was
+asked for. Nor is `verify query --repo-scope <name>` for an entry that holds
+only filter segments: it sends none, so it verifies the text as typed, exits
+by the verdict and says on stderr that the segments were not part of it
+(`segments_not_sent`). A segment the named entry references that cannot be read is a
+`validation_error` as well, and more segments than a query takes (ten, the
+entry's and `--segment`'s together) is an error in every case. A scoped query that fails keeps the query's own error code and
+position, which points into the text that was sent; `suggestions` shows that
+text and the `--no-repo-scope` retry, and a runnable repair among them is of
+the query as typed, with `--repo-scope <name>` when the run named one.
+
+`dtctl repo-scope discover` returns a list of reports as `result`, one per
+unit: one report in most repositories, and one per deployable from a
+directory several Gradle deployables share. `context.total` counts the
+reports, and a dry run's `result.payload` is the list of plans in the same
+way. A report's `verdict` is
+the overall answer and `verdicts` has one per kind of binding (`workload`,
+`serviceName`, `processGroup`, `service`). A per-kind verdict can be
+`ambiguous` while the overall one is `match`: a single candidate whose logs
+name two process groups is one candidate but two process groups. It is never
+the other way round: no kind is `match` unless the overall verdict is. Each
+candidate's `setCommand` is the line that saves it. A candidate without one
+either has no binding that selects it alone, or is one nothing shows to run
+this code: `indirect` gives the reason when only names that are not the
+unit's own matched it (a sidecar's image, a manifest not named like the
+unit), and `workloadUnnamed` is set when only its `service.name` matched and
+the repository does not name its workload. Such a candidate is never a
+`match`; ask the user, and if it does run this code, run
+`dtctl repo-scope discover --term <its workload or service name>`, which the
+candidate's note spells out. `suggestions` says what to do in every case. What qualifies a line (a binding it leaves out, the reason a
+candidate has none) is in the report's `notes` as well as in `suggestions`,
+so it is not lost where the report is read without the envelope.
+
+`dtctl create breakpoint` never sets workspace filters from a repo scope entry
+you did not name. Where an entry covers the working directory and the
+workspace holds other filters, a suggestion names the command that applies the
+entry; where the workspace has no filters, the `validation_error` names
+`--repo-scope <entry>` (see
+[Filters from the repo scope](LIVE_DEBUGGER.md#filters-from-the-repo-scope)).
 
 ### Result notes: samples and durations
 

@@ -1,0 +1,199 @@
+[
+  {
+    "environment": "abc12345.apps.dynatrace.com",
+    "dir": "services/refunds",
+    "unit": ".",
+    "verdict": "ambiguous",
+    "verdicts": {
+      "processGroup": "ambiguous",
+      "service": "none",
+      "serviceName": "ambiguous",
+      "workload": "ambiguous"
+    },
+    "candidates": [
+      {
+        "rank": 1,
+        "name": "refunds",
+        "clusterUid": "11111111-2222-3333-4444-555555555555",
+        "clusterName": "prod-eu",
+        "namespace": "payments",
+        "workload": "refunds",
+        "workloadShared": true,
+        "serviceName": "refunds",
+        "serviceNameShared": true,
+        "serviceNameOwn": true,
+        "processGroups": [
+          "PROCESS_GROUP-FEDCBA9876543210"
+        ],
+        "processGroupCount": 1,
+        "tier": "exact",
+        "spans": 500,
+        "logs": 7000,
+        "evidence": [
+          "k8s.cluster.uid \"11111111-2222-3333-4444-555555555555\" (k8s.cluster.name \"prod-eu\")",
+          "k8s.namespace.name \"payments\" from deploy/k8s/deployment.yaml:5",
+          "k8s.workload.name \"refunds\" from services/refunds/",
+          "service.name \"refunds\" from services/refunds/",
+          "500 spans, 7000 logs in 24h"
+        ],
+        "matchedDir": true
+      },
+      {
+        "rank": 2,
+        "name": "refunds",
+        "clusterRefused": "legacy-cluster",
+        "namespace": "payments",
+        "workload": "refunds",
+        "workloadShared": true,
+        "serviceName": "refunds",
+        "serviceNameShared": true,
+        "serviceNameOwn": true,
+        "tier": "exact",
+        "spans": 300,
+        "logs": 10,
+        "evidence": [
+          "k8s.cluster.uid \"legacy-cluster\" is not a cluster uid a scope file can hold",
+          "k8s.namespace.name \"payments\" from deploy/k8s/deployment.yaml:5",
+          "k8s.workload.name \"refunds\" from services/refunds/",
+          "service.name \"refunds\" from services/refunds/",
+          "300 spans, 10 logs in 24h"
+        ],
+        "matchedDir": true
+      },
+      {
+        "rank": 3,
+        "name": "refunds",
+        "clusterUid": "66666666-7777-8888-9999-000000000000",
+        "clusterName": "prod-us",
+        "withoutCluster": [
+          "logs"
+        ],
+        "namespace": "batch",
+        "workload": "refunds",
+        "serviceName": "refunds",
+        "serviceNameShared": true,
+        "serviceNameOwn": true,
+        "tier": "exact",
+        "spans": 200,
+        "logs": 60,
+        "evidence": [
+          "k8s.cluster.uid \"66666666-7777-8888-9999-000000000000\" (k8s.cluster.name \"prod-us\"); its logs carry none",
+          "k8s.workload.name \"refunds\" from services/refunds/",
+          "service.name \"refunds\" from services/refunds/",
+          "200 spans, 60 logs in 24h"
+        ],
+        "matchedDir": true
+      },
+      {
+        "rank": 4,
+        "name": "refunds",
+        "namespace": "tools",
+        "workload": "refunds",
+        "serviceName": "refunds",
+        "serviceNameShared": true,
+        "serviceNameOwn": true,
+        "processGroups": [
+          "PROCESS_GROUP-0000000000000002"
+        ],
+        "processGroupCount": 1,
+        "tier": "exact",
+        "spans": 100,
+        "logsByProcessGroup": 5012,
+        "evidence": [
+          "k8s.workload.name \"refunds\" from services/refunds/",
+          "service.name \"refunds\" from services/refunds/",
+          "100 spans in 24h",
+          "5012 logs in 24h carry its process group, none its workload or service name"
+        ],
+        "matchedDir": true
+      }
+    ],
+    "queries": [
+      {
+        "purpose": "spans by workload or service name",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "rows": 4
+      },
+      {
+        "purpose": "spans by workload or service name (sampled 1-in-100000 over 1h)",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "1h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "spans by workload or service name (sampled 1-in-100000 over 24h)",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "spans by workload or service name (sampled 1-in-1000 over 24h)",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 1000
+      },
+      {
+        "purpose": "logs by workload or service name",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "rows": 3
+      },
+      {
+        "purpose": "logs by workload or service name (sampled 1-in-100000 over 1h)",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "1h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "logs by workload or service name (sampled 1-in-100000 over 24h)",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "logs by workload or service name (sampled 1-in-1000 over 24h)",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")) or contains(k8s.workload.name, \"checkout\") or contains(k8s.workload.name, \"refunds\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\", \"refunds\")) or in(service.name, array(\"checkout\", \"refunds\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\") or contains(workloadSegments, \"-refunds-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 1000
+      },
+      {
+        "purpose": "services by entity name",
+        "dataObject": "dt.entity.service",
+        "dql": "fetch dt.entity.service, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\") or matchesValue(entity.name, \"*refunds*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
+        "skipped": true
+      },
+      {
+        "purpose": "process groups by entity name",
+        "dataObject": "dt.entity.process_group",
+        "dql": "fetch dt.entity.process_group, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\") or matchesValue(entity.name, \"*refunds*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
+        "skipped": true
+      },
+      {
+        "purpose": "logs by process group",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(\"PROCESS_GROUP-0000000000000002\"))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200",
+        "rows": 1
+      }
+    ],
+    "sent": [
+      "checkout",
+      "refunds"
+    ],
+    "notes": [
+      "candidate 4 has spans, but no logs carry its k8s.workload.name or service.name; its logs carry the process group, so a process-group binding is what reaches them"
+    ]
+  }
+]

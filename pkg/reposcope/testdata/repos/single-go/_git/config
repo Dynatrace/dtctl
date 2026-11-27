@@ -1,0 +1,7 @@
+[core]
+	repositoryformatversion = 0
+[remote "upstream"]
+	url = https://git.example.invalid/vendor/checkout-fork.git
+[remote "origin"]
+	url = git@git.example.invalid:acme/checkout-service.git
+	fetch = +refs/heads/*:refs/remotes/origin/*

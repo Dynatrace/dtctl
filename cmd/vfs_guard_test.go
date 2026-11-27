@@ -57,15 +57,17 @@ var hostFileAccessAllowlist = map[string]string{
 
 	// Test-only helper: golden files are repository state, read and written by
 	// the test suite, never by a command.
-	"cmd/testutil/golden.go": "golden-file helper for tests — repository state, not reachable from a command",
+	"cmd/testutil/golden.go":  "golden-file helper for tests — repository state, not reachable from a command",
+	"cmd/testutil/helpers.go": "temp-file helper for tests, in the test's own temp directory; not reachable from a command",
 
 	// Spill machinery writes results to, and lists them from, a host directory
 	// dtctl chooses. It requires the HostDiskSpill capability, which embedded
 	// callers do not grant: a spilled file would outlive the request on the
 	// server's disk and the path returned would be unreadable by the caller.
-	"pkg/output/spill.go":      "writes/prunes dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
-	"pkg/output/spill_list.go": "enumerates dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
-	"pkg/inspect/reader.go":    "streams a spilled result file from the host disk; `inspect` is blocked in a service and nothing spills there",
+	"pkg/output/spill.go":        "writes/prunes dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
+	"pkg/output/spill_list.go":   "enumerates dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
+	"pkg/output/spill_stream.go": "streams rows into a temp file in dtctl's own spill directory (HostDiskSpill capability, never granted embedded)",
+	"pkg/inspect/reader.go":      "streams a spilled result file from the host disk; `inspect` is blocked in a service and nothing spills there",
 
 	// The usage ledger is a counter file dtctl keeps in its own XDG state
 	// directory for a context that opted in. Recording needs the
@@ -81,12 +83,18 @@ var hostFileAccessAllowlist = map[string]string{
 	"pkg/plugin/plugin.go":    "stats plugin executables on the host PATH (PluginDispatch capability, never granted embedded)",
 	"pkg/skills/installer.go": "installs skill files for locally installed assistants — host state, and `skills` is blocked in a service",
 
+	// The repo scope file is found by walking up from the working directory
+	// to the enclosing git repository: the CLI's own host state.
+	"pkg/reposcope/store.go": "the repo scope file (.dtctl-repo-scope.yaml) is host state found by walking up from the working directory — reachable only with the HostWorkingDirectory capability, which embedded callers do not grant, and `repo-scope` is blocked in a service",
+
 	// The seam itself: osFS is what "the host filesystem" means.
 	"pkg/vfs/vfs.go": "the vfs seam's own host-filesystem implementation",
 }
 
 // hostFileAccessCalls are the direct host-filesystem entry points that bypass
-// the vfs seam. os.Stdin/os.Stdout/os.Stderr are deliberately absent: the
+// the vfs seam: the calls that read or write a file, and the ones that reach
+// one without them (a directory as an fs.FS, a temp file renamed into place,
+// an inspection that does not follow links). os.Stdin/os.Stdout/os.Stderr are deliberately absent: the
 // stream seam swaps those variables per invocation (see stdio.go), so using
 // them is correct. Opening "/dev/stdin" as a *path* is not — that reaches the
 // process's real fd 0, past the redirection, and does not exist on Windows.
@@ -97,6 +105,10 @@ var hostFileAccessCalls = []string{
 	"os.OpenFile(",
 	"os.Create(",
 	"os.ReadDir(",
+	"os.DirFS(",
+	"os.OpenRoot(",
+	"os.CreateTemp(",
+	"os.Lstat(",
 	`"/dev/stdin"`,
 }
 

@@ -1,0 +1,16 @@
+Name:           checkout
+Path:           whole repository
+Environment:    abc12345.apps.dynatrace.com
+File:           .dtctl-repo-scope.yaml
+Workloads:      payments/checkout in cluster 11111111-2222-3333-4444-555555555555
+Cluster:        narrows the workloads only: service names and process groups select records of every cluster
+Service names:  checkout
+Process groups: PROCESS_GROUP-FEDCBA9876543210
+Filters:
+  fetch logs   | filter (in(dt.entity.process_group, array("PROCESS_GROUP-FEDCBA9876543210")) or service.name == "checkout" or (k8s.cluster.uid == "11111111-2222-3333-4444-555555555555" and k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))
+  fetch spans  | filter (service.name == "checkout" or (k8s.cluster.uid == "11111111-2222-3333-4444-555555555555" and k8s.namespace.name == "payments" and k8s.workload.name == "checkout"))
+Live Debugger filters:
+  k8s.namespace.name:payments,k8s.workload.name:checkout
+  service.name:checkout
+  dt.entity.process_group:PROCESS_GROUP-FEDCBA9876543210
+  not narrowed by cluster: the filters include the same workload in other clusters

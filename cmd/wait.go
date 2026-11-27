@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 	"github.com/Dynatrace/dtctl/pkg/util/template"
 	"github.com/Dynatrace/dtctl/pkg/wait"
@@ -152,6 +154,50 @@ Examples:
 			if err != nil {
 				return err
 			}
+
+			// The command line is checked by now: what follows reads the
+			// entry's segments from the environment.
+			//
+			// A scope is applied only when it is named. Without a name the
+			// wait is the one it always was, and says in one line when the
+			// directory's entry would have narrowed it. A quiet wait prints
+			// no such line, so it does not look for the entry either.
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+			invocation := cmdContext(cmd)
+			ctx := invocation
+			if !quiet {
+				if hint := repoScopeHint(cmd, cfg, query, true); hint != "" {
+					output.FprintInfo(currentStderr(ctx), "%s", hint)
+				}
+			}
+			// --timeout bounds the whole wait, so for a scope that has
+			// segments to read the deadline starts before the reads. The
+			// waiter applies the same duration to this context, and the
+			// earlier deadline is the one that holds. A wait without such a
+			// scope keeps the waiter's deadline alone.
+			if timeout > 0 && scoped.readsSegments() {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+			// Read once here, however often the wait polls.
+			if err := scoped.checkSegments(ctx, c); err != nil {
+				// Only the deadline set above is the wait's timeout. A read
+				// that ended on the client's own, or on the invocation's, is
+				// the failed read checkSegments says it is.
+				if invocation.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					if !quiet {
+						fmt.Fprintf(currentStderr(ctx), "Timeout reached before the first attempt: %v\n", err)
+					}
+					return &silentExitError{code: 1, reason: "wait: timeout"}
+				}
+				return err
+			}
+			segments := scoped.withSegments(nil)
+			scoped.announce(&queryLimits)
 			fetchTimeoutSeconds, _ := cmd.Flags().GetInt32("fetch-timeout-seconds")
 			defaultTimeframeStart, _ := cmd.Flags().GetString("default-timeframe-start")
 			defaultTimeframeEnd, _ := cmd.Flags().GetString("default-timeframe-end")
@@ -169,6 +215,11 @@ Examples:
 				DefaultTimeframeEnd:    defaultTimeframeEnd,
 				Locale:                 locale,
 				Timezone:               timezone,
+				// The waiter calls this on every attempt; zero rows are the
+				// condition not met yet, so only the scan-cap line applies
+				// here, and the outcome names the scope once below.
+				OnResult: scoped.noticeScanCap,
+				Segments: segments,
 				// ShowProgress is left false: the waiter drives its own per-attempt
 				// progress output on stderr, and a per-query progress bar (plus a
 				// completion summary per attempt) would fight it.
@@ -176,7 +227,7 @@ Examples:
 
 			// Create wait config
 			waitConfig := wait.WaitConfig{
-				Query:        query,
+				Query:        scoped.Query,
 				Condition:    condition,
 				Timeout:      timeout,
 				MaxAttempts:  maxAttempts,
@@ -185,6 +236,10 @@ Examples:
 				OutputFormat: outputFormat(cmdContext(cmd)),
 				Quiet:        quiet,
 				Verbose:      verbose,
+				// A query the platform refuses for good ends the wait. Under a
+				// scope the text it refused is not the one typed, and the cause
+				// may be the entry's, so the scope words it.
+				ExplainError: scoped.wrapError,
 				ProgressOut:  currentStderr(cmdContext(cmd)),
 				Out:          currentStdout(cmdContext(cmd)),
 			}
@@ -193,9 +248,16 @@ Examples:
 			executor := newDQLExecutorFromConfig(cmdContext(cmd), cfg, c)
 			waiter := wait.NewQueryWaiter(executor, waitConfig)
 
-			result, err := waiter.Wait(cmdContext(cmd))
+			result, err := waiter.Wait(ctx)
 			if err != nil && err != context.DeadlineExceeded {
 				return fmt.Errorf("wait failed: %w", err)
+			}
+
+			// A refused query is not an outcome of the condition. The waiter
+			// printed it, as the scope words it (ExplainError). Neither is a
+			// wait that ended before its first attempt: nothing was compared.
+			if result.Err == nil && result.Attempts > 0 {
+				scoped.noticeWaitOutcome(result.Success, result.RecordCount)
 			}
 
 			// Print results if output format specified and condition was met
@@ -248,6 +310,7 @@ Examples:
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
+	addRepoScopeFlags(c, namedRepoScopeUsage, "")
 	rejectEmptyFlag(c, "file")
 	return c
 }

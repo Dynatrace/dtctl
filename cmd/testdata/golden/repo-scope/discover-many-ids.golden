@@ -1,0 +1,13 @@
+Unit: .
+
+#  CLUSTER  WORKLOAD           SERVICE NAME  PROCESS GROUP                   SERVICE                                                      TIER
+1  -        payments/checkout  checkout      PROCESS_GROUP-FEDCBA9876543210  SERVICE-000000000000C000,SERVICE-000000000000C001 +198 more  exact
+   k8s.namespace.name "payments" from deploy/k8s/deployment.yaml:5
+   k8s.workload.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   service.name "checkout" from deploy/k8s/deployment.yaml:4, deploy/k8s/deployment.yaml:11, go.mod:1
+   5400000 spans in 24h
+
+Verdict: match: workload, service name, process group
+3 of 11 queries ran in 0.6s. No repo scope was saved. Save it with:
+  dtctl --context c repo-scope set checkout --namespace payments --workload checkout
+Note: candidate 1 has spans, but no logs in 24h carry its k8s.workload.name, service.name or process group, so a scoped fetch logs returns nothing

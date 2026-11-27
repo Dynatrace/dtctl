@@ -21,8 +21,7 @@ func TestPromptCallSitesAreKnown(t *testing.T) {
 	known := map[string]string{
 		"auth.go:authConfirmFunc":                              "auth login's consent prompt: asks only when stdin is a terminal file, which a service never has, and auth is blocked in the engine",
 		"usage.go:runUsageReset":                               "usage reset --yes",
-		"create_breakpoints.go:newCreateBreakpointCmd":         "--yes",
-		"update_breakpoints.go:newUpdateBreakpointCmd":         "--yes",
+		"breakpoint_helpers.go:applyWorkspaceFiltersWithDeps":  "create breakpoint --yes, update breakpoint --yes",
 		"delete_breakpoints.go:runDeleteAllBreakpointsWithOps": "delete breakpoint --yes",
 		"delete_breakpoints.go:runDeleteBreakpointRowsWithOps": "delete breakpoint --yes",
 		"get_anomalydetector.go:newDeleteAnomalyDetectorCmd":   "--yes",

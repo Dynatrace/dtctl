@@ -1,0 +1,276 @@
+package cmd
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
+)
+
+// Running a proposed line is the confirmation, so a line binds only what
+// discovery verified selects the candidate and nothing else. Each row is a
+// report discovery can produce and the line its first candidate gets.
+func TestRepoScopeSetLine(t *testing.T) {
+	const (
+		uid = "11111111-2222-3333-4444-555555555555"
+		svc = "SERVICE-0000000000000001"
+		pg  = "PROCESS_GROUP-0000000000000001"
+	)
+	for _, tc := range []struct {
+		name   string
+		report reposcope.DiscoveryReport
+		want   string
+		notes  []string
+	}{
+		{
+			// The record filter compares service.name to the sent names
+			// only, so nothing looked for other workloads that report a
+			// name the candidate merely carries, and the bindings of an
+			// entry are alternatives: the name would select all of them.
+			name: "a service name the repository did not name is not bound",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ClusterUID: uid, Namespace: "payments", Workload: "checkout", ServiceName: "gateway", Tier: "exact", Spans: 10},
+			}},
+			want: "dtctl repo-scope set checkout --cluster-uid " + uid + " --namespace payments --workload checkout",
+		},
+		{
+			// The bindings of an entry are alternatives, so a service name
+			// beside a workload would also select that name in every other
+			// cluster and namespace, now or later.
+			name: "a workload binding stands alone",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ClusterUID: uid, Namespace: "payments", Workload: "checkout", ServiceName: "checkout", Tier: "exact", Spans: 10},
+			}},
+			want: "dtctl repo-scope set checkout --cluster-uid " + uid + " --namespace payments --workload checkout",
+		},
+		{
+			name: "a service name the repository named is",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ServiceName: "checkout", Tier: "exact", Spans: 10},
+			}},
+			want: "dtctl repo-scope set checkout --service-name checkout",
+		},
+		{
+			// A query that did not answer could have found a second
+			// candidate with this service name or these ids.
+			name: "a partial report binds the workload only",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Partial: true, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", Namespace: "payments", Workload: "checkout", ServiceName: "checkout", Tier: "exact", Spans: 10,
+					ProcessGroups: []string{pg}, LogsByProcessGroup: 7},
+			}},
+			want: "dtctl repo-scope set checkout --namespace payments --workload checkout",
+			notes: []string{"candidate 1's line leaves --process-group out, and with it the 7 logs found by process group: " +
+				"the result is partial, and a candidate it did not see could share its service name or ids"},
+		},
+		{
+			name: "a partial report binds no ids",
+			report: reposcope.DiscoveryReport{Partial: true, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", Tier: "exact", ProcessGroups: []string{pg}, Services: []string{svc}},
+			}},
+			notes: []string{"candidate 1 has no set line: the result is partial, and a candidate it did not see could share its service name or ids, " +
+				"so only --namespace with --workload is proposed, and no workload binding selects it"},
+		},
+		{
+			name: "nor a service name alone",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Partial: true, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ServiceName: "checkout", Tier: "exact", Spans: 10},
+			}},
+			notes: []string{"candidate 1 has no set line: the result is partial, and a candidate it did not see could share its service name or ids, " +
+				"so only --namespace with --workload is proposed, and no workload binding selects it"},
+		},
+		{
+			// Both names are withheld as shared, and the ids are the other
+			// candidate's too: nothing selects this one alone.
+			name: "ids another candidate carries are not bound",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", Namespace: "payments", Workload: "checkout", WorkloadShared: true, ServiceName: "checkout", ServiceNameShared: true,
+					Tier: "exact", Spans: 10, Logs: 10, ProcessGroups: []string{pg}, Services: []string{svc}},
+				{Rank: 2, Name: "checkout", ClusterUID: uid, Namespace: "payments", Workload: "checkout", WorkloadShared: true, ServiceName: "checkout", ServiceNameShared: true,
+					Tier: "exact", Spans: 5, Services: []string{svc}},
+			}},
+			notes: []string{"candidate 1 has no set line: its records name no cluster, and another candidate runs the same namespace and workload in one, so a binding without --cluster-uid would select both; to bind the workload in every cluster, leave --cluster-uid out of that candidate's line"},
+		},
+		{
+			name: "ids of its own are",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ServiceName: "checkout", ServiceNameShared: true, Tier: "exact", Spans: 10, Logs: 10, ProcessGroups: []string{pg}, Services: []string{svc}},
+				{Rank: 2, Name: "checkout", ServiceName: "checkout", ServiceNameShared: true, Namespace: "payments", Workload: "checkout", Tier: "exact", Spans: 5,
+					Services: []string{"SERVICE-0000000000000002"}},
+			}},
+			want: "dtctl repo-scope set checkout --process-group " + pg + " --service " + svc,
+		},
+		{
+			name: "an id two candidates carry selects both",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ServiceName: "checkout", ServiceNameShared: true, Tier: "exact", Spans: 10, Services: []string{svc}},
+				{Rank: 2, Name: "checkout", ServiceName: "checkout", ServiceNameShared: true, Namespace: "payments", Workload: "checkout", Tier: "exact", Spans: 5, Services: []string{svc}},
+			}},
+			notes: []string{"candidate 1 has no set line: candidate 2 carries one of its entity ids, so a binding by id would select both"},
+		},
+		{
+			// A scope filters spans by the service id and logs by the
+			// process group. An entry of process groups alone binds nothing
+			// for the spans that found the candidate.
+			name: "ids that leave out the spans that found it are not bound",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", ServiceName: "checkout", ServiceNameShared: true, Tier: "exact", Spans: 10, ProcessGroups: []string{pg}},
+				{Rank: 2, Name: "checkout", ServiceName: "checkout", ServiceNameShared: true, Namespace: "payments", Workload: "checkout", Tier: "exact", Spans: 5},
+			}},
+			notes: []string{"candidate 1 has no set line: its spans carry no dt.entity.service, the id a scope filters spans by, so a binding by id would leave them out"},
+		},
+		{
+			name: "nor ids that leave out its logs",
+			report: reposcope.DiscoveryReport{Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", Workload: "checkout", Tier: "exact", Spans: 10, Logs: 4, Services: []string{svc}},
+			}},
+			notes: []string{"candidate 1 has no set line: its logs carry no dt.entity.process_group, the id a scope filters logs by, so a binding by id would leave them out"},
+		},
+		{
+			// "pay" inside "prepaymentgateway" is no evidence that the
+			// entity runs this code.
+			name: "an entity matched inside a longer word gets no line",
+			report: reposcope.DiscoveryReport{Sent: []string{"pay"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "pay", Tier: "substring", Services: []string{svc}},
+			}},
+			notes: []string{"candidate 1 has no set line: it matched only inside a longer name, which is too weak a tie to bind it by entity id"},
+		},
+		{
+			name: "an entity matched by a whole segment does",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "checkout", Tier: "segment", Services: []string{svc}},
+			}},
+			want: "dtctl repo-scope set checkout --service " + svc,
+		},
+		{
+			// set would refuse the line, so the part a scope file cannot
+			// hold is left out and named.
+			name: "a workload a scope file cannot hold is left out",
+			report: reposcope.DiscoveryReport{Sent: []string{"BillingEngine"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "billingengine", Namespace: "Payments", Workload: "BillingEngine", ServiceName: "BillingEngine", Tier: "exact", Spans: 10},
+			}},
+			want:  "dtctl repo-scope set billingengine --service-name BillingEngine",
+			notes: []string{`candidate 1's line leaves --namespace Payments --workload BillingEngine out, which a scope file cannot hold: workloads[0] namespace "Payments" is not a Kubernetes namespace name`},
+		},
+		{
+			// Without a workload the name is all a line could bind, and a
+			// name nothing looked for selects records nothing checked.
+			name: "a candidate without a workload is not bound by a name the repository did not name",
+			report: reposcope.DiscoveryReport{Sent: []string{"checkout"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "gateway", ServiceName: "gateway", Tier: "exact", Spans: 10, Services: []string{svc}},
+			}},
+			want: "dtctl repo-scope set gateway --service " + svc,
+		},
+		{
+			// No name discovery sends is one a scope file refuses; the
+			// check holds should that ever change.
+			name: "a service name a scope file cannot hold gets no line",
+			report: reposcope.DiscoveryReport{Sent: []string{`pay"roll`}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "pay-roll", ServiceName: `pay"roll`, Tier: "exact", Spans: 10},
+			}},
+			notes: []string{`candidate 1 has no set line: a scope file cannot hold --service-name 'pay"roll': service-names[0] "pay\"roll" must not contain " or \`},
+		},
+		{
+			name: "an entity id a scope file cannot hold gets no line",
+			report: reposcope.DiscoveryReport{Sent: []string{"pay"}, Candidates: []reposcope.Candidate{
+				{Rank: 1, Name: "pay", Tier: "exact", Services: []string{"dt.smartscape.service-1234"}},
+			}},
+			notes: []string{`candidate 1 has no set line: a scope file cannot hold --service dt.smartscape.service-1234: services[0] "dt.smartscape.service-1234" is not a service id (SERVICE- and 16 hex digits)`},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.report
+			r.Unit, r.Dir = ".", "."
+			for i, c := range r.Candidates {
+				r.Candidates[i].SetCommand = repoScopeSetCommand(&r, c, nil)
+			}
+			require.Equal(t, tc.want, r.Candidates[0].SetCommand)
+			require.Equal(t, tc.notes, repoScopeNoLineNotes(&r))
+		})
+	}
+}
+
+// Lines for one unit are alternatives and may share a name; a line for
+// another unit of the run takes a name of its own, however many units want
+// the same one and however long the name is.
+func TestRepoScopeNamesClaim(t *testing.T) {
+	names := repoScopeNames{}
+	claim := func(name, unit string) string {
+		claimed, _ := names.claim(name, unit)
+		return claimed
+	}
+	require.Equal(t, "checkout", claim("checkout", "admin"))
+	require.Equal(t, "checkout", claim("checkout", "admin"), "the same unit's second candidate")
+	require.Equal(t, "web-checkout", claim("checkout", "web"))
+	require.Equal(t, "services-api-checkout", claim("checkout", "services/api"))
+	require.Equal(t, "web-checkout", claim("web-checkout", "web"), "its own name")
+	require.Equal(t, "2-web-checkout", claim("checkout", "web_"), "named after its unit it is another unit's name, so it is numbered")
+
+	long := strings.Repeat("a", 63)
+	require.Equal(t, long, claim(long, "admin"))
+	second, holder := names.claim(long, "web")
+	require.Equal(t, "admin", holder)
+	require.NotEqual(t, long, second)
+	require.LessOrEqual(t, len(second), 63)
+	third := claim(long, "api")
+	require.NotContains(t, []string{long, second}, third)
+}
+
+// The line that selects every candidate reporting a service name is an entry
+// for that service, not for whichever candidate ranked first: it is named
+// after the service name, and covers the directory discovery ran for only
+// when that directory's name matched every candidate it selects.
+func TestRepoScopeSelectAllLineIsNamedAfterTheServiceName(t *testing.T) {
+	candidates := func(secondMatchedDir bool) []reposcope.Candidate {
+		return []reposcope.Candidate{
+			{Rank: 1, Name: "web", Workload: "web", ServiceName: "Checkout_API", ServiceNameShared: true, ServiceNameOwn: true, Tier: "exact", Spans: 10, MatchedDir: true},
+			{Rank: 2, Name: "jobs", Workload: "jobs", ServiceName: "Checkout_API", ServiceNameShared: true, ServiceNameOwn: true, Tier: "exact", Spans: 5, MatchedDir: secondMatchedDir},
+		}
+	}
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: "services/checkout", Sent: []string{"Checkout_API"}, Verdict: reposcope.VerdictAmbiguous,
+		Candidates: candidates(true)}
+	p := newRepoScopeProposal(r, nil, repoScopeNames{})
+	require.Len(t, p.selectAll, 1)
+	require.Equal(t, "dtctl repo-scope set checkout-api --service-name Checkout_API --path services/checkout", p.selectAll[0].line)
+
+	r.Candidates = candidates(false)
+	p = newRepoScopeProposal(r, nil, repoScopeNames{})
+	require.Equal(t, "dtctl repo-scope set checkout-api --service-name Checkout_API", p.selectAll[0].line,
+		"one of the candidates is tied to the repository, not to the directory")
+
+	// Another unit of the run has a line under that name.
+	names := repoScopeNames{}
+	names.claim("checkout-api", "admin")
+	r.Unit, r.Dir = "web", "web"
+	p = newRepoScopeProposal(r, nil, names)
+	require.Equal(t, "dtctl repo-scope set web-checkout-api --service-name Checkout_API --path web", p.selectAll[0].line)
+}
+
+// One line per shared service name, in the order of the best-ranked candidate
+// that reports each, and only for a name that is the unit's own.
+func TestRepoScopeSelectAllLinesFollowTheRanking(t *testing.T) {
+	candidate := func(rank int, workload, serviceName string, own bool) reposcope.Candidate {
+		return reposcope.Candidate{Rank: rank, Name: workload, Workload: workload, ServiceName: serviceName,
+			ServiceNameShared: true, ServiceNameOwn: own, Tier: "exact", Spans: 10}
+	}
+	r := &reposcope.DiscoveryReport{Unit: ".", Dir: ".", Sent: []string{"ledger", "checkout", "redis-cache"}, Verdict: reposcope.VerdictAmbiguous,
+		Candidates: []reposcope.Candidate{
+			candidate(1, "blue", "ledger", true),
+			candidate(2, "cache-a", "redis-cache", false),
+			candidate(3, "green", "checkout", true),
+			candidate(4, "teal", "ledger", true),
+			candidate(5, "cache-b", "redis-cache", false),
+			candidate(6, "red", "checkout", true),
+		}}
+	p := newRepoScopeProposal(r, nil, repoScopeNames{})
+	var lines []string
+	for _, a := range p.selectAll {
+		require.False(t, a.all)
+		lines = append(lines, a.line)
+	}
+	require.Equal(t, []string{
+		"dtctl repo-scope set ledger --service-name ledger",
+		"dtctl repo-scope set checkout --service-name checkout",
+	}, lines)
+}

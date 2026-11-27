@@ -261,6 +261,8 @@ tokens:
 
 Commit the file to version control without secrets -- each developer or CI system provides values via environment variables.
 
+A repository can also commit a `.dtctl-repo-scope.yaml` beside it, which links the repository to the services and workloads that run its code so that queries made from inside it are narrowed to them (see [REPO_SCOPE.md](REPO_SCOPE.md)). The two files are found differently: `.dtctl.yaml` is searched for in every parent up to `/`, while the scope file is read only from the root of the git repository around the working directory — the walk stops at the first `.git`.
+
 ### Config Search Order
 
 1. `--config` flag (explicit path)

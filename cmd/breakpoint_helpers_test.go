@@ -3,13 +3,19 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
 
@@ -152,59 +158,117 @@ func TestParseFilters(t *testing.T) {
 	}
 }
 
-func TestBuildWorkspaceFilterSets(t *testing.T) {
-	t.Run("valid single filter", func(t *testing.T) {
-		sets, err := buildWorkspaceFilterSets("k8s.namespace.name:prod")
+// filterOpsStub stands in for the Live Debugger handler behind
+// applyWorkspaceFilters, recording which calls were made.
+type filterOpsStub struct {
+	activeRules int
+	counted     bool
+	sent        []map[string]interface{}
+	updated     bool
+}
+
+func (s *filterOpsStub) deps() liveDebuggerDeps {
+	return liveDebuggerDeps{
+		getWorkspaceRules: func(_ *livedebugger.Handler, _ string) (map[string]interface{}, error) {
+			s.counted = true
+			rules := make([]interface{}, 0, s.activeRules)
+			for i := 0; i < s.activeRules; i++ {
+				rules = append(rules, map[string]interface{}{"id": fmt.Sprintf("bp-%d", i), "is_disabled": false})
+			}
+			return map[string]interface{}{"data": map[string]interface{}{"org": map[string]interface{}{
+				"workspace": map[string]interface{}{"rules": rules},
+			}}}, nil
+		},
+		updateWorkspaceFilters: func(_ *livedebugger.Handler, _ string, filterSets []map[string]interface{}) (map[string]interface{}, error) {
+			s.updated = true
+			s.sent = filterSets
+			return map[string]interface{}{}, nil
+		},
+	}
+}
+
+func TestApplyWorkspaceFilters(t *testing.T) {
+	sets := []map[string][]string{
+		{"k8s.workload.name": {"checkout"}, "k8s.namespace.name": {"payments"}},
+		{"service.name": {"checkout"}},
+	}
+	// run calls the helper on an invocation of its own, so the plain-mode
+	// switch and the answer typed at the prompt stay out of the process.
+	call := func(stub *filterOpsStub, plain bool, change workspaceFilterChange, answer string) (bool, string, error) {
+		var out bytes.Buffer
+		ctx := withInvocation(context.Background(), &invocation{
+			concurrent: true,
+			flags:      rootFlags{plainMode: plain},
+			stdin:      strings.NewReader(answer),
+			stdout:     &out,
+		})
+		change.creating = true
+		cancelled, err := applyWorkspaceFiltersWithDeps(ctx, nil, "ws-1", sets, change, stub.deps())
+		return cancelled, out.String(), err
+	}
+	run := func(t *testing.T, stub *filterOpsStub, plain bool, change workspaceFilterChange, answer string) (bool, string) {
+		t.Helper()
+		cancelled, out, err := call(stub, plain, change, answer)
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("applyWorkspaceFilters: %v", err)
 		}
-		if len(sets) != 1 {
-			t.Fatalf("expected 1 filter set, got %d", len(sets))
-		}
+		return cancelled, out
+	}
 
-		filtersField, ok := sets[0]["filters"].([]interface{})
-		if !ok || len(filtersField) != 0 {
-			t.Fatalf("expected empty filters slice, got %#v", sets[0]["filters"])
+	t.Run("a declined confirmation changes nothing", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 2}
+		cancelled, out := run(t, stub, false, workspaceFilterChange{}, "n\n")
+		if !cancelled || stub.updated {
+			t.Fatalf("cancelled=%t updated=%t, want a cancel and no update", cancelled, stub.updated)
 		}
-
-		labels, ok := sets[0]["labels"].([]map[string]interface{})
-		if !ok || len(labels) != 1 {
-			t.Fatalf("expected 1 label, got %#v", sets[0]["labels"])
-		}
-		if labels[0]["field"] != "k8s.namespace.name" {
-			t.Fatalf("unexpected field: %#v", labels[0]["field"])
-		}
-		values, ok := labels[0]["values"].([]string)
-		if !ok || len(values) != 1 || values[0] != "prod" {
-			t.Fatalf("unexpected values: %#v", labels[0]["values"])
+		if !strings.Contains(out, filterChangeConfirmMessage(2, true)) {
+			t.Fatalf("prompt = %q, want the creating confirmation for 2 breakpoints", out)
 		}
 	})
 
-	t.Run("multiple filters yield one set with multiple labels", func(t *testing.T) {
-		sets, err := buildWorkspaceFilterSets("k8s.namespace.name:prod,dt.entity.host:HOST-1")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	t.Run("an accepted confirmation sends every set", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 1}
+		if cancelled, _ := run(t, stub, false, workspaceFilterChange{}, "y\n"); cancelled {
+			t.Fatal("cancelled after the confirmation was accepted")
 		}
-		if len(sets) != 1 {
-			t.Fatalf("expected 1 filter set, got %d", len(sets))
-		}
-		labels, ok := sets[0]["labels"].([]map[string]interface{})
-		if !ok || len(labels) != 2 {
-			t.Fatalf("expected 2 labels, got %#v", sets[0]["labels"])
+		if want := livedebugger.BuildFilterSets(sets...); !reflect.DeepEqual(stub.sent, want) {
+			t.Fatalf("sent %#v, want %#v", stub.sent, want)
 		}
 	})
 
-	t.Run("invalid format returns error", func(t *testing.T) {
-		if _, err := buildWorkspaceFilterSets("no-separator"); err == nil {
-			t.Fatalf("expected error for invalid filter format")
+	t.Run("no active breakpoints asks nothing", func(t *testing.T) {
+		stub := &filterOpsStub{}
+		cancelled, out := run(t, stub, false, workspaceFilterChange{}, "")
+		if cancelled || !stub.counted || !stub.updated || out != "" {
+			t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want a silent count and an update", cancelled, stub.counted, stub.updated, out)
 		}
 	})
 
-	t.Run("empty input returns error", func(t *testing.T) {
-		if _, err := buildWorkspaceFilterSets(""); err == nil {
-			t.Fatalf("expected error for empty filter input")
+	for _, tt := range []struct {
+		name               string
+		plain, skipConfirm bool
+	}{
+		{"--yes skips the count", false, true},
+		{"a non-interactive run skips the count", true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &filterOpsStub{activeRules: 3}
+			cancelled, out := run(t, stub, tt.plain, workspaceFilterChange{skipConfirm: tt.skipConfirm}, "")
+			if cancelled || stub.counted || !stub.updated || out != "" {
+				t.Fatalf("cancelled=%t counted=%t updated=%t prompt=%q, want no count, no prompt and an update", cancelled, stub.counted, stub.updated, out)
+			}
+		})
+	}
+
+	// A prompt whose input ended, as from a closed pipe, has no yes.
+	t.Run("a change at a prompt whose input ended is cancelled", func(t *testing.T) {
+		stub := &filterOpsStub{activeRules: 1}
+		cancelled, _ := run(t, stub, false, workspaceFilterChange{}, "")
+		if !cancelled || stub.updated {
+			t.Fatalf("cancelled=%t updated=%t, want a cancel and no update", cancelled, stub.updated)
 		}
 	})
+
 }
 
 func TestFormatFilters(t *testing.T) {
@@ -442,20 +506,121 @@ func TestPrintGraphQLResponse_NilPayload(t *testing.T) {
 	}
 }
 
-func TestCurrentProjectPath(t *testing.T) {
-	originalCwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get cwd: %v", err)
+func TestResolveBreakpointWorkspace(t *testing.T) {
+	writeIsolatedConfig(t, safetyLevelConfig("http://127.0.0.1:1", "readonly"))
+	optInRepoScope(t)
+	cfg, err := loadConfig(context.Background())
+	require.NoError(t, err)
+	resolve := func(t *testing.T) breakpointWorkspace {
+		t.Helper()
+		c := &cobra.Command{}
+		c.SetContext(withInvocation(context.Background(), &invocation{caps: Capabilities{HostWorkingDirectory: true}}))
+		got, err := resolveBreakpointWorkspace(c, cfg)
+		require.NoError(t, err)
+		return got
 	}
-	defer func() { _ = os.Chdir(originalCwd) }()
-
-	tmp := t.TempDir()
-	if err := os.Chdir(tmp); err != nil {
-		t.Fatalf("failed to chdir: %v", err)
+	name := func(t *testing.T) string {
+		t.Helper()
+		got := resolve(t)
+		require.Empty(t, got.unusable)
+		return got.name
 	}
+	const origin = "[remote \"origin\"]\n\turl = https://example.invalid/shop/storefront.git\n"
 
-	if got := currentProjectPath(); got == "" || got == "no-project" {
-		t.Fatalf("expected project name from cwd, got %q", got)
+	t.Run("outside a checkout", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		got := name(t)
+		require.Equal(t, filepath.Base(cwd), got)
+	})
+	t.Run("no scope file", func(t *testing.T) {
+		chdirTestRepo(t, "")
+		chdirSubdir(t, "src")
+		got := name(t)
+		require.Equal(t, "src", got, "an unlinked checkout keeps the base name")
+	})
+	t.Run("a covering entry", func(t *testing.T) {
+		root := chdirTestRepo(t, breakpointScope)
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, filepath.Join("services", "ledger", "src"))
+		got := resolve(t)
+		require.Equal(t, "storefront/ledger", got.name)
+		require.Equal(t, "ledger", got.scope.Entry.Name)
+	})
+	t.Run("a directory no entry covers", func(t *testing.T) {
+		root := chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: ledger\n      path: services/ledger\n      service-names: [ledger]\n")
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, filepath.Join("docs", "src"))
+		got := name(t)
+		require.Equal(t, "storefront", got)
+	})
+	t.Run("a directory two entries tie on", func(t *testing.T) {
+		gradle := gradleMultiRepo(t)
+		root := chdirTestRepo(t, `environments:
+  127.0.0.1:
+    - name: webproxy
+      path: webproxy
+      service-names: [webproxy]
+    - name: admin
+      path: admin
+      service-names: [admin]
+`)
+		require.NoError(t, os.CopyFS(root, os.DirFS(gradle)))
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, filepath.Join("webproxy-core", "src"))
+		got := name(t)
+		require.Equal(t, "storefront", got, "a tie names no entry, and no directory's base name either")
+	})
+	t.Run("a worktree", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: ../storefront/.git/worktrees/wt\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, reposcope.FileName), []byte(breakpointScope), 0o644))
+		t.Chdir(root)
+		got := name(t)
+		require.Equal(t, filepath.Base(root)+"/checkout", got, "without a readable .git/config the checkout directory names the repository")
+	})
+	t.Run("a scope file with no entry for this environment", func(t *testing.T) {
+		root := chdirTestRepo(t, "environments:\n  other.example.invalid:\n    - name: ledger\n      service-names: [ledger]\n")
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, "src")
+		got := resolve(t)
+		require.Equal(t, "src", got.name, "a file written for another environment moves nobody's breakpoints")
+		require.Nil(t, got.scope)
+	})
+	t.Run("a scope file that does not load", func(t *testing.T) {
+		root := chdirTestRepo(t, "environments: [\n")
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte(origin), 0o644))
+		chdirSubdir(t, "src")
+		got := resolve(t)
+		require.Equal(t, "src", got.name)
+		require.True(t, strings.HasPrefix(got.unusable, reposcope.FileName+": not valid YAML"), got.unusable)
+		require.NotContains(t, got.unusable, root)
+		require.Error(t, got.requireScopeFile())
+	})
+
+	// An embedded invocation has no working directory of its own, so it never
+	// names its workspace after the server's.
+	for name, inv := range map[string]*invocation{
+		"without HostWorkingDirectory": {concurrent: true},
+		"serving a session":            {concurrent: true, caps: Capabilities{HostWorkingDirectory: true}, session: &Session{}},
+	} {
+		c := &cobra.Command{}
+		c.SetContext(withInvocation(context.Background(), inv))
+		got, err := resolveBreakpointWorkspace(c, cfg)
+		require.NoError(t, err)
+		require.Equal(t, breakpointWorkspace{name: "no-project"}, got, name)
+	}
+}
+
+func TestDirectoryWorkspace(t *testing.T) {
+	for dir, want := range map[string]string{
+		filepath.Join("home", "dev", "storefront"): "storefront",
+		string(filepath.Separator):                 "no-project",
+		".":                                        "no-project",
+		"":                                         "no-project",
+	} {
+		require.Equal(t, want, directoryWorkspace(dir), "%q", dir)
 	}
 }
 
@@ -551,7 +716,7 @@ func TestRunGetBreakpoints_TableView(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
 
-	if err := runGetBreakpointsWithDeps(nil, nil, deps); err != nil {
+	if err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps); err != nil {
 		t.Fatalf("runGetBreakpoints returned error: %v", err)
 	}
 
@@ -615,7 +780,7 @@ func TestRunGetBreakpoints_StructuredView(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
 
-	if err := runGetBreakpointsWithDeps(nil, nil, deps); err != nil {
+	if err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps); err != nil {
 		t.Fatalf("runGetBreakpoints returned error: %v", err)
 	}
 
@@ -683,7 +848,7 @@ func TestRunGetBreakpoints_AgentEnvelope(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
 
-	if err := runGetBreakpointsWithDeps(nil, nil, deps); err != nil {
+	if err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps); err != nil {
 		t.Fatalf("runGetBreakpoints returned error: %v", err)
 	}
 
@@ -711,7 +876,7 @@ func TestRunGetBreakpoints_GetWorkspaceRulesError(t *testing.T) {
 		return nil, os.ErrPermission
 	}
 
-	err := runGetBreakpointsWithDeps(nil, nil, deps)
+	err := runGetBreakpointsWithDeps(newGetBreakpointsCmd(), nil, deps)
 	if err == nil {
 		t.Fatalf("expected get workspace rules error")
 	}

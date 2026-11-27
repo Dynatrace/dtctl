@@ -3,9 +3,8 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/output"
+	"github.com/Dynatrace/dtctl/pkg/prompt"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 	"github.com/Dynatrace/dtctl/pkg/stability"
 )
@@ -49,6 +49,7 @@ type liveDebuggerDeps struct {
 	getOrCreateWorkspace   func(*livedebugger.Handler, string) (map[string]interface{}, string, error)
 	getWorkspaceRules      func(*livedebugger.Handler, string) (map[string]interface{}, error)
 	getRuleStatusBreakdown func(*livedebugger.Handler, string) (map[string]interface{}, error)
+	updateWorkspaceFilters func(*livedebugger.Handler, string, []map[string]interface{}) (map[string]interface{}, error)
 }
 
 func defaultLiveDebuggerDeps() liveDebuggerDeps {
@@ -64,6 +65,9 @@ func defaultLiveDebuggerDeps() liveDebuggerDeps {
 		},
 		getRuleStatusBreakdown: func(handler *livedebugger.Handler, ruleID string) (map[string]interface{}, error) {
 			return handler.GetRuleStatusBreakdown(ruleID)
+		},
+		updateWorkspaceFilters: func(handler *livedebugger.Handler, workspaceID string, filterSets []map[string]interface{}) (map[string]interface{}, error) {
+			return handler.UpdateWorkspaceFilters(workspaceID, filterSets)
 		},
 	}
 }
@@ -93,6 +97,14 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
+	// The workspace is resolved first: what is wrong with a name is said
+	// before what is wrong with a token.
+	ws, err := resolveBreakpointWorkspace(cmd, cfg)
+	if err != nil {
+		return err
+	}
+	workspace, warnings := ws.shown(), ws.readWarnings(cmdContext(cmd))
+
 	c, err := deps.newClient(cmdContext(cmd), cfg)
 	if err != nil {
 		return err
@@ -103,7 +115,7 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, ws.name)
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -132,12 +144,13 @@ func runGetBreakpointsWithDeps(cmd *cobra.Command, args []string, deps liveDebug
 	if err != nil {
 		return err
 	}
+	printWorkspaceName(cmdContext(cmd), workspace)
 
 	// This printer writes to rootCmd's writer rather than going through
 	// NewPrinter, so it opts into the get-wide --limit/--fields itself.
 	var printer output.Printer
 	if agentMode(cmdContext(cmd)) {
-		printer = shapeListOutput(cmdContext(cmd), output.NewAgentPrinter(currentStdoutOr(cmdContext(cmd), rootCmd.OutOrStdout()), &output.ResponseContext{}), "json", false)
+		printer = shapeListOutput(cmdContext(cmd), output.NewAgentPrinter(currentStdoutOr(cmdContext(cmd), rootCmd.OutOrStdout()), &output.ResponseContext{Warnings: warnings}), "json", false)
 	} else {
 		printer = shapeListOutput(cmdContext(cmd), newPrinterOpts(cmdContext(cmd), output.PrinterOptions{Format: outputFormat(cmdContext(cmd)), Writer: currentStdoutOr(cmdContext(cmd), rootCmd.OutOrStdout()), PlainMode: plainMode(cmdContext(cmd))}),
 			outputFormat(cmdContext(cmd)), output.IsTabularFormat(outputFormat(cmdContext(cmd)), plainMode(cmdContext(cmd))))
@@ -213,18 +226,6 @@ func breakpointRowFromRule(rule livedebugger.BreakpointRule) (breakpointRow, boo
 	return breakpointRow{ID: id, Filename: filename, Line: line, Active: !isDisabled, LogMessage: logMessage}, true
 }
 
-func currentProjectPath() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "no-project"
-	}
-	project := filepath.Base(cwd)
-	if project == "" || project == "." || project == string(filepath.Separator) {
-		return "no-project"
-	}
-	return project
-}
-
 func parseFilters(input string) (map[string][]string, error) {
 	filters := map[string][]string{}
 	parts := strings.Split(input, ",")
@@ -260,19 +261,6 @@ func parseFilters(input string) (map[string][]string, error) {
 	}
 
 	return filters, nil
-}
-
-// buildWorkspaceFilterSets parses a raw "key:value,key:value" filter string and
-// converts it into the GraphQL filter-set payload expected by
-// UpdateWorkspaceFilters. It is pure: no network calls and no side effects, so
-// callers (create and update) reuse it and run the network update at their own
-// call site.
-func buildWorkspaceFilterSets(raw string) ([]map[string]interface{}, error) {
-	parsed, err := parseFilters(raw)
-	if err != nil {
-		return nil, err
-	}
-	return livedebugger.BuildFilterSets(parsed), nil
 }
 
 // formatFilters renders parsed filters as a canonical, deterministic
@@ -315,21 +303,10 @@ func requireFiltersValue(filters string) error {
 	return nil
 }
 
-// countActiveWorkspaceBreakpoints returns how many enabled breakpoints currently
-// exist in the workspace. Disabled rules are excluded on purpose: a breakpoint
-// that reached its hit limit is auto-disabled by the runtime, so it should not
+// countActiveRules counts the enabled breakpoint rules in a GetWorkspaceRules
+// GraphQL response. Disabled rules are excluded on purpose: a breakpoint that
+// reached its hit limit is auto-disabled by the runtime, so it should not
 // inflate the confirmation count shown before workspace filters are changed.
-func countActiveWorkspaceBreakpoints(handler *livedebugger.Handler, workspaceID string) (int, error) {
-	resp, err := handler.GetWorkspaceRules(workspaceID)
-	if err != nil {
-		return 0, err
-	}
-	return countActiveRules(resp)
-}
-
-// countActiveRules counts the enabled (non-disabled) breakpoint rules in a
-// GetWorkspaceRules GraphQL response. Split out from the network call so the
-// active-only counting logic can be unit tested without a live handler.
 func countActiveRules(resp map[string]interface{}) (int, error) {
 	rules, err := livedebugger.ExtractWorkspaceRules(resp)
 	if err != nil {
@@ -344,6 +321,65 @@ func countActiveRules(resp map[string]interface{}) (int, error) {
 	return count, nil
 }
 
+// workspaceFilterChange is how applyWorkspaceFilters asks before it
+// changes a workspace's filters.
+type workspaceFilterChange struct {
+	// creating says the same operation also creates a breakpoint, for the
+	// prompt.
+	creating bool
+	// skipConfirm is --yes: nothing is counted and nobody is asked.
+	skipConfirm bool
+}
+
+// applyWorkspaceFilters replaces the workspace's filters with sets, one filter
+// set per map. It is the one place create and update breakpoint change
+// workspace filters.
+//
+// Changing them re-scopes every existing active breakpoint in the workspace,
+// not just one being created, so it confirms first. A non-interactive
+// (--plain/agent) run skips the confirmation: the user named the filters,
+// and a prompt in agent mode would land in the envelope on stdout. The extra
+// read that counts the active breakpoints is only paid when the run might
+// prompt.
+//
+// cancelled reports a confirmation the user declined; the workspace is
+// unchanged then, and the caller says so.
+func applyWorkspaceFilters(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, change workspaceFilterChange) (cancelled bool, err error) {
+	return applyWorkspaceFiltersWithDeps(ctx, handler, workspaceID, sets, change, defaultLiveDebuggerDeps())
+}
+
+func applyWorkspaceFiltersWithDeps(ctx context.Context, handler *livedebugger.Handler, workspaceID string, sets []map[string][]string, change workspaceFilterChange, deps liveDebuggerDeps) (bool, error) {
+	verbose := isDebugVerbose(ctx)
+
+	if !change.skipConfirm && !plainMode(ctx) {
+		rulesResp, err := deps.getWorkspaceRules(handler, workspaceID)
+		if err != nil {
+			return false, err
+		}
+		count, err := countActiveRules(rulesResp)
+		if err != nil {
+			return false, err
+		}
+		if count > 0 && !prompt.ConfirmWith(currentStdin(ctx), currentStdout(ctx), filterChangeConfirmMessage(count, change.creating)) {
+			return true, nil
+		}
+	}
+
+	updateResp, err := deps.updateWorkspaceFilters(handler, workspaceID, livedebugger.BuildFilterSets(sets...))
+	if err != nil {
+		if verbose {
+			_ = printGraphQLResponse(ctx, "updateWorkspaceV2", updateResp)
+		}
+		return false, err
+	}
+	if verbose {
+		if err := printGraphQLResponse(ctx, "updateWorkspaceV2", updateResp); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
 // filterChangeConfirmMessage builds the prompt shown before changing workspace
 // filters, which re-scopes every existing active breakpoint in the workspace.
 // creating indicates the same operation also creates a new breakpoint.
@@ -356,6 +392,29 @@ func filterChangeConfirmMessage(count int, creating bool) string {
 		return fmt.Sprintf("In addition to creating this breakpoint, this will change the workspace filters for %d active %s. Continue?", count, noun)
 	}
 	return fmt.Sprintf("This will change the workspace filters for %d active %s. Continue?", count, noun)
+}
+
+// breakpointNotFoundError is a breakpoint command that found no breakpoint
+// for the identifier it was given. It is a type so that the agent code is
+// not read off the message, which ends with the workspace, and the workspace
+// with whatever a directory is called.
+type breakpointNotFoundError struct{ msg string }
+
+func (e *breakpointNotFoundError) Error() string { return e.msg }
+
+// breakpointNotFound words a breakpointNotFoundError.
+func breakpointNotFound(format string, args ...interface{}) error {
+	return &breakpointNotFoundError{msg: fmt.Sprintf(format, args...)}
+}
+
+// requireBreakpointIdentifier refuses an identifier of nothing but spaces:
+// it names no breakpoint, and sent as a rule id it would be reported as
+// changed.
+func requireBreakpointIdentifier(identifier string) error {
+	if strings.TrimSpace(identifier) == "" {
+		return &invalidInputError{errors.New("the breakpoint identifier is empty: name a breakpoint by its id or as filename:line")}
+	}
+	return nil
 }
 
 func parseBreakpoint(input string) (string, int, error) {

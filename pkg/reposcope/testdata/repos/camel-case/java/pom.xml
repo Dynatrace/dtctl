@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <parent>
+    <groupId>invalid.example.acme</groupId>
+    <artifactId>acme-parent</artifactId>
+    <version>3</version>
+  </parent>
+  <artifactId>paymentService</artifactId>
+  <version>1.0.0</version>
+</project>

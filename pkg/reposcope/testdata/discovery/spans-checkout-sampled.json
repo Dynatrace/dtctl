@@ -1,0 +1,12 @@
+[
+  {
+    "k8s.namespace.name": "payments",
+    "k8s.workload.name": "checkout",
+    "service.name": "checkout",
+    "records": "17",
+    "serviceCount": "1",
+    "services": ["SERVICE-0123456789ABCDEF"],
+    "processGroupCount": "1",
+    "processGroups": ["PROCESS_GROUP-FEDCBA9876543210"]
+  }
+]

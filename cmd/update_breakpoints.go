@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -8,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
-	"github.com/Dynatrace/dtctl/pkg/prompt"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 	"github.com/Dynatrace/dtctl/pkg/safety"
 )
@@ -24,6 +25,7 @@ const (
 var updateBreakpointCmd = newUpdateBreakpointCmd()
 
 func newUpdateBreakpointCmd() *cobra.Command {
+	enabledFlag := &enabledFlagValue{}
 	c := &cobra.Command{
 		Use:     "breakpoint [<id|filename:line>]",
 		Aliases: []string{"breakpoints", "bp"},
@@ -34,6 +36,8 @@ or update workspace filters for the current project.
 Filters are workspace-scoped, so updating them with --filters also re-scopes
 every existing breakpoint in the workspace. When active breakpoints would be
 affected you are asked to confirm; pass --yes (-y) to skip the prompt.
+--repo-scope <name> sets them from an entry of the repository's
+.dtctl-repo-scope.yaml instead (see 'dtctl repo-scope describe <name>').
 
 Condition expressions (--condition):
   Conditions limit data collection to moments when the expression is true.
@@ -60,12 +64,17 @@ Examples:
   # Enable a breakpoint
 	 dtctl update breakpoint OrderController.java:306 --enabled true
 
-  # Disable a breakpoint
+  # Disable a breakpoint (name it before --enabled, or write --enabled=false:
+  # a boolean that follows the flag with no breakpoint named before it is
+  # refused, since it would be read as the identifier)
 	 dtctl update breakpoint OrderController.java:306 --enabled false
 
   # Update workspace filters
 	 dtctl update breakpoint --filters k8s.namespace.name:prod
 	 dtctl update breakpoint --filters k8s.namespace.name:prod,dt.entity.host:HOST-123
+
+  # Update workspace filters from a repo scope entry
+	 dtctl update breakpoint --repo-scope checkout
 `,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -80,29 +89,39 @@ Examples:
 
 			conditionChanged := cmd.Flags().Changed("condition")
 			logMessageChanged := cmd.Flags().Changed("log-message")
+			trailingArgs, err := enabledFlag.trailingValue(args, trailingArgs, filtersChanged)
+			if err != nil {
+				return err
+			}
 			enabled, enabledChanged, err := getOptionalBoolFlag(cmd, "enabled", trailingArgs)
 			if err != nil {
 				return err
 			}
 
-			if filtersChanged {
-				if err := requireFiltersValue(filters); err != nil {
+			scopeName, _ := cmd.Flags().GetString(repoScopeFlag)
+			if filtersChanged || (scopeName != "" && len(args) == 0) {
+				// --filters and --repo-scope are exclusive, so source names the
+				// one given.
+				source := "--filters"
+				if scopeName != "" {
+					source = "--" + repoScopeFlag
+				} else if err := requireFiltersValue(filters); err != nil {
 					return err
 				}
 				if conditionChanged || enabledChanged || logMessageChanged {
-					return fmt.Errorf("--filters cannot be combined with --condition, --log-message, or --enabled")
+					return fmt.Errorf("%s sets the workspace's filters, shared by every breakpoint in it; change --condition, --log-message, or --enabled in a separate call", source)
 				}
 				if len(args) > 0 {
-					return fmt.Errorf("--filters does not accept a breakpoint identifier")
+					return errors.New("--filters sets the workspace's filters, shared by every breakpoint in it; run it without the breakpoint identifier")
 				}
 
 				cfg, err := loadConfig(cmdContext(cmd))
 				if err != nil {
 					return err
 				}
-
-				ctx, err := cfg.CurrentContextObj()
-				if err != nil {
+				// Before the dry run returns: a preview for a context that
+				// does not exist would name the wrong workspace.
+				if _, err := cfg.CurrentContextObj(); err != nil {
 					return err
 				}
 
@@ -110,25 +129,45 @@ Examples:
 					return err
 				}
 
-				if dryRun(cmdContext(cmd)) {
+				ws, err := resolveBreakpointWorkspace(cmd, cfg)
+				if err != nil {
+					return err
+				}
+				if err := ws.requireScopeFile(); err != nil {
+					return err
+				}
+				workspace := ws.shown()
+
+				var sets []map[string][]string
+				var origin string // " from repo scope <name>", or empty
+				notes := ws.changeNotes()
+				if scopeName != "" {
+					var entryNotes []string
+					if sets, entryNotes, err = namedBreakpointFilters(ws, breakpointSelectors(cmdContext(cmd), cfg)); err != nil {
+						return err
+					}
+					origin = " from repo scope " + scopeName
+					notes = append(notes, entryNotes...)
+				} else {
 					parsed, err := parseFilters(filters)
 					if err != nil {
 						return err
 					}
-					return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update Live Debugger workspace filters (%s) (note: this also re-scopes existing breakpoints in the workspace)", formatFilters(parsed)))
+					sets = []map[string][]string{parsed}
+				}
+				// Said before the confirmation and before anything is sent.
+				ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), notes...)
+
+				if dryRun(ctx) {
+					return printBreakpointMessage(ctx, "update", fmt.Sprintf("Dry run: would update workspace %s's filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", workspace, origin, filterSetsSummary(sets)))
 				}
 
-				c, err := newClientFromConfig(cmdContext(cmd), cfg)
+				handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
 				if err != nil {
 					return err
 				}
 
-				handler, err := livedebugger.NewHandler(c, ctx.Environment)
-				if err != nil {
-					return err
-				}
-
-				workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
+				workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 				if err != nil {
 					if verbose {
 						_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -141,39 +180,18 @@ Examples:
 					}
 				}
 
-				filterSets, err := buildWorkspaceFilterSets(filters)
+				cancelled, err := applyWorkspaceFilters(ctx, handler, workspaceID, sets, workspaceFilterChange{skipConfirm: skipConfirm})
 				if err != nil {
 					return err
 				}
-
-				// Changing workspace filters re-scopes every existing active
-				// breakpoint in the workspace. Confirm first, unless --yes or a
-				// non-interactive (--plain/agent) context. The extra read is only
-				// paid when we might prompt.
-				if !skipConfirm && !plainMode(cmdContext(cmd)) {
-					count, err := countActiveWorkspaceBreakpoints(handler, workspaceID)
-					if err != nil {
-						return err
-					}
-					if count > 0 && !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), filterChangeConfirmMessage(count, false)) {
-						return printBreakpointMessage(cmdContext(cmd), "update", "Cancelled")
-					}
+				if cancelled {
+					return printBreakpointMessage(ctx, "update", "Cancelled")
 				}
 
-				updateResp, err := handler.UpdateWorkspaceFilters(workspaceID, filterSets)
-				if err != nil {
-					if verbose {
-						_ = printGraphQLResponse(cmdContext(cmd), "updateWorkspaceV2", updateResp)
-					}
-					return err
+				if scopeName != "" {
+					return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Updated Live Debugger workspace filters%s (%s)", origin, filterSetsSummary(sets)), workspace))
 				}
-				if verbose {
-					if err := printGraphQLResponse(cmdContext(cmd), "updateWorkspaceV2", updateResp); err != nil {
-						return err
-					}
-				}
-
-				return printBreakpointMessage(cmdContext(cmd), "update", "Updated Live Debugger workspace filters")
+				return printBreakpointMessage(ctx, "update", inWorkspace("Updated Live Debugger workspace filters", workspace))
 			}
 
 			if len(args) == 0 {
@@ -189,14 +207,15 @@ Examples:
 			condition, _ := cmd.Flags().GetString("condition")
 			logMessage, _ := cmd.Flags().GetString("log-message")
 			identifier := strings.TrimSpace(args[0])
+			if err := requireBreakpointIdentifier(identifier); err != nil {
+				return err
+			}
 
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
 				return err
 			}
-
-			ctx, err := cfg.CurrentContextObj()
-			if err != nil {
+			if _, err := cfg.CurrentContextObj(); err != nil {
 				return err
 			}
 
@@ -204,22 +223,26 @@ Examples:
 				return err
 			}
 
-			if dryRun(cmdContext(cmd)) {
+			ws, err := resolveBreakpointWorkspace(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			if err := ws.requireScopeFile(); err != nil {
+				return err
+			}
+			workspace := ws.shown()
+			ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), ws.changeNotes()...)
+			if dryRun(ctx) {
 				changes := describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)
-				return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes))
+				return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes), workspace))
 			}
 
-			c, err := newClientFromConfig(cmdContext(cmd), cfg)
+			handler, err := liveDebuggerHandler(cmdContext(cmd), cfg)
 			if err != nil {
 				return err
 			}
 
-			handler, err := livedebugger.NewHandler(c, ctx.Environment)
-			if err != nil {
-				return err
-			}
-
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 			if err != nil {
 				if verbose {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -250,14 +273,14 @@ Examples:
 				return err
 			}
 
-			targetRules, targetDescription, allowDirectID, err := resolveBreakpointRulesForEdit(rules, identifier)
+			targetRules, targetDescription, allowDirectID, err := resolveBreakpointRulesForEdit(rules, identifier, workspace)
 			if err != nil {
 				return err
 			}
 
 			if conditionChanged || logMessageChanged {
 				if len(targetRules) == 0 {
-					return fmt.Errorf("breakpoint %q not found in the current workspace", identifier)
+					return breakpointNotFound("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				for _, rule := range targetRules {
 					ruleSettings, err := buildEditBreakpointSettings(rule, condition, conditionChanged, logMessage, logMessageChanged)
@@ -290,7 +313,7 @@ Examples:
 					ruleIDs = append(ruleIDs, identifier)
 				}
 				if len(ruleIDs) == 0 {
-					return fmt.Errorf("breakpoint %q not found in the current workspace", identifier)
+					return breakpointNotFound("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				enableResp, err := handler.EnableOrDisableBreakpoints(workspaceID, ruleIDs, !enabled)
 				if err != nil {
@@ -306,25 +329,34 @@ Examples:
 				}
 			}
 
-			return printBreakpointMessage(cmdContext(cmd), "update", fmt.Sprintf("Updated breakpoint %s (%s)", targetDescription, describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)))
+			return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Updated breakpoint %s (%s)", targetDescription, describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)), workspace))
 		},
 	}
 	c.Flags().String("condition", "", `Condition expression (e.g. "a==1 && b!='bbb'", "'val' in arr", "x>0 && y<=10")`)
 	c.Flags().String("log-message", "", `Log message template with {variable} placeholders (e.g. "Hit on {frame.filename}:{frame.line} value={newTodoRecord.title}")`)
-	c.Flags().String("enabled", "", "Enable or disable the breakpoint")
+	enabledFlag.flags = c.Flags()
+	c.Flags().Var(enabledFlag, "enabled", "Enable or disable the breakpoint; name the breakpoint before the flag, or write the value as --enabled=false")
 	c.Flags().String("filters", "", "workspace filters to apply (comma-separated key:value pairs)")
 	c.Flags().BoolP("yes", "y", false, "skip the confirmation prompt when changing workspace filters affects existing breakpoints")
 	markPrompts(c, "yes", "dry-run")
 	c.Flags().Lookup("enabled").NoOptDefVal = "true"
+	// update applies a scope only when one is named, so there is no default
+	// to opt out of and no --no-repo-scope.
+	addRepoScopeFlags(c, updateBreakpointRepoScopeUsage, "")
+	c.MarkFlagsMutuallyExclusive(repoScopeFlag, "filters")
 	markLiveDebuggerExperimental(c)
 	return c
 }
 
-func resolveBreakpointRulesForEdit(rules []livedebugger.BreakpointRule, identifier string) ([]livedebugger.BreakpointRule, string, bool, error) {
+// resolveBreakpointRulesForEdit finds the rules identifier names among rules,
+// the breakpoints of workspace: by location, where none is an error naming
+// the workspace, or by id, where none leaves the identifier to be tried as an
+// id directly (allowDirectID).
+func resolveBreakpointRulesForEdit(rules []livedebugger.BreakpointRule, identifier, workspace string) ([]livedebugger.BreakpointRule, string, bool, error) {
 	if fileName, lineNumber, err := parseBreakpoint(identifier); err == nil {
 		matches := findBreakpointRulesByLocation(rules, fileName, lineNumber)
 		if len(matches) == 0 {
-			return nil, "", false, fmt.Errorf("no breakpoints found at %s:%d", fileName, lineNumber)
+			return nil, "", false, breakpointNotFound("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 		}
 		return matches, fmt.Sprintf("%s:%d", fileName, lineNumber), false, nil
 	}
@@ -588,6 +620,79 @@ func describeBreakpointEdits(conditionChanged bool, condition string, logMessage
 		changes = append(changes, fmt.Sprintf("enabled=%t", enabled))
 	}
 	return strings.Join(changes, ", ")
+}
+
+// enabledFlagValue is the value of --enabled, a string flag that is "true"
+// when given bare, together with where on the line it was given: pflag
+// collects the arguments it has passed so far, so the count at the moment
+// the flag is set is the number of arguments written before it.
+type enabledFlagValue struct {
+	value      string
+	flags      *pflag.FlagSet
+	set        bool
+	argsBefore int
+}
+
+func (v *enabledFlagValue) String() string { return v.value }
+func (v *enabledFlagValue) Type() string   { return "string" }
+func (v *enabledFlagValue) Set(s string) error {
+	// The last occurrence gives the value, as for any string flag, and the
+	// first one the place: an identifier before any --enabled was not
+	// written where a value of it would be.
+	if !v.set {
+		v.set, v.argsBefore = true, v.flags.NArg()
+	}
+	v.value = s
+	return nil
+}
+
+// Reset returns the flag to its default between invocations; Set would
+// record a place.
+func (v *enabledFlagValue) Reset() { v.value, v.set, v.argsBefore = "", false, 0 }
+
+// trailingValue decides which of args is the value of --enabled: trailing,
+// the arguments after the first, when "<id> --enabled false" was written,
+// and none otherwise. The flag takes an optional value, so a value written
+// after a space arrives as an argument, and only where it stands tells it
+// from an identifier.
+//
+// A bare flag sets exactly "true", so any other value was written with "="
+// and is the flag's own: one argument is then the identifier, wherever it
+// stands, and a second is refused rather than read as a value that overrides
+// the written one. (--enabled=true cannot be told from the bare flag and is
+// treated as one.)
+//
+// After a bare flag an argument is the value only in the documented place,
+// following the one identifier. With no identifier before the flag, an
+// argument that reads as a boolean is the mistake "--enabled false": no
+// breakpoint is named, and enabling a rule called "false" helps nobody. An
+// identifier is whatever a rule was created with, so one that reads as a
+// boolean exists; before the flag it is never refused, and after it, it
+// cannot be told from the mistake. filtersChanged leaves that to the caller,
+// which refuses --filters with --enabled for what it is.
+func (v *enabledFlagValue) trailingValue(args, trailing []string, filtersChanged bool) ([]string, error) {
+	const spelling = "dtctl update breakpoint <id|filename:line> --enabled"
+	switch {
+	case !v.set:
+		return trailing, nil
+	case v.value != "true":
+		if _, err := strconv.ParseBool(strings.TrimSpace(v.value)); err != nil {
+			return nil, &invalidInputError{fmt.Errorf("invalid boolean value %q for --enabled", v.value)}
+		}
+		if len(args) > 1 {
+			return nil, &invalidInputError{fmt.Errorf("--enabled=%s carries its value, so one breakpoint identifier is expected beside it, and %d arguments were given", v.value, len(args))}
+		}
+		return nil, nil
+	case len(args) > 0 && v.argsBefore == 0 && !filtersChanged:
+		if value, err := strconv.ParseBool(strings.TrimSpace(args[0])); err == nil {
+			return nil, &invalidInputError{fmt.Errorf(`%q follows --enabled, where it reads as the flag's value, so no breakpoint is named: name it first, as in %s=%t; a breakpoint whose identifier is %q goes before the flag as well`,
+				args[0], spelling, value, args[0])}
+		}
+	}
+	if len(args) > 1 && !(len(args) == 2 && v.argsBefore == 1) {
+		return nil, &invalidInputError{fmt.Errorf("%d arguments were given, and --enabled takes a value only right after the one breakpoint identifier, as in %s false", len(args), spelling)}
+	}
+	return trailing, nil
 }
 
 func getOptionalBoolFlag(cmd *cobra.Command, flagName string, trailingArgs []string) (bool, bool, error) {

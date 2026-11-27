@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dynatrace/dtctl/pkg/exec"
+	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
 
@@ -26,6 +27,9 @@ BREAKPOINT can be specified as:
 
 The command looks up the breakpoint's internal DQL ID, then executes:
   fetch application.snapshots | filter breakpoint.id == toUid("<id>")
+
+Updating a breakpoint, or reaching its hit limit, gives it a new internal ID;
+snapshots captured before that stay under the old ID and are not shown.
 
 Use --decode-snapshots to decode snapshot payloads (same as dtctl query).
 Use -o json / -o yaml for structured output.`,
@@ -55,22 +59,57 @@ Use -o json / -o yaml for structured output.`,
 			if listShapeFields(cmdContext(cmd)) != "" {
 				return fmt.Errorf("--fields is not supported by get snapshots; project fields in DQL instead: dtctl query 'fetch application.snapshots | fields ...'")
 			}
-			cfg, c, err := setupClient(cmdContext(cmd))
+			if err := requireBreakpointIdentifier(args[0]); err != nil {
+				return err
+			}
+			// Flag values are checked before anything is read: the first
+			// request finds the workspace, and creates one where there is
+			// none.
+			decodeVal, _ := cmd.Flags().GetString("decode-snapshots")
+			var decodeMode exec.DecodeMode
+			if cmd.Flags().Changed("decode-snapshots") {
+				switch decodeVal {
+				case "", "simplified":
+					decodeMode = exec.DecodeSimplified
+				case "full":
+					decodeMode = exec.DecodeFull
+				default:
+					return fmt.Errorf("unsupported --decode-snapshots value %q (use \"simplified\" or \"full\")", decodeVal)
+				}
+			}
+
+			metadataFields, metadataDefaulted, err := resolveMetadataFlag(cmd, agentMode(cmdContext(cmd)))
 			if err != nil {
 				return err
 			}
 
-			ctx, ctxErr := cfg.CurrentContextObj()
-			if ctxErr != nil {
-				return ctxErr
+			cfg, err := loadConfig(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+			ctx, err := cfg.CurrentContextObj()
+			if err != nil {
+				return err
 			}
 
+			// The workspace is resolved first: what is wrong with a name is
+			// said before what is wrong with a token.
+			ws, err := resolveBreakpointWorkspace(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			workspace, warnings := ws.shown(), ws.readWarnings(cmdContext(cmd))
+
+			c, err := newClientFromConfig(cmdContext(cmd), cfg)
+			if err != nil {
+				return err
+			}
 			handler, err := livedebugger.NewHandler(c, ctx.Environment)
 			if err != nil {
 				return err
 			}
 
-			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(currentProjectPath())
+			workspaceResp, workspaceID, err := handler.GetOrCreateWorkspace(ws.name)
 			if err != nil {
 				if isDebugVerbose(cmdContext(cmd)) {
 					_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -89,12 +128,12 @@ Use -o json / -o yaml for structured output.`,
 			}
 
 			identifier := args[0]
-			matchedRules, _, _, err := resolveBreakpointRulesForEdit(rules, identifier)
+			matchedRules, _, _, err := resolveBreakpointRulesForEdit(rules, identifier, workspace)
 			if err != nil {
 				return err
 			}
 			if len(matchedRules) == 0 {
-				return fmt.Errorf("no breakpoint found with identifier %q", identifier)
+				return breakpointNotFound("no breakpoint found with identifier %q in workspace %s", identifier, workspace)
 			}
 
 			rule := matchedRules[0]
@@ -107,33 +146,17 @@ Use -o json / -o yaml for structured output.`,
 				dqlQuery += fmt.Sprintf(" | limit %d", limit)
 			}
 
-			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: Snapshots from the latest version of the breakpoint will be shown")
-
-			decodeVal, _ := cmd.Flags().GetString("decode-snapshots")
-			var decodeMode exec.DecodeMode
-			if cmd.Flags().Changed("decode-snapshots") {
-				switch decodeVal {
-				case "", "simplified":
-					decodeMode = exec.DecodeSimplified
-				case "full":
-					decodeMode = exec.DecodeFull
-				default:
-					return fmt.Errorf("unsupported --decode-snapshots value %q (use \"simplified\" or \"full\")", decodeVal)
-				}
-			}
+			printWorkspaceName(cmdContext(cmd), workspace)
+			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: only snapshots since the breakpoint was last changed are shown")
 
 			maxResultRecords, _ := cmd.Flags().GetInt64("max-result-records")
 			defaultTimeframeStart, _ := cmd.Flags().GetString("default-timeframe-start")
 			defaultTimeframeEnd, _ := cmd.Flags().GetString("default-timeframe-end")
 			noProgress, _ := cmd.Flags().GetBool("no-progress")
 
-			metadataFields, metadataDefaulted, err := resolveMetadataFlag(cmd, agentMode(cmdContext(cmd)))
-			if err != nil {
-				return err
-			}
-
 			executor := newDQLExecutorFromConfig(cmdContext(cmd), cfg, c)
 
+			var hint string
 			cancelCtx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
@@ -148,6 +171,30 @@ Use -o json / -o yaml for structured output.`,
 				MetadataDefaulted:     metadataDefaulted,
 				Verbose:               verbosity(cmdContext(cmd)) > 0,
 				ShowProgress:          !noProgress,
+				OnResult: func(n int, _ *exec.DQLQueryResponse) {
+					if n > 0 || rule.DisableReason == "" {
+						return
+					}
+					const query = "fetch application.snapshots | summarize count(), by:{breakpoint.id}"
+					// Whether there are earlier snapshots is not known: the
+					// hint keys on the disable reason, not on a re-version.
+					// The count is across the environment's breakpoints, so
+					// the suggested query must not run under the repo scope.
+					hint = fmt.Sprintf("0 snapshots under the breakpoint's current ID (%s); earlier snapshots, if any, are under its previous IDs: dtctl query %s --%s", rule.DisableReason, exec.ShellQuote(query), noRepoScopeFlag)
+					if defaultTimeframeStart != "" {
+						hint += " --default-timeframe-start " + exec.ShellQuote(defaultTimeframeStart)
+					}
+					if defaultTimeframeEnd != "" {
+						hint += " --default-timeframe-end " + exec.ShellQuote(defaultTimeframeEnd)
+					}
+					output.FprintInfo(currentStderr(cmdContext(cmd)), "%s", hint)
+				},
+				Decorate: func(c *output.ResponseContext, _ *exec.DQLQueryResponse, _ []map[string]interface{}) {
+					c.Warnings = append(c.Warnings, warnings...)
+					if hint != "" {
+						c.Suggestions = append([]string{hint}, c.Suggestions...)
+					}
+				},
 			}
 
 			return executor.ExecuteWithContext(cancelCtx, dqlQuery, opts)
@@ -165,6 +212,7 @@ bare --decode-snapshots simplifies variant wrappers to plain values;
 	c.Flags().StringP("metadata", "M", "", `include query metadata in output (use = for field selection)
 bare --metadata or -M shows all fields; --metadata=field1,field2 selects specific fields`)
 	c.Flags().Lookup("metadata").NoOptDefVal = "all"
+	addRepoScopeFlags(c, breakpointWorkspaceRepoScopeUsage, "")
 	markLiveDebuggerExperimental(c)
 	return c
 }

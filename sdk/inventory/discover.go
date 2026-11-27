@@ -23,6 +23,12 @@ type RunResult struct {
 	// can name the one remedy that applies instead of listing three. Empty
 	// when Truncated is false, or when the runner cannot tell.
 	TruncationCause TruncationCause
+	// Truncations is every limit the response reported, in its order, of
+	// which TruncationCause is the first. A caller that treats one limit
+	// differently from another reads this: a response can carry a result
+	// limit and a scan limit together. Nil when the runner does not report
+	// it; such a result is judged by TruncationCause alone.
+	Truncations []Truncation
 	// ColumnTypes maps a result column to its DQL type descriptor, merged
 	// across the response's index ranges. A column the query named but the
 	// data does not carry comes back as "undefined" — that is how a probe can
@@ -36,6 +42,12 @@ type RunResult struct {
 	// assumed its requested ratio had been honoured would extrapolate a
 	// refused object's count by that whole factor.
 	Sampled bool
+	// ScannedBytes is how much the query read, as the environment reports
+	// it; 0 when it does not. So 0 means two things, "read nothing" and "not
+	// reported", and a caller cannot tell them apart: it may predict its
+	// next query's scan from a value above 0, and must take 0 as no
+	// prediction rather than as a query that costs nothing.
+	ScannedBytes int64
 }
 
 // TypeUndefined is the DQL type of a column the query referenced but the
@@ -56,6 +68,16 @@ const (
 	TruncationConsumption TruncationCause = "consumption"
 )
 
+// Truncation is one limit a response reported.
+type Truncation struct {
+	Cause TruncationCause
+	// Typed reports that the notification named its type. One recognised by
+	// its message alone is less specific about what was cut: Grail words a
+	// collected array that reached its maxLength like a result that lost
+	// rows.
+	Typed bool
+}
+
 // Runner executes DQL on the live environment. The cmd layer implements it
 // over the existing DQL executor (with scan caps); tests implement it over
 // fixtures.
@@ -64,8 +86,8 @@ const (
 // column types and the reason a result was cut short, and several verdicts are
 // only as good as those two fields — a Runner that omits ColumnTypes turns every
 // "n/a" into a confident "empty", with no error to say so. Build the result with
-// ColumnTypesOf and FirstTruncationCause rather than filling those fields by
-// hand; see runner.go.
+// ColumnTypesOf, FirstTruncationCause and TruncationsOf rather than filling
+// those fields by hand; see runner.go.
 type Runner interface {
 	RunQuery(ctx context.Context, dql string) (*RunResult, error)
 }

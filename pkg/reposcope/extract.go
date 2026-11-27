@@ -1,0 +1,516 @@
+package reposcope
+
+import (
+	"bytes"
+	"fmt"
+	"io/fs"
+	"path"
+	"slices"
+	"strings"
+
+	"golang.org/x/text/unicode/norm"
+)
+
+// Discovery runs inside a developer's checkout, which can be anything from one
+// service to a monorepo with a vendored world, so the walk is bounded rather
+// than trusted to be small.
+const (
+	maxDepth     = 6       // directories below the root
+	maxFiles     = 2000    // files a source matches, every .yaml/.yml among them
+	maxFileBytes = 1 << 20 // per file
+)
+
+// skippedDirs are never entered: dependency trees, build output, build
+// tooling and tool state hold other projects' names, not this repository's.
+// Gradle's buildSrc is a build of its own that compiles the main build's
+// logic, so like target and build it names nothing that runs.
+var skippedDirs = keySet(".git", "node_modules", "vendor", "target", "build", "dist",
+	".venv", "__pycache__", ".idea", ".terraform", ".gradle", "buildSrc")
+
+// excludedDirs hold test content, compared case-insensitively and behind a
+// leading dot, so .NET's Tests/ and Helm's rendered .tests/ count too: Go's
+// testdata, Jest's __tests__, end-to-end suites, and examples, whose
+// manifests deploy a demonstration rather than the service.
+// Unlike skippedDirs they are entered when discovery was asked about a
+// directory inside one (see onPath). dev is deliberately absent: it names
+// an environment, and deploy/overlays/dev describes exactly what runs on the
+// environment developers use most.
+var excludedDirs = union(testWords, "testdata", "__tests__", "e2e", "examples")
+
+// testFileWords mark a test's own file beside a real one when they are a
+// whole word of its name: Dockerfile.test, deployment-e2e.yaml,
+// docker-compose.test.yml.
+var testFileWords = union(testWords, "e2e")
+
+// source is one kind of file names are read from. A build file or Dockerfile
+// makes its directory a unit, except inside a Gradle build (see
+// gradleBuilds.absorbs); a Kubernetes manifest or Helm chart does not, and is
+// attributed to a unit instead (see attribute).
+type source struct {
+	match     func(name string) bool
+	makesUnit bool
+	read      func(data []byte, file string) []sourceNames
+}
+
+// sources is checked in order; the first match reads the file.
+var sources = []source{
+	{named("go.mod"), true, buildFile(goModule)},
+	{named("package.json"), true, buildFile(packageName)},
+	{named("pom.xml"), true, buildFile(pomArtifact)},
+	{named(gradleSettingsFiles...), true, buildFile(gradleRootProject)},
+	{named(gradleBuildFiles...), true, buildFile(gradleArchivesName)},
+	{named("pyproject.toml"), true, buildFile(pyprojectName)},
+	{func(n string) bool { return strings.HasSuffix(n, ".csproj") }, true, buildFile(assemblyName)},
+	{isDockerfile, true, buildFile(dockerEntrypoint)},
+	{named("Chart.yaml"), false, chartName},
+	{func(n string) bool { return strings.HasSuffix(n, ".yaml") || strings.HasSuffix(n, ".yml") }, false, manifestWorkloads},
+}
+
+func named(names ...string) func(string) bool {
+	return func(name string) bool { return slices.Contains(names, name) }
+}
+
+func isDockerfile(name string) bool {
+	return name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile.") || strings.HasSuffix(name, ".Dockerfile")
+}
+
+func sourceFor(file string) *source {
+	name := path.Base(file)
+	for i := range sources {
+		if sources[i].match(name) {
+			return &sources[i]
+		}
+	}
+	return nil
+}
+
+// sourceNames is what one source contributed: tokens that belong together
+// and the directory they were found in.
+//
+// A build file's names are its unit's. A manifest's or a chart's are only
+// when the unit claims it (needsClaim): claims are the names it can be
+// claimed by, its workload's or chart's and its images', and named is the
+// first of those alone, which also places a manifest kept outside every unit
+// (see attribute). Only a name that made a token is either: a placeholder
+// claims nothing.
+type sourceNames struct {
+	dir        string
+	needsClaim bool
+	named      string
+	claims     []string
+	tokens     []token
+}
+
+type signals struct {
+	unit   string
+	tokens []token
+	// dropped are the unit's names held back as test names (see
+	// token.testName), sorted, so that holding them back is never silent.
+	dropped []string
+	// sharedBy are the Gradle deployables that share the library module
+	// discovery ran for; nothing is sent for the module itself.
+	sharedBy []string
+	// capped reports that the walk stopped at maxFiles, so names of the
+	// unit, and other units that would have claimed some, may be missing.
+	capped bool
+}
+
+// extract reads the names the repository at fsys gives the unit holding dir,
+// walking within maxDepth, maxFiles and maxFileBytes, never entering
+// skippedDirs, and leaving test content unread: excludedDirs other than those
+// on the way to dir, and test files (see testFile). Nothing leaves the
+// machine here.
+//
+// The unit is the nearest directory at or above dir that holds a build file
+// or a Dockerfile, or the repository root when none does; inside a Gradle
+// build it is a deployable or the build (see gradleBuild). Its directory name
+// is a token, and so is dir's own name when the unit is a root no Gradle
+// build holds: in a monorepo with one build file at the top, the directory a
+// developer stands in is often what the service is called, while a Gradle
+// module is part of what its build deploys.
+func extract(fsys fs.FS, dir string) (*signals, error) {
+	dir = path.Clean(dir)
+	files, capped, err := listSources(fsys, ".", dir, func(f string) bool { return sourceFor(f) != nil })
+	if err != nil {
+		return nil, err
+	}
+	if capped {
+		// What the walk did not reach must not move the unit: a build file
+		// it missed would make the whole repository the unit of a directory
+		// that has one of its own. Those files take the place of the last
+		// ones walked, so that no more than maxFiles are read either way.
+		above := unitSourcesAbove(fsys, dir)
+		recovered := make(map[string]bool, len(above))
+		for _, f := range above {
+			recovered[f] = true
+		}
+		files = slices.DeleteFunc(files, func(f string) bool { return recovered[f] })
+		files = append(files[:min(len(files), maxFiles-len(above))], above...)
+	}
+	var found []sourceNames
+	gradle := map[string]string{}
+	for _, f := range files {
+		data, err := readSource(fsys, f)
+		if err != nil {
+			continue
+		}
+		found = append(found, sourceFor(f).read(data, f)...)
+		if isGradleFile(path.Base(f)) {
+			gradle[f] = string(data)
+		}
+	}
+	found = append(found, readRemote(fsys)...)
+
+	builds := readGradleBuilds(files, gradle, found)
+	for _, b := range builds {
+		b.dropMissing(fsys)
+	}
+	units := map[string]bool{".": true}
+	for _, f := range files {
+		if sourceFor(f).makesUnit && !builds.absorbs(f) {
+			units[path.Dir(f)] = true
+		}
+	}
+	for _, b := range builds {
+		if deployables := b.deployables(); len(deployables) > 1 {
+			for _, d := range deployables {
+				units[d] = true
+			}
+		}
+	}
+
+	unit, build := nearestUnit(units, dir), builds.of(dir)
+	if build == nil {
+		nameDir := unit
+		if nameDir == "." {
+			nameDir = dir
+		}
+		return newSignals(unit, unitTokens(units, found, unit, nameDir), capped), nil
+	}
+	unit, sharedBy := build.unitOf(dir, unit)
+	if len(sharedBy) > 0 {
+		return &signals{unit: unit, sharedBy: sharedBy, capped: capped}, nil
+	}
+	return newSignals(unit, unitTokens(units, found, unit, unit), capped), nil
+}
+
+// unitTokens collects the names of unit: nameDir's own name unless it is the
+// repository root or one of layoutWords, then the names of every source
+// attributed to the unit. The names that are not the unit's own are marked
+// (see indirectNames).
+func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string) []token {
+	var tokens []token
+	if nameDir != "." {
+		if t, ok := newToken(kindDir, path.Base(nameDir), dirSource(nameDir), 0); ok && !layoutWords[t.value] {
+			tokens = append(tokens, t)
+		}
+	}
+	var attributed []sourceNames
+	for _, f := range found {
+		if attribute(units, f) == unit {
+			attributed = append(attributed, f)
+		}
+	}
+	return append(tokens, indirectNames(tokens, attributed)...)
+}
+
+// indirectNames returns the tokens of a unit's sources, after its directory
+// tokens dirs, marking in both the names that find a candidate and cannot
+// settle one, because the repository holds them without their being the
+// unit's own:
+//
+//   - the origin remote's name and every image, marked where they are read;
+//   - whatever was read at or below one of skippedDirs or excludedDirs, a
+//     directory's own name included. The walk never enters the first and
+//     enters the second only on the way to the directory discovery was asked
+//     about, and being asked about a fixture does not make it the service;
+//   - the names of a manifest or chart the unit does not claim. A build
+//     file's name and the unit's directory say what the unit is called, and
+//     a manifest whose workload or image is called the same is the unit's.
+//     Any other may deploy a dependency. Only a name that is the unit's own
+//     claims one: the remote's name or a vendored directory's would make a
+//     second indirect name of the manifest's and call the two direct;
+//   - in a manifest the unit claims, the service name of a container that
+//     stands beside others and whose image is not called like the unit: a
+//     sidecar's.
+//
+// A candidate matched by such names alone is reported, never as a match,
+// and gets no line (Candidate.Indirect). A --term is the way to say that it
+// is what runs this code.
+func indirectNames(dirs []token, sources []sourceNames) []token {
+	foreign := func(t *token) {
+		// The remote is read from .git/config and says so itself.
+		if dir := foreignDir(path.Dir(t.file)); dir != "" && t.kind != kindRemote {
+			t.indirect = fmt.Sprintf(indirectForeign, dir)
+		}
+	}
+	var called []string // what the unit is called
+	for i := range dirs {
+		if foreign(&dirs[i]); dirs[i].indirect == "" {
+			called = append(called, dirs[i].value)
+		}
+	}
+	for _, f := range sources {
+		for _, t := range f.tokens {
+			if foreign(&t); !f.needsClaim && t.indirect == "" {
+				called = append(called, t.value)
+			}
+		}
+	}
+	unitCalled := func(name string) bool {
+		return slices.ContainsFunc(called, func(own string) bool { return sameName(name, own) })
+	}
+	var tokens []token
+	for _, f := range sources {
+		claimed := !f.needsClaim || slices.ContainsFunc(f.claims, unitCalled)
+		for _, t := range f.tokens {
+			switch foreign(&t); {
+			case t.indirect != "":
+			case !claimed:
+				t.indirect = indirectUnclaimed
+			case t.beside && !unitCalled(t.image):
+				t.indirect = indirectSidecar
+			}
+			tokens = append(tokens, t)
+		}
+	}
+	return tokens
+}
+
+// foreignDir is the first directory of the path dir that is one of
+// skippedDirs or excludedDirs, or "".
+func foreignDir(dir string) string {
+	for _, name := range strings.Split(dir, "/") {
+		if skippedDirs[name] || excludedDirs[strings.ToLower(strings.TrimPrefix(name, "."))] {
+			return name
+		}
+	}
+	return ""
+}
+
+// newSignals holds the unit's test names back from its tokens. They are held
+// back here rather than where they are read, so that what is reported as held
+// back is this unit's, not every unit's.
+func newSignals(unit string, tokens []token, capped bool) *signals {
+	s := &signals{unit: unit, capped: capped}
+	dropped := map[string]bool{}
+	for _, t := range tokens {
+		// A namespace is never sent, only matched, so holding one back
+		// would only take it out of the evidence.
+		if t.kind != kindNamespace && t.testName() {
+			dropped[t.value] = true
+		} else {
+			s.tokens = append(s.tokens, t)
+		}
+	}
+	if len(dropped) > 0 {
+		s.dropped = sortedKeys(dropped)
+	}
+	return s
+}
+
+// readSource reads a file names are read from, without the UTF-8 byte order
+// mark some editors save one with: the mark is not part of the first line, and
+// the readers here match on line starts.
+func readSource(fsys fs.FS, name string) ([]byte, error) {
+	data, err := readRegular(fsys, name)
+	return bytes.TrimPrefix(data, []byte("\ufeff")), err
+}
+
+// dirSource is the source recorded for a directory's own name: the directory
+// with a trailing slash, which no file read from it can be.
+func dirSource(dir string) string {
+	return dir + "/"
+}
+
+// listSources lists the files keep accepts under root, for discovery from
+// dir, and reports whether it stopped at maxFiles; only kept files count
+// toward that. The directories on the way to dir are entered whatever their
+// depth or name, short of skippedDirs: discovery asked about a directory
+// reads it. Depth is counted from root, and below dir from dir (see depth).
+func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []string, capped bool, err error) {
+	err = fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, walkErr error) error {
+		switch {
+		case walkErr != nil:
+			if p == root {
+				return walkErr
+			}
+			return nil
+		case d.IsDir():
+			if p != root && (skippedDirs[d.Name()] || (!onPath(p, dir) &&
+				(depth(p, root, dir) > maxDepth || excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))]))) {
+				return fs.SkipDir
+			}
+			return nil
+		case !d.Type().IsRegular() || !keep(p) || testFile(d.Name()):
+			return nil
+		case len(files) == maxFiles:
+			capped = true
+			return fs.SkipAll
+		}
+		files = append(files, p)
+		return nil
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("read repository: %w", err)
+	}
+	return files, capped, nil
+}
+
+// unitSourcesAbove lists the files that make a unit (build files and
+// Dockerfiles) in dir and in each directory above it, by reading those
+// directories rather than walking the repository. Like the walk it reads no
+// test file and nothing at or below one of skippedDirs, and lists no more than
+// maxFiles: dir's own come first, so it is the directories furthest above it
+// that a repository with that many build files in one place loses.
+func unitSourcesAbove(fsys fs.FS, dir string) []string {
+	var files []string
+	for d := dir; ; d = path.Dir(d) {
+		if !inSkippedDir(d) {
+			entries, _ := fs.ReadDir(fsys, d)
+			for _, e := range entries {
+				f := path.Join(d, e.Name())
+				if src := sourceFor(f); src != nil && src.makesUnit && e.Type().IsRegular() && !testFile(e.Name()) {
+					if len(files) == maxFiles {
+						return files
+					}
+					files = append(files, f)
+				}
+			}
+		}
+		if topDir(d) {
+			return files
+		}
+	}
+}
+
+// inSkippedDir reports whether dir is one of skippedDirs or below one, where
+// the walk never goes.
+func inSkippedDir(dir string) bool {
+	return slices.ContainsFunc(strings.Split(dir, "/"), func(name string) bool { return skippedDirs[name] })
+}
+
+// onPath reports whether p is dir or one of its ancestors. Discovery asked
+// about a directory reads it whatever it is called: a repository that keeps
+// its deployables under examples/<name> still discovers from
+// examples/checkout. Names are compared composed, as an entry's path is: a
+// volume may spell a name decomposed that a caller composes.
+func onPath(p, dir string) bool {
+	_, ok := below(dir, p)
+	return ok
+}
+
+// below reports whether p is base or lies below it, and how many directories
+// below, comparing names in their composed form.
+func below(p, base string) (levels int, ok bool) {
+	p, base = norm.NFC.String(p), norm.NFC.String(base)
+	switch {
+	case base == "." && p != ".":
+		return strings.Count(p, "/") + 1, true
+	case p == base:
+		return 0, true
+	case strings.HasPrefix(p, base+"/"):
+		return strings.Count(p[len(base):], "/"), true
+	}
+	return 0, false
+}
+
+// depth is how many directories p lies below where the reading of it
+// starts: the walk's root, or dir for what lies below the directory
+// discovery was asked about. The bound is on how far a walk descends, not on
+// where in the repository it happens: a build six directories down is read
+// with its modules, and a deep directory with what it holds.
+func depth(p, root, dir string) int {
+	levels, _ := below(p, root)
+	if under, ok := below(p, dir); ok {
+		levels = min(levels, under)
+	}
+	return levels
+}
+
+// testFile reports whether a file is a test's own: a word of its name, split
+// at '.', '-' and '_', is in testFileWords (Dockerfile.test,
+// deployment-e2e.yaml), or a word after the first is spec
+// (checkout.spec.yaml). spec counts only after the first word, because a
+// manifest may well be called spec.yaml.
+func testFile(name string) bool {
+	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return r == '.' || r == '-' || r == '_'
+	})
+	for i, w := range words {
+		if testFileWords[w] || (i > 0 && w == "spec") {
+			return true
+		}
+	}
+	return false
+}
+
+// topDir reports whether d has no directory above it to walk up to: the
+// repository root, or "/" for a path that is not relative to it, whose parent
+// is itself.
+func topDir(d string) bool {
+	return d == "." || d == "/"
+}
+
+func nearestUnit(units map[string]bool, dir string) string {
+	for d := dir; !topDir(d); d = path.Dir(d) {
+		if units[d] {
+			return d
+		}
+	}
+	return "."
+}
+
+// attribute picks the unit a source's names belong to: the nearest unit
+// above where they were found. A manifest or chart kept outside every unit
+// below the root goes to the one unit called like its workload or chart, so
+// deploy/checkout/deployment.yaml lands on services/checkout.
+//
+// One that lies inside a unit stays there whatever it names, and an image
+// never moves one: a sidecar's image called like another unit would hand
+// that unit the whole manifest, its workload name as the unit's own.
+func attribute(units map[string]bool, f sourceNames) string {
+	nearest := nearestUnit(units, f.dir)
+	if nearest != "." || f.named == "" {
+		return nearest
+	}
+	var called []string
+	for u := range units {
+		if u != "." && sameName(path.Base(u), f.named) {
+			called = append(called, u)
+		}
+	}
+	if len(called) == 1 {
+		return called[0]
+	}
+	return nearest
+}
+
+// buildFile adapts a reader of one name to a source: a build file's name
+// always belongs to the unit it was found in.
+func buildFile(read func(text, file string) (token, bool)) func([]byte, string) []sourceNames {
+	return func(data []byte, file string) []sourceNames {
+		if t, ok := read(string(data), file); ok {
+			return []sourceNames{{dir: path.Dir(file), tokens: []token{t}}}
+		}
+		return nil
+	}
+}
+
+// location renders where a token was read, "file:line", or the file alone
+// when the line is unknown.
+func location(file string, line int) string {
+	if line <= 0 {
+		return file
+	}
+	return fmt.Sprintf("%s:%d", file, line)
+}
+
+// tokenAt builds a token whose raw name was found at needle in text.
+func tokenAt(kind, raw, file, text, needle string) (token, bool) {
+	line := 0
+	if i := strings.Index(text, needle); i >= 0 {
+		line = strings.Count(text[:i], "\n") + 1
+	}
+	return newToken(kind, raw, file, line)
+}

@@ -1,0 +1,17 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ledger-close
+  namespace: shop
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: close
+              image: registry.example.invalid/shop/ledger:7
+              env:
+                - name: OTEL_RESOURCE_ATTRIBUTES
+                  value: deployment.environment=prod,service.name=ledger-close

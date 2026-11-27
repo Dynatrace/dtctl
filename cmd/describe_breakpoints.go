@@ -35,6 +35,7 @@ Examples:
 			return runDescribeBreakpoint(cmd, args[0])
 		},
 	}
+	addRepoScopeFlags(c, breakpointWorkspaceRepoScopeUsage, "")
 	markLiveDebuggerExperimental(c)
 	return c
 }
@@ -42,6 +43,7 @@ Examples:
 type breakpointStatusResult struct {
 	ID                 string                  `json:"id" yaml:"id"`
 	Location           string                  `json:"location,omitempty" yaml:"location,omitempty"`
+	Workspace          string                  `json:"workspace,omitempty" yaml:"workspace,omitempty"`
 	Enabled            bool                    `json:"enabled" yaml:"enabled"`
 	DisableReason      string                  `json:"disableReason,omitempty" yaml:"disableReason,omitempty"`
 	LogMessage         string                  `json:"logMessage,omitempty" yaml:"logMessage,omitempty"`
@@ -81,6 +83,9 @@ func runDescribeBreakpoint(cmd *cobra.Command, identifier string) error {
 }
 
 func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps liveDebuggerDeps) error {
+	if err := requireBreakpointIdentifier(identifier); err != nil {
+		return err
+	}
 	verbose := isDebugVerbose(cmdContext(cmd))
 
 	cfg, err := deps.loadConfig(cmdContext(cmd))
@@ -93,6 +98,14 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
+	// The workspace is resolved first: what is wrong with a name is said
+	// before what is wrong with a token.
+	ws, err := resolveBreakpointWorkspace(cmd, cfg)
+	if err != nil {
+		return err
+	}
+	workspace, warnings := ws.shown(), ws.readWarnings(cmdContext(cmd))
+
 	c, err := deps.newClient(cmdContext(cmd), cfg)
 	if err != nil {
 		return err
@@ -103,7 +116,7 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
-	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
+	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, ws.name)
 	if err != nil {
 		if verbose {
 			_ = printGraphQLResponse(cmdContext(cmd), "getOrCreateWorkspaceV2", workspaceResp)
@@ -134,12 +147,12 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 
-	targetRules, _, allowDirectID, err := resolveBreakpointRulesForEdit(rules, strings.TrimSpace(identifier))
+	targetRules, _, allowDirectID, err := resolveBreakpointRulesForEdit(rules, strings.TrimSpace(identifier), workspace)
 	if err != nil {
 		return err
 	}
 	if allowDirectID {
-		return fmt.Errorf("no breakpoint found with identifier %q", strings.TrimSpace(identifier))
+		return breakpointNotFound("no breakpoint found with identifier %q in workspace %s", strings.TrimSpace(identifier), workspace)
 	}
 
 	results := make([]breakpointStatusResult, 0, len(targetRules))
@@ -162,12 +175,15 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		if err != nil {
 			return err
 		}
+		result.Workspace = workspace
 		results = append(results, result)
 	}
 
 	if !useBreakpointDescribeTextView(cmdContext(cmd)) {
 		printer := newPrinterCtx(cmdContext(cmd))
-		_ = enrichAgent(printer, "describe", "breakpoint")
+		if ap := enrichAgent(printer, "describe", "breakpoint"); ap != nil {
+			ap.Context().Warnings = append(ap.Context().Warnings, warnings...)
+		}
 		if len(results) == 1 {
 			return printer.Print(results[0])
 		}
@@ -465,6 +481,9 @@ func printBreakpointStatusResult(ctx context.Context, result breakpointStatusRes
 	output.FprintDescribeKV(w, "ID:", kw, "%s", result.ID)
 	if result.Location != "" {
 		output.FprintDescribeKV(w, "Location:", kw, "%s", result.Location)
+	}
+	if result.Workspace != "" {
+		output.FprintDescribeKV(w, "Workspace:", kw, "%s", result.Workspace)
 	}
 	output.FprintDescribeKV(w, "Enabled:", kw, "%t", result.Enabled)
 	if result.DisableReason != "" {

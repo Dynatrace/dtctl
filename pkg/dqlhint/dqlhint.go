@@ -41,17 +41,49 @@ type hint struct {
 	advice string
 }
 
+// Repair is one suggestion for a query error: a corrected query with the
+// rule behind it, or, when the fix depends on something the error does not
+// reveal, advice.
+type Repair struct {
+	// Reason is the rule a rewrite follows.
+	Reason string
+	// Query is Error.Query with the mistake corrected, "" for advice.
+	Query string
+	// Advice is the suggestion when there is no rewrite.
+	Advice string
+}
+
+// Render returns the suggestion as a caller shows it: the advice, or the
+// reason and a runnable `dtctl query '…'` command, so the reader learns the
+// rule and not just the fix. The command runs query, which is r.Query unless
+// the caller sent a text of its own making and repairs what the user typed
+// instead, followed by flags.
+func (r Repair) Render(query string, flags ...string) string {
+	if r.Query == "" {
+		return r.Advice
+	}
+	command := "dtctl query " + shellQuote(query)
+	for _, f := range flags {
+		command += " " + f
+	}
+	return r.Reason + ": " + command
+}
+
+// Repairs returns the repairs for a query error, most specific first.
+func Repairs(e Error) []Repair {
+	var out []Repair
+	for _, h := range hints(e) {
+		out = append(out, Repair{Reason: h.reason, Query: h.query, Advice: h.advice})
+	}
+	return out
+}
+
 // Suggest returns the repair suggestions for a query error, most specific
-// first. Rewrites are rendered as a runnable `dtctl query '…'` command preceded
-// by the reason, so the caller learns the rule and not just the fix.
+// first, each rendered for the query the error reports.
 func Suggest(e Error) []string {
 	var out []string
-	for _, h := range hints(e) {
-		if h.query != "" {
-			out = append(out, h.reason+": dtctl query "+shellQuote(h.query))
-		} else {
-			out = append(out, h.advice)
-		}
+	for _, r := range Repairs(e) {
+		out = append(out, r.Render(r.Query))
 	}
 	return out
 }
