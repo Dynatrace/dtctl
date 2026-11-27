@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -363,6 +362,8 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		{"discover-none", rowsByObject(nil)},
 		{"discover-entity-name", rowsByObject(map[string]string{
 			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"eu-checkout-frontend"}`})},
+		{"discover-entity-name-exact", rowsByObject(map[string]string{
+			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"checkout"}`})},
 		{"discover-partial", func(r *http.Request, query string) (int, string) {
 			if strings.HasPrefix(query, "fetch spans") {
 				return http.StatusBadRequest, `{"error":{"code":400,"message":"Scan limit exceeded.","details":{"errorType":"SCAN_LIMIT"}}}`
@@ -373,22 +374,21 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		t.Run(tc.golden, func(t *testing.T) {
 			newDQLRecorder(t, "readonly", tc.respond)
 			chdirCheckoutRepo(t)
-			report, _ := discoverReport(t)
-			testutil.AssertGolden(t, "repo-scope/"+tc.golden, discoveryTable(report, 600*time.Millisecond))
+			testutil.AssertGolden(t, "repo-scope/"+tc.golden, discoveryStdout(t))
 		})
 	}
 }
 
-// discoveryTable is the terminal output for a report read back from a
-// structured run. Such a report carries the proposal's notes itself, which
-// the table prints from the proposal, so they are taken out of the report
-// first.
-func discoveryTable(report *reposcope.DiscoveryReport, elapsed time.Duration) string {
-	proposal := newRepoScopeProposal(report, nil, repoScopeNames{})
-	report.Notes = slices.DeleteFunc(report.Notes, func(n string) bool { return slices.Contains(proposal.notes(), n) })
-	var out strings.Builder
-	printRepoScopeDiscovery(&out, report, proposal, elapsed)
-	return out.String()
+// discoveryStdout is what `repo-scope discover` prints to a terminal: the
+// command's own stdout, lines with the context it ran in, and only the time
+// it took replaced, since no two runs take the same.
+func discoveryStdout(t *testing.T, args ...string) string {
+	t.Helper()
+	code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "discover", "--plain"}, args...), RunOptions{})
+	require.Zero(t, code, stderr)
+	took := regexp.MustCompile(`queries ran in [0-9]+\.[0-9]s\.`)
+	require.Regexp(t, took, stdout)
+	return took.ReplaceAllString(stdout, "queries ran in 0.6s.")
 }
 
 // otherCluster is row as a second cluster reports it: the same namespace,
@@ -662,12 +662,18 @@ func TestRepoScopeDiscoverEntityNameAlone(t *testing.T) {
 	report, suggestions := discoverReport(t)
 	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
 	require.False(t, report.Partial)
-	require.Equal(t, "show the user the candidates and ask which runs this code, then run its setCommand", suggestions[0])
+	// The caveat is the report's own and the agent's first instruction, not
+	// a sentence of the terminal alone, and nothing tells an agent to run
+	// the line of an entity that may have stopped long ago.
+	require.Contains(t, report.Notes, repoScopeEntityNameNote)
+	require.Equal(t, "tell the user that "+repoScopeEntityNameNote+"; show the candidates, and offer a setCommand only for one the user says runs this code", suggestions[0])
+	require.NotContains(t, strings.Join(suggestions, "\n"), "then run its setCommand")
 
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its entity name alone; no span or log in 24h carries a name of this repository\n")
-	require.Contains(t, stdout, "Nothing was written. If it is what runs this code, save it with:\n  dtctl --context c repo-scope set checkout --service "+flowService+"\n")
+	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its entity name alone (see the notes)\n")
+	require.Contains(t, stdout, "\nNote: "+repoScopeEntityNameNote+"\n")
+	require.Contains(t, stdout, "No repo scope was saved. If it is what runs this code, save it with:\n  dtctl --context c repo-scope set checkout --service "+flowService+"\n")
 }
 
 // --path picks another directory of a monorepo, and --term adds a name; both
@@ -1059,7 +1065,7 @@ func TestRepoScopeDiscoveryNothingSent(t *testing.T) {
 	var out bytes.Buffer
 	printRepoScopeDiscovery(&out, r, repoScopeProposal{}, 0)
 	require.NotContains(t, out.String(), "Values sent:")
-	require.Contains(t, out.String(), "No value was sent.\n0 of 1 queries ran in 0.0s. Nothing was written.\n")
+	require.Contains(t, out.String(), "No value was sent.\n0 of 1 queries ran in 0.0s. No repo scope was saved.\n")
 }
 
 // A plan lists every query a run could send, and no run sends them all: the
@@ -1323,7 +1329,7 @@ func TestRepoScopeDiscoverSharedServiceName(t *testing.T) {
 	require.Contains(t, suggestions, notes[0])
 
 	require.Contains(t, report.Notes, notes[0], "the report says so itself, for a reader with no suggestions")
-	table := discoveryTable(report, time.Second)
+	table := discoveryStdout(t)
 	require.Equal(t, 1, strings.Count(table, "Note: "+notes[0]+"\n"), table)
 
 	// The saved entry selects payments alone.

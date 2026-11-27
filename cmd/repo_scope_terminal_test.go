@@ -147,6 +147,10 @@ func TestRepoScopeDiscoverProposesNoPathSetRefuses(t *testing.T) {
 	require.Contains(t, stdout, "candidate 1 has no set line: a scope file cannot hold --path: path ")
 	require.Contains(t, stdout, refusal)
 	require.NotContains(t, stdout, "--path '", "a line set would refuse is not printed")
+	// The verdict is a match, so the summary says what stands in the way:
+	// a value of the line, not the binding.
+	require.Contains(t, stdout, "Its set line would hold a value a scope file cannot (see the notes), so none is proposed.\n")
+	require.NotContains(t, stdout, "No binding selects this candidate alone")
 	require.Contains(t, stdout, "repo-scope set <name> --service-name <service.name>\n", "the template covers the repository")
 	require.Contains(t, stdout, "a scope file cannot hold the unit's directory as --path: ")
 

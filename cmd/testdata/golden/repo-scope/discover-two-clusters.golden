@@ -15,7 +15,7 @@ Unit: .
    12400 spans, 88000 logs in 24h
 
 Verdict: ambiguous (candidates: 2)
-2 of 11 queries ran in 0.6s. Nothing was written. Save the one that runs this code with its line:
+2 of 11 queries ran in 0.6s. No repo scope was saved. Save the one that runs this code with its line:
   1  dtctl --context c repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout
   2  dtctl --context c repo-scope set checkout --cluster-uid 66666666-7777-8888-9999-000000000000 --namespace payments --workload checkout
 Note: candidates 1 and 2 are payments/checkout in different clusters, and each line binds one; to bind the workload in every cluster, run either line without --cluster-uid; to bind some of several, list the workload once per cluster-uid under workloads in .dtctl-repo-scope.yaml

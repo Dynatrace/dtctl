@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,7 +53,7 @@ func TestRepoScopeDiscoverIndirectEvidenceProposesNoLine(t *testing.T) {
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, named only by a manifest or chart that is not named like the unit\n")
-	require.Contains(t, stdout, "Nothing was written. No candidate is named by the unit itself (see the notes).\n")
+	require.Contains(t, stdout, "No repo scope was saved. No candidate is named by the unit itself (see the notes).\n")
 	require.Contains(t, stdout, "\nNote: "+note+"\n")
 	require.NotContains(t, stdout, "repo-scope set redis", "no line that saves the cache as this repository's scope")
 	require.NotContains(t, stdout, "--workload redis-cache")
@@ -64,6 +65,12 @@ func TestRepoScopeDiscoverIndirectEvidenceProposesNoLine(t *testing.T) {
 		require.NotContains(t, stdout, "setCommand", format)
 		require.Contains(t, stdout, "--term redis-cache", format)
 	}
+	// No candidate has a line, so an agent is not told that running one
+	// is the confirmation.
+	_, suggestions := discoverReport(t)
+	require.Contains(t, suggestions, "nothing has been saved, and no candidate has a set command to run")
+	require.NotContains(t, strings.Join(suggestions, "\n"), "running the set command is the confirmation")
+
 	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "-o", "json"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	var reports []reposcope.DiscoveryReport

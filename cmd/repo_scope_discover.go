@@ -64,7 +64,7 @@ them between "-" or "." (acme-prod-checkout for checkout) is found too, ranked
 below one named exactly, when the name has at least five letters and digits.
 Each candidate is one workload in one cluster, and its line binds that cluster. When a candidate's spans match and no logs
 do, its logs are looked up once by the process group the spans carried. It
-names every value on stderr before sending it, and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
+names every value on stderr before sending it, and saves no repo scope: each candidate comes with the 'dtctl repo-scope set' line
 that saves it. Test content (test, testdata, e2e, examples and similar
 directories, and files such as Dockerfile.test) is not read, and a name that
 starts with test, mock or fixture is not sent unless given with --term.
@@ -299,6 +299,11 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 			if note := repoScopeHeldNote(held, c.Name, repoScopeDir(report, *c)); note != "" {
 				report.Notes = append(report.Notes, fmt.Sprintf("candidate %d's line %s", c.Rank, note))
 			}
+		}
+		// Part of the report, so that it is read wherever the report is:
+		// the terminal says it in the verdict line for one candidate only.
+		if repoScopeByEntityNameAlone(report) {
+			report.Notes = append(report.Notes, repoScopeEntityNameNote)
 		}
 		if errors.Is(err, context.DeadlineExceeded) && runCtx.Err() == nil {
 			// The report marks the query that ran out of time and says the
@@ -1070,6 +1075,20 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 	return notes
 }
 
+// repoScopeEntityNameNote qualifies every candidate of a report that the
+// entity-name search found: that search runs only when the record queries
+// find nothing.
+const repoScopeEntityNameNote = "no span or log in 24h carries a name of this repository: the candidates were found by entity name alone, and an entity outlives its last record, so nothing shows that one of them runs now"
+
+// repoScopeByEntityNameAlone reports whether r's candidates come from the
+// entity-name search: none has a workload or a service name, which every
+// candidate of the record queries has.
+func repoScopeByEntityNameAlone(r *reposcope.DiscoveryReport) bool {
+	return len(r.Candidates) > 0 && !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool {
+		return c.Workload != "" || c.ServiceName != ""
+	})
+}
+
 // repoScopeUnexplained reports whether c is a candidate of the record
 // queries that neither of its names explains: a row Grail returned for a
 // reason discovery cannot show in a file (an array-valued service.name that
@@ -1133,6 +1152,9 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, p repoScopeProp
 		}
 	case r.Verdict == reposcope.VerdictMatch:
 		s = append(s, "confirm with the user, then: "+r.Candidates[0].SetCommand)
+	case repoScopeByEntityNameAlone(r):
+		// Not "run its setCommand": nothing shows that a candidate runs.
+		s = append(s, "tell the user that "+repoScopeEntityNameNote+"; show the candidates, and offer a setCommand only for one the user says runs this code")
 	default:
 		s = append(s, "show the user the candidates and ask which runs this code, then run its setCommand")
 	}
@@ -1141,8 +1163,12 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, p repoScopeProp
 	// What a sample can have missed is the agent's to tell the user: it is
 	// why one sampled candidate is not a match.
 	s = append(s, r.SamplingNotes()...)
-	if len(r.Candidates) > 0 {
+	switch {
+	case len(r.Candidates) == 0:
+	case len(p.selectAll) > 0 || slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.SetCommand != "" }):
 		s = append(s, "nothing has been saved; running the set command is the confirmation")
+	default:
+		s = append(s, "nothing has been saved, and no candidate has a set command to run")
 	}
 	if r.Partial {
 		s = append(s, "the result is partial (see notes): a query failed, timed out, was capped or was interrupted, or a sample matched nothing, so a missing candidate is not evidence that nothing runs this code")
