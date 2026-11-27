@@ -38,6 +38,8 @@ func TestDecode_MalformedIsRefused(t *testing.T) {
 			"path on line 4 has no value"},
 		{"an empty path under a tag", scopeDoc("name: checkout", `path: !!str ""`, "service-names: [checkout]"),
 			"path on line 4 has no value"},
+		{"binary data", scopeDoc("name: !!binary Y2hlY2tvdXQ=", "service-names: [checkout]"),
+			"name on line 3 must be plain text, not !!binary data"},
 		{"an empty block for a path", scopeDoc("name: checkout", "path: |", "service-names: [checkout]"),
 			"path on line 4 has no value"},
 		{"an empty cluster uid", scopeDoc("name: checkout", "workloads:", "  - cluster-uid: ''", "    namespace: payments", "    name: checkout"),
@@ -95,8 +97,6 @@ func TestDecode_MalformedIsRefused(t *testing.T) {
 			"the merge key << on line 5 is not accepted"},
 		{"a merge key of the document", "<<: {environments: {" + prodHost + ": [{name: checkout, service-names: [checkout]}]}}\n",
 			"the merge key << on line 1 is not accepted"},
-		{"binary data", scopeDoc("name: !!binary Y2hlY2tvdXQ=", "service-names: [checkout]"),
-			"name on line 3 must be plain text, not !!binary data"},
 
 		{"a list for the document", "- environments\n", "does not match the repo scope schema: the document on line 1 must be a mapping"},
 		{"a list for environments", "environments: [" + prodHost + "]\n",
@@ -311,4 +311,39 @@ func TestFileTypesCarryEveryField(t *testing.T) {
 	assert.Contains(t, string(data), "service-names:")
 	assert.Contains(t, string(data), "process-groups:")
 	assert.NotRegexp(t, `(?m)^[ -]*[A-Za-z-]*[a-z][A-Z][A-Za-z]*:`, strings.SplitN(string(data), "apiVersion: v1\n", 2)[1], "a camelCase key in the file")
+}
+
+// What a file makes dtctl say is bounded like what it makes dtctl do: a
+// warning is printed by every scoped query and travels in its envelope.
+func TestDecode_HostileFileGetsAShortAnswer(t *testing.T) {
+	const size = 1_000_000
+	valid := scopeDoc("name: checkout", "service-names: [checkout]")
+	keys := []byte(valid)
+	for i := 0; len(keys) < size; i++ {
+		keys = fmt.Appendf(keys, "%s%d: 1\n", strings.Repeat("k", 200), i)
+	}
+	f, err := decode(keys)
+	require.Nil(t, err)
+	assert.Less(t, len(f.Warning()), maxMessageBytes+1)
+	assert.Regexp(t, `^unknown keys "k+0" on line 5, .* and \d+ more \(a typo, or written by a newer dtctl\)$`, f.Warning())
+
+	entryKeys := []byte(valid)
+	for i := 0; len(entryKeys) < size; i++ {
+		entryKeys = fmt.Appendf(entryKeys, "      %s%d: 1\n", strings.Repeat("k", 200), i)
+	}
+	long := strings.Repeat("v", size)
+	for name, data := range map[string][]byte{
+		"unknown entry keys": entryKeys,
+		"a long version":     []byte("apiVersion: " + long + "\n"),
+		"a long anchor":      []byte("environments: &" + long + " {}\n"),
+		"a long name":        []byte(scopeDoc("name: "+long, "service-names: [checkout]")),
+		"a long service":     []byte(scopeDoc("name: checkout", "service-names: ["+long+"]")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.LessOrEqual(t, len(data), maxFileBytes)
+			_, err := decode(data)
+			require.NotNil(t, err)
+			assert.Less(t, len(err.Msg), maxMessageBytes+1)
+		})
+	}
 }

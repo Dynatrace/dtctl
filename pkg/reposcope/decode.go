@@ -50,6 +50,26 @@ const fileHeader = "# dtctl repo scope: links this repository to the Dynatrace e
 // which a generator or a concatenation leaves after a trailing '---',
 // carries nothing to drop.
 func decode(data []byte) (*File, *InvalidError) {
+	f, err := read(data)
+	if err != nil {
+		err.Msg = bounded(err.Msg)
+	}
+	return f, err
+}
+
+// bounded is msg cut to maxMessageBytes. The file is as long as 1 MiB and a
+// refusal quotes what it refuses, so without a bound one line of a clone
+// decides how much every command run in it prints.
+func bounded(msg string) string {
+	if len(msg) <= maxMessageBytes {
+		return msg
+	}
+	const cut = "… (cut short)"
+	return strings.ToValidUTF8(msg[:maxMessageBytes-len(cut)], "") + cut
+}
+
+// read is decode without the bound on what it says.
+func read(data []byte) (*File, *InvalidError) {
 	f := &File{}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return f, nil
@@ -430,16 +450,24 @@ func (f *File) Warning() string {
 	if len(f.unknown) == 0 {
 		return ""
 	}
-	return unknownKeys(f.unknown)
+	return bounded(unknownKeys(f.unknown))
 }
 
-// unknownKeys names keys this dtctl does not know, each as decode found it.
+// maxNamedKeys is how many unknown keys a message names before it counts.
+const maxNamedKeys = 5
+
+// unknownKeys names keys this dtctl does not know, each as decode found it:
+// the first few, then how many more there are.
 func unknownKeys(keys []string) string {
 	noun := "key"
 	if len(keys) > 1 {
 		noun = "keys"
 	}
-	return fmt.Sprintf("unknown %s %s (a typo, or written by a newer dtctl)", noun, strings.Join(keys, ", "))
+	more := ""
+	if n := len(keys) - maxNamedKeys; n > 0 {
+		keys, more = keys[:maxNamedKeys], fmt.Sprintf(" and %d more", n)
+	}
+	return fmt.Sprintf("unknown %s %s%s (a typo, or written by a newer dtctl)", noun, strings.Join(keys, ", "), more)
 }
 
 // The file's own spelling: kebab-case keys, where Entry and Workload carry

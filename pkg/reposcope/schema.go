@@ -164,6 +164,10 @@ const maxDNSSubdomain = 253
 // reads can be: an environment's host, and an annotation's key.
 const maxKeyBytes = max(maxDNSSubdomain, maxAnnotationKeyBytes)
 
+// maxMessageBytes bounds what a file can make dtctl say about it: a refusal
+// quotes the value it refuses, and a value can be as long as the file.
+const maxMessageBytes = 2048
+
 // maxServiceNameRunes bounds a service name; Dynatrace stores longer ones
 // truncated, so a longer binding could never match.
 const maxServiceNameRunes = 255
