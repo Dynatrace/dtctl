@@ -100,6 +100,10 @@ func repositoryName(remote string) string {
 		if i := strings.IndexByte(remote, ':'); i >= 0 && !strings.ContainsRune(remote[:i], '/') {
 			p = remote[i+1:]
 		}
+		// Not a URL, so nothing parsed a query or a fragment off it.
+		if i := strings.IndexAny(p, "?#"); i >= 0 {
+			p = p[:i]
+		}
 	}
 	p = strings.TrimSuffix(strings.TrimRight(p, "/"), ".git")
 	return p[strings.LastIndexByte(p, '/')+1:]
