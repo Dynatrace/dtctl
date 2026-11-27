@@ -209,6 +209,24 @@ func TestInjectID(t *testing.T) {
 			id:      "some-id",
 			wantErr: true,
 		},
+		{
+			name:    "trailing data after object returns error",
+			input:   `{"name":"test"},"content":{"tiles":[]}}`,
+			id:      "some-id",
+			wantErr: true,
+		},
+		{
+			name:    "second object after object returns error",
+			input:   `{"name":"test"} {"name":"other"}`,
+			id:      "some-id",
+			wantErr: true,
+		},
+		{
+			name:   "trailing whitespace is accepted",
+			input:  "{\"name\":\"test\"}\n",
+			id:     "new-id",
+			wantID: "new-id",
+		},
 	}
 
 	for _, tt := range tests {

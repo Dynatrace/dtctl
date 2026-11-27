@@ -754,7 +754,7 @@ func (a *Applier) dryRun(resourceType ResourceType, data []byte, opts ApplyOptio
 				docType, _ = doc["type"].(string)
 			}
 		}
-		return a.dryRunDocument(docType, doc)
+		return a.dryRunDocument(docType, data, doc)
 	}
 
 	// Extension monitoring configs have specific fields
@@ -860,11 +860,51 @@ func capitalize(s string) string {
 }
 
 // injectID sets the "id" field in a JSON object, overwriting any existing value.
+// The object is rewritten field by field rather than through a map so the order
+// of all other keys is preserved (apps such as Notebooks derive behaviour from
+// it); the "id" field is written first.
 func injectID(data []byte, id string) ([]byte, error) {
-	var doc map[string]interface{}
-	if err := json.Unmarshal(data, &doc); err != nil {
+	rawID, err := json.Marshal(id)
+	if err != nil {
 		return nil, err
 	}
-	doc["id"] = id
-	return json.Marshal(doc)
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil {
+		return nil, err
+	} else if tok != json.Delim('{') {
+		return nil, fmt.Errorf("expected a JSON object")
+	}
+
+	var out bytes.Buffer
+	out.WriteString(`{"id":`)
+	out.Write(rawID)
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		if tok == "id" {
+			continue
+		}
+		rawKey, _ := json.Marshal(tok)
+		out.WriteByte(',')
+		out.Write(rawKey)
+		out.WriteByte(':')
+		out.Write(value)
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	// Reject trailing data so malformed input is not accepted as a truncated
+	// document (json.Unmarshal enforces the same).
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("invalid JSON: unexpected data after top-level object")
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
 }
