@@ -189,7 +189,7 @@ func repoScopeOnDiskDir(repo fs.FS, dir string) (string, error) {
 			switch {
 			case e.Name() == name, norm.NFC.String(e.Name()) == norm.NFC.String(name):
 				exact = append(exact, e)
-			case strings.EqualFold(e.Name(), name):
+			case strings.EqualFold(norm.NFC.String(e.Name()), norm.NFC.String(name)):
 				folded = append(folded, e)
 			}
 		}

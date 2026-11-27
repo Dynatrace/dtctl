@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
 
@@ -215,4 +216,15 @@ func TestRepoScopeUnknownSubcommandIsTheGroups(t *testing.T) {
 	}
 	_, _, stderr := runRepoScoped([]string{"repo-scope", "sett"}, RunOptions{})
 	require.Contains(t, stderr, "set")
+}
+
+// The directory is found whatever case and composition it is typed in, also
+// when it differs from the stored name in both.
+func TestRepoScopeOnDiskDirFoldsCaseAfterComposing(t *testing.T) {
+	repo := fstest.MapFS{"Café/app/main.go": {Data: []byte("")}}
+	for _, typed := range []string{"café/app", "café/APP", "Café"} {
+		dir, err := repoScopeOnDiskDir(repo, typed)
+		require.NoError(t, err, "%+q", typed)
+		require.True(t, strings.HasPrefix(dir, "Café"), "%+q", dir)
+	}
 }
