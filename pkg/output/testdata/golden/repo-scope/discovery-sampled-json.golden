@@ -17,6 +17,7 @@
       "workload": "checkout",
       "serviceName": "checkout",
       "serviceNameShared": true,
+      "serviceNameOwn": true,
       "services": [
         "SERVICE-0123456789ABCDEF"
       ],
@@ -39,6 +40,7 @@
       "workload": "checkout",
       "serviceName": "checkout",
       "serviceNameShared": true,
+      "serviceNameOwn": true,
       "tier": "exact",
       "cappedScan": [
         "spans"

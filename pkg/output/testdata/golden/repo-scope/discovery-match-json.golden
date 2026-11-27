@@ -18,6 +18,7 @@
       "namespace": "payments",
       "workload": "checkout",
       "serviceName": "checkout",
+      "serviceNameOwn": true,
       "processGroups": [
         "PROCESS_GROUP-FEDCBA9876543210"
       ],

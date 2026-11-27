@@ -20,6 +20,7 @@
       "workloadShared": true,
       "serviceName": "refunds",
       "serviceNameShared": true,
+      "serviceNameOwn": true,
       "processGroups": [
         "PROCESS_GROUP-FEDCBA9876543210"
       ],
@@ -45,6 +46,7 @@
       "workloadShared": true,
       "serviceName": "refunds",
       "serviceNameShared": true,
+      "serviceNameOwn": true,
       "tier": "exact",
       "spans": 300,
       "logs": 10,
@@ -69,6 +71,7 @@
       "workload": "refunds",
       "serviceName": "refunds",
       "serviceNameShared": true,
+      "serviceNameOwn": true,
       "tier": "exact",
       "spans": 200,
       "logs": 60,
@@ -87,6 +90,7 @@
       "workload": "refunds",
       "serviceName": "refunds",
       "serviceNameShared": true,
+      "serviceNameOwn": true,
       "processGroups": [
         "PROCESS_GROUP-0000000000000002"
       ],

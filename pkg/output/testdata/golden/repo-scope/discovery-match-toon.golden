@@ -10,6 +10,7 @@ candidates[1]:
     rank: 1
     serviceCount: 1
     serviceName: checkout
+    serviceNameOwn: true
     services[1]: SERVICE-0123456789ABCDEF
     spans: 12400
     tier: exact
