@@ -1,7 +1,9 @@
 package reposcope
 
 import (
+	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
@@ -50,6 +52,10 @@ type gradleBuild struct {
 	dir        string
 	modules    map[string][]string
 	deployable map[string]bool
+	// partial says why the build was not read whole, "" when it was. It is
+	// set by gradleBuildAt only: what a module depends on is then not known
+	// for every module, so neither is which deployables a module belongs to.
+	partial string
 }
 
 // gradleBuilds are a repository's builds, by the directory of their settings
@@ -278,6 +284,13 @@ func (b *gradleBuild) owners(m string) []string {
 // a walk, and the walk it does starts at the build's own directory, never at
 // the repository root: resolving an entry calls this on every scoped query.
 // Nothing is deployed in it: the caller says what is.
+//
+// The build's partial says whether it was read whole. It was not when the
+// walk stopped at its file limit, when a build file it listed could not be
+// read, or when a module the settings include has a build file the walk did
+// not list (the module lies deeper than the walk goes, or in a directory it
+// skips). The last is asked of the filesystem, module by module, so it does
+// not depend on how the walk bounds itself.
 func gradleBuildAt(fsys fs.FS, dir string) *gradleBuild {
 	root := dir
 	for ; !slices.ContainsFunc(gradleSettingsFiles, func(f string) bool {
@@ -291,15 +304,58 @@ func gradleBuildAt(fsys fs.FS, dir string) *gradleBuild {
 	if inSkippedDir(root) {
 		return nil
 	}
-	files, _, err := listSources(fsys, root, dir, func(f string) bool { return isGradleFile(path.Base(f)) })
+	files, capped, err := listSources(fsys, root, dir, func(f string) bool { return isGradleFile(path.Base(f)) })
 	if err != nil {
 		return nil
 	}
+	partial := ""
+	if capped {
+		partial = fmt.Sprintf("it holds more than %d build files", maxFiles)
+	}
 	text := map[string]string{}
 	for _, f := range files {
-		if data, err := readSource(fsys, f); err == nil {
-			text[f] = string(data)
+		data, err := readSource(fsys, f)
+		if err != nil {
+			if partial == "" {
+				partial = fmt.Sprintf("%q could not be read", f)
+			}
+			continue
+		}
+		text[f] = string(data)
+	}
+	b := readGradleBuilds(files, text, nil).of(dir)
+	if b == nil {
+		if partial == "" {
+			return nil
+		}
+		// The settings file is there and the walk did not get to it: a
+		// build of which nothing is known, which is not the same as none.
+		b = &gradleBuild{dir: root, modules: map[string][]string{}, deployable: map[string]bool{}}
+	}
+	if partial == "" {
+		partial = b.unlistedBuildFile(fsys, files)
+	}
+	b.partial = partial
+	return b
+}
+
+// unlistedBuildFile names why the build is not read whole when a module has a
+// build file that is not among files, the ones the walk listed, or returns "".
+func (b *gradleBuild) unlistedBuildFile(fsys fs.FS, files []string) string {
+	listed := make(map[string]bool, len(files))
+	for _, f := range files {
+		listed[f] = true
+	}
+	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
+		for _, name := range gradleBuildFiles {
+			f := path.Join(m, name)
+			if listed[f] {
+				continue
+			}
+			if _, err := fs.Stat(fsys, f); err == nil {
+				return fmt.Sprintf("%q was not read", f)
+			}
 		}
 	}
-	return readGradleBuilds(files, text, nil).of(dir)
+	return ""
 }
