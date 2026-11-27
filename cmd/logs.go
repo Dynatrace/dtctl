@@ -65,7 +65,6 @@ Examples:
 
   # Follow logs in real-time (stream until execution completes)
   dtctl logs wfe <execution-id> --follow
-  dtctl logs wfe <execution-id> -f
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -137,7 +136,7 @@ Examples:
 		},
 	}
 	c.Flags().StringVarP(&taskName, "task", "t", "", "Get logs for a specific task")
-	c.Flags().BoolVarP(&followLogs, "follow", "f", false, "Follow logs in real-time until execution completes")
+	c.Flags().BoolVar(&followLogs, "follow", false, "Follow logs in real-time until execution completes")
 	stability.MarkFlag(c, "follow", stability.Experimental, pre10Since)
 	c.Flags().BoolVarP(&allTaskLogs, "all", "a", false, "Get all logs (workflow execution log + all task logs)")
 	c.Flags().BoolVar(&tasksOnlyLogs, "tasks", false, "Get task logs only (all tasks with headers)")

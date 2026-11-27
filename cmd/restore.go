@@ -51,7 +51,7 @@ Examples:
   dtctl restore workflow "My Workflow" 3
 
   # Restore without confirmation
-  dtctl restore workflow "My Workflow" 3 --force
+  dtctl restore workflow "My Workflow" 3 --yes
 `,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,7 +92,7 @@ Examples:
 				return newDryRunReport(cmd).Linef("Dry run: would restore workflow %q to version %d", wf.Title, version).Print()
 			}
 
-			// Confirm restore unless --force or --plain
+			// Confirm restore unless --yes or --plain
 			if !forceDelete && !plainMode(cmdContext(cmd)) {
 				confirmMsg := fmt.Sprintf("Restore workflow %q to version %d?", wf.Title, version)
 				if !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), confirmMsg) {
@@ -110,9 +110,9 @@ Examples:
 			return nil
 		},
 	}
-	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force", "dry-run")
-	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes", "dry-run")
+	stability.MarkFlagStable(c, "yes")
 	stability.MarkStable(c)
 	return c
 }
@@ -142,7 +142,7 @@ Examples:
   dtctl restore dashboard "Production Dashboard" 3
 
   # Restore without confirmation
-  dtctl restore dashboard "Production Dashboard" 3 --force
+  dtctl restore dashboard "Production Dashboard" 3 --yes
 `,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -186,7 +186,7 @@ Examples:
 				return newDryRunReport(cmd).Linef("Dry run: would restore dashboard %q from snapshot %d", metadata.Name, version).Print()
 			}
 
-			// Confirm restore unless --force or --plain
+			// Confirm restore unless --yes or --plain
 			if !forceDelete && !plainMode(cmdContext(cmd)) {
 				confirmMsg := fmt.Sprintf("Restore dashboard %q from snapshot %d?", metadata.Name, version)
 				if !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), confirmMsg) {
@@ -204,9 +204,9 @@ Examples:
 			return nil
 		},
 	}
-	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force", "dry-run")
-	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes", "dry-run")
+	stability.MarkFlagStable(c, "yes")
 	stability.MarkStable(c)
 	return c
 }
@@ -236,7 +236,7 @@ Examples:
   dtctl restore notebook "Analysis Notebook" 3
 
   # Restore without confirmation
-  dtctl restore notebook "Analysis Notebook" 3 --force
+  dtctl restore notebook "Analysis Notebook" 3 --yes
 `,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -280,7 +280,7 @@ Examples:
 				return newDryRunReport(cmd).Linef("Dry run: would restore notebook %q from snapshot %d", metadata.Name, version).Print()
 			}
 
-			// Confirm restore unless --force or --plain
+			// Confirm restore unless --yes or --plain
 			if !forceDelete && !plainMode(cmdContext(cmd)) {
 				confirmMsg := fmt.Sprintf("Restore notebook %q from snapshot %d?", metadata.Name, version)
 				if !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), confirmMsg) {
@@ -298,9 +298,9 @@ Examples:
 			return nil
 		},
 	}
-	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force", "dry-run")
-	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes", "dry-run")
+	stability.MarkFlagStable(c, "yes")
 	stability.MarkStable(c)
 	return c
 }
@@ -332,7 +332,7 @@ Examples:
   dtctl restore document "My Launchpad" 3
 
   # Restore without confirmation
-  dtctl restore document "My Launchpad" 3 --force
+  dtctl restore document "My Launchpad" 3 --yes
 `,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -373,7 +373,7 @@ Examples:
 				return newDryRunReport(cmd).Linef("Dry run: would restore document %q (%s) from snapshot %d", metadata.Name, metadata.Type, version).Print()
 			}
 
-			// Confirm restore unless --force or --plain
+			// Confirm restore unless --yes or --plain
 			if !forceDelete && !plainMode(cmdContext(cmd)) {
 				confirmMsg := fmt.Sprintf("Restore document %q (%s) from snapshot %d?", metadata.Name, metadata.Type, version)
 				if !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), confirmMsg) {
@@ -391,9 +391,9 @@ Examples:
 			return nil
 		},
 	}
-	c.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation prompt")
-	markPrompts(c, "force", "dry-run")
-	stability.MarkFlag(c, "force", stability.Experimental, pre10Since)
+	c.Flags().BoolVarP(&forceDelete, "yes", "y", false, "Skip confirmation prompt")
+	markPrompts(c, "yes", "dry-run")
+	stability.MarkFlagStable(c, "yes")
 	stability.MarkStable(c)
 	return c
 }
@@ -504,10 +504,6 @@ func init() {
 	restoreCmd.AddCommand(restoreNotebookCmd)
 	restoreCmd.AddCommand(restoreDocumentCmd)
 	restoreCmd.AddCommand(restoreTrashCmd)
-
-	// Add --force flag to restore commands
-	// -f is reserved for --file in 1.0 (contrib breaking-changes/short-flag-f.md).
-	// Restore trash flags
 }
 
 // Declared stable: the invocation and output contract of these commands is

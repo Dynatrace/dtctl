@@ -991,20 +991,20 @@ query                                stable
 restore                              stable
 restore dashboard                    stable
   --dry-run                          stable
-  --force                            experimental  since 0.39.0  (declared)
+  --yes                              stable  (declared)
 restore document                     stable
   --dry-run                          stable
-  --force                            experimental  since 0.39.0  (declared)
+  --yes                              stable  (declared)
 restore notebook                     stable
   --dry-run                          stable
-  --force                            experimental  since 0.39.0  (declared)
+  --yes                              stable  (declared)
 restore trash                        stable
   --dry-run                          stable
   --force                            stable
   --new-name                         stable
 restore workflow                     stable
   --dry-run                          stable
-  --force                            experimental  since 0.39.0  (declared)
+  --yes                              stable  (declared)
 serve                                development  (opt-in key: serve)
 serve http                           development
   --addr                             development
