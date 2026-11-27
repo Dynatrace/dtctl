@@ -1,6 +1,7 @@
 package reposcope
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -150,6 +151,24 @@ func TestResolve_ClosestIsDeepestNotLongest(t *testing.T) {
 		require.NotNil(t, r.Entry, "%d letters: %s", letters, r.Reason)
 		assert.Equal(t, "sub", r.Entry.Name, "%d letters", letters)
 	}
+}
+
+// entry renders no Live Debugger filters is still there afterwards.
+func TestStatus_LiveDebuggerReasonSurvivesJSON(t *testing.T) {
+	f := &File{Environments: map[string][]Entry{prodHost: {{Name: "seg", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}}}}}
+	r, err := Resolve(nil, f, prodHost, ".", "")
+	require.NoError(t, err)
+	_, ok, want := r.LiveDebuggerFilterSets()
+	require.False(t, ok)
+	require.NotEmpty(t, want)
+
+	data, err := json.Marshal(r)
+	require.NoError(t, err)
+	var back Status
+	require.NoError(t, json.Unmarshal(data, &back))
+	_, ok, reason := back.LiveDebuggerFilterSets()
+	assert.False(t, ok)
+	assert.Equal(t, want, reason)
 }
 
 // build on every scoped query.

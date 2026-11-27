@@ -83,8 +83,6 @@ type Status struct {
 	// describe and the breakpoint commands read it through
 	// LiveDebuggerFilterSets.
 	LiveDebuggerFilters []map[string][]string `json:"liveDebuggerFilters,omitempty" yaml:"liveDebuggerFilters,omitempty"`
-	// liveDebuggerReason says why an entry renders no filter sets.
-	liveDebuggerReason string
 	// Reason explains a nil Entry, an entry chosen by name that does not
 	// cover Dir, or one that covers it through a Gradle build. It is for a
 	// person; a program reads Code, Selected and Tied.
@@ -191,13 +189,14 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 			s.Filters[object] = filter.Expr
 		}
 	}
-	s.LiveDebuggerFilters, _, s.liveDebuggerReason = LiveDebuggerFilters(s.Entry)
+	s.LiveDebuggerFilters, _, _ = LiveDebuggerFilters(s.Entry)
 	return s, nil
 }
 
 // LiveDebuggerFilterSets is the entry's LiveDebuggerFilters, or, when it
 // renders none, ok false and the reason. A Status without an entry renders
-// none either.
+// none either. The reason is rendered from the entry, so a Status read back
+// from what a command printed gives it too.
 func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, reason string) {
 	switch {
 	case len(s.LiveDebuggerFilters) > 0:
@@ -205,7 +204,8 @@ func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, 
 	case s.Entry == nil:
 		return nil, false, s.Reason
 	}
-	return nil, false, s.liveDebuggerReason
+	_, _, reason = LiveDebuggerFilters(s.Entry)
+	return nil, false, reason
 }
 
 // Ambiguous reports whether several entries cover Dir as closely, none
