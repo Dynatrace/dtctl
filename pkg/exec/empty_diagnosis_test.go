@@ -408,3 +408,99 @@ func TestE2E_EmptyResultCarriesEmptyReason(t *testing.T) {
 		})
 	}
 }
+
+func spanSample() *DQLQueryResponse {
+	r := recordsResponse(
+		map[string]interface{}{"trace.id": "5b9f2740a42acf2f3b8a94e7fff925a5", "span.id": "7fecf2bdb41167f8", "span.name": "GET"},
+		map[string]interface{}{"trace.id": "a16174edc5d3d37234855e4996d341d5", "span.id": "f1290efbbf4b232e", "span.name": "POST"},
+	)
+	r.Result.Types = []ColumnTypes{{IndexRange: []int{0, 1}, Mappings: map[string]ColumnType{
+		"trace.id": {Type: "uid"}, "span.id": {Type: "uid"}, "span.name": {Type: "string"},
+	}}}
+	return r
+}
+
+// A trace id pasted as a string: the field exists, the filter parses, and it
+// matches nothing. Production agents retried other windows (2026-11 query log).
+func TestEmptyResultAdvice_UIDComparedToString(t *testing.T) {
+	for _, query := range []string{
+		`fetch spans, from:now()-1h | filter trace.id == "a16174edc5d3d37234855e4996d341d5" | fields span.name`,
+		`fetch spans | filter "a16174edc5d3d37234855e4996d341d5" == trace.id`,
+		`fetch spans | filter in(trace.id, array("a16174edc5d3d37234855e4996d341d5", "5b9f2740a42acf2f3b8a94e7fff925a5"))`,
+		`fetch spans | filter in(trace.id, "a16174edc5d3d37234855e4996d341d5", "5b9f2740a42acf2f3b8a94e7fff925a5") and span.name == "GET"`,
+		"fetch spans | filter `trace.id` == \"a16174edc5d3d37234855e4996d341d5\"",
+		`fetch spans | filter span.name == "GET" and (trace.id == "a16174edc5d3d37234855e4996d341d5")`,
+		`fetch spans | filterOut span.name == "x" | filter trace.id == """a16174edc5d3d37234855e4996d341d5"""`,
+		`fetch spans | filter (trace.id == "a16174edc5d3d37234855e4996d341d5" and span.name == "GET")`,
+		`fetch spans | filter (span.name == "GET" or span.name == "POST") AND trace.id == "a16174edc5d3d37234855e4996d341d5"`,
+		// Unicode case folding changes byte lengths (K → k): offsets must stay those of the query.
+		"fetch spans | filter `\u212a` == \"x\" and trace.id == \"a16174edc5d3d37234855e4996d341d5\"",
+	} {
+		p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return spanSample(), nil }}
+		e := &DQLExecutor{probe: p.run}
+		reason, sugg := e.emptyResultAdvice(query, recordsResponse(), nil, DQLExecuteOptions{})
+		if reason == nil || reason.Code != "uid_compared_to_string" || reason.Field != "trace.id" || reason.DataObject != "spans" {
+			t.Fatalf("%s: reason = %+v, suggestions=%v", query, reason, sugg)
+		}
+		if !hasSuggestion(sugg, "toUid(") {
+			t.Errorf("%s: suggestions should name toUid: %v", query, sugg)
+		}
+		if hasSuggestion(sugg, "DEFAULT query window") {
+			t.Errorf("%s: widen-the-window advice must be withheld: %v", query, sugg)
+		}
+		if !p.opts[0].IncludeTypes {
+			t.Errorf("the probe must ask for column types")
+		}
+	}
+}
+
+func TestEmptyResultAdvice_UIDComparedRightIsNotFlagged(t *testing.T) {
+	for _, query := range []string{
+		`fetch spans | filter trace.id == toUid("a16174edc5d3d37234855e4996d341d5")`,
+		`fetch spans | filter toString(trace.id) == "a16174edc5d3d37234855e4996d341d5"`,
+		`fetch spans | filter span.name == "GET"`,
+		// The compare drops nothing here, so the empty result has another cause.
+		`fetch spans | filterOut trace.id == "a16174edc5d3d37234855e4996d341d5" | filter span.name == "missing"`,
+		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" or span.name == "GET"`,
+		`fetch spans | filter not(trace.id == "a16174edc5d3d37234855e4996d341d5")`,
+		// `and` binds tighter than `or`: this is (trace.id == … and …) or span.name == "POST".
+		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" and span.name == "GET" or span.name == "POST"`,
+		`fetch spans | filter (trace.id == "a16174edc5d3d37234855e4996d341d5" or span.name == "GET")`,
+		`fetch spans | filter trace.id == "a16174edc5d3d37234855e4996d341d5" xor span.name == "GET"`,
+		// The in() call is only part of the conjunct, or lists a value that can match.
+		`fetch spans | filter (in(trace.id, "x") == isNull(span.name) and span.name == "missing")`,
+		`fetch spans | filter in(trace.id, "a16174edc5d3d37234855e4996d341d5", toUid("5b9f2740a42acf2f3b8a94e7fff925a5"))`,
+		`fetch spans | filter in(trace.id, array("a16174edc5d3d37234855e4996d341d5", toUid("5b9f2740a42acf2f3b8a94e7fff925a5")))`,
+		// Text inside a string literal is not code.
+		`fetch spans | filter span.name == "trace.id == " and isNotNull(trace.id)`,
+	} {
+		p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return spanSample(), nil }}
+		e := &DQLExecutor{probe: p.run}
+		reason, sugg := e.emptyResultAdvice(query, recordsResponse(), nil, DQLExecuteOptions{})
+		if reason != nil && reason.Code == "uid_compared_to_string" {
+			t.Errorf("%s: flagged a correct compare: %+v %v", query, reason, sugg)
+		}
+	}
+}
+
+// A quoted field name may hold spaces or keywords: it is matched as one
+// identifier, and the suggested DQL keeps its quotes.
+func TestEmptyResultAdvice_UIDComparedToString_QuotedField(t *testing.T) {
+	sample := func() *DQLQueryResponse {
+		r := recordsResponse(map[string]interface{}{"trace and id": "5b9f2740a42acf2f3b8a94e7fff925a5", "span.name": "GET"})
+		r.Result.Types = []ColumnTypes{{IndexRange: []int{0, 0}, Mappings: map[string]ColumnType{
+			"trace and id": {Type: "uid"}, "span.name": {Type: "string"},
+		}}}
+		return r
+	}
+	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return sample(), nil }}
+	e := &DQLExecutor{probe: p.run}
+	query := "fetch spans | filter `trace and id` == \"5b9f2740a42acf2f3b8a94e7fff925a5\" and span.name == \"GET\""
+	reason, sugg := e.emptyResultAdvice(query, recordsResponse(), nil, DQLExecuteOptions{})
+	if reason == nil || reason.Code != "uid_compared_to_string" || reason.Field != "trace and id" {
+		t.Fatalf("reason = %+v, suggestions=%v", reason, sugg)
+	}
+	if !hasSuggestion(sugg, "filter `trace and id` == toUid(") || !hasSuggestion(sugg, "toString(`trace and id`)") {
+		t.Errorf("suggested DQL must keep the identifier quoted: %v", sugg)
+	}
+}

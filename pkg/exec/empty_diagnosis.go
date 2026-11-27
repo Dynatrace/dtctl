@@ -126,6 +126,8 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	// timeframe flags are passed through.
 	probeOpts.DefaultTimeframeStart = opts.DefaultTimeframeStart
 	probeOpts.DefaultTimeframeEnd = opts.DefaultTimeframeEnd
+	// The column types show a uid field compared to a string (see uidStringCompares).
+	probeOpts.IncludeTypes = true
 	resp, err := probe(ctx, fmt.Sprintf("%s | limit %d", stages[0], emptyProbeSampleRecords), probeOpts)
 	// A sample cut short by a limit is skewed toward whatever was read first,
 	// so it is not used as evidence.
@@ -150,6 +152,22 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	var reason *output.EmptyReason
 	var suggestions []string
 	n := len(sample)
+	// A uid field (trace.id, span.id, …) never equals a string literal: the filter
+	// is well-formed, the field is present, and it still matches nothing. That is
+	// the one case where the sample proves the cause, so it replaces the window advice.
+	for _, f := range uidStringCompares(stages, fields, sampleTypes(resp)) {
+		id := dqlIdentifier(f)
+		suggestions = append(suggestions, fmt.Sprintf("# `%s` is a uid, not a string, so comparing it with a string literal matches nothing — compare with toUid(\"<hex>\"), e.g. filter %s == toUid(\"…\"), or use toString(%s)", f, id, id))
+		if reason == nil {
+			reason = &output.EmptyReason{
+				Code:       "uid_compared_to_string",
+				Field:      f,
+				DataObject: object,
+				SampleSize: n,
+				Evidence:   fmt.Sprintf("`%s` has type uid in all %d sampled `%s` records, and the query compares it with a string literal", f, n, object),
+			}
+		}
+	}
 	for _, f := range fields {
 		if seen[f] {
 			continue
@@ -173,6 +191,189 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, object string, 
 	}
 	return reason, suggestions
 }
+
+// sampleTypes maps each column of the probe sample to its DQL type, when every
+// typed record range agrees on it.
+func sampleTypes(resp *DQLQueryResponse) map[string]string {
+	types := map[string]string{}
+	mixed := map[string]bool{}
+	for _, g := range resp.GetTypes() {
+		for name, ct := range g.Mappings {
+			if t, ok := types[name]; ok && t != ct.Type {
+				mixed[name] = true
+			}
+			types[name] = ct.Type
+		}
+	}
+	for name := range mixed {
+		delete(types, name)
+	}
+	return types
+}
+
+// uidStringCompares returns the referenced fields that the sample types as uid
+// and that a filter compares with a string literal: `f == "x"`, `"x" == f`,
+// `f != "x"` or `in(f, "x", …)` / `in(f, array("x", …))`.
+//
+// The compare only proves the cause when it necessarily drops every record, so
+// it must be a top-level conjunct of a `filter` stage. Under `filterOut`, `or`,
+// `xor` or `not()` it can let records through, and the empty result has another cause.
+func uidStringCompares(stages, fields []string, types map[string]string) []string {
+	var conjuncts []string
+	for _, st := range stages[1:] {
+		cmd, rest := splitCommand(st)
+		switch strings.ToLower(cmd) {
+		case "filter":
+			conjuncts = append(conjuncts, topLevelConjuncts(maskStringLiterals(rest))...)
+		case "filterout", "sort", "limit", "dedup":
+		default:
+			goto done
+		}
+	}
+done:
+	var out []string
+	for _, f := range fields {
+		if types[f] != "uid" {
+			continue
+		}
+		q := regexp.QuoteMeta(f)
+		id := `(?:` + q + "|`" + q + "`)"
+		// The in() form must be the whole conjunct and list only string literals
+		// (masked to ""), so `in(f, "x") == …` or `in(f, "x", toUid("y"))` is not read as one.
+		strs := `""(?:\s*,\s*"")*`
+		re := regexp.MustCompile(`^(?:` + id + `\s*[!=]=\s*""|""\s*[!=]=\s*` + id +
+			`|in\(\s*` + id + `\s*,\s*(?:` + strs + `|array\(\s*` + strs + `\s*\))\s*\))$`)
+		for _, c := range conjuncts {
+			if re.MatchString(c) {
+				out = append(out, f)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// maskStringLiterals empties every string literal (`"…"`, `"""…"""`) to `""`,
+// so nothing inside one is read as code. Backtick identifiers stay as they are.
+func maskStringLiterals(expr string) string {
+	var b strings.Builder
+	for i := 0; i < len(expr); {
+		switch {
+		case strings.HasPrefix(expr[i:], `"""`):
+			end := strings.Index(expr[i+3:], `"""`)
+			if end < 0 {
+				end = len(expr) - i - 6
+			}
+			i += 3 + end + 3
+			b.WriteString(`""`)
+		case expr[i] == '"':
+			i = skipQuoted(expr, i)
+			b.WriteString(`""`)
+		case expr[i] == '`':
+			j := skipQuoted(expr, i)
+			b.WriteString(expr[i:j])
+			i = j
+		default:
+			b.WriteByte(expr[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+// topLevelConjuncts returns the parts of a filter expression that every
+// matching record must satisfy: its `and` operands, recursively through
+// enclosing parentheses, each trimmed and unwrapped. `and` binds tighter than
+// `or`/`xor`, so an expression with a top-level `or` or `xor` has none.
+func topLevelConjuncts(expr string) []string {
+	expr = unwrapParens(strings.TrimSpace(expr))
+	if len(splitTopLevelWord(expr, "or")) > 1 || len(splitTopLevelWord(expr, "xor")) > 1 {
+		return nil
+	}
+	parts := splitTopLevelWord(expr, "and")
+	if len(parts) == 1 {
+		return parts
+	}
+	var out []string
+	for _, p := range parts {
+		out = append(out, topLevelConjuncts(p)...)
+	}
+	return out
+}
+
+// splitTopLevelWord splits expr on the keyword word (ASCII, any case) where it
+// stands outside brackets and quoted runs.
+func splitTopLevelWord(expr, word string) []string {
+	var parts []string
+	depth, from := 0, 0
+	for i := 0; i < len(expr); i++ {
+		switch c := expr[i]; {
+		case c == '"' || c == '`':
+			i = skipQuoted(expr, i) - 1
+		case c == '(' || c == '[' || c == '{':
+			depth++
+		case c == ')' || c == ']' || c == '}':
+			depth--
+		case depth == 0 && isWordAt(expr, i, word):
+			parts = append(parts, expr[from:i])
+			from = i + len(word)
+			i += len(word) - 1
+		}
+	}
+	return append(parts, expr[from:])
+}
+
+// isWordAt reports whether the lowercase ASCII keyword word starts at s[i] as
+// a whole word. It compares bytes in place, so the offsets stay those of s.
+func isWordAt(s string, i int, word string) bool {
+	if i+len(word) > len(s) {
+		return false
+	}
+	for k := 0; k < len(word); k++ {
+		c := s[i+k]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != word[k] {
+			return false
+		}
+	}
+	inWord := func(c byte) bool { return isIdentChar(c) || c == '.' }
+	return (i == 0 || !inWord(s[i-1])) && (i+len(word) == len(s) || !inWord(s[i+len(word)]))
+}
+
+// unwrapParens drops parentheses that enclose the whole expression.
+func unwrapParens(s string) string {
+	for len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
+		depth := 0
+		for i := 0; i < len(s); i++ {
+			switch s[i] {
+			case '"', '`':
+				i = skipQuoted(s, i) - 1
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			if depth == 0 && i < len(s)-1 {
+				return s
+			}
+		}
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
+	return s
+}
+
+// dqlIdentifier renders a field name as DQL source: bare when it is a plain
+// (dotted) identifier, backtick-quoted otherwise.
+func dqlIdentifier(name string) string {
+	if plainIdentifierRe.MatchString(name) && !dqlKeywords[strings.ToLower(name)] {
+		return name
+	}
+	return "`" + name + "`"
+}
+
+var plainIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
 
 // queriedMetricKeys returns the metric keys Grail reports for a timeseries
 // query, in order and without duplicates.
