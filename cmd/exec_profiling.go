@@ -864,10 +864,16 @@ func profilingAPIError(err error) error {
 	default:
 		return err
 	}
+	// The details say what was wrong, a violated constraint for one: shown
+	// after the message, as the error itself would show them.
+	message := f.Message
+	if f.Details != "" {
+		message += " - " + f.Details
+	}
 	return &diagnostic.Error{
 		Operation:   "run profiling analysis",
 		StatusCode:  f.StatusCode,
-		Message:     f.Message,
+		Message:     message,
 		Suggestions: suggestions,
 		Err:         err,
 	}

@@ -18,7 +18,8 @@ const (
 	// a window a Handler does not take (errors.Is and errors.As find
 	// ErrWindowEmpty and the *WindowTooLongError).
 	FailureInvalidInput FailureReason = "invalid_input"
-	// FailureBadRequest: the API rejected the request parameters (400).
+	// FailureBadRequest: the API rejected the request parameters (400 on the
+	// request that starts the analysis, which carries them).
 	FailureBadRequest FailureReason = "bad_request"
 	// FailureForbidden: a scope or an IAM permission is missing (403).
 	// Analyses need storage:profiles:read and storage:entities:read.
@@ -48,9 +49,13 @@ type Failure struct {
 	// StatusCode is the status the API answered with, and 0 for a failure
 	// that is not an answer of the API (FailureInvalidInput, FailureTimeout).
 	StatusCode int
-	// Message is the API's own message, or the error's text where the
-	// failure is not an answer of the API.
+	// Message is the API's own message, or the analysis error's text where
+	// the failure is not an answer of the API.
 	Message string
+	// Details is what the API said beyond its message, such as the
+	// constraint a rejected parameter violated, and empty when it said
+	// nothing more. The SDK caps its length.
+	Details string
 }
 
 // ClassifyError recognizes the failures of an analysis that a caller can act
@@ -75,16 +80,18 @@ func ClassifyError(err error) (Failure, bool) {
 		return Failure{Reason: FailureInvalidInput, Message: runErr.Error()}, true
 	}
 	if errors.Is(runErr.Err, sdkcla.ErrNotCompleted) {
-		return Failure{Reason: FailureTimeout, Message: err.Error()}, true
+		return Failure{Reason: FailureTimeout, Message: runErr.Error()}, true
 	}
 
 	var apiErr *httpclient.APIError
 	if !errors.As(runErr.Err, &apiErr) {
 		return Failure{}, false
 	}
-	f := Failure{StatusCode: apiErr.StatusCode, Message: apiErr.Message}
+	f := Failure{StatusCode: apiErr.StatusCode, Message: apiErr.Message, Details: apiErr.Details}
 	switch {
-	case apiErr.StatusCode == 400:
+	case apiErr.StatusCode == 400 && phase == sdkcla.PhaseSubmit:
+		// The parameters went with the submit. A 400 on a poll says nothing
+		// about them, and is left unclassified.
 		f.Reason = FailureBadRequest
 	case apiErr.StatusCode == 403:
 		f.Reason = FailureForbidden

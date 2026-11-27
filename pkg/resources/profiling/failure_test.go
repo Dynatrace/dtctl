@@ -57,6 +57,20 @@ func TestClassifyError(t *testing.T) {
 			want: Failure{Reason: FailureInvalidInput, Message: `codelevelanalysis: unknown leaf type "nope": use total, service, or background`}},
 		{name: "wrapped again by the caller", err: fmt.Errorf("profile: %w", api(sdkcla.PhasePoll, 404)), ok: true,
 			want: Failure{Reason: FailureTaskExpired, StatusCode: 404, Message: "the API's message"}},
+		// The message is the analysis error's, whatever the caller wrapped
+		// around it, as it is for a refused request.
+		{name: "never completed, wrapped by the caller", err: fmt.Errorf("load prod: %w", notCompleted), ok: true,
+			want: Failure{Reason: FailureTimeout, Message: "codelevelanalysis: analysis did not complete within 60s (token t1)"}},
+		{name: "refused, wrapped by the caller", err: fmt.Errorf("load prod: %w", refused), ok: true,
+			want: Failure{Reason: FailureInvalidInput, Message: `codelevelanalysis: unknown leaf type "nope": use total, service, or background`}},
+		// What the API says beyond its message comes along.
+		{name: "400 with details", ok: true,
+			err:  &sdkcla.Error{Phase: sdkcla.PhaseSubmit, Err: httpclient.NewAPIError(400, "Constraints violated.", "from: must not be older than 14d")},
+			want: Failure{Reason: FailureBadRequest, StatusCode: 400, Message: "Constraints violated.", Details: "from: must not be older than 14d"}},
+		// A 400 names the request parameters, and those went with the submit.
+		// What one would mean on a poll is not known, so it is not passed off
+		// as a bad timeframe or entity.
+		{name: "400 on a poll", err: api(sdkcla.PhasePoll, 400)},
 		// An API error that did not come through an analysis is not one of
 		// its failures: a 404 from another API names no process.
 		{name: "an API error from elsewhere", err: httpclient.NewAPIError(404, "the API's message", "")},

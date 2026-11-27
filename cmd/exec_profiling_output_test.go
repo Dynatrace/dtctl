@@ -697,3 +697,53 @@ func TestExecProfiling_AgentKeepsTheFormatWarning(t *testing.T) {
 		})
 	}
 }
+
+// A 400 says what was wrong in its details. The advice for the status must
+// not replace them.
+func TestExecProfiling_BadRequestShowsItsDetails(t *testing.T) {
+	newProfilingAPI(t, http.StatusBadRequest, `{"error":{"code":400,"message":"Constraints violated.","details":{"constraintViolations":[{"path":"from","message":"must not be older than 14d"}]}}}`)
+
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess)
+	require.Equal(t, 1, code)
+	require.Empty(t, stdout)
+	require.True(t, strings.HasPrefix(stderr, "Error: Failed to run profiling analysis (HTTP 400): Constraints violated. - "), stderr)
+	require.Contains(t, strings.SplitN(stderr, "\n", 2)[0], "must not be older than 14d")
+
+	code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--agent")
+	require.Equal(t, 1, code)
+	require.Empty(t, stderr)
+	var env struct {
+		Error struct{ Code, Message string }
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &env), stdout)
+	require.Equal(t, "bad_request", env.Error.Code)
+	require.Contains(t, env.Error.Message, "must not be older than 14d")
+}
+
+// A 400 on a poll gets no advice about the timeframe or the entity: those
+// went with the submit, which was accepted. It passes through with the status
+// and the agent code a 400 has.
+func TestExecProfiling_BadRequestOnAPoll(t *testing.T) {
+	newProfilingPollAPI(t, http.StatusBadRequest, `{"error":{"code":400,"message":"the API's message"}}`)
+
+	code, stdout, stderr := runProfilingStreams(t, "hotspots", testProcess)
+	require.Equal(t, 1, code)
+	require.Empty(t, stdout)
+	require.Equal(t, "Error: codelevelanalysis: poll (token t1): API error (400): the API's message\n", stderr)
+
+	code, stdout, stderr = runProfilingStreams(t, "hotspots", testProcess, "--agent")
+	require.Equal(t, 1, code)
+	require.Empty(t, stderr)
+	var env struct {
+		Error struct {
+			Code, Message string
+			Suggestions   []string
+		}
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &env), stdout)
+	require.Equal(t, "bad_request", env.Error.Code)
+	require.Equal(t, "codelevelanalysis: poll (token t1): API error (400): the API's message", env.Error.Message)
+	for _, s := range env.Error.Suggestions {
+		require.NotContains(t, s, "timeframe")
+	}
+}
