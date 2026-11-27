@@ -922,3 +922,18 @@ func TestMetadataFlagCompletionRegistered(t *testing.T) {
 		t.Error("expected NoFileComp directive")
 	}
 }
+
+// TestExecAnalyzerNoWaitFlag pins the wait control: --no-wait exists and
+// defaults to false (so the analyzer waits), and --wait is gone.
+func TestExecAnalyzerNoWaitFlag(t *testing.T) {
+	f := execAnalyzerCmd.Flags().Lookup("no-wait")
+	if f == nil {
+		t.Fatal("exec analyzer --no-wait not found")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--no-wait default = %q, want false", f.DefValue)
+	}
+	if execAnalyzerCmd.Flags().Lookup("wait") != nil {
+		t.Error("exec analyzer --wait must be removed")
+	}
+}

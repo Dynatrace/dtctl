@@ -92,9 +92,9 @@ dtctl exec analyzer dt.statistics.GenericForecastAnalyzer \
   --input '{"query":"timeseries avg(dt.host.cpu.usage)"}'
 dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json
 
-# Execute and wait for completion (default; --wait=false returns immediately)
+# Execute and wait for completion (default; --no-wait skips polling and returns the initial response, which waits up to 30s server-side and carries a request token if the analyzer is still running)
 dtctl exec analyzer dt.statistics.GenericForecastAnalyzer \
-  -f input.json --wait --timeout 300
+  -f input.json --timeout 300
 ```
 
 In agent mode (`-A`) the result is shaped for a model reader: the echoed input and DQL `types` blocks are omitted, nulls dropped, and embedded timeseries default to `--series=summary --precision 4` (see [Agent Mode](../AGENT_MODE.md)); `--series=full --precision 0` restores the raw values. A `SUCCESSFUL` run with an empty `output` is reported as "nothing detected", not missing data.

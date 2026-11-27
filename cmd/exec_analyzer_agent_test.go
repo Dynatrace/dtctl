@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Dynatrace/dtctl/pkg/client"
 )
 
 // analyzerServer answers every :execute with the given completed result body.
@@ -95,4 +98,16 @@ func anyStrings(in []any) string {
 		}
 	}
 	return sb.String()
+}
+
+func TestExecAnalyzerNoWaitRejectsTimeout(t *testing.T) {
+	analyzerServer(t, forecastBody)
+	code, env := runAgentEnvelope(t, execAnalyzerArgs("--no-wait", "--timeout", "60"))
+	require.Equal(t, client.ExitUsageError, code)
+	assert.Contains(t, fmt.Sprint(env), "--timeout")
+	assert.Contains(t, fmt.Sprint(env), "validation_error")
+
+	// Without an explicit --timeout, --no-wait is accepted.
+	code, _ = runAgentEnvelope(t, execAnalyzerArgs("--no-wait"))
+	require.Equal(t, 0, code)
 }

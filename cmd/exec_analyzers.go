@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -36,7 +37,10 @@ Examples:
   dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json --validate
 
   # Execute and wait for completion (default)
-  dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json --wait
+  dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json
+
+  # Do not poll for completion; return the initial response (result or request token)
+  dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json --no-wait
 
   # Output as JSON
   dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json -o json
@@ -44,6 +48,11 @@ Examples:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			analyzerName := args[0]
+
+			// --timeout bounds the polling loop, which --no-wait skips.
+			if noWait, _ := cmd.Flags().GetBool("no-wait"); noWait && cmd.Flags().Changed("timeout") {
+				return &invalidInputError{err: errors.New("--timeout only applies when waiting and cannot be combined with --no-wait")}
+			}
 
 			// Running an analyzer computes over data and persists nothing, so it is a
 			// read despite being a POST.
@@ -72,14 +81,14 @@ Examples:
 			}
 
 			// Execute analyzer
-			wait, _ := cmd.Flags().GetBool("wait")
+			noWait, _ := cmd.Flags().GetBool("no-wait")
 			timeout, _ := cmd.Flags().GetInt("timeout")
 
 			var result *analyzer.ExecuteResult
-			if wait {
-				result, err = handler.ExecuteAndWait(cmd.Context(), analyzerName, input, timeout)
-			} else {
+			if noWait {
 				result, err = handler.Execute(analyzerName, input, 30)
+			} else {
+				result, err = handler.ExecuteAndWait(cmd.Context(), analyzerName, input, timeout)
 			}
 
 			if err != nil {
@@ -90,8 +99,8 @@ Examples:
 		},
 	}
 	c.Flags().Bool("validate", false, "validate input without executing")
-	c.Flags().Bool("wait", true, "wait for analyzer execution to complete")
-	stability.MarkFlag(c, "wait", stability.Experimental, pre10Since)
+	c.Flags().Bool("no-wait", false, "do not poll for completion: return after the initial request (the API call itself waits up to 30s), with a request token if the analyzer is still running")
+	stability.MarkFlagStable(c, "no-wait")
 	c.Flags().Int("timeout", 300, "timeout in seconds when waiting for completion")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)
 	c.Flags().String("series", "full", `how to render timeseries embedded in the result (agent mode only):
