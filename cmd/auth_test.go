@@ -2281,6 +2281,112 @@ func TestAuthLogin_ContextWithoutALevelIsNotGivenOne(t *testing.T) {
 	}
 }
 
+// TestAuthLogin_CurrentContextKeepsItsLevel: a plain `dtctl auth login` names
+// no context, and the current one must keep its level all the same. That is
+// the case the kept level exists for: renewing an expired session.
+func TestAuthLogin_CurrentContextKeepsItsLevel(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	setup := func(t *testing.T) string {
+		t.Helper()
+		configPath := setupAuthTestConfig(t, "viewer", envURL, "viewer-oauth")
+		cfg, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		cfg.SetContextWithOptions("viewer", envURL, "viewer-oauth", &config.ContextOptions{SafetyLevel: config.SafetyLevelReadOnly})
+		if err := cfg.SaveTo(configPath); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+		gFlags.cfgFile = configPath
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+		return configPath
+	}
+
+	t.Run("the browser login requests its scopes", func(t *testing.T) {
+		setup(t)
+		stderr, oauthConfig, runErr := runBrowserLogin(t)
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		if want := auth.GetScopesForSafetyLevel(config.SafetyLevelReadOnly); !slices.Equal(oauthConfig.Scopes, want) {
+			t.Errorf("%d scopes requested, want the %d of readonly", len(oauthConfig.Scopes), len(want))
+		}
+		if want := "Safety level: readonly\n"; !strings.Contains(stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, stderr)
+		}
+	})
+
+	t.Run("the saved context keeps it", func(t *testing.T) {
+		configPath := setup(t)
+		stderr, runErr, granted := runClientCredentialsLogin(t)
+		if runErr != nil || !granted {
+			t.Fatalf("login: err %v, granted %v\n%s", runErr, granted, stderr)
+		}
+		after, err := config.LoadFrom(configPath)
+		if err != nil {
+			t.Fatalf("load saved config: %v", err)
+		}
+		nc, err := after.GetContext("viewer")
+		if err != nil {
+			t.Fatalf("context missing: %v", err)
+		}
+		if nc.Context.SafetyLevel != config.SafetyLevelReadOnly {
+			t.Errorf("safety level = %q, want readonly", nc.Context.SafetyLevel)
+		}
+	})
+}
+
+// TestAuthLogin_ContextWithoutALevelOutsideAProject: a context that stores no
+// level is still saved by a login, here with a new environment, and still
+// without a level. And since nothing clamps it outside a project directory,
+// the login has no lower level to explain.
+func TestAuthLogin_ContextWithoutALevelOutsideAProject(t *testing.T) {
+	const (
+		envURL = "https://abc12345.apps.dynatrace.com"
+		newURL = "https://xyz67890.apps.dynatrace.com"
+	)
+	setup := func(t *testing.T) string {
+		t.Helper()
+		// setupAuthTestConfig writes the context without a level.
+		configPath := setupAuthTestConfig(t, "plain", envURL, "plain-oauth")
+		gFlags.cfgFile = configPath
+		t.Cleanup(func() { gFlags.cfgFile = "" })
+		return configPath
+	}
+
+	t.Run("the login saves the context, without a level", func(t *testing.T) {
+		configPath := setup(t)
+		stderr, runErr, granted := runClientCredentialsLogin(t, "--context", "plain", "--environment", newURL)
+		if runErr != nil || !granted {
+			t.Fatalf("login: err %v, granted %v\n%s", runErr, granted, stderr)
+		}
+		raw, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), newURL) || strings.Contains(string(raw), envURL) {
+			t.Errorf("the saved context is not on %s:\n%s", newURL, raw)
+		}
+		if strings.Contains(string(raw), "safety-level") {
+			t.Errorf("the login wrote a safety level:\n%s", raw)
+		}
+	})
+
+	t.Run("the browser login explains no lower level", func(t *testing.T) {
+		setup(t)
+		stderr, oauthConfig, runErr := runBrowserLogin(t, "--context", "plain")
+		if !errors.Is(runErr, errBrowserLoginStubbed) {
+			t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+		}
+		if want := auth.GetScopesForSafetyLevel(config.DefaultSafetyLevel); !slices.Equal(oauthConfig.Scopes, want) {
+			t.Errorf("%d scopes requested, want the %d of the default level", len(oauthConfig.Scopes), len(want))
+		}
+		if strings.Contains(stderr, "so the login requests") {
+			t.Errorf("stderr explains a lower level that was not applied:\n%s", stderr)
+		}
+	})
+}
+
 // TestAuthLogin_NewProjectContextIsNotGivenTheDefault: a login that creates a
 // context in a project directory without --safety-level must not write the
 // default into .dtctl.yaml. Nobody chose it, and dtctl enforces the level of
