@@ -66,10 +66,6 @@ var pre10Demotions = []pre10Demotion{
 
 	// breaking-changes/short-flag-f.md — `-f` means `--file` on every command,
 	// so these lose their short form or the whole flag.
-	{"restore workflow", "--force", "short-flag-f"},
-	{"restore dashboard", "--force", "short-flag-f"},
-	{"restore notebook", "--force", "short-flag-f"},
-	{"restore document", "--force", "short-flag-f"},
 	{"logs workflow-execution", "--follow", "short-flag-f"},
 
 	// breaking-changes/timeout-duration.md — every --timeout takes a Go
@@ -307,7 +303,7 @@ var pre10SurvivingCommands = map[string]string{
 	"diff":                    "--format replaces the removed -o",
 	"wait query":              "--verbose only adds progress output",
 	"exec copilot":            "--context only adds conversation context",
-	"restore workflow":        "--force only skips a prompt",
+	"restore workflow":        "--yes only skips a prompt",
 	"exec analyzer":           "--timeout has a default",
 	"exec slo":                "--timeout has a default",
 }

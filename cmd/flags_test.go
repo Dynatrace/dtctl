@@ -569,12 +569,16 @@ func TestLogsFlags(t *testing.T) {
 			}
 		})
 	}
+
+	if flag := logsWorkflowCmd.Flags().Lookup("follow"); flag == nil || flag.Shorthand != "" {
+		t.Errorf("logs %s: want --follow with no short form", logsWorkflowCmd.Name())
+	}
 }
 
 // TestRestoreFlags validates restore command flags
 func TestRestoreFlags(t *testing.T) {
-	// Test force flag on restore subcommands
-	restoreSubcommands := []string{"workflow", "dashboard", "notebook"}
+	// -y, --yes skips the confirmation prompt; --force is gone from these.
+	restoreSubcommands := []string{"workflow", "dashboard", "notebook", "document"}
 
 	for _, cmdName := range restoreSubcommands {
 		t.Run(cmdName, func(t *testing.T) {
@@ -591,14 +595,20 @@ func TestRestoreFlags(t *testing.T) {
 				return
 			}
 
-			flag := subcmd.Flags().Lookup("force")
+			flag := subcmd.Flags().Lookup("yes")
 			if flag == nil {
-				t.Errorf("Restore %s flag --force not found", cmdName)
+				t.Errorf("Restore %s flag --yes not found", cmdName)
 				return
 			}
 
 			if flag.DefValue != "false" {
-				t.Errorf("Flag --force default = %q, want %q", flag.DefValue, "false")
+				t.Errorf("Flag --yes default = %q, want %q", flag.DefValue, "false")
+			}
+			if flag.Shorthand != "y" {
+				t.Errorf("Flag --yes shorthand = %q, want %q", flag.Shorthand, "y")
+			}
+			if subcmd.Flags().Lookup("force") != nil {
+				t.Errorf("Restore %s still has --force", cmdName)
 			}
 		})
 	}
