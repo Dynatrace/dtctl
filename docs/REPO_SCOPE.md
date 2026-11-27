@@ -87,7 +87,7 @@ The `set` line saves exactly the candidate shown:
 - A row whose workload and service name are both names discovery did not send (Grail returned it for a reason no file shows, an array-valued `service.name` for one) is listed with the tier `substring` and gets no line.
 - When more than one candidate reports the same service name and one of them has no workload binding to stand in for it, the lines leave `--service-name` out and a note says so: the bindings of an entry are alternatives, and that name would select every such candidate's records. A candidate no other binding selects alone gets no line; when no candidate has one, discovery says nothing tells them apart and offers the `--service-name` line as selecting all of them.
 - A run for a directory several Gradle deployables share proposes lines for each of them. `set` replaces an entry of the same name, so when two deployables' lines would save under one name, the later one is named after its unit (`webproxy-gateway` for `gateway` found for `webproxy`), and a note says so. Running both lines leaves both entries.
-- It always carries the `--context` discovery ran in, however that was chosen (`--context`, `DTCTL_CONTEXT` or the config's current context), and `--config` when discovery was given one, so it saves under the environment discovery asked, also after `dtctl ctx` has moved on.
+- It always carries the `--context` discovery ran in, however that was chosen (`--context`, `DTCTL_CONTEXT` or the config's current context), and `--config` when the flag or `DTCTL_CONFIG` chose the config file, so it saves under the environment discovery asked, also after `dtctl ctx` has moved on.
 
 ### Units
 
