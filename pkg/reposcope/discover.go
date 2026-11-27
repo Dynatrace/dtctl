@@ -775,6 +775,7 @@ func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.R
 		skipUnneeded(rungs)
 	}
 	r.fold(q, res, d)
+	d.addUnfinished(q.DataObject)
 }
 
 // sample walks the rungs of a record query the scan cap stopped and folds
@@ -785,7 +786,9 @@ func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.R
 // last one that ran is scaled by the steps in between, and a rung predicted
 // to hit the cap again is skipped rather than sent. A rung Grail would not
 // sample, or one cut short, ends it: the next one reads more. Not sampled
-// means a result without the sampled flag that read something.
+// means a result without the sampled flag that read something. The rows of
+// such a rung are no answer, but they name candidates that exist, and are
+// kept for addUnfinished.
 func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, rungs []*Query, d *discovery) (answered bool) {
 	var predicted int64 // what the next rung will scan; 0 when unknown
 	done, capped := false, false
@@ -822,6 +825,7 @@ func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, r
 			// the sampled flag out of a result that scanned no record, so
 			// there the flag says nothing and the rung is simply empty.
 			q.Cause, done = causeSamplingRefused, true
+			d.unfinished[q.DataObject] = append(d.unfinished[q.DataObject], res.Records...)
 			r.note(failureNote(q))
 		case cut:
 			// Even sampled this rung does not fit, and every rung after it
@@ -829,6 +833,7 @@ func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, r
 			q.Truncated, q.Cause, q.truncation = true, causeTruncated, limit
 			capped = limit == inventory.TruncationScanLimit
 			done = !capped
+			d.unfinished[q.DataObject] = append(d.unfinished[q.DataObject], res.Records...)
 			r.note(failureNote(q))
 		case q.Rows == 0:
 			// An unknown scan keeps the prediction scaled from the last
@@ -937,7 +942,7 @@ func (r *DiscoveryReport) SamplingNotes() []string {
 	var answered []*Query
 	for i := range r.Queries {
 		q := &r.Queries[i]
-		if !q.SampledRetry() || q.Skipped || q.Error != "" || (q.Cause != "" && q.Cause != causeRowLimit) || r.samplingRefused(q.DataObject) {
+		if !r.sampleAnswered(q) {
 			continue
 		}
 		// The last rung of an object that answered is the finest: it is
@@ -960,9 +965,16 @@ func (r *DiscoveryReport) SamplingNotes() []string {
 // be missing from the report, read whole or not, so a service name the
 // report shows to be unshared may still be shared.
 func (r *DiscoveryReport) SampledRecords() bool {
-	return slices.ContainsFunc(r.Queries, func(q Query) bool {
-		return q.SampledRetry() && !q.Skipped && q.Error == "" && !r.samplingRefused(q.DataObject)
-	})
+	return slices.ContainsFunc(r.Queries, func(q Query) bool { return r.sampleAnswered(&q) })
+}
+
+// sampleAnswered reports whether q is a sampled retry that read its sample
+// to the end, whatever it matched: it ran, nothing cut it short but its own
+// row limit, and the environment samples the data object. Both statements
+// the report makes about sampling rest on it.
+func (r *DiscoveryReport) sampleAnswered(q *Query) bool {
+	return q.SampledRetry() && !q.Skipped && q.Error == "" && (q.Cause == "" || q.Cause == causeRowLimit) &&
+		!r.samplingRefused(q.DataObject)
 }
 
 // samplingRefused reports whether a sampled retry over object came back

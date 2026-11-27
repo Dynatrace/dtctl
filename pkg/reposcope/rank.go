@@ -85,10 +85,11 @@ type Candidate struct {
 	// these.
 	LogsByProcessGroup int64 `json:"logsByProcessGroup,omitempty" yaml:"logsByProcessGroup,omitempty"`
 	// CappedScan are the data objects (spans, logs) whose records of this
-	// candidate were seen only by the query the scan cap stopped: the sampled
-	// retry that replaced it did not return the candidate. It exists, but a
-	// partial scan gives no count and not all of its ids, so none are
-	// reported for that object.
+	// candidate were seen only by a query that did not finish: the query the
+	// scan cap stopped, when the sampled retry that replaced it did not
+	// return the candidate, or a sampled retry that was itself cut short or
+	// not sampled. It exists, but an unfinished read gives no count and not
+	// all of its ids, so none are reported for that object.
 	CappedScan []string `json:"cappedScan,omitempty" yaml:"cappedScan,omitempty"`
 	// Sampled reports that some of the candidate's records were read by a
 	// sampled retry, so a candidate quieter than the stated floor could
@@ -137,6 +138,9 @@ type Candidate struct {
 	// window, no logs did; logsChecked is the process-group lookup having
 	// answered for it. See DiscoveryReport.checkLogs.
 	logsMissed, logsChecked bool
+	// unfinished are the CappedScan objects a sampled retry that did not
+	// finish saw, which the evidence words apart.
+	unfinished []string
 }
 
 // tier is how well a candidate's name matches, best first. A row of the
@@ -181,6 +185,9 @@ type discovery struct {
 	// of the way through the window, with no sampled retry answering in its
 	// place: what it counted is a lower bound.
 	stopped map[string]bool
+	// unfinished holds, per data object, the rows of the sampled retries
+	// that were cut short or not sampled (see addUnfinished).
+	unfinished map[string][]map[string]interface{}
 }
 
 // newDiscovery prepares the matchers: every variant of every token sent, then
@@ -190,7 +197,8 @@ type discovery struct {
 // value that neither a token nor a term explains has no matcher, so a row it
 // finds is one discovery cannot explain (see recordTier).
 func newDiscovery(p *Plan) *discovery {
-	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}, stopped: map[string]bool{}}
+	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}, stopped: map[string]bool{},
+		unfinished: map[string][]map[string]interface{}{}}
 	if p.Unit == "." && p.Dir != "." {
 		d.dirSource = dirSource(p.Dir)
 	}
@@ -300,10 +308,32 @@ func (d *discovery) addCapped(object string, recs []map[string]interface{}) (add
 	for _, rec := range recs {
 		if c := d.candidate(rec); c != nil && c.sampledHits(object) == 0 {
 			c.CappedScan = addSorted(c.CappedScan, object)
+			if c.ClusterName == "" {
+				c.ClusterName = stringField(rec, fieldAnyClusterName)
+			}
 			added = true
 		}
 	}
 	return added
+}
+
+// addUnfinished keeps the identities in the rows of object's sampled retries
+// that were cut short or not sampled, once the query the scan cap stopped
+// has been folded in their place. Like addCapped: a row names a workload or
+// service that exists, and one the folded query did not count becomes or
+// joins a candidate marked CappedScan, with no count and no ids.
+func (d *discovery) addUnfinished(object string) {
+	for _, rec := range d.unfinished[object] {
+		c := d.candidate(rec)
+		if c == nil || slices.ContainsFunc(c.recordCounts(), func(n recordCount) bool { return n.object == object }) {
+			continue
+		}
+		c.CappedScan, c.unfinished = addSorted(c.CappedScan, object), addSorted(c.unfinished, object)
+		if c.ClusterName == "" {
+			c.ClusterName = stringField(rec, fieldAnyClusterName)
+		}
+	}
+	delete(d.unfinished, object)
 }
 
 // sampledHits is the records of object a sampled retry matched for c.
@@ -374,6 +404,10 @@ func (d *discovery) foldClusterless() {
 		for _, n := range c.recordCounts() {
 			in[0].WithoutCluster = addSorted(in[0].WithoutCluster, n.object)
 		}
+		// Records only an unfinished read saw carry no cluster either.
+		for _, object := range c.CappedScan {
+			in[0].WithoutCluster = addSorted(in[0].WithoutCluster, object)
+		}
 		in[0].absorb(c)
 		delete(d.records, key)
 	}
@@ -398,12 +432,17 @@ func (c *Candidate) absorb(o *Candidate) {
 	if c.ClusterName == "" {
 		c.ClusterName = o.ClusterName
 	}
-	// What only the capped scan saw of o is not news when the sample
-	// returned c for the same object.
-	for _, object := range o.CappedScan {
+	// What only the capped scan saw of either is not news when the sample
+	// returned the other for the same object.
+	seen := append(slices.Clone(c.CappedScan), o.CappedScan...)
+	c.CappedScan = nil
+	for _, object := range seen {
 		if c.sampledHits(object) == 0 {
 			c.CappedScan = addSorted(c.CappedScan, object)
 		}
+	}
+	for _, object := range o.unfinished {
+		c.unfinished = addSorted(c.unfinished, object)
 	}
 }
 
@@ -623,6 +662,10 @@ func (d *discovery) explain(c *Candidate) {
 		c.Evidence = append(c.Evidence, counts)
 	}
 	for _, object := range c.CappedScan {
+		if slices.Contains(c.unfinished, object) {
+			c.Evidence = append(c.Evidence, fmt.Sprintf("seen in a sampled retry over %s that did not finish, so without a count", object))
+			continue
+		}
 		c.Evidence = append(c.Evidence, fmt.Sprintf("seen in the %s scan the %d GB cap stopped, not in the sample that replaced it", object, ScanLimitGB))
 	}
 	if c.LogsByProcessGroup > 0 {
