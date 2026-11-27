@@ -87,6 +87,15 @@ func requireNothingWider(t failer, doc string, f *File) {
 			keys := keysOf(t, written.Content[j], entryKeys, doc)
 			where := fmt.Sprintf("entry %q on line %d\n%s", e.Name, written.Content[j].Line, doc)
 
+			// What an entry is called and what it binds are the text's own
+			// values, in the text's order: a reader that answered with other
+			// ones would narrow a query to somebody else's service.
+			require.Equal(t, valueOf(keys["name"]), e.Name, where)
+			for key, read := range map[string][]string{"service-names": e.ServiceNames, "process-groups": e.ProcessGroups, "services": e.Services} {
+				require.Equalf(t, keys[key] != nil, len(read) > 0, "%s is written exactly when the entry has some: %s", key, where)
+				require.Truef(t, slices.Equal(valuesOf(keys[key]), read), "%s: read %q: %s", key, read, where)
+			}
+
 			path, hasPath := keys["path"]
 			require.Equal(t, hasPath, e.Path != "", "a path is written exactly when the entry has one: %s", where)
 			if hasPath {
@@ -94,9 +103,10 @@ func requireNothingWider(t failer, doc string, f *File) {
 			}
 
 			workloads := keys["workloads"]
-			require.Equal(t, workloads != nil && len(workloads.Content) > 0, len(e.Workloads) > 0, where)
+			require.Equal(t, workloads != nil, len(e.Workloads) > 0, "workloads are written exactly when the entry has some: %s", where)
 			for k, w := range e.Workloads {
 				wk := keysOf(t, workloads.Content[k], workloadKeys, doc)
+				require.Equal(t, Workload{ClusterUID: w.ClusterUID, Namespace: valueOf(wk["namespace"]), Name: valueOf(wk["name"])}, w, where)
 				cluster, hasCluster := wk["cluster-uid"]
 				require.Equal(t, hasCluster, w.ClusterUID != "", "a cluster is written exactly when the workload has one: %s", where)
 				if hasCluster {
@@ -109,6 +119,7 @@ func requireNothingWider(t failer, doc string, f *File) {
 			for k, s := range e.Segments {
 				require.Len(t, e.Segments, len(segments.Content), where)
 				sk := keysOf(t, segments.Content[k], segmentKeys, doc)
+				require.Equal(t, valueOf(sk["id"]), s.ID, where)
 				variables, hasVariables := sk["variables"]
 				require.Equal(t, hasVariables, len(s.Variables) > 0, "variables are written exactly when the segment has some: %s", where)
 				if !hasVariables {
@@ -126,6 +137,26 @@ func requireNothingWider(t failer, doc string, f *File) {
 			}
 		}
 	}
+}
+
+// valueOf is the text of a scalar the document writes, "" for none.
+func valueOf(n *yaml.Node) string {
+	if n == nil {
+		return ""
+	}
+	return n.Value
+}
+
+// valuesOf are the items of a list the document writes, in its order.
+func valuesOf(n *yaml.Node) []string {
+	if n == nil {
+		return nil
+	}
+	var out []string
+	for _, item := range n.Content {
+		out = append(out, item.Value)
+	}
+	return out
 }
 
 // requireWrittenLoads holds a file that loaded to what Save makes of it: the
@@ -165,6 +196,24 @@ func TestRequireNothingWider_SeesAWiderRead(t *testing.T) {
 		"empty variables read as none": {
 			scopeDoc("name: checkout", "segments: [{id: Ab3dEf9hIjk, variables: {}}]"),
 			entry(Entry{Name: "checkout", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}})},
+		"an empty binding list read as an entry of segments alone": {
+			scopeDoc("name: checkout", "service-names: []", "segments: [{id: Ab3dEf9hIjk}]"),
+			entry(Entry{Name: "checkout", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}})},
+		"another service than the one written": {
+			scopeDoc("name: checkout", "service-names: [checkout]"),
+			entry(Entry{Name: "checkout", ServiceNames: []string{"ledger"}})},
+		"another entity than the one written": {
+			scopeDoc("name: checkout", "services: ["+svcID+"]"),
+			entry(Entry{Name: "checkout", Services: []string{"SERVICE-0000000000000000"}})},
+		"another workload than the one written": {
+			scopeDoc("name: checkout", "workloads: [{namespace: payments, name: checkout}]"),
+			entry(Entry{Name: "checkout", Workloads: []Workload{{Namespace: "payments", Name: "ledger"}}})},
+		"another segment than the one written": {
+			scopeDoc("name: checkout", "segments: [{id: Ab3dEf9hIjk}]"),
+			entry(Entry{Name: "checkout", Segments: []Segment{{ID: "Zz3dEf9hIjk"}}})},
+		"another name than the one written": {
+			scopeDoc("name: checkout", "service-names: [checkout]"),
+			entry(Entry{Name: "ledger", ServiceNames: []string{"checkout"}})},
 		"a dropped entry": {
 			scopeDoc("name: checkout", "service-names: [checkout]"),
 			&File{Environments: map[string][]Entry{prodHost: {}}}},
