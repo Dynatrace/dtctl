@@ -108,6 +108,14 @@ type Candidate struct {
 	// candidate with it is never a match and is proposed no line, since
 	// nothing shows that it runs this code.
 	Indirect string `json:"indirect,omitempty" yaml:"indirect,omitempty"`
+	// WorkloadUnnamed reports a candidate found by its service name alone:
+	// the service name is the unit's own, and no name of the unit's own is
+	// its workload's or a run of that name's segments. The queries returned
+	// the records under that service name, so what else the workload reports
+	// was never read, and a binding of the workload would take all of it in.
+	// Like a candidate with Indirect it is never a match and is proposed no
+	// line; a term that names the workload settles it.
+	WorkloadUnnamed bool `json:"workloadUnnamed,omitempty" yaml:"workloadUnnamed,omitempty"`
 	// SetCommand is the command line that saves the candidate. Discover
 	// leaves it empty: spelling a command line is the CLI's business.
 	SetCommand string `json:"setCommand,omitempty" yaml:"setCommand,omitempty"`
@@ -561,6 +569,7 @@ func (d *discovery) explain(c *Candidate) {
 	if cluster != "" {
 		c.Evidence = append(c.Evidence, cluster)
 	}
+	ownWorkload := false // a name of the unit's own is the workload's
 	// The namespace leads its workload, as in namespace/name.
 	var named []token
 	for _, t := range d.namespaces {
@@ -587,6 +596,7 @@ func (d *discovery) explain(c *Candidate) {
 			c.ServiceNameOwn = own
 			continue
 		}
+		ownWorkload = own
 		// The names inside the workload's are evidence when none names it
 		// whole, and the unit's own among them also when only an indirect
 		// name does.
@@ -602,6 +612,11 @@ func (d *discovery) explain(c *Candidate) {
 			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(inside[0].token), tierSegment))
 		}
 	}
+	// Told apart from the segment tier, which looks only for names long
+	// enough to be searched for: here the service name already found the
+	// row, and any name of the unit's inside the workload's ties the two.
+	c.WorkloadUnnamed = c.Workload != "" && c.ServiceNameOwn && !ownWorkload &&
+		!slices.ContainsFunc(d.matchers, func(m matcher) bool { return m.own() && containsSegment(c.Workload, m.value) })
 	if c.tier == tierSubstring {
 		c.Evidence = append(c.Evidence, fmt.Sprintf("neither its %s nor its %s is a name discovery sent", fieldWorkload, fieldServiceName))
 	}
@@ -994,7 +1009,7 @@ func VerdictLabel(kind string) string {
 // verdicts decides each kind and the whole. unsure is a result that is
 // partial, that a sample read, or that rests on entity names alone: it is
 // never a match. Nor is a candidate found by its whole name when every name
-// that matched is Indirect. A kind is tallied by
+// that matched is Indirect, or when it is WorkloadUnnamed. A kind is tallied by
 // its count where it has one, so a candidate listing one of its 200 service
 // ids is 200 services, not one. No kind is a match unless the whole is.
 func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict) {
@@ -1033,9 +1048,10 @@ func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict)
 }
 
 // settles reports whether c, were it the only candidate, is one a verdict can
-// rest on: found by its whole name, and by a name that is the unit's own.
+// rest on: found by its whole name, by a name that is the unit's own, and
+// not by its service name alone under a workload the unit does not name.
 func settles(c Candidate) bool {
-	return c.Tier == tierExact.String() && c.Indirect == ""
+	return c.Tier == tierExact.String() && c.Indirect == "" && !c.WorkloadUnnamed
 }
 
 func decide(distinct int, exact, unsure bool) Verdict {

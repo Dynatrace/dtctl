@@ -176,3 +176,45 @@ func TestRepoScopeDiscoverIndirectWholeNameBesideOwnPart(t *testing.T) {
 		require.NotContains(t, s, "--service-name")
 	}
 }
+
+// One row: a shared gateway that reports this repository's service name. The
+// queries returned the records under that name and nothing else the gateway
+// reports, so the report is ambiguous and carries no line that would bind the
+// whole gateway; a term naming the workload is what confirms it.
+func TestRepoScopeDiscoverServiceNameAloneProposesNoWorkloadLine(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": `{` + flowCluster + `"k8s.namespace.name":"infra","k8s.workload.name":"edge-gateway","service.name":"checkout","records":"900",` +
+			`"serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`,
+	}))
+	chdirCheckoutWithRedis(t)
+	const (
+		note = "candidate 1 has no set line: it was found by its service.name alone, and no name of this repository is its workload's, " +
+			"so a line would bind everything infra/edge-gateway reports, of which discovery read only the records under that service name; " +
+			"if it does, run discover again with --term edge-gateway"
+		line = "dtctl --context c repo-scope set edge-gateway --cluster-uid " + flowClusterUID + " --namespace infra --workload edge-gateway"
+	)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its service.name alone; no name of this repository is its workload's\n")
+	require.Contains(t, stdout, "No candidate's workload is named by the unit itself (see the notes).\n")
+	require.Contains(t, stdout, "\nNote: "+note+"\n")
+	require.NotContains(t, stdout, "--workload edge-gateway")
+	require.NotContains(t, stdout, "repo-scope set edge-gateway")
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdicts["workload"])
+	require.True(t, report.Candidates[0].WorkloadUnnamed)
+	require.Empty(t, report.Candidates[0].SetCommand)
+	require.Contains(t, report.Notes, note)
+	require.Contains(t, suggestions, note)
+	for _, s := range suggestions {
+		require.NotContains(t, s, "--workload edge-gateway")
+		require.NotContains(t, s, "run its setCommand", "there is none to run")
+	}
+
+	report, suggestions = discoverReport(t, "--term", "edge-gateway")
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	require.Equal(t, "confirm with the user, then: "+line, suggestions[0])
+}

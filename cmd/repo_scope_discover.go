@@ -491,7 +491,10 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // A candidate that only names the repository holds without their being the
 // unit's own matched (Candidate.Indirect) gets no line at all: the line is
 // the whole hand-off, and nothing shows that the candidate runs this code. A
-// note says so and names the --term that confirms it.
+// note says so and names the --term that confirms it. Neither does one found
+// by its service name alone in a workload the repository does not name
+// (Candidate.WorkloadUnnamed): discovery read the records under that service
+// name, not what else the workload reports, and the line would bind it all.
 //
 // The workload binding carries the cluster the candidate's records name, so
 // the same namespace and workload in another cluster stays out of the entry.
@@ -527,7 +530,9 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e reposcope.Entry, unheld []repoScopeUnheld) {
 	// Nothing shows that a candidate found by indirect names runs this
 	// code, and a line is something to run.
-	if c.Indirect != "" {
+	// Nor that the workload of one found by its service name alone does:
+	// its line would bind everything that workload reports.
+	if c.Indirect != "" || c.WorkloadUnnamed {
 		return e, nil
 	}
 	// Nor is there a line for a directory set would refuse as --path: it
@@ -902,6 +907,9 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		case c.Indirect != "":
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it is %s, so nothing shows that it runs this code%s",
 				c.Rank, c.Indirect, repoScopeConfirmHint(c)))
+		case c.WorkloadUnnamed:
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it was found by its service.name alone, and no name of this repository is its workload's, so a line would bind everything %s reports, of which discovery read only the records under that service name%s",
+				c.Rank, cmp.Or(reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}.String(), c.Workload), repoScopeConfirmHint(c)))
 		case len(unheld) > 0:
 			var all []string
 			for _, u := range unheld {

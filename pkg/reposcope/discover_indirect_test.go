@@ -315,7 +315,7 @@ func TestDiscover_IndirectNamesDoNotAddUp(t *testing.T) {
 	})
 	for name, metadata := range map[string]string{
 		"a workload manifest without a name or an image": "  generateName: patch-\n",
-		"a placeholder name that reads like the unit's":   "  name: \"${checkout}\"\n",
+		"a placeholder name that reads like the unit's":  "  name: \"${checkout}\"\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			patch := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n" + metadata + "spec:\n  template:\n    spec:\n      containers:\n" +
@@ -424,4 +424,54 @@ func TestDiscover_ShortNameInsideAnEntityName(t *testing.T) {
 		require.Len(t, matched, 1, name)
 		assert.Equal(t, want, got, name)
 	}
+}
+
+// A candidate found by its service name alone, in a workload no name of the
+// repository names: the records were found under that service name, so
+// discovery never saw what else the workload reports, and a line for the
+// workload would bind all of it. It is listed, never a match, and a term
+// naming the workload is the user's word that it runs this code.
+func TestDiscover_ServiceNameAloneDoesNotSettleItsWorkload(t *testing.T) {
+	repo := fstest.MapFS{"go.mod": file("module example.invalid/acme/checkout\n")}
+	row := func(workload string) map[string]interface{} {
+		return map[string]interface{}{fieldNamespace: "infra", fieldWorkload: workload, fieldServiceName: "checkout"}
+	}
+	r := discoverOne(t, repo, ".", nil, row("edge-gateway"))
+	c := r.Candidates[0]
+	assert.True(t, c.WorkloadUnnamed)
+	assert.True(t, c.ServiceNameOwn)
+	assert.Equal(t, "exact", c.Tier)
+	assert.Empty(t, c.Indirect)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
+	for kind, v := range r.Verdicts {
+		assert.NotEqual(t, VerdictMatch, v, kind)
+	}
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["workload"])
+	assert.Equal(t, VerdictAmbiguous, r.Verdicts["serviceName"])
+
+	r = discoverOne(t, repo, ".", []string{"edge-gateway"}, row("edge-gateway"))
+	assert.False(t, r.Candidates[0].WorkloadUnnamed)
+	assert.Equal(t, VerdictMatch, r.Verdict)
+
+	for name, row := range map[string]map[string]interface{}{
+		"the workload holds the unit's name":             row("acme-prod-checkout"),
+		"the workload is the unit's name":                row("checkout"),
+		"records that name no workload":                  {fieldNamespace: "infra", fieldServiceName: "checkout"},
+		"a short name the workload holds as a segment":   {fieldNamespace: "infra", fieldWorkload: "cart-v2", fieldServiceName: "cart"},
+		"the workload is named and the service name not": {fieldNamespace: "infra", fieldWorkload: "checkout", fieldServiceName: "storefront"},
+	} {
+		repo := fstest.MapFS{"go.mod": file("module example.invalid/acme/checkout\n"), "cart/Dockerfile": file("FROM scratch\n")}
+		dir := "."
+		if row[fieldServiceName] == "cart" {
+			dir = "cart"
+		}
+		r := discoverOne(t, repo, dir, nil, row)
+		assert.False(t, r.Candidates[0].WorkloadUnnamed, name)
+		assert.Equal(t, VerdictMatch, r.Verdict, name)
+	}
+
+	// A term that spells the service name says nothing of the workload.
+	r = discoverOne(t, fstest.MapFS{}, ".", []string{"checkout"}, row("edge-gateway"))
+	assert.True(t, r.Candidates[0].WorkloadUnnamed)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 }

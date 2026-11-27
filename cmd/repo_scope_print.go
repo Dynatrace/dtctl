@@ -243,8 +243,11 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 			}
 		case len(p.handLinks) > 0:
 			why := "No binding selects any candidate alone."
-			if !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.Indirect == "" }) {
+			switch {
+			case !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.Indirect == "" }):
 				why = "No candidate is named by the unit itself (see the notes)."
+			case !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.Indirect == "" && !c.WorkloadUnnamed }):
+				why = "No candidate's workload is named by the unit itself (see the notes)."
 			}
 			fmt.Fprintf(w, "%s %s\n", took, why)
 			writeRepoScopeHandLinks(w, p)
@@ -271,7 +274,7 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 // not: that candidate's name matched only in part, the result is partial and
 // a query that did not answer could have found another, a sample read the
 // records and could have missed another, no name of the unit's own matched
-// it, or only the entity table holds the name.
+// it or only its service name did, or only the entity table holds the name.
 func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 	switch {
 	case len(r.Candidates) != 1:
@@ -282,6 +285,8 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 		return ": one candidate, but the records were sampled, which can miss another (see the notes)"
 	case r.Candidates[0].Indirect != "":
 		return ": one candidate, " + r.Candidates[0].Indirect
+	case r.Candidates[0].WorkloadUnnamed:
+		return ": one candidate, found by its service.name alone; no name of this repository is its workload's"
 	case r.Candidates[0].Tier == "exact" && r.Candidates[0].Workload == "" && r.Candidates[0].ServiceName == "":
 		// Named exactly, but found by the entity-name search, which runs
 		// only when the records find nothing: the entity exists, and
