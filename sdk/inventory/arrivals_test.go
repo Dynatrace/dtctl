@@ -2061,34 +2061,51 @@ func TestSampledStaleBeyondTheBiasIsStale(t *testing.T) {
 	}
 }
 
-// TestBiasBelowASecondIsNotABand: a thick sample shifts last-seen by a
+// TestBiasBelowASecondIsNotPrinted: a thick sample shifts last-seen by a
 // fraction of a second, which is the feature's ordinary good case. Such a bias
-// is neither printed, since it rounds to "~0s", nor used to withhold a stale
-// verdict: the age is compared exactly, not after truncation to whole seconds.
-func TestBiasBelowASecondIsNotABand(t *testing.T) {
+// is not printed on a hit, since it rounds to "~0s". It still decides the
+// verdict: an age past the threshold by more than it is stale, compared
+// exactly and not after truncation to whole seconds, and one past the
+// threshold by less is an age the sampling could have produced.
+func TestBiasBelowASecondIsNotPrinted(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		ago   time.Duration
 		state SignalState
 	}{
 		{"half a second past the threshold", 5*time.Minute + 500*time.Millisecond, SignalStale},
+		{"past the threshold by just more than the bias", 5*time.Minute + 94*time.Millisecond, SignalStale},
+		{"past the threshold by less than the bias", 5*time.Minute + 50*time.Millisecond, SignalUnknown},
+		{"on the threshold", 5 * time.Minute, SignalLive},
 		{"fresh", 30 * time.Second, SignalLive},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := windowRunner()
 			runner.responses = append([]mockResponse{
 				cappedLogs(),
-				// 15m over 9688 records is 93ms of bias.
+				// 15m over 9688 records is 92.9ms of bias.
 				sampledRung(1000, 9688, 9688000, fixedNow.Add(-tc.ago).Format(time.RFC3339Nano)),
 				sampledRung(100000, 0, 0, ""), sampledRung(10000, 0, 0, ""),
 			}, runner.responses...)
 
-			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+			inv := discoverWith(t, runner, windowOpts())
+			logs := signalByName(t, inv, "logs")
 			if logs.State != tc.state {
-				t.Errorf("state = %q, want %q (evidence: %s)", logs.State, tc.state, logs.Evidence)
+				t.Fatalf("state = %q, want %q (evidence: %s)", logs.State, tc.state, logs.Evidence)
 			}
 			if strings.Contains(logs.Evidence, "~0s") || strings.Contains(logs.Evidence, "biased") {
 				t.Errorf("evidence %q states a bias that rounds to nothing", logs.Evidence)
+			}
+			if tc.state == SignalUnknown {
+				for _, want := range []string{"sampled at 1-in-1000", "past the 5m0s stale threshold by less than a second", "live and stale cannot be told apart"} {
+					if !strings.Contains(logs.Evidence, want) {
+						t.Errorf("evidence %q should contain %q", logs.Evidence, want)
+					}
+				}
+				if got := CheckRequired(inv, []string{"logs"}).ExitCode(); got == ExitRequiredSignalNotLive {
+					t.Errorf("gate exit = %d: a signal the probe cannot date is not reported as not live", got)
+				}
+				return
 			}
 			if !strings.Contains(logs.Evidence, "9688 sampled records extrapolate to about 9.7M") {
 				t.Errorf("evidence %q should still disclose the sample", logs.Evidence)

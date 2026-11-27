@@ -250,7 +250,15 @@ func sampledZeroEvidence(object string, ratio int64, since string, scanLimitGB f
 // bias, so the signal may be perfectly live and merely under-sampled. Claiming
 // stale here would raise a false alarm during onboarding, which is worse than
 // admitting the probe cannot tell.
+//
+// A bias below a second is not printed as a duration, since it and the age's
+// distance from the threshold both round to nothing: the sentence says so in
+// words instead.
 func sampledAmbiguousEvidence(object string, age, bias, staleAfter time.Duration, ratio int64) string {
+	if bias < time.Second {
+		return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and the newest record it matched is past the %s stale threshold by less than a second — within the fraction of a second the sampling itself can shift last-seen, so live and stale cannot be told apart here; run it again, or raise --scan-limit-gbytes for an exact answer",
+			object, formatCount(ratio), roundDuration(staleAfter))
+	}
 	return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and the newest record it matched is %s old against a %s stale threshold — within the ~%s the sampling itself can shift last-seen, so live and stale cannot be told apart here; raise --scan-limit-gbytes for an exact answer",
 		object, formatCount(ratio), roundDuration(age), roundDuration(staleAfter), roundDuration(bias))
 }
@@ -482,11 +490,14 @@ func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts Disco
 		lastSeen, askedAt = newest.lastSeen, newest.askedAt
 	}
 	// A thick sample shifts last-seen by a fraction of a second. That is
-	// below what the evidence can print and below what a verdict should turn
-	// on, so it counts as no bias at all.
+	// below what the evidence of a hit can print, so a hit states no bias
+	// then (shown). The verdict is decided on the bias as it is: an age past
+	// the threshold by less than it is one the sampling could have produced,
+	// however small the two are.
 	bias := samplingBias(windowDuration(opts.Since), p.matched)
-	if bias < time.Second {
-		bias = 0
+	shown := bias
+	if shown < time.Second {
+		shown = 0
 	}
 	applyFreshness(&sig, lastSeen, timeField, askedAt, opts.StaleAfter)
 
@@ -522,7 +533,7 @@ func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts Disco
 	// Freshness sets evidence only when it has something to flag; a sampled
 	// signal always does, so its provenance leads and anything freshness added
 	// follows.
-	sig.Evidence = joinEvidence(sampledHitEvidence(def.DataObject, p, newest, bias, opts.ScanLimitGBytes), sig.Evidence)
+	sig.Evidence = joinEvidence(sampledHitEvidence(def.DataObject, p, newest, shown, opts.ScanLimitGBytes), sig.Evidence)
 	return sig
 }
 
