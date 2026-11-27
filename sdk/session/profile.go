@@ -185,21 +185,37 @@ func (p *Profile) Validate() error {
 //  3. it is an ancestor of an allowlisted entry (the path is a segment-prefix of
 //     the entry — a parent verb stays reachable so its allowed child can be run).
 //
-// Everything else is masked.
+// Everything else is masked. A parent allowed only to reach an entry must not
+// run on its own; see AllowsOnlyAsAncestor.
 func (p *Profile) Allows(path string) bool {
+	return p.grants(path) || p.AllowsOnlyAsAncestor(path)
+}
+
+// AllowsOnlyAsAncestor reports whether path is allowed only because an entry
+// sits below it. Such a command stays visible so the entry can be reached,
+// but must not run on its own: "apply extension-config" does not allow
+// "apply -f <file>".
+func (p *Profile) AllowsOnlyAsAncestor(path string) bool {
+	if p.grants(path) {
+		return false
+	}
+	for _, entry := range p.Commands {
+		if segmentPrefix(path, entry) {
+			return true
+		}
+	}
+	return false
+}
+
+// grants reports whether path is always available or at or below an entry.
+func (p *Profile) grants(path string) bool {
 	for _, entry := range alwaysAvailableCommands {
 		if segmentPrefix(entry, path) {
 			return true
 		}
 	}
 	for _, entry := range p.Commands {
-		// Command is at/under an allowed entry.
 		if segmentPrefix(entry, path) {
-			return true
-		}
-		// Command is an ancestor of an allowed entry — keep parents reachable so
-		// their allowed children can be invoked and appear in the catalog.
-		if segmentPrefix(path, entry) {
 			return true
 		}
 	}

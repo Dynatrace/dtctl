@@ -272,14 +272,15 @@ func reportOptionsError(ctx context.Context, opts RunOptions, err error) {
 
 // pristineCommandState is the subset of cobra.Command that dtctl mutates
 // between construction and execution. The surface stages overwrite RunE/Run/
-// Args/Hidden/DisableFlagParsing, ValidArgs/ValidArgsFunction and Annotations
-// to mask commands, installScopePreflight wraps RunE,
+// Use/Args/Hidden/DisableFlagParsing, ValidArgs/ValidArgsFunction and
+// Annotations to mask commands, installScopePreflight wraps RunE,
 // applyStabilityFloor hides below-floor flags, and applyStabilityBadges
 // rewrites Short/Long and flag usage strings; restoring these fields returns a
 // command to its as-registered state.
 type pristineCommandState struct {
 	runE               func(*cobra.Command, []string) error
 	run                func(*cobra.Command, []string)
+	use                string
 	args               cobra.PositionalArgs
 	hidden             bool
 	disableFlagParsing bool
@@ -316,6 +317,7 @@ func capturePristineState(c *cobra.Command) pristineCommandState {
 	return pristineCommandState{
 		runE:               c.RunE,
 		run:                c.Run,
+		use:                c.Use,
 		args:               c.Args,
 		hidden:             c.Hidden,
 		disableFlagParsing: c.DisableFlagParsing,
@@ -364,6 +366,7 @@ func restorePristineTree(ctx context.Context) {
 		}
 		c.RunE = state.runE
 		c.Run = state.run
+		c.Use = state.use
 		c.Args = state.args
 		c.Hidden = state.hidden
 		c.DisableFlagParsing = state.disableFlagParsing
