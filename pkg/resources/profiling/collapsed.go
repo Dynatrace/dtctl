@@ -174,10 +174,14 @@ func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 		md.ai, _ = nm["allocationInfo"].(map[string]interface{})
 		if cids, ok := nm["childIds"].([]interface{}); ok {
 			for _, c := range cids {
-				md.children = append(md.children, nodeIDStr(c))
+				if cid, ok := nodeIDStr(c); ok {
+					md.children = append(md.children, cid)
+				}
 			}
 		}
-		nodeMap[nodeIDStr(nm["id"])] = md
+		if id, ok := nodeIDStr(nm["id"]); ok {
+			nodeMap[id] = md
+		}
 	}
 
 	type line struct {
@@ -245,7 +249,9 @@ func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 		}
 	}
 	for _, rid := range rootIDs {
-		dfs(nodeIDStr(rid), nil)
+		if id, ok := nodeIDStr(rid); ok {
+			dfs(id, nil)
+		}
 	}
 	if len(all) == 0 {
 		return nil

@@ -41,12 +41,19 @@ func hotspotTree(raw interface{}) (map[string]*treeNode, string) {
 		if cids, ok := nm["childIds"].([]interface{}); ok {
 			for _, c := range cids {
 				// Read as a node's own id is: the API writes either form.
-				nd.children = append(nd.children, nodeIDStr(c))
+				if cid, ok := nodeIDStr(c); ok {
+					nd.children = append(nd.children, cid)
+				}
 			}
 		}
-		nodeMap[nodeIDStr(nm["id"])] = nd
+		// A node without an id is one nothing can name; see nodeIDStr.
+		if id, ok := nodeIDStr(nm["id"]); ok {
+			nodeMap[id] = nd
+		}
 	}
-	return nodeMap, nodeIDStr(result["dataRootNodeId"])
+	// Without a root id the empty one is returned, which names no node.
+	root, _ := nodeIDStr(result["dataRootNodeId"])
+	return nodeMap, root
 }
 
 // self derives a node's own (exclusive) per-state counts from the cumulative API
@@ -192,18 +199,21 @@ func nodeSamples(n map[string]interface{}) map[string]int {
 	return out
 }
 
-// nodeIDStr is a node id as the text ids are compared by. The API writes an
-// id as a string or as a number, and a number is spelled the way JSON writes
-// an integer, without an exponent: %g gives 1e+06 for a million, which is not
-// the "1000000" a string id of the same node holds.
-func nodeIDStr(v interface{}) string {
+// nodeIDStr is a node id as the text ids are compared by, and whether v is an
+// id at all. The API writes an id as a string or as a number, and a number is
+// spelled the way JSON writes an integer, without an exponent: %g gives 1e+06
+// for a million, which is not the "1000000" a string id of the same node
+// holds. Anything else, a missing id and an empty one are no id: read as the
+// empty id, a node without one would be what a null child id and a missing
+// root id resolve to.
+func nodeIDStr(v interface{}) (string, bool) {
 	switch x := v.(type) {
 	case string:
-		return x
+		return x, x != ""
 	case float64:
-		return strconv.FormatFloat(x, 'f', -1, 64)
+		return strconv.FormatFloat(x, 'f', -1, 64), true
 	}
-	return ""
+	return "", false
 }
 
 func strVal(m map[string]interface{}, key string) string {

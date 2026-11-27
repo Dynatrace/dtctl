@@ -292,9 +292,59 @@ func TestHotspots_LargeNumericIDs(t *testing.T) {
 		t.Errorf("Stacks(false) = %+v\nwant %+v", got, want)
 	}
 	for id, want := range map[float64]string{999999: "999999", 1000000: "1000000", 1e21: "1000000000000000000000", 1.5: "1.5"} {
-		if got := nodeIDStr(id); got != want {
-			t.Errorf("nodeIDStr(%v) = %q, want %q", id, got, want)
+		if got, ok := nodeIDStr(id); got != want || !ok {
+			t.Errorf("nodeIDStr(%v) = %q, %v, want %q", id, got, ok, want)
 		}
+	}
+}
+
+// A node without an id is no node anything can name. Stored under the empty
+// id, it was what a null child id and a missing root id resolved to: an edge
+// the document does not hold.
+func TestTrees_NodeWithoutAnID(t *testing.T) {
+	orphan := snode(nil, "Orphan", "ghost", true, counts("RUNNING", float64(7)))
+	delete(orphan, "id")
+	h := hotspotsOf(map[string]interface{}{
+		"dataRootNodeId": "1",
+		"dataNodes": []interface{}{
+			snode("1", "Real", "main", true, counts("RUNNING", float64(10)), nil),
+			orphan,
+		},
+	})
+	want := StackView{Samples: 10, Rows: []StackRow{{Running: 10, Stack: "Real.main"}}}
+	if got := h.Stacks(false); !reflect.DeepEqual(got, want) {
+		t.Errorf("Stacks(false) = %+v\nwant %+v", got, want)
+	}
+	wantFns := FunctionView{Samples: 10, Rows: []FunctionRow{{Self: 10, SelfPct: 100, Total: 10, TotalPct: 100, Paths: 1, Function: "Real.main"}}}
+	if got := mustFunctions(t, h, false, StateRunning); !reflect.DeepEqual(got, wantFns) {
+		t.Errorf("Functions(false, running) = %+v\nwant %+v", got, wantFns)
+	}
+
+	// A document that names no root does not start at the node without an id.
+	rootless := hotspotsOf(map[string]interface{}{"dataNodes": []interface{}{orphan}})
+	if got := rootless.Stacks(false); len(got.Rows) != 0 || got.Empty != EmptyNoSamples {
+		t.Errorf("Stacks of a document without a root = %+v, want no rows", got)
+	}
+	// An empty id is none either.
+	unnamed := snode("", "Orphan", "ghost", true, counts("RUNNING", float64(7)))
+	rootless = hotspotsOf(map[string]interface{}{"dataNodes": []interface{}{unnamed}})
+	if got := rootless.Stacks(false); len(got.Rows) != 0 || got.Empty != EmptyNoSamples {
+		t.Errorf("Stacks of a document whose node has an empty id = %+v, want no rows", got)
+	}
+
+	ghost := map[string]interface{}{"name": "Orphan.ghost", "childIds": []interface{}{},
+		"allocationInfo": map[string]interface{}{"allocationSize": float64(70)}}
+	a := allocationsOf(map[string]interface{}{"analysisResult": map[string]interface{}{
+		"stacktreeRootIds": []interface{}{float64(1), nil},
+		"stacktreeNodes": []interface{}{
+			map[string]interface{}{"id": float64(1), "name": "Real.put", "childIds": []interface{}{nil},
+				"allocationInfo": map[string]interface{}{"allocationSize": float64(100)}},
+			ghost,
+		},
+	}})
+	wantAllocs := AllocationView{AllocatedBytes: 100, Rows: []AllocationRow{{AllocBytes: 100, Stack: "Real.put"}}}
+	if got := a.Stacks(false, false); !reflect.DeepEqual(got, wantAllocs) {
+		t.Errorf("allocation Stacks = %+v\nwant %+v", got, wantAllocs)
 	}
 }
 
