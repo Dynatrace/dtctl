@@ -322,28 +322,37 @@ func TestCreateBreakpoint_AnEmptySetIsNotAPreviousFilter(t *testing.T) {
 }
 
 // A workspace's filters are whatever the environment returns. A value with a
-// control character is printed with U+FFFD in its place, in the error and in
-// the hint, and no restore line is offered: the line would not set the value
-// the workspace held.
-func TestCreateBreakpoint_PrintsNoControlCharacterOfAWorkspaceFilter(t *testing.T) {
-	const escaped = `{"filters":[],"labels":[{"field":"service.name","values":["svc\u001b[31mRED"]}]}`
-	const shown = "service.name:svc�[31mRED"
+// character a terminal does not show as itself is printed with U+FFFD in its
+// place, in the error and in the hint, and no restore line is offered: the
+// line would not set the value the workspace held. That holds for a control
+// character and for one that is no control character and still not shown,
+// such as the override that reverses how the rest of a line reads.
+func TestCreateBreakpoint_PrintsNoUnshownCharacterOfAWorkspaceFilter(t *testing.T) {
+	for name, tc := range map[string]struct{ value, hidden, shown string }{
+		"an escape sequence":       {`svc\u001b[31mRED`, "\x1b", "service.name:svc\uFFFD[31mRED"},
+		"a right-to-left override": {`svc\u202eRED`, "\u202e", "service.name:svc\uFFFDRED"},
+		"a zero-width space":       {`svc\u200bRED`, "\u200b", "service.name:svc\uFFFDRED"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			set := `{"filters":[],"labels":[{"field":"service.name","values":["` + tc.value + `"]}]}`
 
-	srv := newLiveDebuggerStub(t, "readwrite-all", escaped)
-	srv.fail["CreateRule"] = "rule limit reached"
-	chdirTestRepo(t, breakpointScope)
-	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:payments", "--no-agent", "--yes"}, RunOptions{})
-	require.NotZero(t, code)
-	require.NotContains(t, stdout+stderr, "\x1b")
-	require.Contains(t, stderr, "filters were changed from "+shown+" to ")
-	require.Contains(t, stderr, "the previous filters are in this message; --filters cannot spell them")
-	require.NotContains(t, stderr, "to restore the previous filters")
+			srv := newLiveDebuggerStub(t, "readwrite-all", set)
+			srv.fail["CreateRule"] = "rule limit reached"
+			chdirTestRepo(t, breakpointScope)
+			code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:payments", "--no-agent", "--yes"}, RunOptions{})
+			require.NotZero(t, code)
+			require.NotContains(t, stdout+stderr, tc.hidden)
+			require.Contains(t, stderr, "filters were changed from "+tc.shown+" to ")
+			require.Contains(t, stderr, "the previous filters are in this message; --filters cannot spell them")
+			require.NotContains(t, stderr, "to restore the previous filters")
 
-	newLiveDebuggerStub(t, "readwrite-all", escaped)
-	code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--no-agent"}, RunOptions{})
-	require.Zero(t, code, stderr)
-	require.NotContains(t, stdout+stderr, "\x1b")
-	require.Contains(t, stderr, "filters ("+shown+") are not the ones repo scope checkout")
+			newLiveDebuggerStub(t, "readwrite-all", set)
+			code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--no-agent"}, RunOptions{})
+			require.Zero(t, code, stderr)
+			require.NotContains(t, stdout+stderr, tc.hidden)
+			require.Contains(t, stderr, "filters ("+tc.shown+") are not the ones repo scope checkout")
+		})
+	}
 }
 
 // What the filters set from an entry leave out, and carry unverified, was
