@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -129,4 +131,45 @@ func TestWaitQuery_ScopesOnlyUnderAName(t *testing.T) {
 		require.Contains(t, stderr, "unknown flag")
 		require.Empty(t, srv.queries())
 	})
+}
+
+// A named wait checks its own flags before it reads the entry's segments: a
+// command line that cannot run sends nothing.
+func TestWaitQuery_ValidatesItsFlagsBeforeReadingSegments(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, segmentScope)
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout", "--min-interval=0s"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, stderr, "invalid backoff configuration")
+	require.Empty(t, srv.requests())
+}
+
+// The outcome line compares a condition that was evaluated. A deadline that
+// falls in the initial delay evaluated nothing.
+func TestWaitQuery_NoOutcomeLineWithoutAnAttempt(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, segmentScope)
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout",
+		"--timeout", "50ms", "--initial-delay", "2s"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Empty(t, srv.queries())
+	require.NotContains(t, stderr, "condition not met under repo scope")
+}
+
+// Only the wait's own deadline is its timeout. A read that ends on another
+// one, here the invocation's with no --timeout at all, is reported as the
+// interrupted read it is.
+func TestWaitQuery_AnotherDeadlineIsNotTheWaitsTimeout(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	slowSegmentReads(srv)
+	chdirTestRepo(t, segmentScope)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	code, _, stderr := runRepoScoped([]string{"wait", "query", repoScopeTypedQuery, "--for=any", "--repo-scope", "checkout", "--timeout", "0"},
+		RunOptions{Context: ctx})
+	require.NotZero(t, code)
+	require.Empty(t, srv.queries())
+	require.NotContains(t, stderr, "Timeout reached")
+	require.Contains(t, stderr, "reading filter segment Ab3dEf9hIjk was interrupted")
 }
