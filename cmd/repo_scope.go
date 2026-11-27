@@ -92,9 +92,9 @@ func newRepoScopeSetCmd() *cobra.Command {
 		services      []string
 		processGroups []string
 		serviceNames  []string
-		clusterUID    string
+		clusterUIDs   []string
 		segments      []string
-		namespace     string
+		namespaces    []string
 		workloads     []string
 		entryPaths    []string
 	)
@@ -140,6 +140,35 @@ Examples:
 			}
 			if len(entryPaths) == 1 {
 				entry.Path = path.Clean(filepath.ToSlash(entryPaths[0]))
+				if entry.Path == "." {
+					return &reposcope.InvalidError{
+						Source:      "--path",
+						Msg:         `"." is the repository root, which an entry without a path covers`,
+						Suggestions: []string{"leave --path out for an entry that covers the whole repository"},
+					}
+				}
+			}
+			// Each qualifies every --workload of the command, so a second
+			// value is refused: taking the last one would rebind the
+			// workloads named before it. Refused here and not while the
+			// flags are parsed, so that the refusal is reported in the mode
+			// the whole command line asks for.
+			var namespace, clusterUID string
+			for _, qualifier := range []struct {
+				flag   string
+				values []string
+				value  *string
+			}{{"namespace", namespaces, &namespace}, {"cluster-uid", clusterUIDs, &clusterUID}} {
+				if len(qualifier.values) > 1 {
+					return &reposcope.InvalidError{
+						Source:      "repo-scope set",
+						Msg:         fmt.Sprintf("--%s takes one value, for every --workload of the command", qualifier.flag),
+						Suggestions: []string{"an entry whose workloads differ in it is written in " + reposcope.FileName + " by hand"},
+					}
+				}
+				if len(qualifier.values) == 1 {
+					*qualifier.value = qualifier.values[0]
+				}
 			}
 			// Said here rather than by a flag group, whose error carries
 			// neither the usage exit code nor a code an agent can read.
@@ -174,8 +203,8 @@ Examples:
 	c.Flags().StringArrayVar(&services, "service", nil, "service id, SERVICE-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&processGroups, "process-group", nil, "process group id, PROCESS_GROUP-<16 hex digits> (repeatable)")
 	c.Flags().StringArrayVar(&serviceNames, "service-name", nil, "OpenTelemetry service.name (repeatable)")
-	c.Flags().Var(&repoScopeWorkloadQualifier{singleUseStringValue{value: &clusterUID}, "cluster-uid"}, "cluster-uid", "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
-	c.Flags().Var(&repoScopeWorkloadQualifier{singleUseStringValue{value: &namespace}, "namespace"}, "namespace", "Kubernetes namespace of the --workload names")
+	c.Flags().StringArrayVar(&clusterUIDs, "cluster-uid", nil, "Kubernetes cluster of the --workload names, as its k8s.cluster.uid (default: any cluster)")
+	c.Flags().StringArrayVar(&namespaces, "namespace", nil, "Kubernetes namespace of the --workload names")
 	c.Flags().StringArrayVar(&workloads, "workload", nil, "Kubernetes workload name in --namespace (repeatable)")
 	c.Flags().StringArrayVar(&entryPaths, "path", nil, "directory the entry covers, relative to the repository root (default: the whole repository)")
 	c.Flags().StringArrayVar(&segments, "segment", nil, `existing filter segment a query under the entry also sends, by the id 'dtctl get segments' lists (repeatable, max 10)
@@ -184,26 +213,6 @@ bind its variables inline: "ID?var=val&var2=val1,val2"`)
 		rejectEmptyFlag(c, name)
 	}
 	return c
-}
-
-// repoScopeWorkloadQualifier is the value of set's --namespace and
-// --cluster-uid. Each qualifies every --workload of the command, so a second
-// value is refused: taking the last one would rebind the workloads named
-// before it.
-type repoScopeWorkloadQualifier struct {
-	singleUseStringValue
-	flag string
-}
-
-func (v *repoScopeWorkloadQualifier) Set(value string) error {
-	if v.set {
-		return &reposcope.InvalidError{
-			Source:      "repo-scope set",
-			Msg:         fmt.Sprintf("--%s takes one value, for every --workload of the command", v.flag),
-			Suggestions: []string{"an entry whose workloads differ in it is written in " + reposcope.FileName + " by hand"},
-		}
-	}
-	return v.singleUseStringValue.Set(value)
 }
 
 var repoScopeCurrentCmd = newRepoScopeCurrentCmd()
