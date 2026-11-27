@@ -279,6 +279,35 @@ func TestBreakpoint_NotFoundNamesTheWorkspace(t *testing.T) {
 	}
 }
 
+// The error names the workspace, and a workspace is named after a directory:
+// the agent code of a breakpoint that is not found is one code whatever the
+// directory is called, and the exit code is the one it always was.
+func TestBreakpoint_NotFoundHasOneCodeInEveryDirectory(t *testing.T) {
+	for _, argv := range [][]string{
+		{"describe", "breakpoint", "B.java:9"},
+		{"describe", "breakpoint", "dtctl-rule-9999"},
+		{"get", "snapshots", "B.java:9"},
+		{"get", "snapshots", "dtctl-rule-9999"},
+		{"update", "breakpoint", "B.java:9", "--enabled=false"},
+		{"update", "breakpoint", "dtctl-rule-9999", "--condition", "a==1"},
+		{"delete", "breakpoint", "B.java:9", "--yes"},
+	} {
+		for _, dir := range []string{"plain", "config-service", "timeout-worker", "invalid-data", "no context here"} {
+			t.Run(strings.Join(argv[:3], " ")+" in "+dir, func(t *testing.T) {
+				newLiveDebuggerStub(t, "readwrite-all").rules = []interface{}{ruleAt("A.java", 1, "")}
+				t.Chdir(t.TempDir())
+				chdirSubdir(t, dir)
+
+				code, stdout, _ := runRepoScoped(append(slices.Clone(argv), "--agent"), RunOptions{})
+				require.Equal(t, 1, code, stdout)
+				detail := agentError(t, stdout)
+				require.Equal(t, "not_found", detail.Code)
+				require.True(t, strings.HasSuffix(detail.Message, " in workspace "+dir), detail.Message)
+			})
+		}
+	}
+}
+
 // An identifier of nothing but spaces names no breakpoint. It is refused
 // before anything is read, rather than sent as a rule id and reported done.
 func TestBreakpoint_ABlankIdentifierNamesNothing(t *testing.T) {
