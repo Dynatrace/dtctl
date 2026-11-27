@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,6 +45,35 @@ func TestRepoScopeSetRefusesTheRootAsAPath(t *testing.T) {
 	require.Equal(t, `--path: "." is the repository root, which an entry without a path covers`, detail.Message)
 	require.Equal(t, []string{"leave --path out for an entry that covers the whole repository"}, detail.Suggestions)
 	require.NoFileExists(t, filepath.Join(repo, reposcope.FileName))
+}
+
+// A scope file that does not load is named the way the repository names it,
+// by every command and in every mode: its path on this machine, the home
+// directory in it, is nobody else's to read in an envelope or a log.
+func TestRepoScopeBrokenFileIsNamedWithoutItsPath(t *testing.T) {
+	broken := "environments:\n  " + repoScopeTestEnvHost + ":\n    - name: Checkout\n      service-names: [checkout]\n"
+	for _, args := range [][]string{
+		{"repo-scope", "list"}, {"repo-scope", "set", "x", "--service-name", "x"}, {"repo-scope", "delete", "checkout"},
+		{"repo-scope", "describe", "checkout"}, {"repo-scope", "current"}, {"repo-scope", "describe"},
+		{"query", "fetch logs", "--repo-scope", "checkout"}, {"query", "fetch logs"},
+	} {
+		for _, mode := range [][]string{nil, {"--agent"}} {
+			newDQLRecorder(t, "readonly", answer(http.StatusOK, oneRecord))
+			writeIsolatedConfig(t, safetyLevelConfig(repoScopeTestEnvironment, "readonly"))
+			repo := chdirTestRepo(t, broken)
+			_, stdout, stderr := runRepoScoped(append(args, mode...), RunOptions{})
+			require.NotContains(t, stdout+stderr, filepath.Dir(repo), "%q %q", args, mode)
+			require.Contains(t, stdout+stderr, reposcope.FileName+": environments[", "%q %q", args, mode)
+		}
+	}
+
+	// A save that is refused names it the same way.
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, "kind: RepoScope\nenvironments:\n  "+repoScopeTestEnvHost+":\n    - name: checkout\n      service-names: [checkout]\n")
+	code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "checkout", "--service-name", "x", "--agent"}, RunOptions{})
+	require.Equal(t, client.ExitUsageError, code)
+	require.True(t, strings.HasPrefix(agentError(t, stdout).Message, reposcope.FileName+`: unknown key "kind" on line 1`), stdout)
+	require.NotContains(t, stdout, filepath.Dir(repo))
 }
 
 // Without a scope file there is no entry to find and no file to name: the

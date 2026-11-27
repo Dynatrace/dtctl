@@ -350,18 +350,50 @@ func openRepoScope(ctx context.Context, cfg *config.Config) (*repoScopeFile, err
 // inspected, which is an unusable file like one that does not load: the
 // scope is returned beside the error, so a caller that warns about those and
 // carries on does so here too. Without one there is no file to speak of.
+//
+// An error about the file names it as the repository does (see named).
 func loadRepoScope(host string, loc reposcope.Location, located error) (*repoScopeFile, error) {
 	if located != nil && loc.Path == "" {
 		return nil, located
 	}
 	s := &repoScopeFile{loc: loc, host: host}
 	if located != nil {
-		return s, located
+		return s, s.named(located)
 	}
 	var err error
 	s.file, err = reposcope.Load(loc)
-	return s, err
+	return s, s.named(err)
 }
+
+// named is an error of reading or writing the scope file, with the file named
+// as the repository names it. reposcope names it by its path on this machine,
+// home directory included, and the message is printed beside a query's
+// output, travels in the agent envelope and ends up in logs. The error stays
+// what it was for whoever asks its type.
+func (s *repoScopeFile) named(err error) error {
+	if err == nil {
+		return nil
+	}
+	if invalid, ok := err.(*reposcope.InvalidError); ok {
+		renamed := *invalid
+		renamed.Source = strings.ReplaceAll(invalid.Source, s.loc.Path, reposcope.FileName)
+		return &renamed
+	}
+	msg := strings.ReplaceAll(err.Error(), reposcope.Shown(s.loc.Path), reposcope.FileName)
+	if msg == err.Error() {
+		return err
+	}
+	return namedError{msg: msg, err: err}
+}
+
+// namedError is an error whose message names the scope file without its path.
+type namedError struct {
+	msg string
+	err error
+}
+
+func (e namedError) Error() string { return e.msg }
+func (e namedError) Unwrap() error { return e.err }
 
 // resolve picks the entry named, or the one covering the working directory.
 func (s *repoScopeFile) resolve(name string) (*reposcope.Status, error) {
@@ -423,11 +455,9 @@ func repoScopeStatus(ctx context.Context, name string) (status *reposcope.Status
 }
 
 // unusable is why the file did not load, for a command that reports it and
-// carries on. The error names the file by its path on this machine; the
-// reason names it as the repository does, since it is printed beside the
-// query's own output and travels in the agent envelope.
+// carries on. It names the file as the repository does (see named).
 func (s *repoScopeFile) unusable(err error) string {
-	return strings.ReplaceAll(err.Error(), reposcope.Shown(s.loc.Path), reposcope.FileName)
+	return s.named(err).Error()
 }
 
 // repoScopeReason is a Status's reason as a command prints it: where no
@@ -564,7 +594,7 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 	}
 	scope.file.Upsert(scope.host, entry)
 	if err := reposcope.Save(scope.loc, scope.file); err != nil {
-		return err
+		return scope.named(err)
 	}
 
 	if agentMode(ctx) {
@@ -603,7 +633,7 @@ func deleteRepoScope(cmd *cobra.Command, name string) error {
 		return &reposcope.NotFoundError{Name: name, Host: scope.host, Known: scope.file.Names(scope.host), NoFile: !scope.loc.Exists}
 	}
 	if err := reposcope.Save(scope.loc, scope.file); err != nil {
-		return err
+		return scope.named(err)
 	}
 
 	if agentMode(ctx) {
