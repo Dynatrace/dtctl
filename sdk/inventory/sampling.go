@@ -222,9 +222,9 @@ func sampledZeroBound(ratio int64) int64 { return ratio * 3 }
 // walk matched it, the sentence about the sample's bias would describe a
 // timestamp the verdict did not use, so the evidence names the rung instead.
 func sampledHitEvidence(object string, p sampledProbe, newest *sighting, bias time.Duration, scanLimitGB float64) string {
-	s := fmt.Sprintf("%s scans more than %s in this window, so it was probed with 1-in-%s sampling: %s sampled %s extrapolate to about %s",
+	s := fmt.Sprintf("%s scans more than %s in this window, so it was probed with 1-in-%s sampling: %s sampled %s to about %s",
 		object, scanCapLabel(scanLimitGB), formatCount(p.ratio),
-		formatCount(p.matched), plural64(p.matched, "record"), formatCount(p.records))
+		formatCount(p.matched), agree(p.matched, "record extrapolates", "records extrapolate"), formatCount(p.records))
 	switch {
 	case newest != nil && newest.asked == 0:
 		s += ", and last-seen was read from the unsampled probe that hit the cap, which matched a newer record than this sample did"
@@ -259,8 +259,8 @@ func sampledAmbiguousEvidence(object string, age, bias, staleAfter time.Duration
 // sample did establish, that records of this scope arrived in the window, and
 // says why the age next to it is not a verdict.
 func sampledThinEvidence(object string, p sampledProbe, age, staleAfter time.Duration) string {
-	return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and %s sampled %s are proof that data arrived but too few to say when the data stopped: the newest record seen is %s old against a %s stale threshold, and a sample this thin can miss a newer one; raise --scan-limit-gbytes for an exact answer",
-		object, formatCount(p.ratio), formatCount(p.matched), plural64(p.matched, "record"),
+	return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and %s sampled %s proof that data arrived but too few to say when the data stopped: the newest record seen is %s old against a %s stale threshold, and a sample this thin can miss a newer one; raise --scan-limit-gbytes for an exact answer",
+		object, formatCount(p.ratio), formatCount(p.matched), agree(p.matched, "record is", "records are"),
 		roundDuration(age), roundDuration(staleAfter))
 }
 
@@ -295,12 +295,12 @@ func formatCount(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
 
-// plural64 is plural for an int64 count.
-func plural64(n int64, word string) string {
+// agree picks the wording that agrees in number with an int64 count.
+func agree(n int64, one, many string) string {
 	if n == 1 {
-		return word
+		return one
 	}
-	return word + "s"
+	return many
 }
 
 // recoverBySampling is reached when the exhaustive stream probe was cut short,

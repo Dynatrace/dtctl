@@ -2000,6 +2000,25 @@ func TestBiasBelowASecondIsNotABand(t *testing.T) {
 	}
 }
 
+// TestOneSampledRecordReadsAsOne: the evidence counts one record in the
+// singular, verb included.
+func TestOneSampledRecordReadsAsOne(t *testing.T) {
+	one := sampledProbe{asked: 100000, ratio: 100000, matched: 1, records: 100000}
+	if got := sampledHitEvidence("logs", one, nil, 0, 25); !strings.Contains(got, "1 sampled record extrapolates to about 100k") {
+		t.Errorf("hit evidence = %q", got)
+	}
+	if got := sampledThinEvidence("logs", one, 6*time.Minute, 5*time.Minute); !strings.Contains(got, "1 sampled record is proof") {
+		t.Errorf("thin evidence = %q", got)
+	}
+	two := sampledProbe{asked: 100000, ratio: 100000, matched: 2, records: 200000}
+	if got := sampledHitEvidence("logs", two, nil, 0, 25); !strings.Contains(got, "2 sampled records extrapolate to about 200k") {
+		t.Errorf("hit evidence = %q", got)
+	}
+	if got := sampledThinEvidence("logs", two, 6*time.Minute, 5*time.Minute); !strings.Contains(got, "2 sampled records are proof") {
+		t.Errorf("thin evidence = %q", got)
+	}
+}
+
 // TestNoSampleKeepsTheCappedVerdict: a caller who would rather have no answer
 // than an approximate one can say so, and then no sampled query runs at all.
 func TestNoSampleKeepsTheCappedVerdict(t *testing.T) {

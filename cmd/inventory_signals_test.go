@@ -54,6 +54,10 @@ func TestSignalCountRendering(t *testing.T) {
 		// estimate invites a few percent of sampling noise to be read as a
 		// change in ingest.
 		{inventory.Signal{State: inventory.SignalLive, Records: 9688000, SamplingRatio: 1000, RecordsSampled: 9688}, "~9688000"},
+		// A sampled hit that could not be dated is unknown and still has a
+		// volume: the Sampling note below the table calls it an estimate, so
+		// the column may not show a dash next to it.
+		{inventory.Signal{State: inventory.SignalUnknown, Records: 100000, SamplingRatio: 100000, RecordsSampled: 1}, "~100000"},
 	} {
 		if got := signalCount(tc.sig); got != tc.want {
 			t.Errorf("signalCount(%+v) = %q, want %q", tc.sig, got, tc.want)
@@ -182,6 +186,43 @@ func TestSampledSignalsAreCalledOutToAgents(t *testing.T) {
 	}
 	if strings.Contains(joined, "spans") {
 		t.Errorf("spans was counted exhaustively and must not be flagged as sampled:\n%s", joined)
+	}
+}
+
+// TestSampledUnknownGetsAdviceThatFitsIt: a sampled hit that could not be
+// dated is unknown, and its arrival is proven. Telling an agent in the same
+// breath that it "got no verdict" and should narrow --since contradicts that,
+// and a narrower window can drop the only records the sample matched and come
+// back empty. The one remedy is the scan limit.
+func TestSampledUnknownGetsAdviceThatFitsIt(t *testing.T) {
+	thin := inventory.Signal{Name: "logs", State: inventory.SignalUnknown, Records: 200000, SamplingRatio: 100000, RecordsSampled: 2}
+	inv := windowedInv(thin, inventory.Signal{Name: "spans", State: inventory.SignalLive, Records: 12})
+	joined := strings.Join(inventorySuggestions(inv), "\n")
+	if strings.Contains(joined, "got no verdict") || strings.Contains(joined, "narrower --since") {
+		t.Errorf("the only unknown is a sampled hit, which must not get the advice for an unanswered probe:\n%s", joined)
+	}
+	if !strings.Contains(joined, "logs matched sampled records") || !strings.Contains(joined, "raise --scan-limit-gbytes") {
+		t.Errorf("suggestions should say what the sampled unknown established and name its one remedy:\n%s", joined)
+	}
+
+	// An unknown without a hit keeps the generic advice, also next to one with.
+	inv = windowedInv(thin, inventory.Signal{Name: "rum", State: inventory.SignalUnknown})
+	joined = strings.Join(inventorySuggestions(inv), "\n")
+	if !strings.Contains(joined, "got no verdict") {
+		t.Errorf("an unknown without a sampled hit still needs the generic advice:\n%s", joined)
+	}
+}
+
+// TestSamplingNoteCountsOneRecordInTheSingular pins the line the human output
+// prints per sampled signal.
+func TestSamplingNoteCountsOneRecordInTheSingular(t *testing.T) {
+	one := samplingNoteLine(inventory.Signal{Name: "logs", SamplingRatio: 100000, RecordsSampled: 1})
+	if want := "  logs — 1-in-100000, 1 sampled record; volume is an estimate and last seen is a lower bound."; one != want {
+		t.Errorf("note = %q, want %q", one, want)
+	}
+	many := samplingNoteLine(inventory.Signal{Name: "logs", SamplingRatio: 1000, RecordsSampled: 9688})
+	if !strings.Contains(many, "9688 sampled records;") {
+		t.Errorf("note = %q, want the plural", many)
 	}
 }
 

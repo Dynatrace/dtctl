@@ -261,7 +261,26 @@ func inventorySuggestions(inv *inventory.Inventory) []string {
 		out = append(out, fmt.Sprintf("%s exceeded the scan cap and were probed on a sample: their arrival is proven, but records is an extrapolation (see samplingRatio/recordsSampled) and lastSeen is a lower bound — do not diff these volumes between runs as if they were counts",
 			strings.Join(signalNames(sampled), ", ")))
 	}
-	if inv.Summary != nil && inv.Summary.Unknown > 0 {
+	// An unknown that holds a sampled hit did get half a verdict: its arrival
+	// is proven. The generic advice would contradict that, and a narrower
+	// window can drop the only records the sample matched, so it gets its own
+	// line with the one remedy that applies.
+	var undated []string
+	unanswered := 0
+	for _, sig := range inv.Signals {
+		switch {
+		case sig.State != inventory.SignalUnknown:
+		case sig.SamplingRatio > 0 && sig.Records > 0:
+			undated = append(undated, sig.Name)
+		default:
+			unanswered++
+		}
+	}
+	if len(undated) > 0 {
+		out = append(out, fmt.Sprintf("%s matched sampled records, so data arrived for this scope inside the window, but the sample cannot say whether it is still arriving — raise --scan-limit-gbytes for an exact answer, and report these neither as missing nor as stopped",
+			strings.Join(undated, ", ")))
+	}
+	if unanswered > 0 {
 		out = append(out, "Unknown signals got no verdict: re-run with a narrower --since or a raised --scan-limit-gbytes rather than treating them as absent")
 	}
 	if len(out) == 0 {
@@ -364,8 +383,7 @@ func printInventorySignalsHuman(ctx context.Context, inv *inventory.Inventory) {
 			strings.Join(signalNames(sampled), ", "), scanLimitOf(inv),
 			map[bool]string{true: "it was", false: "they were"}[len(sampled) == 1])
 		for _, sig := range sampled {
-			fmt.Fprintf(currentStdout(ctx), "  %s — 1-in-%d, %d sampled records; volume is an estimate and last seen is a lower bound.\n",
-				sig.Name, sig.SamplingRatio, sig.RecordsSampled)
+			fmt.Fprintln(currentStdout(ctx), samplingNoteLine(sig))
 		}
 	}
 
@@ -415,20 +433,32 @@ func stateRank(state string) int {
 	}
 }
 
+// samplingNoteLine is the line the Sampling note prints for one signal.
+func samplingNoteLine(sig inventory.Signal) string {
+	records := "records"
+	if sig.RecordsSampled == 1 {
+		records = "record"
+	}
+	return fmt.Sprintf("  %s — 1-in-%d, %d sampled %s; volume is an estimate and last seen is a lower bound.",
+		sig.Name, sig.SamplingRatio, sig.RecordsSampled, records)
+}
+
 func signalCount(sig inventory.Signal) string {
 	switch {
 	case sig.Datapoints > 0:
 		return strconv.FormatInt(sig.Datapoints, 10) + " pts"
-	case sig.State == inventory.SignalAbsent ||
-		sig.State == inventory.SignalUnknown ||
-		sig.State == inventory.SignalNotApplicable:
-		return "—"
-	case sig.SamplingRatio > 0:
+	case sig.SamplingRatio > 0 && sig.Records > 0:
 		// A sampled volume is an extrapolation from a fraction of the records,
 		// so it is marked here as well as in the evidence: the table is what
 		// most readers will compare between runs, and an unmarked estimate
 		// invites a swing of a few percent to be read as a change in ingest.
+		// It comes before the states without a count, because a sampled hit
+		// that could not be dated is unknown and has a volume all the same.
 		return "~" + strconv.FormatInt(sig.Records, 10)
+	case sig.State == inventory.SignalAbsent ||
+		sig.State == inventory.SignalUnknown ||
+		sig.State == inventory.SignalNotApplicable:
+		return "—"
 	default:
 		return strconv.FormatInt(sig.Records, 10)
 	}
