@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -541,5 +542,47 @@ func TestSemanticFormatter_AllOperations(t *testing.T) {
 				t.Errorf("SemanticFormatter.Format() should contain path %q, got:\n%s", tt.path, got)
 			}
 		})
+	}
+}
+
+func TestJSONPatchUsesRFC6901Pointers(t *testing.T) {
+	differ := NewDiffer(DiffOptions{Format: DiffFormatJSONPatch})
+	left := map[string]interface{}{
+		"tasks": []interface{}{map[string]interface{}{"name": "a"}, map[string]interface{}{"name": "b"}},
+		"a/b":   "x",
+		"c~d":   "y",
+		"e.f":   "z",
+	}
+	right := map[string]interface{}{
+		"tasks": []interface{}{map[string]interface{}{"name": "a"}, map[string]interface{}{"name": "B"}, "new"},
+		"a/b":   "x2",
+		"c~d":   "y2",
+		"e.f":   "z2",
+	}
+	result, err := differ.Compare(left, right, "l", "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := (&JSONPatchFormatter{}).Format(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var patch []map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &patch); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, op := range patch {
+		got[op["path"].(string)] = true
+	}
+	for _, want := range []string{"/tasks/1/name", "/tasks/2", "/a~1b", "/c~0d", "/e.f"} {
+		if !got[want] {
+			t.Errorf("missing pointer %q in %v", want, got)
+		}
+	}
+	for p := range got {
+		if strings.Contains(p, "[") {
+			t.Errorf("pointer %q still uses bracket indexes", p)
+		}
 	}
 }

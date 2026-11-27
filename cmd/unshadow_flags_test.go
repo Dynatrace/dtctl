@@ -1,15 +1,17 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
 	"github.com/Dynatrace/dtctl/cmd/testutil"
+	"github.com/Dynatrace/dtctl/pkg/auth"
 	"github.com/Dynatrace/dtctl/pkg/config"
 )
 
@@ -73,16 +75,45 @@ func TestConfigInitReadsContextFromEnv(t *testing.T) {
 
 func TestAuthLoginContextFromEnvWithoutConfig(t *testing.T) {
 	resetAuthLoginFlags(t)
+	// Isolate from the host: no stored-credential or client-credentials env, so
+	// the interactive path is the one under test, and that path is stubbed.
+	for _, name := range []string{
+		config.EnvTokenStorage, config.EnvDisableKeyring, "DTCTL_TOKEN",
+		envLoginClientID, envLoginClientSecret, envLoginAccountURN,
+	} {
+		t.Setenv(name, "")
+	}
 	t.Setenv("DTCTL_CONTEXT", "fresh")
-	t.Setenv("DTCTL_DISABLE_KEYRING", "1")
+
+	origCheck, origBrowser := authCheckKeyringFunc, authBrowserFlowFunc
+	t.Cleanup(func() { authCheckKeyringFunc, authBrowserFlowFunc = origCheck, origBrowser })
+	authCheckKeyringFunc = func() error { return nil }
+	errStub := errors.New("stub: browser flow reached")
+	authBrowserFlowFunc = func(context.Context, *auth.OAuthFlow) (*auth.TokenSet, error) {
+		return nil, errStub
+	}
+
 	gFlags.cfgFile = filepath.Join(t.TempDir(), "missing.yaml")
 	t.Cleanup(func() { gFlags.cfgFile = "" })
 
 	rootCmd.SetArgs([]string{"auth", "login", "--environment", "https://abc12345.apps.dynatrace.com"})
 	err := rootCmd.Execute()
-	// Login itself cannot finish in a unit test; it must get past context
-	// resolution, which is what failed before.
-	if err != nil {
-		require.False(t, strings.Contains(err.Error(), "--context and --environment are required"), err.Error())
+	// Context resolution succeeded without any config: login got as far as the
+	// (stubbed) browser flow.
+	require.ErrorIs(t, err, errStub)
+}
+
+func TestDiffRejectsJSONOutputWithOtherFormats(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.yaml")
+	require.NoError(t, os.WriteFile(a, []byte("name: one\n"), 0o600))
+	for _, flag := range []string{"--side-by-side", "--semantic"} {
+		t.Run(flag, func(t *testing.T) {
+			resetGlobalOutputFlag(t)
+			rootCmd.SetArgs([]string{"diff", "-f", a, "-f", a, "-o", "json", flag})
+			err := rootCmd.Execute()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "cannot be combined")
+		})
 	}
 }

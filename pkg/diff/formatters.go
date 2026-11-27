@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -100,7 +101,7 @@ func (f *JSONPatchFormatter) Format(result *DiffResult) (string, error) {
 	for _, change := range result.Changes {
 		op := map[string]interface{}{
 			"op":   string(change.Operation),
-			"path": "/" + strings.ReplaceAll(change.Path, ".", "/"),
+			"path": jsonPointer(change),
 		}
 
 		if change.Operation != ChangeOpRemove {
@@ -117,6 +118,26 @@ func (f *JSONPatchFormatter) Format(result *DiffResult) (string, error) {
 
 	return string(data), nil
 }
+
+// jsonPointer renders a change's location as an RFC 6901 JSON Pointer: each
+// token is escaped ("~" to "~0", "/" to "~1") and prefixed with "/". A change
+// built without Pointer tokens falls back to splitting its display Path.
+func jsonPointer(change Change) string {
+	tokens := change.Pointer
+	if tokens == nil && change.Path != "" {
+		path := arrayIndex.ReplaceAllString(change.Path, ".$1")
+		tokens = strings.Split(path, ".")
+	}
+	var b strings.Builder
+	for _, tok := range tokens {
+		tok = strings.ReplaceAll(tok, "~", "~0")
+		tok = strings.ReplaceAll(tok, "/", "~1")
+		b.WriteString("/" + tok)
+	}
+	return b.String()
+}
+
+var arrayIndex = regexp.MustCompile(`\[(\d+)\]`)
 
 type SemanticFormatter struct{}
 

@@ -105,6 +105,9 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	if outputFormatChanged(cmdContext(cmd)) {
 		switch of := outputFormat(cmdContext(cmd)); of {
 		case "json":
+			if sideBySide || semantic {
+				return &suggest.FlagError{Flag: "output", Message: "-o json prints a JSON patch and cannot be combined with --side-by-side or --semantic"}
+			}
 			format = "json-patch"
 		default:
 			return &suggest.FlagError{Flag: "output", Message: fmt.Sprintf("diff does not support -o %s (supported: json, the JSON patch; omit -o for the text diff, or use --format)", of)}
