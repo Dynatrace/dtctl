@@ -1805,6 +1805,15 @@ func TestAuthLogin_BrowserFlowRequestsTheKeptLevelsScopes(t *testing.T) {
 // token was requested.
 func runClientCredentialsLogin(t *testing.T, args ...string) (stderr string, runErr error, granted bool) {
 	t.Helper()
+	stderr, grant, runErr := runClientCredentialsGrant(t, args...)
+	return stderr, runErr, grant != nil
+}
+
+// runClientCredentialsGrant is runClientCredentialsLogin for a test that reads
+// what the command asked the grant for: the scopes it passed, in a pointer
+// that is nil when no token was requested.
+func runClientCredentialsGrant(t *testing.T, args ...string) (stderr string, grantScopes *[]string, runErr error) {
+	t.Helper()
 	viper.Reset()
 	resetAuthLoginFlags(t)
 	t.Setenv(config.EnvTokenStorage, "file")
@@ -1820,8 +1829,8 @@ func runClientCredentialsLogin(t *testing.T, args ...string) (stderr string, run
 	}
 	origGrant := authClientCredentialsFunc
 	t.Cleanup(func() { authClientCredentialsFunc = origGrant })
-	authClientCredentialsFunc = func(context.Context, *auth.OAuthFlow, string, string, string, []string) (*auth.TokenSet, error) {
-		granted = true
+	authClientCredentialsFunc = func(_ context.Context, _ *auth.OAuthFlow, _, _, _ string, scopes []string) (*auth.TokenSet, error) {
+		grantScopes = &scopes
 		return &auth.TokenSet{AccessToken: "test-access-token", TokenType: "Bearer", ExpiresIn: 300, ExpiresAt: time.Now().Add(5 * time.Minute)}, nil
 	}
 
@@ -1829,7 +1838,46 @@ func runClientCredentialsLogin(t *testing.T, args ...string) (stderr string, run
 		rootCmd.SetArgs(append([]string{"auth", "login"}, args...))
 		runErr = rootCmd.Execute()
 	})
-	return stderr, runErr, granted
+	return stderr, grantScopes, runErr
+}
+
+// TestAuthLogin_ClientCredentialsScopesDoNotFollowTheLevel: the grant gets
+// --scopes as given, or none, also in a project directory where a browser
+// login would leave scopes out. Nothing about left-out scopes may be printed.
+func TestAuthLogin_ClientCredentialsScopesDoNotFollowTheLevel(t *testing.T) {
+	const envURL = "https://abc12345.apps.dynatrace.com"
+	global := loginConfigYAML("prod", loginTestContext{"prod", envURL, "prod-oauth", config.SafetyLevelReadWriteMine})
+	project := loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", config.SafetyLevelReadOnly})
+
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		// One of the six scopes a browser login leaves out here, and a write scope.
+		{"--scopes arrives unchanged", []string{"--scopes", "storage:user.events:read,document:documents:write"}, []string{"storage:user.events:read", "document:documents:write"}},
+		{"no --scopes requests none", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupLoginProject(t, global, project)
+			stderr, grantScopes, runErr := runClientCredentialsGrant(t, append([]string{"--context", "project"}, tt.args...)...)
+			if runErr != nil || grantScopes == nil {
+				t.Fatalf("login: err %v, granted %v\n%s", runErr, grantScopes != nil, stderr)
+			}
+			if !slices.Equal(*grantScopes, tt.want) {
+				t.Errorf("scopes passed to the grant: %q, want %q", *grantScopes, tt.want)
+			}
+			if want := "Safety level: readonly\n"; !strings.Contains(stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+			for _, unwanted := range []string{"Left out", "requests only scopes", "so the login requests"} {
+				if strings.Contains(stderr, unwanted) {
+					t.Errorf("stderr contains %q:\n%s", unwanted, stderr)
+				}
+			}
+		})
+	}
 }
 
 // TestAuthLogin_BothFlagsKeepTheContextsTokenName: --token-name "defaults to
@@ -2732,6 +2780,28 @@ func TestAuthLogin_ProjectConfigRequestsOnlyScopesTheBindingRequests(t *testing.
 				}
 			} else if want := `Token "prod-oauth" is also used by ` + tt.wantNarrowed + ", whose safety level requests scopes this login does not."; !strings.Contains(stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, stderr)
+			}
+		})
+	}
+
+	// A context at the level of its token's binding requests that level's
+	// whole set, up to the 90 scopes of an unrestricted one.
+	for _, level := range []config.SafetyLevel{config.SafetyLevelReadWriteMine, config.SafetyLevelReadWriteAll, config.SafetyLevelDangerouslyUnrestricted} {
+		t.Run(string(level)+" under a binding of the same level", func(t *testing.T) {
+			setupLoginProject(t, loginConfigYAML("prod", prod(level)),
+				loginConfigYAML("project", loginTestContext{"project", envURL, "prod-oauth", level}))
+
+			stderr, oauthConfig, runErr := runBrowserLogin(t, "--context", "project")
+			if !errors.Is(runErr, errBrowserLoginStubbed) {
+				t.Fatalf("auth login: %v, want it to reach the browser step\n%s", runErr, stderr)
+			}
+			if want := auth.GetScopesForSafetyLevel(level); !slices.Equal(oauthConfig.Scopes, want) {
+				t.Errorf("%d scopes requested, want the %d of %s", len(oauthConfig.Scopes), len(want), level)
+			}
+			for _, unwanted := range []string{"Left out", "so the login requests", "is also used by"} {
+				if strings.Contains(stderr, unwanted) {
+					t.Errorf("stderr contains %q:\n%s", unwanted, stderr)
+				}
 			}
 		})
 	}
