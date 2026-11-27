@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // scopeDoc renders a one-entry document for prodHost from the entry's lines.
@@ -178,13 +179,23 @@ func hostileFiles() map[string][]byte {
 		aliases = append(aliases, "*a,"...)
 	}
 	aliases = append(aliases, "]\n"...)
+	// YAML bounds an implicit key at 1,024 bytes and an explicit one ("? key")
+	// not at all, so a key can be as long as the file allows, and whatever
+	// the reader does once per item under it is done with all of it.
+	longKey := strings.Repeat("k", size/2)
+	values := "[" + strings.TrimSuffix(strings.Repeat("a,", size/5), ",") + "]"
+	variable := "environments:\n  " + prodHost + ":\n    - name: checkout\n      segments:\n        - id: Ab3dEf9hIjk\n" +
+		"          variables:\n            ? " + longKey + "\n            : " + values + "\n"
+	host := "environments:\n  ? " + strings.Repeat("k", size/10) + "\n  :\n" + strings.Repeat("    - {}\n", size/50)
 	return map[string][]byte{
-		"one wide mapping":          wide,
-		"unknown document keys":     keys,
-		"aliases of one anchor":     aliases,
-		"documents after the first": []byte(scopeDoc("name: checkout", "service-names: [checkout]") + strings.Repeat("---\n", size/4)),
-		"nested lists":              []byte("environments: " + strings.Repeat("[", size/2) + strings.Repeat("]", size/2) + "\n"),
-		"one long key":              []byte(strings.Repeat("k", size) + ": 1\n"),
+		"a long variable name over many values": []byte(variable),
+		"a long host over many entries":         []byte(host),
+		"one wide mapping":                      wide,
+		"unknown document keys":                 keys,
+		"aliases of one anchor":                 aliases,
+		"documents after the first":             []byte(scopeDoc("name: checkout", "service-names: [checkout]") + strings.Repeat("---\n", size/4)),
+		"nested lists":                          []byte("environments: " + strings.Repeat("[", size/2) + strings.Repeat("]", size/2) + "\n"),
+		"one long key":                          []byte(strings.Repeat("k", size) + ": 1\n"),
 	}
 }
 
@@ -200,6 +211,48 @@ func TestDecode_HostileFileIsAnsweredAtOnce(t *testing.T) {
 			assert.Less(t, time.Since(start), 5*time.Second)
 		})
 	}
+}
+
+// No key of the format is longer than a host or an annotation key, and a
+// longer one is refused by its line, without being quoted.
+func TestDecode_RefusesAKeyLongerThanTheFormatHas(t *testing.T) {
+	long := strings.Repeat("k", maxKeyBytes+1)
+	for name, doc := range map[string]string{
+		"a document key":  long + ": 1\n" + scopeDoc("name: checkout", "service-names: [checkout]"),
+		"an environment":  "environments:\n  " + long + ":\n    - name: checkout\n      service-names: [checkout]\n",
+		"an entry key":    scopeDoc("name: checkout", "service-names: [checkout]", long+": 1"),
+		"a workload key":  scopeDoc("name: checkout", "workloads: [{namespace: payments, name: checkout, "+long+": 1}]"),
+		"a variable name": scopeDoc("name: checkout", "segments: [{id: Ab3dEf9hIjk, variables: {"+long+": [a]}}]"),
+		"an annotation":   scopeDoc("name: checkout", "service-names: [checkout]", "annotations: {"+long+": a}"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decode([]byte(doc))
+			require.NotNil(t, err)
+			assert.Regexp(t, `^the key on line \d+ is longer than 253 bytes, which no key of the format is$`, err.Msg)
+		})
+	}
+	_, err := decode([]byte(scopeDoc("name: checkout", "service-names: [checkout]", "annotations: {"+long[1:]+": a}")))
+	require.Nil(t, err, "a key of the longest length loads")
+}
+
+// Reading an item costs nothing that grows with the key it sits under: where
+// the item is, is put into words only for a message. The list here is read
+// with the one allocation of its result.
+func TestItems_DescribeAnItemOnlyForAMessage(t *testing.T) {
+	var list yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("["+strings.TrimSuffix(strings.Repeat("a,", 1000), ",")+"]"), &list))
+	at := place{what: "variable " + strings.Repeat("k", maxKeyBytes), line: 1}
+	allocs := testing.AllocsPerRun(10, func() {
+		values, err := items(list.Content[0], at, text)
+		if err != nil || len(values) != 1000 {
+			t.Fatalf("read %d values: %v", len(values), err)
+		}
+	})
+	assert.LessOrEqual(t, allocs, 2.0)
+
+	_, err := items(list.Content[0], at, func(n *yaml.Node, p place) (string, *InvalidError) { return "", noValue(p) })
+	require.NotNil(t, err)
+	assert.Equal(t, at.what+"[0] on line 1 has no value", err.Msg)
 }
 
 func BenchmarkDecode_Hostile(b *testing.B) {

@@ -160,6 +160,10 @@ const maxSegmentValueRunes = 255
 // StatefulSet, …) is a DNS subdomain, so "checkout.v2" is a valid one.
 const maxDNSSubdomain = 253
 
+// maxKeyBytes bounds a key of the file. It is the longest any key the format
+// reads can be: an environment's host, and an annotation's key.
+const maxKeyBytes = max(maxDNSSubdomain, maxAnnotationKeyBytes)
+
 // maxServiceNameRunes bounds a service name; Dynatrace stores longer ones
 // truncated, so a longer binding could never match.
 const maxServiceNameRunes = 255

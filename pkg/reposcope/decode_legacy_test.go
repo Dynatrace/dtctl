@@ -108,6 +108,7 @@ var stricter = regexp.MustCompile(strings.Join([]string{
 	`^the anchor &`,
 	`^the merge key << `,
 	`^the key on line \d+ must be a plain string$`,
+	`^the key on line \d+ is longer than \d+ bytes, which no key of the format is$`,
 	`!!binary data$`,
 	`^holds more than one '---' after its document$`,
 	// A key the legacy reader's pattern could not see: empty, or of more

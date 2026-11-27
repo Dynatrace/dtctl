@@ -171,13 +171,24 @@ func isNull(n *yaml.Node) bool {
 type place struct {
 	what string
 	line int
+	// index is the item's position in the list what names, for the place
+	// of an item. The text is put together only when a message needs it: a
+	// list can hold as many items as the file has bytes for, and what can be
+	// as long as a key.
+	index   int
+	indexed bool
 }
 
-func (p place) String() string { return fmt.Sprintf("%s on line %d", p.what, p.line) }
+func (p place) String() string {
+	if p.indexed {
+		return fmt.Sprintf("%s[%d] on line %d", p.what, p.index, p.line)
+	}
+	return fmt.Sprintf("%s on line %d", p.what, p.line)
+}
 
 // item is the place of the i-th item of the list at p.
 func (p place) item(i int, n *yaml.Node) place {
-	return place{fmt.Sprintf("%s[%d]", p.what, i), n.Line}
+	return place{what: p.what, line: n.Line, index: i, indexed: true}
 }
 
 // noValue refuses a null. A key left empty is a line somebody has not
@@ -235,7 +246,9 @@ type reader struct {
 }
 
 // mapping calls each for every key of the mapping n, with the key's node and
-// its value's. A key is a plain string, given once.
+// its value's. A key is a plain string, given once, and no longer than a key
+// of the format can be: YAML bounds a key written "key:" and not one written
+// "? key", and a key is repeated in what is said about everything under it.
 func (r *reader) mapping(n *yaml.Node, p place, each func(key string, k, v *yaml.Node) *InvalidError) *InvalidError {
 	switch {
 	case isNull(n):
@@ -248,6 +261,9 @@ func (r *reader) mapping(n *yaml.Node, p place, each func(key string, k, v *yaml
 		k, v := n.Content[i], n.Content[i+1]
 		if k.Kind != yaml.ScalarNode || isNull(k) {
 			return invalid(fmt.Sprintf("the key on line %d must be a plain string", k.Line))
+		}
+		if len(k.Value) > maxKeyBytes {
+			return invalid(fmt.Sprintf("the key on line %d is longer than %d bytes, which no key of the format is", k.Line, maxKeyBytes))
 		}
 		if first, twice := lines[k.Value]; twice {
 			return invalid(fmt.Sprintf("key %q on line %d is already given on line %d", k.Value, k.Line, first))
@@ -305,8 +321,8 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 	if isNull(n) {
 		return nil
 	}
-	return r.mapping(n, place{"the document", n.Line}, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+	return r.mapping(n, place{what: "the document", line: n.Line}, func(key string, k, v *yaml.Node) (err *InvalidError) {
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "apiVersion":
 			// Left out, the version is v1; written, it says which.
@@ -316,7 +332,7 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 		case "environments":
 			f.Environments = map[string][]Entry{}
 			err = r.mapping(v, p, func(host string, k, v *yaml.Node) (err *InvalidError) {
-				f.Environments[host], err = items(v, place{fmt.Sprintf("environment %q", host), k.Line}, r.entry)
+				f.Environments[host], err = items(v, place{what: fmt.Sprintf("environment %q", host), line: k.Line}, r.entry)
 				return err
 			})
 		default:
@@ -327,9 +343,9 @@ func (r *reader) document(n *yaml.Node, f *File) *InvalidError {
 }
 
 func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
-	p.what = "entry" // its line says which
+	p = place{what: "entry", line: p.line} // its line says which
 	err = r.mapping(n, p, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "name":
 			e.Name, err = text(v, p)
@@ -350,7 +366,7 @@ func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
 				if e.Annotations == nil {
 					e.Annotations = map[string]string{}
 				}
-				e.Annotations[name], err = text(v, place{fmt.Sprintf("annotation %q", name), k.Line})
+				e.Annotations[name], err = text(v, place{what: fmt.Sprintf("annotation %q", name), line: k.Line})
 				return err
 			})
 		default:
@@ -363,7 +379,7 @@ func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
 
 func (r *reader) workload(n *yaml.Node, p place) (w Workload, err *InvalidError) {
 	err = r.mapping(n, p, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "cluster-uid":
 			w.ClusterUID, err = constraint(v, p)
@@ -381,7 +397,7 @@ func (r *reader) workload(n *yaml.Node, p place) (w Workload, err *InvalidError)
 
 func (r *reader) segment(n *yaml.Node, p place) (s Segment, err *InvalidError) {
 	err = r.mapping(n, p, func(key string, k, v *yaml.Node) (err *InvalidError) {
-		p := place{key, k.Line}
+		p := place{what: key, line: k.Line}
 		switch key {
 		case "id":
 			s.ID, err = text(v, p)
@@ -391,7 +407,7 @@ func (r *reader) segment(n *yaml.Node, p place) (s Segment, err *InvalidError) {
 			}
 			s.Variables = map[string][]string{}
 			err = r.mapping(v, p, func(name string, k, v *yaml.Node) (err *InvalidError) {
-				s.Variables[name], err = items(v, place{fmt.Sprintf("variable %q", name), k.Line}, text)
+				s.Variables[name], err = items(v, place{what: fmt.Sprintf("variable %q", name), line: k.Line}, text)
 				return err
 			})
 		default:

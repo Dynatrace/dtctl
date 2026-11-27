@@ -150,7 +150,7 @@ func TestCheck(t *testing.T) {
 		{name: "an annotation key in capitals", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {Owner: a}"),
 			msg: `annotation "Owner" is not an annotation key (lowercase letters, digits, and . _ - / inside; at most 253)`},
 		{name: "an annotation key too long", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {"+strings.Repeat("k", 254)+": a}"),
-			msg: `is not an annotation key`},
+			msg: `the key on line 5 is longer than 253 bytes, which no key of the format is`},
 		{name: "an annotation value too long", doc: entry("name: checkout", "service-names: [checkout]", "annotations: {owner: "+strings.Repeat("v", 1025)+"}"),
 			msg: `annotation "owner" is longer than 1024 bytes`},
 		{name: "an annotation value of two lines", doc: entry("name: checkout", "service-names: [checkout]", `annotations: {owner: "a\nb"}`),
@@ -179,7 +179,7 @@ func TestCheck(t *testing.T) {
 			msg: `environment "abc_12345" is not a host name`},
 
 		{name: "host longer than a host name", doc: "environments:\n  " + strings.Repeat("a.", 126) + "ab:\n    - name: checkout\n      service-names: [checkout]\n",
-			msg: `is not a host name`},
+			msg: `the key on line 2 is longer than 253 bytes, which no key of the format is`},
 		{name: "name with capitals", doc: entry("name: Checkout", "service-names: [checkout]"),
 			msg: `environments[abc12345.apps.dynatrace.com] entry "Checkout": name "Checkout" must be lowercase letters, digits and dashes (at most 63)`},
 		{name: "missing name", doc: entry("service-names: [checkout]"),
