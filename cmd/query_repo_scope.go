@@ -1014,7 +1014,8 @@ func (e *ScopedQueryError) retypeRepairs(detail *output.ErrorDetail) {
 		}
 		out = append(out, r.Render(query, flags...))
 	}
-	detail.Suggestions = append(out, advice...)
+	out = append(out, advice...)
+	detail.Suggestions = out
 }
 
 // Suggestions shows what was sent and how to rule the scope out. A segment's
