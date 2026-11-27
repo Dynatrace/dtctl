@@ -1,6 +1,7 @@
 package dql
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -174,11 +175,14 @@ func TestInsertFilter(t *testing.T) {
 				assert.Equal(t, tt.query, got.Query, "a refusal sends the input byte for byte")
 				assert.NotEmpty(t, got.Reason)
 				assert.Empty(t, got.Filter)
+				assert.Empty(t, got.Inserted)
 				return
 			}
 			assert.Equal(t, tt.want, got.Query)
 			assertOnlyInserted(t, tt.query, got.Query)
 			assert.Equal(t, testFilters[tt.object].Expr, got.Filter)
+			assert.Equal(t, 1, strings.Count(got.Query, got.Inserted), "the inserted run occurs once")
+			assert.Equal(t, tt.query, strings.Replace(got.Query, got.Inserted, "", 1), "and removing it leaves the input")
 			assert.Empty(t, got.Reason)
 		})
 	}

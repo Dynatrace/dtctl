@@ -38,7 +38,11 @@ type Rewrite struct {
 	Outcome    Outcome
 	DataObject string
 	Filter     string
-	Reason     string // one sentence for a person, when not applied
+	// Inserted is the run of bytes added to the input, when applied: the
+	// filter stage with the line break that keeps it on a line of its own.
+	// Removed from Query it leaves the input.
+	Inserted string
+	Reason   string // one sentence for a person, when not applied
 	// ScanBounded reports that the fetch stage itself bounds what Grail
 	// scans: a scanLimitGBytes above 0, a samplingRatio above 1, or either
 	// with a value that is not a plain number and so may be one. The
@@ -115,6 +119,7 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 		Outcome:         Applied,
 		DataObject:      object,
 		Filter:          f.Expr,
+		Inserted:        insert,
 		ScanBounded:     limit == scanBound || sampling == scanBound,
 		ScanLimitLifted: limit == scanLifted,
 	}

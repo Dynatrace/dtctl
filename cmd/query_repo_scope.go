@@ -14,6 +14,7 @@ import (
 	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/config"
 	"github.com/Dynatrace/dtctl/pkg/dql"
+	"github.com/Dynatrace/dtctl/pkg/dqlhint"
 	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
@@ -220,6 +221,8 @@ type repoScopedQuery struct {
 	// filtered says the entry's filter was inserted. scope.Applied holds
 	// then, and for an entry without bindings whose segments are sent.
 	filtered bool
+	// inserted is the run of bytes the filter added to typed, "" without one.
+	inserted string
 	// bound says the entry has bindings, so a filter was attempted; an entry
 	// without them references segments and nothing else.
 	bound bool
@@ -318,6 +321,7 @@ func (q *repoScopedQuery) rewrite(res *reposcope.Status) (refused string) {
 	if q.bound {
 		rw := dql.InsertFilter(q.Query, reposcope.Filters(e))
 		q.Query, q.scanBounded, q.filtered = rw.Query, rw.ScanBounded, rw.Outcome == dql.Applied
+		q.inserted = rw.Inserted
 		q.scanLifted = rw.ScanLimitLifted
 		q.scope.DataObject, q.scope.Filter = rw.DataObject, rw.Filter
 		code, reason := string(rw.Outcome), rw.Reason
@@ -455,7 +459,7 @@ func (q *repoScopedQuery) checkSegments(ctx context.Context, c *client.Client) e
 				},
 			}
 		}
-		q.Query, q.filtered, q.segments, q.unavailable = q.typed, false, nil, reason
+		q.Query, q.filtered, q.inserted, q.segments, q.unavailable = q.typed, false, "", nil, reason
 		q.scope.DataObject, q.scope.Filter = "", ""
 		q.settle()
 		return nil
@@ -888,7 +892,8 @@ func (q *repoScopedQuery) wrapError(err error) error {
 	if !errors.As(err, &refused) && !errors.As(err, &variable) && !errors.As(err, &state) {
 		return err
 	}
-	return &ScopedQueryError{Err: err, Scope: q.scope, Sent: q.Query, asTyped: q.asTyped(), without: q.without(), userSegments: q.userSegments}
+	return &ScopedQueryError{Err: err, Scope: q.scope, Sent: q.Query, inserted: q.inserted, named: q.named,
+		asTyped: q.asTyped(), without: q.without(), userSegments: q.userSegments}
 }
 
 // ScopedQueryError is a query that failed after repo scoping rewrote it. Grail
@@ -905,6 +910,10 @@ type ScopedQueryError struct {
 	asTyped, without string
 	// userSegments are the ids of the segments the command line sent too.
 	userSegments []string
+	// inserted is the run of bytes the scope added to the typed text to make
+	// Sent, and named the entry --repo-scope asked for; retypeRepairs turns a
+	// repair of Sent into one of the command line that failed with them.
+	inserted, named string
 }
 
 // repoScopeSegmentVariableCode is the agent error code of a query that
@@ -961,6 +970,44 @@ func (e *ScopedQueryError) segmentList() string {
 }
 
 func (e *ScopedQueryError) Unwrap() error { return e.Err }
+
+// retypeRepairs replaces the runnable repairs in detail, which the query's
+// own error built from the text Grail saw, with repairs of the command line
+// that failed. Run as printed, such a repair would carry the inserted filter
+// as if the user had typed it and, without the name, run under whichever
+// entry covers the directory, with that entry's segments.
+//
+// Each repair has the inserted run taken out again and keeps the name. A
+// repair in which the run is not found exactly once (a rule edited inside
+// it) is dropped: no hint is better than one for another query. detail is
+// left alone unless its suggestions are the ones the query error makes.
+func (e *ScopedQueryError) retypeRepairs(detail *output.ErrorDetail) {
+	var queryErr *exec.QueryError
+	if !errors.As(e.Err, &queryErr) {
+		return
+	}
+	hinted := queryHintError(queryErr)
+	advice := dqlErrorAdvice(queryErr)
+	if !slices.Equal(detail.Suggestions, append(dqlhint.Suggest(hinted), advice...)) {
+		return
+	}
+	var flags []string
+	if e.named != "" {
+		flags = []string{"--" + repoScopeFlag, e.named}
+	}
+	var out []string
+	for _, r := range dqlhint.Repairs(hinted) {
+		query := r.Query
+		if query != "" && e.inserted != "" {
+			if strings.Count(query, e.inserted) != 1 {
+				continue
+			}
+			query = strings.Replace(query, e.inserted, "", 1)
+		}
+		out = append(out, r.Render(query, flags...))
+	}
+	detail.Suggestions = append(out, advice...)
+}
 
 // Suggestions shows what was sent and how to rule the scope out. A segment's
 // missing variable is one failure only the platform can report, so the
