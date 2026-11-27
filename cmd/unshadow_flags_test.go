@@ -117,3 +117,41 @@ func TestDiffRejectsJSONOutputWithOtherFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestDiffRejectsJSONOutputWithConflictingFormat(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.yaml")
+	require.NoError(t, os.WriteFile(a, []byte("name: one\n"), 0o600))
+	for _, format := range []string{"unified", "side-by-side", "semantic"} {
+		t.Run(format, func(t *testing.T) {
+			resetGlobalOutputFlag(t)
+			rootCmd.SetArgs([]string{"diff", "-f", a, "-f", a, "-o", "json", "--format", format})
+			err := rootCmd.Execute()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "--format json-patch")
+		})
+	}
+	t.Run("json-patch agrees", func(t *testing.T) {
+		resetGlobalOutputFlag(t)
+		rootCmd.SetArgs([]string{"diff", "-f", a, "-f", a, "-o", "json", "--format", "json-patch"})
+		require.NoError(t, rootCmd.Execute())
+	})
+}
+
+func TestDiffRejectsJSONPatchWithIgnoreOrder(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.yaml")
+	require.NoError(t, os.WriteFile(a, []byte("name: one\n"), 0o600))
+	for _, args := range [][]string{
+		{"-o", "json"},
+		{"--format", "json-patch"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			resetGlobalOutputFlag(t)
+			rootCmd.SetArgs(append([]string{"diff", "-f", a, "-f", a, "--ignore-order"}, args...))
+			err := rootCmd.Execute()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "--ignore-order")
+		})
+	}
+}

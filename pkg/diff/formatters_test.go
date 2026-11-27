@@ -2,6 +2,8 @@ package diff
 
 import (
 	"encoding/json"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -584,5 +586,98 @@ func TestJSONPatchUsesRFC6901Pointers(t *testing.T) {
 		if strings.Contains(p, "[") {
 			t.Errorf("pointer %q still uses bracket indexes", p)
 		}
+	}
+}
+
+// applyPatch applies add/remove/replace operations with RFC 6901 pointers.
+func applyPatch(t *testing.T, doc interface{}, patch []map[string]interface{}) interface{} {
+	t.Helper()
+	for _, op := range patch {
+		path := op["path"].(string)
+		if path == "" {
+			doc = op["value"]
+			continue
+		}
+		var toks []string
+		for _, tok := range strings.Split(path[1:], "/") {
+			tok = strings.ReplaceAll(tok, "~1", "/")
+			toks = append(toks, strings.ReplaceAll(tok, "~0", "~"))
+		}
+		doc = applyAt(t, doc, toks, op["op"].(string), op["value"])
+	}
+	return doc
+}
+
+func applyAt(t *testing.T, node interface{}, toks []string, op string, value interface{}) interface{} {
+	t.Helper()
+	tok := toks[0]
+	switch n := node.(type) {
+	case map[string]interface{}:
+		if len(toks) == 1 {
+			if op == "remove" {
+				delete(n, tok)
+			} else {
+				n[tok] = value
+			}
+			return n
+		}
+		n[tok] = applyAt(t, n[tok], toks[1:], op, value)
+		return n
+	case []interface{}:
+		i, err := strconv.Atoi(tok)
+		if err != nil || i < 0 || i > len(n) || (op != "add" && i == len(n)) {
+			t.Fatalf("pointer index %q out of range for array of %d", tok, len(n))
+		}
+		if len(toks) > 1 {
+			n[i] = applyAt(t, n[i], toks[1:], op, value)
+			return n
+		}
+		switch op {
+		case "remove":
+			return append(n[:i], n[i+1:]...)
+		case "add":
+			return append(n[:i], append([]interface{}{value}, n[i:]...)...)
+		default:
+			n[i] = value
+			return n
+		}
+	}
+	t.Fatalf("cannot descend into %T with %v", node, toks)
+	return nil
+}
+
+func TestJSONPatchAppliesToTheLeftDocument(t *testing.T) {
+	cases := map[string][2]string{
+		"shrink":      {`{"l":["a","b","c","d"]}`, `{"l":["a"]}`},
+		"grow":        {`{"l":["a"]}`, `{"l":["a","b","c"]}`},
+		"nested":      {`{"t":[{"n":"a"},{"n":"b"},{"n":"c"}]}`, `{"t":[{"n":"a"},{"n":"B"}]}`},
+		"escaped key": {`{"a/b":[1,2,3],"c~d":1}`, `{"a/b":[1],"c~d":2}`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			var left, right interface{}
+			if err := json.Unmarshal([]byte(c[0]), &left); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(c[1]), &right); err != nil {
+				t.Fatal(err)
+			}
+			result, err := NewDiffer(DiffOptions{Format: DiffFormatJSONPatch}).Compare(left, right, "l", "r")
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := (&JSONPatchFormatter{}).Format(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var patch []map[string]interface{}
+			if err := json.Unmarshal([]byte(out), &patch); err != nil {
+				t.Fatal(err)
+			}
+			got := applyPatch(t, left, patch)
+			if !reflect.DeepEqual(got, right) {
+				t.Errorf("patched %v, want %v (patch %s)", got, right, out)
+			}
+		})
 	}
 }

@@ -105,12 +105,12 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	if outputFormatChanged(cmdContext(cmd)) {
 		switch of := outputFormat(cmdContext(cmd)); of {
 		case "json":
-			if sideBySide || semantic {
-				return &suggest.FlagError{Flag: "output", Message: "-o json prints a JSON patch and cannot be combined with --side-by-side or --semantic"}
+			if sideBySide || semantic || (cmd.Flags().Changed("format") && format != "json-patch") {
+				return &suggest.FlagError{Flag: "output", Message: "-o json prints a JSON patch and cannot be combined with --side-by-side, --semantic or a --format other than json-patch (use --format json-patch alone)"}
 			}
 			format = "json-patch"
 		default:
-			return &suggest.FlagError{Flag: "output", Message: fmt.Sprintf("diff does not support -o %s (supported: json, the JSON patch; omit -o for the text diff, or use --format)", of)}
+			return &suggest.FlagError{Flag: "output", Message: fmt.Sprintf("diff does not support -o %s (supported: json, the JSON patch; omit -o for the text diff, or use --format json-patch for the JSON patch)", of)}
 		}
 	}
 
@@ -120,6 +120,12 @@ func runDiff(cmd *cobra.Command, args []string) error {
 
 	if semantic {
 		format = "semantic"
+	}
+
+	// --ignore-order compares sorted copies of arrays, so a patch's indexes
+	// would not address the original documents.
+	if format == "json-patch" && ignoreOrder {
+		return &suggest.FlagError{Flag: "ignore-order", Message: "--ignore-order cannot be combined with a JSON patch (-o json or --format json-patch): its array indexes would refer to reordered copies"}
 	}
 
 	diffFormat := diff.DiffFormat(format)

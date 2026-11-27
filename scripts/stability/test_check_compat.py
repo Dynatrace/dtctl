@@ -54,46 +54,40 @@ class SurfaceTest(unittest.TestCase):
 
 
 class ReplacedByGlobalTest(unittest.TestCase):
-    BASE = [
+    GLOBAL = [
         "(global)                      stable",
-        "get widgets                   stable",
         "  --context                   stable",
-        "  --limit                     stable",
     ]
 
-    def run_check(self, head_rows):
-        return cc.withdrawal_findings(
-            cc.surface(manifest(*self.BASE)), cc.surface(manifest(*head_rows)))
-
-    def test_local_flag_replaced_by_a_stable_global_passes(self):
-        removed, replaced, demoted = self.run_check([
+    def run_check(self, command, head_global):
+        base = [
             "(global)                      stable",
+            command + "                   stable",
             "  --context                   stable",
-            "get widgets                   stable",
-            "  --limit                     stable",
-        ])
+        ]
+        head = head_global + [command + "                   stable"]
+        return cc.withdrawal_findings(
+            cc.surface(manifest(*base)), cc.surface(manifest(*head)))
+
+    def test_allowlisted_key_replaced_by_a_stable_global_passes(self):
+        removed, replaced, demoted = self.run_check("auth login", self.GLOBAL)
         self.assertEqual((removed, demoted), ([], []))
-        self.assertEqual(replaced, ["get widgets --context"])
+        self.assertEqual(replaced, ["auth login --context"])
 
-    def test_local_flag_replaced_by_a_non_stable_global_is_refused(self):
-        removed, replaced, _ = self.run_check([
-            "(global)                      stable",
-            "  --context                   experimental  since 0.40.0",
-            "get widgets                   stable",
-            "  --limit                     stable",
-        ])
+    def test_same_name_stable_global_does_not_exempt_other_removals(self):
+        removed, replaced, _ = self.run_check("get widgets", self.GLOBAL)
         self.assertEqual(removed, ["get widgets --context"])
         self.assertEqual(replaced, [])
 
-    def test_local_flag_with_no_global_of_that_name_is_refused(self):
-        removed, replaced, _ = self.run_check([
-            "(global)                      stable",
-            "  --other                     stable",
-            "get widgets                   stable",
-            "  --limit                     stable",
-        ])
-        self.assertEqual(removed, ["get widgets --context"])
-        self.assertEqual(replaced, [])
+    def test_allowlisted_key_without_a_stable_global_is_refused(self):
+        for head_global in (
+            ["(global)                      stable"],
+            ["(global)                      stable",
+             "  --context                   experimental  since 0.40.0"],
+        ):
+            removed, replaced, _ = self.run_check("config init", head_global)
+            self.assertEqual(removed, ["config init --context"])
+            self.assertEqual(replaced, [])
 
 
 class UndeclaredTest(unittest.TestCase):

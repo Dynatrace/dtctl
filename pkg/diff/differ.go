@@ -257,28 +257,33 @@ func computeDiff(path string, ptr []string, left, right interface{}) []Change {
 			maxLen = len(rightSlice)
 		}
 
-		for i := 0; i < maxLen; i++ {
-			newPath := fmt.Sprintf("%s[%d]", path, i)
-			newPtr := appendToken(ptr, strconv.Itoa(i))
+		minLen := len(leftSlice)
+		if len(rightSlice) < minLen {
+			minLen = len(rightSlice)
+		}
 
-			switch {
-			case i >= len(leftSlice):
+		for i := 0; i < maxLen; i++ {
+			if i < len(leftSlice) && i < len(rightSlice) {
+				newPath := fmt.Sprintf("%s[%d]", path, i)
+				changes = append(changes, computeDiff(newPath, appendToken(ptr, strconv.Itoa(i)), leftSlice[i], rightSlice[i])...)
+			} else if i >= len(leftSlice) {
 				changes = append(changes, Change{
-					Path:      newPath,
-					Pointer:   newPtr,
+					Path:      fmt.Sprintf("%s[%d]", path, i),
+					Pointer:   appendToken(ptr, strconv.Itoa(i)),
 					Operation: ChangeOpAdd,
 					NewValue:  rightSlice[i],
 				})
-			case i >= len(rightSlice):
-				changes = append(changes, Change{
-					Path:      newPath,
-					Pointer:   newPtr,
-					Operation: ChangeOpRemove,
-					OldValue:  leftSlice[i],
-				})
-			default:
-				changes = append(changes, computeDiff(newPath, newPtr, leftSlice[i], rightSlice[i])...)
 			}
+		}
+		// Removals go from the highest index down, so each index is still valid
+		// when a patch applies them in order.
+		for i := len(leftSlice) - 1; i >= minLen; i-- {
+			changes = append(changes, Change{
+				Path:      fmt.Sprintf("%s[%d]", path, i),
+				Pointer:   appendToken(ptr, strconv.Itoa(i)),
+				Operation: ChangeOpRemove,
+				OldValue:  leftSlice[i],
+			})
 		}
 		return changes
 	}
