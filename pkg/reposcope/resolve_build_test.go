@@ -171,6 +171,29 @@ func TestStatus_LiveDebuggerReasonSurvivesJSON(t *testing.T) {
 	assert.Equal(t, want, reason)
 }
 
+// entry that covers the whole of it applies there, and no build is read.
+func TestResolve_DirectoryThatIsNotUTF8(t *testing.T) {
+	f := &File{Environments: map[string][]Entry{prodHost: {
+		{Name: "all", ServiceNames: []string{"all"}},
+		{Name: "svc", Path: "services", ServiceNames: []string{"svc"}},
+	}}}
+	repo := fstest.MapFS{"settings.gradle": {Data: []byte("include ':services'\n")}}
+	r, err := Resolve(repo, f, prodHost, "other/\xff", "")
+	require.NoError(t, err)
+	require.NotNil(t, r.Entry)
+	assert.Equal(t, "all", r.Entry.Name)
+	r, err = Resolve(repo, f, prodHost, "services/\xff", "")
+	require.NoError(t, err)
+	require.NotNil(t, r.Entry)
+	assert.Equal(t, "svc", r.Entry.Name)
+
+	for _, dir := range []string{"", "/abs", "a/../b", "../up", "a//b", "a/", "./a"} {
+		_, err := Resolve(repo, f, prodHost, dir, "")
+		var invalidErr *InvalidError
+		require.ErrorAs(t, err, &invalidErr, "%q", dir)
+	}
+}
+
 // build on every scoped query.
 func TestGradleBuildAt_ManyModules(t *testing.T) {
 	const modules, refs = 500, 40

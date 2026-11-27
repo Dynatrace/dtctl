@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"path"
 	"runtime"
 	"slices"
 	"sort"
@@ -107,14 +108,17 @@ type Status struct {
 // entries that cover relDir as closely (see Ambiguous).
 //
 // relDir is Location.RelDir: a clean, slash-separated path relative to the
-// repository root, "." at the root. Anything else is an *InvalidError. repo
-// may be nil for a caller with no repository to read; no build is read then.
+// repository root, "." at the root. Anything else is an *InvalidError. It need
+// not be UTF-8: a directory name is whatever the filesystem holds, and the
+// entry that covers such a directory applies there like anywhere. repo may be
+// nil for a caller with no repository to read; no build is read then, nor for
+// a directory an fs.FS cannot name.
 //
 // Path comparison folds case on darwin and windows and is exact elsewhere.
 // The Status holds a copy of the entry, so it stays the answer it was when f
 // changes.
 func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
-	if !fs.ValidPath(relDir) {
+	if !cleanRelative(relDir) {
 		return nil, &InvalidError{Source: fmt.Sprintf("directory %q", relDir), Msg: "is not a clean path relative to the repository root"}
 	}
 	s := &Status{File: FileName, Environment: host, Dir: relDir, Warning: f.Warning(), Hosts: f.Hosts()}
@@ -191,6 +195,13 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 	}
 	s.LiveDebuggerFilters, _, _ = LiveDebuggerFilters(s.Entry)
 	return s, nil
+}
+
+// cleanRelative reports whether dir is "." or a clean, slash-separated path
+// that stays below the directory it is relative to. It is fs.ValidPath
+// without the demand for UTF-8.
+func cleanRelative(dir string) bool {
+	return dir == "." || (dir != "" && path.Clean(dir) == dir && !path.IsAbs(dir) && dir != ".." && !strings.HasPrefix(dir, "../"))
 }
 
 // LiveDebuggerFilterSets is the entry's LiveDebuggerFilters, or, when it
@@ -284,7 +295,7 @@ type gradleCoverage struct {
 
 func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverage {
 	var c gradleCoverage
-	if repo == nil || !slices.ContainsFunc(entries, func(e Entry) bool { return e.Path != "" }) {
+	if repo == nil || !fs.ValidPath(relDir) || !slices.ContainsFunc(entries, func(e Entry) bool { return e.Path != "" }) {
 		return c
 	}
 	b := gradleBuildAt(repo, relDir)
