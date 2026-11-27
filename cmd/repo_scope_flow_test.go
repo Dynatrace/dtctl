@@ -516,18 +516,30 @@ func TestRepoScopeDiscoverClusterValueTheFileRefuses(t *testing.T) {
 
 // What Grail says about a cut result reaches discovery whole: each
 // notification of the response, in the order it came. A typed result limit is
-// a cut page however short the page, the message alone is not, and the scan
-// cap decides whether a sampled retry runs wherever it stands in the list.
+// a cut page however short the page. The message alone is one too, unless a
+// row shows the id array longer than a binding takes that Grail words the
+// same way. The scan cap decides whether a sampled retry runs wherever it
+// stands in the list.
 func TestRepoScopeDiscoverReadsEveryNotification(t *testing.T) {
 	const (
 		typedLimit = `{"notificationType":"RESULT_LIMIT_BYTES","severity":"WARN","message":"The result was truncated"}`
 		message    = `{"severity":"WARN","message":"The result has been limited to 50 values."}`
 		scanCap    = `{"notificationType":"SCAN_LIMIT_GBYTES","severity":"WARN","message":"Scan limit of 5 gigabytes reached"}`
 	)
-	spansWith := func(notifications string) func(*http.Request, string) (int, string) {
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = fmt.Sprintf(`"SERVICE-%016X"`, i)
+	}
+	clippedRow := `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"900",` +
+		`"serviceCount":"80","services":[` + strings.Join(ids, ",") + `],"processGroupCount":"0","processGroups":[]}`
+	spansWith := func(notifications string, clipped bool) func(*http.Request, string) (int, string) {
 		return func(r *http.Request, query string) (int, string) {
 			if strings.HasPrefix(query, "fetch spans, from:now()-24h, scanLimitGBytes:5\n") {
-				return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[` + checkoutRows["spans"] +
+				row := checkoutRows["spans"]
+				if clipped {
+					row = clippedRow
+				}
+				return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[` + row +
 					`],"metadata":{"grail":{"notifications":[` + notifications + `]}}}}`
 			}
 			if strings.Contains(query, "samplingRatio:") {
@@ -541,20 +553,22 @@ func TestRepoScopeDiscoverReadsEveryNotification(t *testing.T) {
 		queries       int
 		partial       bool
 		note          string
+		clipped       bool
 	}{
-		"a typed result limit":         {typedLimit, 2, true, "spans stopped at Grail's result limit, so the result is partial"},
-		"the message alone":            {message, 2, false, ""},
-		"the scan cap after a message": {message + "," + scanCap, 3, false, "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
-		"the scan cap before a limit":  {scanCap + "," + typedLimit, 3, false, "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
+		"the message alone":                        {message, 2, true, "spans stopped at Grail's result limit, so the result is partial", false},
+		"the message beside the array it is about": {message, 2, false, "", true},
+		"a typed result limit":                     {notifications: typedLimit, queries: 2, partial: true, note: "spans stopped at Grail's result limit, so the result is partial"},
+		"the scan cap after a message":             {notifications: message + "," + scanCap, queries: 3, note: "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
+		"the scan cap before a limit":              {notifications: scanCap + "," + typedLimit, queries: 3, note: "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv := newDQLRecorder(t, "readonly", spansWith(tc.notifications))
+			srv := newDQLRecorder(t, "readonly", spansWith(tc.notifications, tc.clipped))
 			chdirCheckoutRepo(t)
 			report, _ := discoverReport(t)
 			require.Len(t, srv.queries(), tc.queries)
 			require.Equal(t, tc.partial, report.Partial)
 			if tc.note == "" {
-				require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+				require.Equal(t, reposcope.VerdictMatch, report.Verdicts["workload"])
 				require.NotContains(t, strings.Join(report.Notes, "\n"), "Grail")
 			} else {
 				require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)

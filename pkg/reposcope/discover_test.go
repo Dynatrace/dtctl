@@ -667,11 +667,17 @@ func TestDiscover_ManyIDsAreOneCandidate(t *testing.T) {
 }
 
 // Grail may report a collected array cut at maxLength with a "limited to"
-// message, which the runner maps to result_limit. A page shorter than the
-// query's own limit lost no row, so that is not a cut page.
+// message, which the runner maps to result_limit. A page that shows the
+// clipped array and is shorter than the query's own limit lost no row, so
+// that is not a cut page.
 func TestDiscover_CollectedArrayCapIsNotACutPage(t *testing.T) {
+	clipped := func(n int) []map[string]interface{} {
+		recs := serviceNames(n)
+		recs[0][fieldServices] = manyIDs(discoveryIDLimit + 1)
+		return recs
+	}
 	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
-		"spans": {{records: serviceNames(3), truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}},
+		"spans": {{records: clipped(3), truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}},
 		"logs":  {{records: serviceNames(3)}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
@@ -680,7 +686,7 @@ func TestDiscover_CollectedArrayCapIsNotACutPage(t *testing.T) {
 	assert.Empty(t, r.Notes)
 
 	r, err = Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
-		"spans": {{records: serviceNames(discoveryRowLimit), truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}},
+		"spans": {{records: clipped(discoveryRowLimit), truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}},
 	}}, singleGo(t), prodHost)
 	require.NoError(t, err)
 	assert.True(t, r.Partial)
@@ -944,9 +950,9 @@ func TestDiscover_ProcessGroupArraysCut(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, r.Candidates, 1)
 	c := r.Candidates[0]
-	assert.Len(t, c.ProcessGroups, 120, "the ids of the first 50 arrays")
+	assert.Len(t, c.ProcessGroups, discoveryIDLimit, "no more ids than a binding takes, whatever the arrays hold")
 	assert.True(t, c.ProcessGroupsCapped, "arrays were cut, and their ids with them")
-	assert.Equal(t, int64(120), c.ProcessGroupCount, "never fewer than the ids listed")
+	assert.Equal(t, int64(60), c.ProcessGroupCount, "the row's own count, never fewer than the ids listed")
 }
 
 // Selecting prod's checkout must carry neither staging's nor the canary
@@ -1114,6 +1120,7 @@ func TestDiscover_EmptySampledAnswerIsPartial(t *testing.T) {
 // record query's own: its rows are the answer.
 func TestDiscover_SampledRungCollectedArrayCapIsNotACutPage(t *testing.T) {
 	rung := sampledAnswer(rows(t, "spans-checkout-sampled"), 100_000_000)
+	rung.records[0][fieldProcessGroups] = append(manyIDs(discoveryIDLimit), pgID) // 51 collected, the clipped array
 	rung.truncations = []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}
 	runner := &fakeRunner{answers: map[string][]answer{
 		"spans": {capped(rows(t, "spans-checkout")), rung},

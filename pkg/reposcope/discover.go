@@ -900,10 +900,11 @@ func (r *DiscoveryReport) fold(q *Query, res *inventory.RunResult, d *discovery)
 //
 // One report is not taken as a cut: a result limit on a query that collects
 // ids (a record query or one of its retries), recognised by its message
-// alone. Grail may word an id array cut at its maxLength that way, and the
-// row then says so itself by holding more ids than a binding takes. A page
-// that lost rows is reported with a type, and one as long as the query's own
-// limit is judged by its length whatever Grail says.
+// alone, when a row of the page holds more ids than a binding takes. Grail
+// may word an id array cut at its maxLength that way, and that row is then
+// what the message is about. With no such row the message says rows were
+// lost: some deployments report a cut page in no other way. A page as long
+// as the query's own limit is judged by its length whatever Grail says.
 //
 // A runner that reports only one cause is taken at its word, as if typed.
 func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCause, cut bool) {
@@ -911,10 +912,10 @@ func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCau
 	if len(limits) == 0 && res.Truncated {
 		limits = []inventory.Truncation{{Cause: res.TruncationCause, Typed: true}}
 	}
-	collectsIDs := !q.fallback() && !q.ProcessGroupCheck()
+	clipped := !q.fallback() && !q.ProcessGroupCheck() && slices.ContainsFunc(res.Records, idsClipped)
 	for _, l := range limits {
 		switch {
-		case collectsIDs && l.Cause == inventory.TruncationResultLimit && !l.Typed:
+		case clipped && l.Cause == inventory.TruncationResultLimit && !l.Typed:
 		case l.Cause == inventory.TruncationScanLimit:
 			return l.Cause, true
 		case !cut:

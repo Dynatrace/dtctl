@@ -1072,16 +1072,22 @@ func stringField(rec map[string]interface{}, key string) string {
 // when the field is itself an array (a log written by several processes
 // carries its process groups as one), so it is flattened. The query collects
 // one element more than discoveryIDLimit, so a column that long was cut: cut
-// says so, and only the first discoveryIDLimit elements are read. ids are
-// the ones a scope file can hold, since no other could be saved; distinct
-// counts every id read, those included.
+// says so, and only the first discoveryIDLimit elements are read. The ids
+// those flatten to are bounded the same way: past discoveryIDLimit distinct
+// ones the column is cut too, however few arrays held them. ids are the ones
+// a scope file can hold, since no other could be saved; distinct counts
+// every id read, those included.
 func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids []string, distinct int, cut bool) {
 	seen := map[string]bool{}
 	var walk func(v interface{})
 	walk = func(v interface{}) {
 		switch v := v.(type) {
 		case string:
-			if !seen[v] {
+			switch {
+			case seen[v]:
+			case len(seen) == discoveryIDLimit:
+				cut = true
+			default:
 				seen[v] = true
 				if valid.MatchString(v) {
 					ids = append(ids, v)
@@ -1099,6 +1105,15 @@ func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids
 	}
 	walk(collected)
 	return ids, len(seen), cut
+}
+
+// idsClipped reports whether a row of a record query holds an id column
+// longer than a binding takes: the one case in which a limit Grail reports
+// in words alone says nothing about the rows.
+func idsClipped(rec map[string]interface{}) bool {
+	_, _, services := idsField(rec, fieldServices, serviceIDRe)
+	_, _, groups := idsField(rec, fieldProcessGroups, processGroupRe)
+	return services || groups
 }
 
 // countField reads a count, which Grail sends as a number or, for a long, as
