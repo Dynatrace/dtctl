@@ -154,7 +154,15 @@ func windowDuration(since string) time.Duration {
 // quantifiable: with 1-in-R sampling, missing a population of R*3 has
 // probability e^-3, just under 5%. Reporting that number is honest in a way
 // "the scan stopped early" cannot be.
-func SampledMissBound(ratio int64) int64 { return ratio * 3 }
+//
+// A ratio below one is no sampling: every record was read, so a count that
+// matched nothing missed nothing, and the bound is 0.
+func SampledMissBound(ratio int64) int64 {
+	if ratio < 1 {
+		return 0
+	}
+	return ratio * 3
+}
 
 // sampledHitEvidence states what a sampled verdict rests on. Every sampled
 // signal carries evidence, including a plain live one: its volume is an

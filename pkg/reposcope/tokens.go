@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // What a repository-derived name was read from.
@@ -40,6 +42,12 @@ type token struct {
 	// candidate by itself; "" for a name the unit gives itself. See
 	// indirectNames.
 	indirect string
+	// beside marks a service name read from one of several containers of a
+	// workload, and image is that container's image. A manifest lists
+	// sidecars beside the unit's own container, so such a name is the unit's
+	// only when its container's image is named like the unit.
+	beside bool
+	image  string
 }
 
 // A repository holds names that are not its own, and each of these finds a
@@ -54,6 +62,9 @@ const (
 	// A manifest or chart the unit does not claim by name may deploy a
 	// dependency: a cache, a broker, a proxy.
 	indirectUnclaimed = "a manifest or chart that is not named like the unit"
+	// A workload's second container is a proxy or an agent as a rule, and
+	// the service name it is given is that product's.
+	indirectSidecar = "a container of a manifest whose image is not named like the unit"
 	// What a directory kept for other projects' code, for build output or
 	// for test content holds, its own name included.
 	indirectForeign = "what is under %s/, which holds no name of this repository's own"
@@ -107,12 +118,15 @@ const (
 // and nothing. Matching on record fields is exact, so "payment_service" in a
 // pom.xml has to reach Dynatrace as "payment-service" too. Names in stopWords
 // and names shorter than minTokenRunes or longer than maxTokenRunes have none.
+// The upper bound is on the longest spelling, the words joined by a
+// separator, since every spelling is sent: 252 characters of camelCase are 378
+// that way.
 func variants(raw string) []string {
 	base := baseName(raw)
 	words := splitWords(base)
 	joined := strings.Join(words, "")
 	if len(words) == 0 || stopWords[strings.Join(words, "-")] || stopWords[joined] ||
-		utf8.RuneCountInString(joined) < minTokenRunes || utf8.RuneCountInString(base) > maxTokenRunes {
+		utf8.RuneCountInString(joined) < minTokenRunes || longestSpelling(raw) > maxTokenRunes {
 		return nil
 	}
 	var out []string
@@ -124,6 +138,13 @@ func variants(raw string) []string {
 		}
 	}
 	return out
+}
+
+// longestSpelling is the length in characters of the longest spelling raw is
+// sent in: the name as written, or its words joined by a separator.
+func longestSpelling(raw string) int {
+	base := baseName(raw)
+	return max(utf8.RuneCountInString(base), utf8.RuneCountInString(strings.Join(splitWords(base), "-")))
 }
 
 // baseName strips what is not part of a name: everything up to the last '/'
@@ -145,6 +166,9 @@ func baseName(raw string) string {
 // splitWords lowercases s and splits it at every non-alphanumeric rune and at
 // camelCase boundaries: "paymentService" and "HTTPServer" become
 // [payment service] and [http server]. Digits stay with the word before them.
+// s is read in its composed form, and a combining mark that has none stays
+// with its letter: read decomposed, an accented letter would end the word and
+// lose its accent.
 func splitWords(s string) []string {
 	var words []string
 	var cur []rune
@@ -154,9 +178,9 @@ func splitWords(s string) []string {
 			cur = cur[:0]
 		}
 	}
-	runes := []rune(s)
+	runes := []rune(norm.NFC.String(s))
 	for i, r := range runes {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) {
 			flush()
 			continue
 		}

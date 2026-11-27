@@ -210,7 +210,7 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 			ran++
 		}
 	}
-	took := fmt.Sprintf("%d of %d queries ran in %.1fs. Nothing was written.", ran, len(r.Queries), elapsed.Seconds())
+	took := fmt.Sprintf("%d of %d queries ran in %.1fs. No repo scope was saved.", ran, len(r.Queries), elapsed.Seconds())
 
 	switch {
 	case len(r.Candidates) == 0:
@@ -227,7 +227,7 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 		// that name a workload and no namespace give nothing to bind.
 		fmt.Fprintf(w, "Verdict: match: %s\n", cmp.Or(strings.Join(matched, ", "), "one candidate, with no binding that selects it"))
 		if len(p.handLinks) > 0 {
-			fmt.Fprintf(w, "%s No binding selects this candidate alone.\n", took)
+			fmt.Fprintf(w, "%s %s\n", took, repoScopeNoLineSummary(r, p))
 			writeRepoScopeHandLinks(w, p)
 			break
 		}
@@ -243,8 +243,11 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 			}
 		case len(p.handLinks) > 0:
 			why := "No binding selects any candidate alone."
-			if !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.Indirect == "" }) {
+			switch {
+			case !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.Indirect == "" }):
 				why = "No candidate is named by the unit itself (see the notes)."
+			case !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.Indirect == "" && !c.WorkloadUnnamed }):
+				why = "No candidate's workload is named by the unit itself (see the notes)."
 			}
 			fmt.Fprintf(w, "%s %s\n", took, why)
 			writeRepoScopeHandLinks(w, p)
@@ -266,12 +269,25 @@ func printRepoScopeDiscovery(w io.Writer, r *reposcope.DiscoveryReport, p repoSc
 	}
 }
 
+// repoScopeNoLineSummary says, under a match that has no set line, why there
+// is none: the one candidate is what runs this code, and what stands in the
+// way is a value its line would hold, not the binding.
+func repoScopeNoLineSummary(r *reposcope.DiscoveryReport, p repoScopeProposal) string {
+	if _, unheld := repoScopeBindings(r, r.Candidates[0]); len(unheld) > 0 {
+		return "Its set line would hold a value a scope file cannot (see the notes), so none is proposed."
+	}
+	if len(p.lineNotes) > 0 {
+		return "No set line is proposed for it (see the notes)."
+	}
+	return "No binding selects this candidate alone."
+}
+
 // repoScopeDoubt says, after a verdict that is not a match, what stands in
 // the way of one. With several candidates it is their number. With one it is
 // not: that candidate's name matched only in part, the result is partial and
 // a query that did not answer could have found another, a sample read the
 // records and could have missed another, no name of the unit's own matched
-// it, or only the entity table holds the name.
+// it or only its service name did, or only the entity table holds the name.
 func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 	switch {
 	case len(r.Candidates) != 1:
@@ -282,11 +298,16 @@ func repoScopeDoubt(r *reposcope.DiscoveryReport) string {
 		return ": one candidate, but the records were sampled, which can miss another (see the notes)"
 	case r.Candidates[0].Indirect != "":
 		return ": one candidate, " + r.Candidates[0].Indirect
-	case r.Candidates[0].Tier == "exact" && r.Candidates[0].Workload == "" && r.Candidates[0].ServiceName == "":
+	case r.Candidates[0].WorkloadUnnamed:
+		return ": one candidate, found by its service.name alone; no name of this repository is its workload's"
+	case r.Candidates[0].Tier == "exact" && repoScopeByEntityNameAlone(r):
 		// Named exactly, but found by the entity-name search, which runs
 		// only when the records find nothing: the entity exists, and
-		// nothing shows that it runs.
-		return ": one candidate, found by its entity name alone; no span or log in 24h carries a name of this repository"
+		// nothing shows that it runs. The note says so in full.
+		return ": one candidate, found by its entity name alone (see the notes)"
+	}
+	if repoScopeUnexplained(r.Candidates[0]) {
+		return ": one candidate, and neither its workload nor its service name is a name discovery sent"
 	}
 	return fmt.Sprintf(": one candidate, matched by a %s of its name rather than the whole of it", r.Candidates[0].Tier)
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -757,22 +758,23 @@ func TestBreakpoint_WorkspaceNamedAfterTheEntry(t *testing.T) {
 }
 
 // The origin remote is text from a file, and only a plain repository name is
-// taken from it: anything else would put a query string, a quote or a
-// directory of this machine into the name that is sent and printed, so the
-// checkout directory names the repository instead.
+// taken from it: a query string and the quotes git allows around a value are
+// not part of the name, and anything else would put a quote or a directory
+// of this machine into the name that is sent and printed, so the checkout
+// directory names the repository instead.
 func TestBreakpoint_WorkspaceNameTakesOnlyAPlainRepositoryName(t *testing.T) {
-	for _, tc := range []struct{ name, url string }{
-		{"a query string", "git@example.invalid:shop/cart.git?ticket=example"},
-		{"a quoted url", `"https://example.invalid/shop/storefront.git"`},
-		{"a parent directory", "https://example.invalid/shop/.."},
-		{"a Windows path", `C:\Users\dev\repos\storefront.git`},
-		{"a space", "https://example.invalid/shop/store%20front.git"},
+	for _, tc := range []struct{ name, url, repository string }{
+		{"a query string", "git@example.invalid:shop/cart.git?ticket=example", "cart"},
+		{"a quoted url", `"https://example.invalid/shop/storefront.git"`, "storefront"},
+		{"a parent directory", "https://example.invalid/shop/..", ""},
+		{"a Windows path", `C:\Users\dev\repos\storefront.git`, ""},
+		{"a space", "https://example.invalid/shop/store%20front.git", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
 			root := chdirTestRepo(t, breakpointScope)
 			require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[remote \"origin\"]\n\turl = "+tc.url+"\n"), 0o644))
-			want := filepath.Base(root) + "/checkout"
+			want := cmp.Or(tc.repository, filepath.Base(root)) + "/checkout"
 
 			code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--plain"}, RunOptions{})
 			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)

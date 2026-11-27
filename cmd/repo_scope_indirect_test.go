@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,7 +53,7 @@ func TestRepoScopeDiscoverIndirectEvidenceProposesNoLine(t *testing.T) {
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, named only by a manifest or chart that is not named like the unit\n")
-	require.Contains(t, stdout, "Nothing was written. No candidate is named by the unit itself (see the notes).\n")
+	require.Contains(t, stdout, "No repo scope was saved. No candidate is named by the unit itself (see the notes).\n")
 	require.Contains(t, stdout, "\nNote: "+note+"\n")
 	require.NotContains(t, stdout, "repo-scope set redis", "no line that saves the cache as this repository's scope")
 	require.NotContains(t, stdout, "--workload redis-cache")
@@ -64,6 +65,12 @@ func TestRepoScopeDiscoverIndirectEvidenceProposesNoLine(t *testing.T) {
 		require.NotContains(t, stdout, "setCommand", format)
 		require.Contains(t, stdout, "--term redis-cache", format)
 	}
+	// No candidate has a line, so an agent is not told that running one
+	// is the confirmation.
+	_, suggestions := discoverReport(t)
+	require.Contains(t, suggestions, "nothing has been saved, and no candidate has a set command to run")
+	require.NotContains(t, strings.Join(suggestions, "\n"), "running the set command is the confirmation")
+
 	code, stdout, stderr = runRepoScoped([]string{"repo-scope", "discover", "-o", "json"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	var reports []reposcope.DiscoveryReport
@@ -108,20 +115,23 @@ func TestRepoScopeDiscoverIndirectEvidenceProposesNoSharedLine(t *testing.T) {
 	require.NotContains(t, stdout, "--service-name redis-cache")
 }
 
-// The same line is proposed when one of the candidates reporting the name is
-// the unit's own workload: the name is then tied to this code by more than
-// the manifest that spells it.
-func TestRepoScopeDiscoverSharedLineNeedsOneDirectCandidate(t *testing.T) {
-	row := func(workload, records string) string {
+// Nor is it proposed when one of the candidates reporting the name is the
+// unit's own workload, named exactly or inside a longer name: what the unit
+// names is that workload, and the service name is still the cache's, spelled
+// only by the manifest that deploys it. A line binding it would select the
+// cache. (This test first required the line, on the reasoning that one
+// candidate named by the unit ties the service name to this code. It does
+// not: the tie is to the candidate's workload.)
+func TestRepoScopeDiscoverSharedLineNeedsTheServiceNameToBeTheUnits(t *testing.T) {
+	row := func(workload, serviceName, records string) string {
 		// Without a namespace no workload binding selects either alone.
-		return `{"k8s.workload.name":"` + workload + `","service.name":"redis-cache","records":"` + records +
+		return `{"k8s.workload.name":"` + workload + `","service.name":"` + serviceName + `","records":"` + records +
 			`","serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`
 	}
-	// Whichever of the two has more records, and whether the unit's
-	// workload carries its name exactly or inside a longer one.
+	// Whichever of the two has more records.
 	for own, rows := range map[string]string{
-		"checkout":       row("checkout", "1000") + "," + row("redis-cache", "10"),
-		"eu-checkout-v2": row("redis-cache", "1000") + "," + row("eu-checkout-v2", "10"),
+		"checkout":       row("checkout", "redis-cache", "1000") + "," + row("redis-cache", "redis-cache", "10"),
+		"eu-checkout-v2": row("redis-cache", "redis-cache", "1000") + "," + row("eu-checkout-v2", "redis-cache", "10"),
 	} {
 		newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": rows}))
 		chdirCheckoutWithRedis(t)
@@ -133,12 +143,85 @@ func TestRepoScopeDiscoverSharedLineNeedsOneDirectCandidate(t *testing.T) {
 		require.Len(t, reports[0].Candidates, 2)
 		direct := 0
 		for _, c := range reports[0].Candidates {
+			require.False(t, c.ServiceNameOwn, c.Workload)
 			if c.Indirect == "" {
 				direct++
 				require.Equal(t, own, c.Workload, "the workload go.mod names")
 			}
 		}
 		require.Equal(t, 1, direct)
-		require.Contains(t, stdout, "repo-scope set redis-cache --service-name redis-cache", rows)
+		require.NotContains(t, stdout, "--service-name redis-cache", rows)
+		require.NotContains(t, stdout, "repo-scope set redis", rows)
 	}
+
+	// The control: the service name is the unit's own, and two workloads
+	// report it.
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{"spans": row("blue", "checkout", "1000") + "," + row("green", "checkout", "10")}))
+	chdirCheckoutWithRedis(t)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "-o", "json"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "repo-scope set checkout --service-name checkout")
+}
+
+// A single row whose service name is the cache's and whose workload only
+// holds the unit's name: found, by the part that is the unit's own, and no
+// match. Its line is the one a segment candidate gets, to confirm.
+func TestRepoScopeDiscoverIndirectWholeNameBesideOwnPart(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": `{` + flowCluster + `"k8s.namespace.name":"infra","k8s.workload.name":"eu-checkout-v2","service.name":"redis-cache","records":"900",` +
+			`"serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`,
+	}))
+	chdirCheckoutWithRedis(t)
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.Equal(t, "segment", report.Candidates[0].Tier)
+	for kind, v := range report.Verdicts {
+		require.NotEqual(t, reposcope.VerdictMatch, v, kind)
+	}
+	for _, s := range suggestions {
+		require.NotContains(t, s, "confirm with the user, then:")
+		require.NotContains(t, s, "--service-name")
+	}
+}
+
+// One row: a shared gateway that reports this repository's service name. The
+// queries returned the records under that name and nothing else the gateway
+// reports, so the report is ambiguous and carries no line that would bind the
+// whole gateway; a term naming the workload is what confirms it.
+func TestRepoScopeDiscoverServiceNameAloneProposesNoWorkloadLine(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(map[string]string{
+		"spans": `{` + flowCluster + `"k8s.namespace.name":"infra","k8s.workload.name":"edge-gateway","service.name":"checkout","records":"900",` +
+			`"serviceCount":"0","services":[],"processGroupCount":"0","processGroups":[]}`,
+	}))
+	chdirCheckoutWithRedis(t)
+	const (
+		note = "candidate 1 has no set line: it was found by its service.name alone, and no name of this repository is its workload's, " +
+			"so a line would bind everything infra/edge-gateway reports, of which discovery read only the records under that service name; " +
+			"if it does, run discover again with --term edge-gateway"
+		line = "dtctl --context c repo-scope set edge-gateway --cluster-uid " + flowClusterUID + " --namespace infra --workload edge-gateway"
+	)
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its service.name alone; no name of this repository is its workload's\n")
+	require.Contains(t, stdout, "No candidate's workload is named by the unit itself (see the notes).\n")
+	require.Contains(t, stdout, "\nNote: "+note+"\n")
+	require.NotContains(t, stdout, "--workload edge-gateway")
+	require.NotContains(t, stdout, "repo-scope set edge-gateway")
+
+	report, suggestions := discoverReport(t)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
+	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdicts["workload"])
+	require.True(t, report.Candidates[0].WorkloadUnnamed)
+	require.Empty(t, report.Candidates[0].SetCommand)
+	require.Contains(t, report.Notes, note)
+	require.Contains(t, suggestions, note)
+	for _, s := range suggestions {
+		require.NotContains(t, s, "--workload edge-gateway")
+		require.NotContains(t, s, "run its setCommand", "there is none to run")
+	}
+
+	report, suggestions = discoverReport(t, "--term", "edge-gateway")
+	require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+	require.Equal(t, line, report.Candidates[0].SetCommand)
+	require.Equal(t, "confirm with the user, then: "+line, suggestions[0])
 }

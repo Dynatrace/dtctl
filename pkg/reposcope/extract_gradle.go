@@ -174,6 +174,21 @@ func (b *gradleBuild) deploy(m string) {
 	}
 }
 
+// dropMissing takes out of the build's deployables each module that is not a
+// directory of fsys. A settings file can include a module the checkout does
+// not hold (a sparse checkout, a projectDir remap, an include left behind),
+// and a chart named like it would still mark it deployed: a unit with nothing
+// to read, and an entry path that set refuses. A symbolic link is no
+// directory here, as it is none to the walk.
+func (b *gradleBuild) dropMissing(fsys fs.FS) {
+	for m := range b.deployable {
+		entries, _ := fs.ReadDir(fsys, path.Dir(m))
+		if !slices.ContainsFunc(entries, func(e fs.DirEntry) bool { return e.Name() == path.Base(m) && e.IsDir() }) {
+			delete(b.deployable, m)
+		}
+	}
+}
+
 // testModule reports whether module m is named like a test, a word of its
 // directory name being one of testFileWords (smoke-tests, integrationTest):
 // the image such a module builds runs the tests, not the service.
@@ -274,8 +289,10 @@ func (b *gradleBuild) closure(m string) []string {
 // unitOf is the unit of dir in a build with several deployables, nearest
 // being the nearest unit above it: a library module's is the one deployable
 // depending on it, and the build's own when several do. The build's own
-// directory, and any other that no module holds, is the build's too. sharedBy
-// lists the deployables when the unit is the build.
+// directory, and any other that no module holds, is the build's too. A
+// directory below a library module that holds a build file of another kind
+// is that unit, as it is anywhere else: the library's owner does not build
+// it. sharedBy lists the deployables when the unit is the build.
 func (b *gradleBuild) unitOf(dir, nearest string) (unit string, sharedBy []string) {
 	if len(b.deployable) < 2 {
 		return nearest, nil
@@ -284,7 +301,7 @@ func (b *gradleBuild) unitOf(dir, nearest string) (unit string, sharedBy []strin
 	switch {
 	case m == "" && nearest == b.dir:
 		return b.dir, b.deployables()
-	case m == "" || b.deployable[m]:
+	case m == "" || b.deployable[m] || strings.HasPrefix(nearest, m+"/"):
 		return nearest, nil
 	}
 	switch sharedBy = b.owners(m); len(sharedBy) {

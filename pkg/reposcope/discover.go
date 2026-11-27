@@ -304,6 +304,9 @@ func checkTerms(terms []string) ([]string, error) {
 		case utf8.RuneCountInString(term) > maxTokenRunes:
 			return nil, &InvalidError{Source: "--term",
 				Msg: fmt.Sprintf("%q is longer than the %d characters a workload or service name has", term, maxTokenRunes)}
+		case longestSpelling(term) > maxTokenRunes:
+			return nil, &InvalidError{Source: "--term",
+				Msg: fmt.Sprintf("%q is sent with its words joined, which is longer than the %d characters a workload or service name has", term, maxTokenRunes)}
 		case len(variants(term)) == 0:
 			return nil, &InvalidError{Source: "--term",
 				Msg: fmt.Sprintf("%q is not looked for: a name needs at least %d letters or digits and must not be a generic word such as api, server or web, which every environment holds many of",
@@ -537,8 +540,9 @@ const (
 	VerdictNone      Verdict = "none"
 )
 
-// DiscoveryReport is the outcome of Discover, and the agent envelope's
-// result as is.
+// DiscoveryReport is the outcome of Discover. The command prints a list of
+// them, one per unit, as the agent envelope's result, after adding each
+// candidate's set line and the notes that qualify it.
 type DiscoveryReport struct {
 	Environment string `json:"environment" yaml:"environment"`
 	// Dir and Unit are the plan's.
@@ -564,10 +568,19 @@ type DiscoveryReport struct {
 }
 
 // Discover runs p's queries through runner and ranks what came back. It only
-// reads. A cancelled run returns the report so far together with ctx.Err(),
+// reads. p is a plan as PlanDiscovery returned it: one rebuilt from its
+// printed form has lost where its values were read, and is refused with an
+// InvalidError and no report before anything is sent. A cancelled run returns the report so far together with ctx.Err(),
 // so a caller can still show what it found after a Ctrl-C; the CLI does in
 // every mode but the agent's, whose envelope is a result or an error.
 func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string) (*DiscoveryReport, error) {
+	if len(p.Sent) > 0 && len(p.tokens) == 0 && len(p.terms) == 0 {
+		// A plan that was printed and read back, say. With only the values
+		// left, nothing tells the unit's own name from a dependency's.
+		return nil, &InvalidError{Source: "discovery plan",
+			Msg:         "the plan does not say where its values were read, so no candidate they find could be weighed",
+			Suggestions: []string{"run a plan as PlanDiscovery returned it"}}
+	}
 	r := &DiscoveryReport{Environment: host, Dir: p.Dir, Unit: p.Unit,
 		Queries: append([]Query{}, p.Queries...), Sent: []string{}}
 	d := newDiscovery(p)
@@ -605,7 +618,7 @@ func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string
 			}
 			continue
 		}
-		r.Sent = p.Sent
+		r.Sent = slices.Clone(p.Sent)
 		if q.fallback() {
 			r.runFallback(ctx, runner, q, d)
 		} else {
@@ -763,6 +776,7 @@ func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.R
 		skipUnneeded(rungs)
 	}
 	r.fold(q, res, d)
+	d.addUnfinished(q.DataObject)
 }
 
 // sample walks the rungs of a record query the scan cap stopped and folds
@@ -773,7 +787,9 @@ func (r *DiscoveryReport) runRecordQuery(ctx context.Context, runner inventory.R
 // last one that ran is scaled by the steps in between, and a rung predicted
 // to hit the cap again is skipped rather than sent. A rung Grail would not
 // sample, or one cut short, ends it: the next one reads more. Not sampled
-// means a result without the sampled flag that read something.
+// means a result without the sampled flag that read something. The rows of
+// such a rung are no answer, but they name candidates that exist, and are
+// kept for addUnfinished.
 func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, rungs []*Query, d *discovery) (answered bool) {
 	var predicted int64 // what the next rung will scan; 0 when unknown
 	done, capped := false, false
@@ -810,6 +826,7 @@ func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, r
 			// the sampled flag out of a result that scanned no record, so
 			// there the flag says nothing and the rung is simply empty.
 			q.Cause, done = causeSamplingRefused, true
+			d.unfinished[q.DataObject] = append(d.unfinished[q.DataObject], res.Records...)
 			r.note(failureNote(q))
 		case cut:
 			// Even sampled this rung does not fit, and every rung after it
@@ -817,6 +834,7 @@ func (r *DiscoveryReport) sample(ctx context.Context, runner inventory.Runner, r
 			q.Truncated, q.Cause, q.truncation = true, causeTruncated, limit
 			capped = limit == inventory.TruncationScanLimit
 			done = !capped
+			d.unfinished[q.DataObject] = append(d.unfinished[q.DataObject], res.Records...)
 			r.note(failureNote(q))
 		case q.Rows == 0:
 			// An unknown scan keeps the prediction scaled from the last
@@ -888,10 +906,11 @@ func (r *DiscoveryReport) fold(q *Query, res *inventory.RunResult, d *discovery)
 //
 // One report is not taken as a cut: a result limit on a query that collects
 // ids (a record query or one of its retries), recognised by its message
-// alone. Grail may word an id array cut at its maxLength that way, and the
-// row then says so itself by holding more ids than a binding takes. A page
-// that lost rows is reported with a type, and one as long as the query's own
-// limit is judged by its length whatever Grail says.
+// alone, when a row of the page holds more ids than a binding takes. Grail
+// may word an id array cut at its maxLength that way, and that row is then
+// what the message is about. With no such row the message says rows were
+// lost: some deployments report a cut page in no other way. A page as long
+// as the query's own limit is judged by its length whatever Grail says.
 //
 // A runner that reports only one cause is taken at its word, as if typed.
 func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCause, cut bool) {
@@ -899,10 +918,10 @@ func cutShort(q *Query, res *inventory.RunResult) (limit inventory.TruncationCau
 	if len(limits) == 0 && res.Truncated {
 		limits = []inventory.Truncation{{Cause: res.TruncationCause, Typed: true}}
 	}
-	collectsIDs := !q.fallback() && !q.ProcessGroupCheck()
+	clipped := !q.fallback() && !q.ProcessGroupCheck() && slices.ContainsFunc(res.Records, idsClipped)
 	for _, l := range limits {
 		switch {
-		case collectsIDs && l.Cause == inventory.TruncationResultLimit && !l.Typed:
+		case clipped && l.Cause == inventory.TruncationResultLimit && !l.Typed:
 		case l.Cause == inventory.TruncationScanLimit:
 			return l.Cause, true
 		case !cut:
@@ -924,7 +943,7 @@ func (r *DiscoveryReport) SamplingNotes() []string {
 	var answered []*Query
 	for i := range r.Queries {
 		q := &r.Queries[i]
-		if !q.SampledRetry() || q.Skipped || q.Error != "" || (q.Cause != "" && q.Cause != causeRowLimit) || r.samplingRefused(q.DataObject) {
+		if !r.sampleAnswered(q) {
 			continue
 		}
 		// The last rung of an object that answered is the finest: it is
@@ -947,9 +966,16 @@ func (r *DiscoveryReport) SamplingNotes() []string {
 // be missing from the report, read whole or not, so a service name the
 // report shows to be unshared may still be shared.
 func (r *DiscoveryReport) SampledRecords() bool {
-	return slices.ContainsFunc(r.Queries, func(q Query) bool {
-		return q.SampledRetry() && !q.Skipped && q.Error == "" && !r.samplingRefused(q.DataObject)
-	})
+	return slices.ContainsFunc(r.Queries, func(q Query) bool { return r.sampleAnswered(&q) })
+}
+
+// sampleAnswered reports whether q is a sampled retry that read its sample
+// to the end, whatever it matched: it ran, nothing cut it short but its own
+// row limit, and the environment samples the data object. Both statements
+// the report makes about sampling rest on it.
+func (r *DiscoveryReport) sampleAnswered(q *Query) bool {
+	return q.SampledRetry() && !q.Skipped && q.Error == "" && (q.Cause == "" || q.Cause == causeRowLimit) &&
+		!r.samplingRefused(q.DataObject)
 }
 
 // samplingRefused reports whether a sampled retry over object came back
@@ -999,14 +1025,17 @@ func failureCause(ctx context.Context, err error) string {
 // report. It names the consequence that holds whatever was found: a result
 // with no candidate has no verdict to cap.
 func failureNote(q *Query) string {
-	if q.ProcessGroupCheck() && q.Skipped {
+	if q.ProcessGroupCheck() && (q.Skipped || q.Cause == causeTimeout || q.Cause == causeCancelled) {
 		// What this lookup would have found is a binding, never a
 		// candidate, so the note does not call the result incomplete.
-		why := "was interrupted"
+		why, when := "was interrupted", "before"
 		if q.Cause == causeTimeout {
 			why = "ran out of time"
 		}
-		return fmt.Sprintf("discovery %s before it looked for logs by process group", why)
+		if !q.Skipped {
+			when = "while"
+		}
+		return fmt.Sprintf("discovery %s %s it looked for logs by process group", why, when)
 	}
 	switch q.Cause {
 	case causeAuth:

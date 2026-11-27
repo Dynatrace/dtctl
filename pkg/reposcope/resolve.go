@@ -223,11 +223,11 @@ func (s *Status) LiveDebuggerFilterSets() (sets []map[string][]string, ok bool, 
 // applying; Tied names them.
 func (s *Status) Ambiguous() bool { return len(s.Tied) > 0 }
 
-// depth is how many segments the path p has, 0 for none. It is how close a
+// pathDepth is how many segments the path p has, 0 for none. It is how close a
 // path that covers a directory is to it: every such path is a prefix of the
 // directory by whole segments, so the deeper one is the closer. Its length in
 // bytes is not: the same path is longer in another case or composition.
-func depth(p string) int {
+func pathDepth(p string) int {
 	if p == "" {
 		return 0
 	}
@@ -251,10 +251,10 @@ func closestEntry(entries []Entry, relDir string, build gradleCoverage) (best *E
 			continue
 		}
 		if covers(e.Path, relDir) {
-			n = depth(e.Path)
+			n = pathDepth(e.Path)
 		}
 		if build.owns(e) {
-			n = max(n, depth(build.module))
+			n = max(n, pathDepth(build.module))
 		}
 		switch {
 		case n == 0 || n < deepest:
@@ -311,7 +311,7 @@ func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverag
 	// order a map is walked in.
 	for _, m := range slices.Sorted(maps.Keys(b.modules)) {
 		// b.module(relDir), folding case as covers does.
-		if covers(m, relDir) && depth(m) > depth(c.module) {
+		if covers(m, relDir) && pathDepth(m) > pathDepth(c.module) {
 			c.module = m
 		}
 		if slices.ContainsFunc(entries, func(e Entry) bool { return samePath(e.Path, m) }) {

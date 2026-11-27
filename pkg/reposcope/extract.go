@@ -7,6 +7,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Discovery runs inside a developer's checkout, which can be anything from one
@@ -82,13 +84,21 @@ func sourceFor(file string) *source {
 	return nil
 }
 
-// sourceNames is what one source contributed: tokens that belong together,
-// the directory they were found in, and the names that may claim a unit for
-// them (a manifest's workload and image names).
+// sourceNames is what one source contributed: tokens that belong together
+// and the directory they were found in.
+//
+// A build file's names are its unit's. A manifest's or a chart's are only
+// when the unit claims it (needsClaim): claims are the names it can be
+// claimed by, its workload's or chart's and its images', and named is the
+// first of those alone, which also places a manifest kept outside every unit
+// (see attribute). Only a name that made a token is either: a placeholder
+// claims nothing.
 type sourceNames struct {
-	dir    string
-	claims []string
-	tokens []token
+	dir        string
+	needsClaim bool
+	named      string
+	claims     []string
+	tokens     []token
 }
 
 type signals struct {
@@ -127,12 +137,15 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 	if capped {
 		// What the walk did not reach must not move the unit: a build file
 		// it missed would make the whole repository the unit of a directory
-		// that has one of its own.
-		for _, f := range unitSourcesAbove(fsys, dir) {
-			if !slices.Contains(files, f) {
-				files = append(files, f)
-			}
+		// that has one of its own. Those files take the place of the last
+		// ones walked, so that no more than maxFiles are read either way.
+		above := unitSourcesAbove(fsys, dir)
+		recovered := make(map[string]bool, len(above))
+		for _, f := range above {
+			recovered[f] = true
 		}
+		files = slices.DeleteFunc(files, func(f string) bool { return recovered[f] })
+		files = append(files[:min(len(files), maxFiles-len(above))], above...)
 	}
 	var found []sourceNames
 	gradle := map[string]string{}
@@ -149,6 +162,9 @@ func extract(fsys fs.FS, dir string) (*signals, error) {
 	found = append(found, readRemote(fsys)...)
 
 	builds := readGradleBuilds(files, gradle, found)
+	for _, b := range builds {
+		b.dropMissing(fsys)
+	}
 	units := map[string]bool{".": true}
 	for _, f := range files {
 		if sourceFor(f).makesUnit && !builds.absorbs(f) {
@@ -204,55 +220,59 @@ func unitTokens(units map[string]bool, found []sourceNames, unit, nameDir string
 // unit's own:
 //
 //   - the origin remote's name and every image, marked where they are read;
-//   - the names of a manifest or chart the unit does not claim. A build
-//     file's name, the unit's directory and the remote say what the unit is
-//     called, and a manifest whose workload or image is called the same is
-//     the unit's. Any other may deploy a dependency;
 //   - whatever was read at or below one of skippedDirs or excludedDirs, a
 //     directory's own name included. The walk never enters the first and
 //     enters the second only on the way to the directory discovery was asked
-//     about, and being asked about a fixture does not make it the service.
+//     about, and being asked about a fixture does not make it the service;
+//   - the names of a manifest or chart the unit does not claim. A build
+//     file's name and the unit's directory say what the unit is called, and
+//     a manifest whose workload or image is called the same is the unit's.
+//     Any other may deploy a dependency. Only a name that is the unit's own
+//     claims one: the remote's name or a vendored directory's would make a
+//     second indirect name of the manifest's and call the two direct;
+//   - in a manifest the unit claims, the service name of a container that
+//     stands beside others and whose image is not called like the unit: a
+//     sidecar's.
 //
 // A candidate matched by such names alone is reported, never as a match,
 // and gets no line (Candidate.Indirect). A --term is the way to say that it
 // is what runs this code.
 func indirectNames(dirs []token, sources []sourceNames) []token {
-	var called []string // what the unit is called
-	for _, t := range dirs {
-		called = append(called, t.value)
-	}
-	for _, f := range sources {
-		if len(f.claims) == 0 {
-			for _, t := range f.tokens {
-				called = append(called, t.value)
-			}
-		}
-	}
-	claimed := func(f sourceNames) bool {
-		return len(f.claims) == 0 || slices.ContainsFunc(f.claims, func(claim string) bool {
-			return slices.ContainsFunc(called, func(name string) bool { return sameName(claim, name) })
-		})
-	}
-	var tokens []token
-	for _, f := range sources {
-		for _, t := range f.tokens {
-			if t.indirect == "" && !claimed(f) {
-				t.indirect = indirectUnclaimed
-			}
-			tokens = append(tokens, t)
-		}
-	}
 	foreign := func(t *token) {
 		// The remote is read from .git/config and says so itself.
 		if dir := foreignDir(path.Dir(t.file)); dir != "" && t.kind != kindRemote {
 			t.indirect = fmt.Sprintf(indirectForeign, dir)
 		}
 	}
+	var called []string // what the unit is called
 	for i := range dirs {
-		foreign(&dirs[i])
+		if foreign(&dirs[i]); dirs[i].indirect == "" {
+			called = append(called, dirs[i].value)
+		}
 	}
-	for i := range tokens {
-		foreign(&tokens[i])
+	for _, f := range sources {
+		for _, t := range f.tokens {
+			if foreign(&t); !f.needsClaim && t.indirect == "" {
+				called = append(called, t.value)
+			}
+		}
+	}
+	unitCalled := func(name string) bool {
+		return slices.ContainsFunc(called, func(own string) bool { return sameName(name, own) })
+	}
+	var tokens []token
+	for _, f := range sources {
+		claimed := !f.needsClaim || slices.ContainsFunc(f.claims, unitCalled)
+		for _, t := range f.tokens {
+			switch foreign(&t); {
+			case t.indirect != "":
+			case !claimed:
+				t.indirect = indirectUnclaimed
+			case t.beside && !unitCalled(t.image):
+				t.indirect = indirectSidecar
+			}
+			tokens = append(tokens, t)
+		}
 	}
 	return tokens
 }
@@ -307,7 +327,7 @@ func dirSource(dir string) string {
 // dir, and reports whether it stopped at maxFiles; only kept files count
 // toward that. The directories on the way to dir are entered whatever their
 // depth or name, short of skippedDirs: discovery asked about a directory
-// reads it.
+// reads it. Depth is counted from root, and below dir from dir (see depth).
 func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []string, capped bool, err error) {
 	err = fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, walkErr error) error {
 		switch {
@@ -318,7 +338,7 @@ func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []
 			return nil
 		case d.IsDir():
 			if p != root && (skippedDirs[d.Name()] || (!onPath(p, dir) &&
-				(strings.Count(p, "/")+1 > maxDepth || excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))]))) {
+				(depth(p, root, dir) > maxDepth || excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))]))) {
 				return fs.SkipDir
 			}
 			return nil
@@ -340,7 +360,9 @@ func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []
 // unitSourcesAbove lists the files that make a unit (build files and
 // Dockerfiles) in dir and in each directory above it, by reading those
 // directories rather than walking the repository. Like the walk it reads no
-// test file and nothing at or below one of skippedDirs.
+// test file and nothing at or below one of skippedDirs, and lists no more than
+// maxFiles: dir's own come first, so it is the directories furthest above it
+// that a repository with that many build files in one place loses.
 func unitSourcesAbove(fsys fs.FS, dir string) []string {
 	var files []string
 	for d := dir; ; d = path.Dir(d) {
@@ -349,6 +371,9 @@ func unitSourcesAbove(fsys fs.FS, dir string) []string {
 			for _, e := range entries {
 				f := path.Join(d, e.Name())
 				if src := sourceFor(f); src != nil && src.makesUnit && e.Type().IsRegular() && !testFile(e.Name()) {
+					if len(files) == maxFiles {
+						return files
+					}
 					files = append(files, f)
 				}
 			}
@@ -368,9 +393,39 @@ func inSkippedDir(dir string) bool {
 // onPath reports whether p is dir or one of its ancestors. Discovery asked
 // about a directory reads it whatever it is called: a repository that keeps
 // its deployables under examples/<name> still discovers from
-// examples/checkout.
+// examples/checkout. Names are compared composed, as an entry's path is: a
+// volume may spell a name decomposed that a caller composes.
 func onPath(p, dir string) bool {
-	return p == dir || strings.HasPrefix(dir, p+"/")
+	_, ok := below(dir, p)
+	return ok
+}
+
+// below reports whether p is base or lies below it, and how many directories
+// below, comparing names in their composed form.
+func below(p, base string) (levels int, ok bool) {
+	p, base = norm.NFC.String(p), norm.NFC.String(base)
+	switch {
+	case base == "." && p != ".":
+		return strings.Count(p, "/") + 1, true
+	case p == base:
+		return 0, true
+	case strings.HasPrefix(p, base+"/"):
+		return strings.Count(p[len(base):], "/"), true
+	}
+	return 0, false
+}
+
+// depth is how many directories p lies below where the reading of it
+// starts: the walk's root, or dir for what lies below the directory
+// discovery was asked about. The bound is on how far a walk descends, not on
+// where in the repository it happens: a build six directories down is read
+// with its modules, and a deep directory with what it holds.
+func depth(p, root, dir string) int {
+	levels, _ := below(p, root)
+	if under, ok := below(p, dir); ok {
+		levels = min(levels, under)
+	}
+	return levels
 }
 
 // testFile reports whether a file is a test's own: a word of its name, split
@@ -406,22 +461,29 @@ func nearestUnit(units map[string]bool, dir string) string {
 	return "."
 }
 
-// attribute picks the unit a source's names belong to: the one unit named
-// like one of its claims, so deploy/checkout/deployment.yaml lands on
-// services/checkout, else the nearest unit above where they were found.
+// attribute picks the unit a source's names belong to: the nearest unit
+// above where they were found. A manifest or chart kept outside every unit
+// below the root goes to the one unit called like its workload or chart, so
+// deploy/checkout/deployment.yaml lands on services/checkout.
+//
+// One that lies inside a unit stays there whatever it names, and an image
+// never moves one: a sidecar's image called like another unit would hand
+// that unit the whole manifest, its workload name as the unit's own.
 func attribute(units map[string]bool, f sourceNames) string {
-	for _, claim := range f.claims {
-		var named []string
-		for u := range units {
-			if u != "." && sameName(path.Base(u), claim) {
-				named = append(named, u)
-			}
-		}
-		if len(named) == 1 {
-			return named[0]
+	nearest := nearestUnit(units, f.dir)
+	if nearest != "." || f.named == "" {
+		return nearest
+	}
+	var called []string
+	for u := range units {
+		if u != "." && sameName(path.Base(u), f.named) {
+			called = append(called, u)
 		}
 	}
-	return nearestUnit(units, f.dir)
+	if len(called) == 1 {
+		return called[0]
+	}
+	return nearest
 }
 
 // buildFile adapts a reader of one name to a source: a build file's name

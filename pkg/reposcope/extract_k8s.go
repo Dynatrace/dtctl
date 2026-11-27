@@ -63,30 +63,37 @@ func workloadNames(doc *yaml.Node, file string) (sourceNames, bool) {
 	if kind := mapValue(doc, "kind"); kind == nil || !workloadKinds[kind.Value] {
 		return sourceNames{}, false
 	}
-	f := sourceNames{dir: path.Dir(file)}
+	f := sourceNames{dir: path.Dir(file), needsClaim: true}
 	meta := mapValue(doc, "metadata")
-	if name := mapValue(meta, "name"); name != nil {
-		f.add(kindWorkload, name.Value, file, name.Line)
-		f.claims = append(f.claims, name.Value)
+	if name := mapValue(meta, "name"); name != nil && f.add(kindWorkload, name.Value, file, name.Line) {
+		f.named, f.claims = name.Value, append(f.claims, name.Value)
 	}
 	if ns := mapValue(meta, "namespace"); ns != nil {
 		f.add(kindNamespace, ns.Value, file, ns.Line)
 	}
-	for _, c := range containers(mapValue(doc, "spec")) {
-		if image := mapValue(c, "image"); image != nil {
+	all := containers(mapValue(doc, "spec"))
+	for _, c := range all {
+		image := mapValue(c, "image")
+		if image != nil {
 			if t, ok := newToken(kindImage, image.Value, file, image.Line); ok {
 				t.indirect = indirectImage
 				f.tokens = append(f.tokens, t)
+				f.claims = append(f.claims, baseName(image.Value))
 			}
-			f.claims = append(f.claims, baseName(image.Value))
 		}
 		for _, env := range sequence(mapValue(c, "env")) {
 			name, value := mapValue(env, "name"), mapValue(env, "value")
 			if name == nil || value == nil {
 				continue
 			}
-			if service := otelServiceName(name.Value, value.Value); service != "" {
-				f.add(kindServiceName, service, file, value.Line)
+			service := otelServiceName(name.Value, value.Value)
+			if t, ok := newToken(kindServiceName, service, file, value.Line); ok && service != "" {
+				// Which container is the unit's is known only once the
+				// unit is: see indirectNames.
+				if t.beside = len(all) > 1; t.beside && image != nil {
+					t.image = baseName(image.Value)
+				}
+				f.tokens = append(f.tokens, t)
 			}
 		}
 	}
@@ -142,13 +149,16 @@ func chartName(data []byte, file string) []sourceNames {
 	if !ok {
 		return nil
 	}
-	return []sourceNames{{dir: path.Dir(file), claims: []string{chart.Name}, tokens: []token{t}}}
+	return []sourceNames{{dir: path.Dir(file), needsClaim: true, named: chart.Name, claims: []string{chart.Name}, tokens: []token{t}}}
 }
 
-func (f *sourceNames) add(kind, raw, file string, line int) {
-	if t, ok := newToken(kind, raw, file, line); ok {
+// add appends raw as a token of kind and reports whether it made one.
+func (f *sourceNames) add(kind, raw, file string, line int) bool {
+	t, ok := newToken(kind, raw, file, line)
+	if ok {
 		f.tokens = append(f.tokens, t)
 	}
+	return ok
 }
 
 // mapValue is the value of key in the mapping n. An alias is read as the node

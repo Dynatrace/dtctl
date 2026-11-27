@@ -1,143 +1,147 @@
-{
-  "environment": "abc12345.apps.dynatrace.com",
-  "dir": ".",
-  "unit": ".",
-  "verdict": "ambiguous",
-  "verdicts": {
-    "processGroup": "none",
-    "service": "ambiguous",
-    "serviceName": "ambiguous",
-    "workload": "ambiguous"
-  },
-  "candidates": [
-    {
-      "rank": 1,
-      "name": "checkout",
-      "namespace": "payments",
-      "workload": "checkout",
-      "serviceName": "checkout",
-      "serviceNameShared": true,
-      "services": [
-        "SERVICE-0123456789ABCDEF"
-      ],
-      "serviceCount": 1,
-      "tier": "exact",
-      "logs": 88000,
-      "spansSampled": 17,
-      "sampled": true,
-      "evidence": [
-        "k8s.namespace.name \"payments\" from deploy/k8s/deployment.yaml:5",
-        "k8s.workload.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
-        "service.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
-        "17 sampled span hits in 1h (1 in 100000 requested), 88000 logs in 24h"
-      ]
+[
+  {
+    "environment": "abc12345.apps.dynatrace.com",
+    "dir": ".",
+    "unit": ".",
+    "verdict": "ambiguous",
+    "verdicts": {
+      "processGroup": "none",
+      "service": "ambiguous",
+      "serviceName": "ambiguous",
+      "workload": "ambiguous"
     },
-    {
-      "rank": 2,
-      "name": "checkout",
-      "namespace": "staging",
-      "workload": "checkout",
-      "serviceName": "checkout",
-      "serviceNameShared": true,
-      "tier": "exact",
-      "cappedScan": [
-        "spans"
-      ],
-      "evidence": [
-        "k8s.workload.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
-        "service.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
-        "seen in the spans scan the 5 GB cap stopped, not in the sample that replaced it"
-      ]
-    }
-  ],
-  "queries": [
-    {
-      "purpose": "spans by workload or service name",
-      "dataObject": "spans",
-      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "rows": 2,
-      "truncated": true,
-      "cause": "truncated"
-    },
-    {
-      "purpose": "spans by workload or service name (sampled 1-in-100000 over 1h)",
-      "dataObject": "spans",
-      "dql": "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "rows": 1,
-      "window": "1h",
-      "samplingRatio": 100000
-    },
-    {
-      "purpose": "spans by workload or service name (sampled 1-in-100000 over 24h)",
-      "dataObject": "spans",
-      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "skipped": true,
-      "window": "24h",
-      "samplingRatio": 100000
-    },
-    {
-      "purpose": "spans by workload or service name (sampled 1-in-1000 over 24h)",
-      "dataObject": "spans",
-      "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "skipped": true,
-      "window": "24h",
-      "samplingRatio": 1000
-    },
-    {
-      "purpose": "logs by workload or service name",
-      "dataObject": "logs",
-      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "rows": 1
-    },
-    {
-      "purpose": "logs by workload or service name (sampled 1-in-100000 over 1h)",
-      "dataObject": "logs",
-      "dql": "fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "skipped": true,
-      "window": "1h",
-      "samplingRatio": 100000
-    },
-    {
-      "purpose": "logs by workload or service name (sampled 1-in-100000 over 24h)",
-      "dataObject": "logs",
-      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "skipped": true,
-      "window": "24h",
-      "samplingRatio": 100000
-    },
-    {
-      "purpose": "logs by workload or service name (sampled 1-in-1000 over 24h)",
-      "dataObject": "logs",
-      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
-      "skipped": true,
-      "window": "24h",
-      "samplingRatio": 1000
-    },
-    {
-      "purpose": "services by entity name",
-      "dataObject": "dt.entity.service",
-      "dql": "fetch dt.entity.service, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
-      "skipped": true
-    },
-    {
-      "purpose": "process groups by entity name",
-      "dataObject": "dt.entity.process_group",
-      "dql": "fetch dt.entity.process_group, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
-      "skipped": true
-    },
-    {
-      "purpose": "logs by process group",
-      "dataObject": "logs",
-      "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(\u003cprocess groups the candidate's spans carried\u003e))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200",
-      "skipped": true
-    }
-  ],
-  "sent": [
-    "checkout"
-  ],
-  "notes": [
-    "the spans scan the 5 GB cap stopped saw candidates the sample did not return; they are listed without a count, and the result is partial",
-    "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"
-  ],
-  "partial": true
-}
+    "candidates": [
+      {
+        "rank": 1,
+        "name": "checkout",
+        "namespace": "payments",
+        "workload": "checkout",
+        "serviceName": "checkout",
+        "serviceNameShared": true,
+        "serviceNameOwn": true,
+        "services": [
+          "SERVICE-0123456789ABCDEF"
+        ],
+        "serviceCount": 1,
+        "tier": "exact",
+        "logs": 88000,
+        "spansSampled": 17,
+        "sampled": true,
+        "evidence": [
+          "k8s.namespace.name \"payments\" from deploy/k8s/deployment.yaml:5",
+          "k8s.workload.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
+          "service.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
+          "17 sampled span hits in 1h (1 in 100000 requested), 88000 logs in 24h"
+        ]
+      },
+      {
+        "rank": 2,
+        "name": "checkout",
+        "namespace": "staging",
+        "workload": "checkout",
+        "serviceName": "checkout",
+        "serviceNameShared": true,
+        "serviceNameOwn": true,
+        "tier": "exact",
+        "cappedScan": [
+          "spans"
+        ],
+        "evidence": [
+          "k8s.workload.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
+          "service.name \"checkout\" from deploy/k8s/deployment.yaml:4, go.mod:1",
+          "seen in the spans scan the 5 GB cap stopped, not in the sample that replaced it"
+        ]
+      }
+    ],
+    "queries": [
+      {
+        "purpose": "spans by workload or service name",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "rows": 2,
+        "truncated": true,
+        "cause": "truncated"
+      },
+      {
+        "purpose": "spans by workload or service name (sampled 1-in-100000 over 1h)",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "rows": 1,
+        "window": "1h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "spans by workload or service name (sampled 1-in-100000 over 24h)",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "spans by workload or service name (sampled 1-in-1000 over 24h)",
+        "dataObject": "spans",
+        "dql": "fetch spans, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 1000
+      },
+      {
+        "purpose": "logs by workload or service name",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "rows": 1
+      },
+      {
+        "purpose": "logs by workload or service name (sampled 1-in-100000 over 1h)",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-1h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "1h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "logs by workload or service name (sampled 1-in-100000 over 24h)",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:100000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 100000
+      },
+      {
+        "purpose": "logs by workload or service name (sampled 1-in-1000 over 24h)",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5, samplingRatio:1000\n| filter in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")) or contains(k8s.workload.name, \"checkout\")\n| summarize {records = count(), clusterName = takeAny(k8s.cluster.name),\n    serviceCount = countDistinct(dt.entity.service), services = collectDistinct(dt.entity.service, maxLength:51),\n    processGroupCount = countDistinct(dt.entity.process_group), processGroups = collectDistinct(dt.entity.process_group, maxLength:51)},\n    by:{k8s.cluster.uid, k8s.namespace.name, k8s.workload.name, service.name}\n| fieldsAdd workloadSegments = concat(\"-\", replaceString(k8s.workload.name, \".\", \"-\"), \"-\"),\n    nameTier = if(in(k8s.workload.name, array(\"checkout\")) or in(service.name, array(\"checkout\")), 0, else:1)\n| filter nameTier == 0 or contains(workloadSegments, \"-checkout-\")\n| sort nameTier asc, records desc\n| limit 200\n| fieldsRemove workloadSegments, nameTier",
+        "skipped": true,
+        "window": "24h",
+        "samplingRatio": 1000
+      },
+      {
+        "purpose": "services by entity name",
+        "dataObject": "dt.entity.service",
+        "dql": "fetch dt.entity.service, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
+        "skipped": true
+      },
+      {
+        "purpose": "process groups by entity name",
+        "dataObject": "dt.entity.process_group",
+        "dql": "fetch dt.entity.process_group, from:now()-24h\n| filter matchesValue(entity.name, \"*checkout*\")\n| fields id, entity.name\n| fieldsAdd nameLength = stringLength(entity.name)\n| sort nameLength asc\n| limit 200",
+        "skipped": true
+      },
+      {
+        "purpose": "logs by process group",
+        "dataObject": "logs",
+        "dql": "fetch logs, from:now()-24h, scanLimitGBytes:5\n| filter in(dt.entity.process_group, array(\u003cprocess groups the candidate's spans carried\u003e))\n| summarize records = count(), by:{dt.entity.process_group}\n| limit 200",
+        "skipped": true
+      }
+    ],
+    "sent": [
+      "checkout"
+    ],
+    "notes": [
+      "the spans scan the 5 GB cap stopped saw candidates the sample did not return; they are listed without a count, and the result is partial",
+      "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"
+    ],
+    "partial": true
+  }
+]

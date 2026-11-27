@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -363,6 +362,8 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		{"discover-none", rowsByObject(nil)},
 		{"discover-entity-name", rowsByObject(map[string]string{
 			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"eu-checkout-frontend"}`})},
+		{"discover-entity-name-exact", rowsByObject(map[string]string{
+			"dt.entity.service": `{"id":"` + flowService + `","entity.name":"checkout"}`})},
 		{"discover-partial", func(r *http.Request, query string) (int, string) {
 			if strings.HasPrefix(query, "fetch spans") {
 				return http.StatusBadRequest, `{"error":{"code":400,"message":"Scan limit exceeded.","details":{"errorType":"SCAN_LIMIT"}}}`
@@ -373,22 +374,21 @@ func TestRepoScopeDiscoverHumanOutput(t *testing.T) {
 		t.Run(tc.golden, func(t *testing.T) {
 			newDQLRecorder(t, "readonly", tc.respond)
 			chdirCheckoutRepo(t)
-			report, _ := discoverReport(t)
-			testutil.AssertGolden(t, "repo-scope/"+tc.golden, discoveryTable(report, 600*time.Millisecond))
+			testutil.AssertGolden(t, "repo-scope/"+tc.golden, discoveryStdout(t))
 		})
 	}
 }
 
-// discoveryTable is the terminal output for a report read back from a
-// structured run. Such a report carries the proposal's notes itself, which
-// the table prints from the proposal, so they are taken out of the report
-// first.
-func discoveryTable(report *reposcope.DiscoveryReport, elapsed time.Duration) string {
-	proposal := newRepoScopeProposal(report, nil, repoScopeNames{})
-	report.Notes = slices.DeleteFunc(report.Notes, func(n string) bool { return slices.Contains(proposal.notes(), n) })
-	var out strings.Builder
-	printRepoScopeDiscovery(&out, report, proposal, elapsed)
-	return out.String()
+// discoveryStdout is what `repo-scope discover` prints to a terminal: the
+// command's own stdout, lines with the context it ran in, and only the time
+// it took replaced, since no two runs take the same.
+func discoveryStdout(t *testing.T, args ...string) string {
+	t.Helper()
+	code, stdout, stderr := runRepoScoped(append([]string{"repo-scope", "discover", "--plain"}, args...), RunOptions{})
+	require.Zero(t, code, stderr)
+	took := regexp.MustCompile(`queries ran in [0-9]+\.[0-9]s\.`)
+	require.Regexp(t, took, stdout)
+	return took.ReplaceAllString(stdout, "queries ran in 0.6s.")
 }
 
 // otherCluster is row as a second cluster reports it: the same namespace,
@@ -516,18 +516,30 @@ func TestRepoScopeDiscoverClusterValueTheFileRefuses(t *testing.T) {
 
 // What Grail says about a cut result reaches discovery whole: each
 // notification of the response, in the order it came. A typed result limit is
-// a cut page however short the page, the message alone is not, and the scan
-// cap decides whether a sampled retry runs wherever it stands in the list.
+// a cut page however short the page. The message alone is one too, unless a
+// row shows the id array longer than a binding takes that Grail words the
+// same way. The scan cap decides whether a sampled retry runs wherever it
+// stands in the list.
 func TestRepoScopeDiscoverReadsEveryNotification(t *testing.T) {
 	const (
 		typedLimit = `{"notificationType":"RESULT_LIMIT_BYTES","severity":"WARN","message":"The result was truncated"}`
 		message    = `{"severity":"WARN","message":"The result has been limited to 50 values."}`
 		scanCap    = `{"notificationType":"SCAN_LIMIT_GBYTES","severity":"WARN","message":"Scan limit of 5 gigabytes reached"}`
 	)
-	spansWith := func(notifications string) func(*http.Request, string) (int, string) {
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = fmt.Sprintf(`"SERVICE-%016X"`, i)
+	}
+	clippedRow := `{"k8s.namespace.name":"payments","k8s.workload.name":"checkout","service.name":"checkout","records":"900",` +
+		`"serviceCount":"80","services":[` + strings.Join(ids, ",") + `],"processGroupCount":"0","processGroups":[]}`
+	spansWith := func(notifications string, clipped bool) func(*http.Request, string) (int, string) {
 		return func(r *http.Request, query string) (int, string) {
 			if strings.HasPrefix(query, "fetch spans, from:now()-24h, scanLimitGBytes:5\n") {
-				return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[` + checkoutRows["spans"] +
+				row := checkoutRows["spans"]
+				if clipped {
+					row = clippedRow
+				}
+				return http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[` + row +
 					`],"metadata":{"grail":{"notifications":[` + notifications + `]}}}}`
 			}
 			if strings.Contains(query, "samplingRatio:") {
@@ -541,20 +553,22 @@ func TestRepoScopeDiscoverReadsEveryNotification(t *testing.T) {
 		queries       int
 		partial       bool
 		note          string
+		clipped       bool
 	}{
-		"a typed result limit":         {typedLimit, 2, true, "spans stopped at Grail's result limit, so the result is partial"},
-		"the message alone":            {message, 2, false, ""},
-		"the scan cap after a message": {message + "," + scanCap, 3, false, "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
-		"the scan cap before a limit":  {scanCap + "," + typedLimit, 3, false, "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
+		"the message alone":                        {message, 2, true, "spans stopped at Grail's result limit, so the result is partial", false},
+		"the message beside the array it is about": {message, 2, false, "", true},
+		"a typed result limit":                     {notifications: typedLimit, queries: 2, partial: true, note: "spans stopped at Grail's result limit, so the result is partial"},
+		"the scan cap after a message":             {notifications: message + "," + scanCap, queries: 3, note: "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
+		"the scan cap before a limit":              {notifications: scanCap + "," + typedLimit, queries: 3, note: "spans scan more than the 5 GB cap over 24h, so they were sampled 1-in-100000 over 1h; a service with fewer than about 300000 spans over 1h may be missing"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv := newDQLRecorder(t, "readonly", spansWith(tc.notifications))
+			srv := newDQLRecorder(t, "readonly", spansWith(tc.notifications, tc.clipped))
 			chdirCheckoutRepo(t)
 			report, _ := discoverReport(t)
 			require.Len(t, srv.queries(), tc.queries)
 			require.Equal(t, tc.partial, report.Partial)
 			if tc.note == "" {
-				require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+				require.Equal(t, reposcope.VerdictMatch, report.Verdicts["workload"])
 				require.NotContains(t, strings.Join(report.Notes, "\n"), "Grail")
 			} else {
 				require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
@@ -620,7 +634,7 @@ func TestRepoScopeDiscoverWideAndCSV(t *testing.T) {
 	before := len(srv.queries())
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain", "-o", "csv"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Contains(t, stdout+stderr, "a discovery report is not rows; use -o json, -o yaml or -o toon")
+	require.Contains(t, stdout+stderr, "a discovery report is not rows; use -o table, -o json, -o yaml or -o toon")
 	require.Len(t, srv.queries(), before, "refused before the first query")
 	require.NotContains(t, stderr, "Sending to")
 }
@@ -648,12 +662,18 @@ func TestRepoScopeDiscoverEntityNameAlone(t *testing.T) {
 	report, suggestions := discoverReport(t)
 	require.Equal(t, reposcope.VerdictAmbiguous, report.Verdict)
 	require.False(t, report.Partial)
-	require.Equal(t, "show the user the candidates and ask which runs this code, then run its setCommand", suggestions[0])
+	// The caveat is the report's own and the agent's first instruction, not
+	// a sentence of the terminal alone, and nothing tells an agent to run
+	// the line of an entity that may have stopped long ago.
+	require.Contains(t, report.Notes, repoScopeEntityNameNote)
+	require.Equal(t, "tell the user that "+repoScopeEntityNameNote+"; show the candidates, and offer a setCommand only for one the user says runs this code", suggestions[0])
+	require.NotContains(t, strings.Join(suggestions, "\n"), "then run its setCommand")
 
 	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
 	require.Zero(t, code, stderr)
-	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its entity name alone; no span or log in 24h carries a name of this repository\n")
-	require.Contains(t, stdout, "Nothing was written. If it is what runs this code, save it with:\n  dtctl --context c repo-scope set checkout --service "+flowService+"\n")
+	require.Contains(t, stdout, "\nVerdict: ambiguous: one candidate, found by its entity name alone (see the notes)\n")
+	require.Contains(t, stdout, "\nNote: "+repoScopeEntityNameNote+"\n")
+	require.Contains(t, stdout, "No repo scope was saved. If it is what runs this code, save it with:\n  dtctl --context c repo-scope set checkout --service "+flowService+"\n")
 }
 
 // --path picks another directory of a monorepo, and --term adds a name; both
@@ -1045,7 +1065,7 @@ func TestRepoScopeDiscoveryNothingSent(t *testing.T) {
 	var out bytes.Buffer
 	printRepoScopeDiscovery(&out, r, repoScopeProposal{}, 0)
 	require.NotContains(t, out.String(), "Values sent:")
-	require.Contains(t, out.String(), "No value was sent.\n0 of 1 queries ran in 0.0s. Nothing was written.\n")
+	require.Contains(t, out.String(), "No value was sent.\n0 of 1 queries ran in 0.0s. No repo scope was saved.\n")
 }
 
 // A plan lists every query a run could send, and no run sends them all: the
@@ -1238,14 +1258,19 @@ tokens:
 			for k, v := range tc.env {
 				t.Setenv(k, v)
 			}
-			args, want := tc.args, "dtctl "
+			// The config is carried whichever way it was chosen, and here
+			// DTCTL_CONFIG always chooses one.
+			args, want := tc.args, "dtctl --config "+exec.ShellQuote(configPath)+" "
 			if tc.withConfig {
 				args = append(args, "--config", configPath)
-				want += "--config " + exec.ShellQuote(configPath) + " "
 			}
 			want += tc.want + " repo-scope set "
-			report, _ := discoverReport(t, args...)
-			line := report.Candidates[0].SetCommand
+			var out, errOut bytes.Buffer
+			code := Run(append([]string{"repo-scope", "discover", "--agent"}, args...), RunOptions{Stdout: &out, Stderr: &errOut})
+			require.Zero(t, code, errOut.String())
+			var reports []reposcope.DiscoveryReport
+			agentResult(t, out.String(), &reports)
+			line := reports[0].Candidates[0].SetCommand
 			require.True(t, strings.HasPrefix(line, want), line)
 
 			// A shell without the selection, and a config that no longer
@@ -1304,7 +1329,7 @@ func TestRepoScopeDiscoverSharedServiceName(t *testing.T) {
 	require.Contains(t, suggestions, notes[0])
 
 	require.Contains(t, report.Notes, notes[0], "the report says so itself, for a reader with no suggestions")
-	table := discoveryTable(report, time.Second)
+	table := discoveryStdout(t)
 	require.Equal(t, 1, strings.Count(table, "Note: "+notes[0]+"\n"), table)
 
 	// The saved entry selects payments alone.

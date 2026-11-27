@@ -185,9 +185,10 @@ func (e *DQLExecutor) fitToBudget(query string, result *DQLQueryResponse, resp o
 // DTCTL_SPILL_DIR, a service name) contains spaces or shell metacharacters:
 // an agent that hands the command to a shell must never have part of a value
 // interpreted. Values made only of characters no shell treats specially stay
-// bare, which is the common case.
+// bare, which is the common case. A leading "=" is quoted: zsh expands =name
+// to the path of the command name.
 func ShellQuote(s string) string {
-	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+	if s != "" && s[0] != '=' && strings.IndexFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_-./:@%+=,", r))
 	}) < 0 {
 		return s

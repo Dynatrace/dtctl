@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/text/unicode/norm"
@@ -62,7 +64,7 @@ them between "-" or "." (acme-prod-checkout for checkout) is found too, ranked
 below one named exactly, when the name has at least five letters and digits.
 Each candidate is one workload in one cluster, and its line binds that cluster. When a candidate's spans match and no logs
 do, its logs are looked up once by the process group the spans carried. It
-names every value on stderr before sending it, and writes nothing: each candidate comes with the 'dtctl repo-scope set' line
+names every value on stderr before sending it, and saves no repo scope: each candidate comes with the 'dtctl repo-scope set' line
 that saves it. Test content (test, testdata, e2e, examples and similar
 directories, and files such as Dockerfile.test) is not read, and a name that
 starts with test, mock or fixture is not sent unless given with --term.
@@ -94,8 +96,12 @@ Examples:
 `,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if outputFormat(cmdContext(cmd)) == "csv" {
-				return fmt.Errorf("a discovery report is not rows; use -o json, -o yaml or -o toon")
+			// A report is one value per unit. A format that prints rows, or
+			// one the printer does not know and answers with a table of its
+			// own, would print something else after the queries had run.
+			if format := outputFormat(cmdContext(cmd)); !slices.Contains([]string{"", "table", "wide", "json", "yaml", "yml", "toon"}, format) {
+				return &reposcope.InvalidError{Source: "-o " + format,
+					Msg: "a discovery report is not rows; use -o table, -o json, -o yaml or -o toon"}
 			}
 			plans, err := discoveryPlans(cmdContext(cmd), dir, terms)
 			if err != nil {
@@ -144,7 +150,7 @@ func discoveryPlans(ctx context.Context, dir string, terms []string) ([]*reposco
 	// one workload would end up bound to each of them.
 	if len(terms) > 0 {
 		return nil, &reposcope.InvalidError{Source: "--term",
-			Msg:         "a term is looked up for one deployable, and this directory is discovered for each of: " + strings.Join(plan.SharedBy, ", "),
+			Msg:         "a term is looked up for one deployable, and this directory is discovered for each of: " + reposcope.Shown(strings.Join(plan.SharedBy, ", ")),
 			Suggestions: []string{"pass --path <deployable> with --term"}}
 	}
 	plans := make([]*reposcope.Plan, len(plan.SharedBy))
@@ -244,6 +250,14 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		scanLimitGB: reposcope.ScanLimitGB, clientContext: "repo-scope-discover"}}
 	selectors := repoScopeSelectors(ctx, cfg)
 	names := repoScopeNames{}
+	// What the scope file already holds for this environment, so a line
+	// that would replace an entry, or that set would refuse, says so.
+	// Discovery does not need the file: one that is missing, or does not
+	// load, holds nothing to speak of here, and set says what is wrong.
+	var held []reposcope.Entry
+	if scope, err := openRepoScope(ctx, cfg); err == nil && scope != nil && scope.file != nil {
+		held = scope.file.Entries(host)
+	}
 	// Each plan is a run of its own with its own time bound. After a Ctrl-C
 	// the rest still report, every query marked as never run, so in table
 	// output no deployable drops out of the answer unsaid. The only error is
@@ -257,10 +271,13 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 			output.FprintInfo(currentStderr(ctx), "Sending to %s: %s (compared to %s); nothing else leaves this machine",
 				host, quotedValues(plan.Sent), strings.Join(reposcope.MatchedFields(), ", "))
 		}
-		runCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverBound(runCtx))
+		unitCtx, cancelTimeout := context.WithTimeout(runCtx, repoScopeDiscoverBound(runCtx))
 		defer cancelTimeout()
 		began := time.Now()
-		report, err := reposcope.Discover(runCtx, runner, plan, host)
+		report, err := reposcope.Discover(unitCtx, runner, plan, host)
+		if report == nil {
+			return nil, 0, err // the plan was refused, and nothing was sent
+		}
 		for i := range report.Queries {
 			// Refused here, so never sent: the report must not count it
 			// among the queries that ran.
@@ -279,10 +296,20 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 				c.Name = name
 				c.SetCommand = repoScopeSetCommand(report, *c, selectors)
 			}
+			if note := repoScopeHeldNote(held, c.Name, repoScopeDir(report, *c)); note != "" {
+				report.Notes = append(report.Notes, fmt.Sprintf("candidate %d's line %s", c.Rank, note))
+			}
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		// Part of the report, so that it is read wherever the report is:
+		// the terminal says it in the verdict line for one candidate only.
+		if repoScopeByEntityNameAlone(report) {
+			report.Notes = append(report.Notes, repoScopeEntityNameNote)
+		}
+		if errors.Is(err, context.DeadlineExceeded) && runCtx.Err() == nil {
 			// The report marks the query that ran out of time and says the
-			// answer is partial; the run itself did what it could.
+			// answer is partial; the run itself did what it could. That is
+			// the unit's own bound: a deadline of the caller's that passed
+			// ends the run, and is the caller's to hear of.
 			err = nil
 		}
 		return report, time.Since(began), err
@@ -292,7 +319,9 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	proposals := make([]repoScopeProposal, len(plans))
 	for i, plan := range plans {
 		var elapsed time.Duration
-		reports[i], elapsed, err = discover(plan)
+		if reports[i], elapsed, err = discover(plan); reports[i] == nil {
+			return err
+		}
 		proposals[i] = newRepoScopeProposal(reports[i], selectors, names)
 		if table {
 			if i > 0 {
@@ -305,9 +334,11 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		return err
 	}
 	// An interrupted run has printed its tables by now. An agent envelope is
-	// a result or an error, never both, so there the interruption is the
-	// whole answer and the partial reports are not printed.
-	if err != nil && agentMode(ctx) {
+	// a result or an error, never both, and in plain mode the error is an
+	// envelope on stdout too, where a second document after the reports
+	// would make the output unreadable as either. There the interruption is
+	// the whole answer and the partial reports are not printed.
+	if err != nil && (agentMode(ctx) || plainMode(ctx)) {
 		return err
 	}
 	// A structured report is read without the lines the table prints under
@@ -486,7 +517,10 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // A candidate that only names the repository holds without their being the
 // unit's own matched (Candidate.Indirect) gets no line at all: the line is
 // the whole hand-off, and nothing shows that the candidate runs this code. A
-// note says so and names the --term that confirms it.
+// note says so and names the --term that confirms it. Neither does one found
+// by its service name alone in a workload the repository does not name
+// (Candidate.WorkloadUnnamed): discovery read the records under that service
+// name, not what else the workload reports, and the line would bind it all.
 //
 // The workload binding carries the cluster the candidate's records name, so
 // the same namespace and workload in another cluster stays out of the entry.
@@ -497,8 +531,10 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // (WorkloadShared), gets no workload binding: it would select both. A
 // candidate some of whose records name the cluster and some none
 // (WithoutCluster) is bound without it: with the cluster the entry would
-// return its spans and none of its logs, or the reverse, and no other
-// candidate runs that workload for the wider binding to select.
+// return its spans and none of its logs, or the reverse. That is so only
+// while no other candidate runs that workload for the wider binding to
+// select; beside one (WorkloadShared too) the line keeps the cluster, and a
+// note says which records it leaves out.
 //
 // When any record query was sampled, a candidate gets its workload binding
 // only, whether its own records were sampled or read whole: another
@@ -507,11 +543,76 @@ func writeDiscoveryPlan(report *dryRunReport, plan *reposcope.Plan) {
 // a query that did not answer could have found that other candidate. An id
 // binding is held to more still, see repoScopeIDRefusal.
 func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
+	return repoScopeSetCommandOn(runtime.GOOS, r, c, selectors)
+}
+
+// repoScopeSetCommandOn is repoScopeSetCommand for the system goos names.
+// The line is written for a POSIX shell. cmd.exe does not read its quotes,
+// so there a word that needs them is not one word: a directory named
+// a&calc.exe&b, which a clone may carry, would end the command and start
+// another. On Windows a candidate whose line would hold such a word gets no
+// line, and a note gives the values to type (see repoScopeUnpastable).
+func repoScopeSetCommandOn(goos string, r *reposcope.DiscoveryReport, c reposcope.Candidate, selectors []string) string {
 	e, _ := repoScopeBindings(r, c)
 	if !e.HasBindings() {
 		return ""
 	}
-	return repoScopeSetLine(exec.ShellQuote(c.Name), repoScopeFlags(e), repoScopeDir(r, c), selectors)
+	line := repoScopeSetLine(exec.ShellQuote(c.Name), repoScopeFlags(e), repoScopeDir(r, c), selectors)
+	if repoScopeUnpastable(goos, line) {
+		return ""
+	}
+	return line
+}
+
+// repoScopeUnpastable reports whether line, written for a POSIX shell,
+// cannot be pasted into the shells of goos as it stands. Only Windows has
+// such lines: any character beyond letters, digits, spaces and "_-./\:"
+// is one cmd.exe or PowerShell may read as more than itself (a quote, "&",
+// "%", "^", "|", "<", ">", "(", ")", "!", "$", ";", "=", ",", "@", "+" and
+// the like), so a line holding one is not proposed there.
+func repoScopeUnpastable(goos, line string) bool {
+	if goos != "windows" {
+		return false
+	}
+	return strings.ContainsFunc(line, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(` _-./\:`, r)
+	})
+}
+
+// repoScopeHeldNote says what the scope file's entries for this environment
+// mean for a line that saves name for dir: set replaces an entry of that
+// name, bindings and path, and refuses a second entry for a path another
+// entry covers. It returns "" when the line adds an entry.
+func repoScopeHeldNote(held []reposcope.Entry, name, dir string) string {
+	covers := func(p string) string {
+		if p == "" {
+			return "the whole repository"
+		}
+		return strconv.Quote(p)
+	}
+	entryPath := ""
+	if dir != "." {
+		entryPath = norm.NFC.String(dir)
+	}
+	for _, old := range held {
+		if old.Name == name {
+			what := "which covers " + covers(old.Path)
+			if old.Path != entryPath {
+				what += ", and moves it to " + covers(entryPath)
+			}
+			return fmt.Sprintf("replaces the entry %q that %s already holds for this environment, %s: set replaces an entry of the same name, its bindings, segments and path",
+				name, reposcope.FileName, what)
+		}
+	}
+	for _, old := range held {
+		// As the file compares paths: composed, and without regard to case,
+		// since one directory has both spellings on macOS and Windows.
+		if strings.EqualFold(norm.NFC.String(old.Path), entryPath) {
+			return fmt.Sprintf("would be refused: the entry %q of %s already covers %s; save the candidate under that name to replace it, or delete it first (dtctl repo-scope delete %s)",
+				old.Name, reposcope.FileName, covers(old.Path), exec.ShellQuote(old.Name))
+		}
+	}
+	return ""
 }
 
 // repoScopeBindings is what a line for c binds, as the entry `set` would
@@ -522,7 +623,15 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e reposcope.Entry, unheld []repoScopeUnheld) {
 	// Nothing shows that a candidate found by indirect names runs this
 	// code, and a line is something to run.
-	if c.Indirect != "" {
+	// Nor that the workload of one found by its service name alone does:
+	// its line would bind everything that workload reports.
+	if c.Indirect != "" || c.WorkloadUnnamed {
+		return e, nil
+	}
+	// Nor is there one for a candidate discovery cannot explain: neither
+	// of its names is a name that was sent, whatever made Grail return the
+	// row, so nothing ties it to this code.
+	if repoScopeUnexplained(c) {
 		return e, nil
 	}
 	// Nor is there a line for a directory set would refuse as --path: it
@@ -543,7 +652,9 @@ func repoScopeBindings(r *reposcope.DiscoveryReport, c reposcope.Candidate) (e r
 	}
 	if c.Namespace != "" && c.Workload != "" && (c.ClusterUID != "" || !c.WorkloadShared) {
 		w := reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}
-		if len(c.WithoutCluster) == 0 {
+		// Without the cluster the binding selects the workload in every
+		// cluster, which is another candidate when the workload is shared.
+		if len(c.WithoutCluster) == 0 || c.WorkloadShared {
 			w.ClusterUID = c.ClusterUID
 		}
 		if holds(reposcope.Entry{Workloads: []reposcope.Workload{w}}) {
@@ -622,6 +733,11 @@ func repoScopeIDRefusal(r *reposcope.DiscoveryReport, c reposcope.Candidate, alo
 	case r.Partial:
 		return &repoScopeRefusal{"the result is partial, and a candidate it did not see could share its service name or ids",
 			workloadOnly + "no workload binding selects it"}
+	case r.SampledRecords():
+		// Read whole itself, beside a data object that was sampled: the
+		// candidate that shares its ids could be the one below the floor.
+		return &repoScopeRefusal{"a record query was sampled, which can miss another candidate sharing its service name or ids",
+			workloadOnly + "no workload binding selects it"}
 	}
 	ids := c.ProcessGroups
 	if alone {
@@ -637,6 +753,14 @@ func repoScopeIDRefusal(r *reposcope.DiscoveryReport, c reposcope.Candidate, alo
 	}
 	if i := slices.IndexFunc(r.Candidates, carries); i >= 0 {
 		return &repoScopeRefusal{cause: fmt.Sprintf("candidate %d carries one of its entity ids, so a binding by id would select both", r.Candidates[i].Rank)}
+	}
+	// A candidate that lists only some of its ids may carry one of these
+	// among the rest.
+	more := func(o reposcope.Candidate) bool {
+		return o.Rank != c.Rank && (o.ProcessGroupsCapped && len(c.ProcessGroups) > 0 || alone && o.ServicesCapped && len(c.Services) > 0)
+	}
+	if i := slices.IndexFunc(r.Candidates, more); i >= 0 {
+		return &repoScopeRefusal{cause: fmt.Sprintf("candidate %d carries more entity ids than discovery lists, and one of them could be this candidate's, so a binding by id could select both", r.Candidates[i].Rank)}
 	}
 	if !alone {
 		return nil
@@ -707,11 +831,13 @@ func repoScopeDirProblem(dir string) string {
 // named, also when it was the config's current one: that is the one a later
 // `dtctl ctx` changes under a line still on the screen. (A session has no
 // context a caller could name, and no working directory either, so discovery
-// never runs in one.) The config is named only when --config named it: DTCTL_CONFIG is set for the shell, the set
-// line included, while --config names it for one command.
+// never runs in one.) The config is named whenever something other than the
+// default chose it, --config or DTCTL_CONFIG: the variable may be set for
+// one command as the flag is, and the line may be run in a shell that does
+// not have it.
 func repoScopeSelectors(ctx context.Context, cfg *config.Config) []string {
 	var args []string
-	if path := cfgFile(ctx); path != "" {
+	if path := cmp.Or(cfgFile(ctx), getenv(ctx, config.EnvConfig)); path != "" {
 		args = append(args, "--config", exec.ShellQuote(path))
 	}
 	if cfg.CurrentContext != "" {
@@ -798,6 +924,19 @@ func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]str
 	case r.Unit == "." && r.Dir != ".":
 		hint = fmt.Sprintf("each line covers the whole repository; add --path %s to cover only %s", exec.ShellQuote(r.Dir), r.Dir)
 	}
+	// A template is filled in by hand, but its --path and selectors are
+	// pasted with it: where they would need quoting this system's shells
+	// do not read, they are left for the user to add.
+	if repoScopeUnpastable(runtime.GOOS, repoScopeSetLine("x", nil, dir, selectors)) {
+		if hint != "" {
+			hint += "; "
+		}
+		hint += "on Windows the --config, --context and --path of this run would need quoting, so add them yourself, quoted for your shell"
+		if dir != "." {
+			hint += fmt.Sprintf(" (--path %s)", strconv.Quote(dir))
+		}
+		dir, selectors = ".", nil
+	}
 	links := []string{
 		repoScopeSetLine("<name>", []string{"--namespace", "<namespace>", "--workload", "<workload>"}, dir, selectors),
 		repoScopeSetLine("<name>", []string{"--service-name", "<service.name>"}, dir, selectors),
@@ -811,30 +950,30 @@ func repoScopeHandLinks(r *reposcope.DiscoveryReport, selectors []string) ([]str
 // name, not for one of the candidates: it is named after the service name,
 // and it covers the directory discovery ran for only when that directory's
 // name matched every candidate it selects (see repoScopeDir).
+//
+// Only a service name that is the unit's own gets one (ServiceNameOwn). That
+// one of the candidates reporting the name is the unit's own workload says
+// nothing about the name: checkout reporting under redis-cache beside the
+// cache itself would get a line that selects the cache.
 func repoScopeSelectAllLines(r *reposcope.DiscoveryReport, selectors []string, names repoScopeNames) []repoScopeSelectAll {
 	var out []repoScopeSelectAll
 	for _, c := range r.Candidates {
-		if !c.ServiceNameShared || slices.ContainsFunc(out, func(s repoScopeSelectAll) bool { return s.serviceName == c.ServiceName }) {
+		if !c.ServiceNameShared || !c.ServiceNameOwn ||
+			slices.ContainsFunc(out, func(s repoScopeSelectAll) bool { return s.serviceName == c.ServiceName }) {
 			continue
 		}
-		// indirect stays set only when every candidate reporting the name
-		// was found by indirect names: the line is then no better founded
-		// than theirs would be.
-		reporting, matchedDir, indirect := 0, true, c.Indirect
+		reporting, matchedDir := 0, true
 		for _, o := range r.Candidates {
 			if o.ServiceName == c.ServiceName {
 				reporting++
 				matchedDir = matchedDir && o.MatchedDir
-				if o.Indirect == "" {
-					indirect = ""
-				}
 			}
 		}
 		// The service name of every candidate that reports it, and nothing
 		// of this one. A sampled candidate's service name, or one of a
 		// partial result, is never proposed alone.
 		all := reposcope.Candidate{Rank: c.Rank, Name: reposcope.EntryName(c.ServiceName), ServiceName: c.ServiceName,
-			Sampled: c.Sampled, MatchedDir: matchedDir, Indirect: indirect}
+			Sampled: c.Sampled, MatchedDir: matchedDir}
 		if repoScopeSetCommand(r, all, selectors) == "" {
 			continue
 		}
@@ -877,12 +1016,17 @@ func repoScopeSharedNameNotes(r *reposcope.DiscoveryReport) []string {
 func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 	var notes []string
 	for _, c := range r.Candidates {
-		_, unheld := repoScopeBindings(r, c)
+		e, unheld := repoScopeBindings(r, c)
 		if c.SetCommand != "" {
 			for _, u := range unheld {
 				notes = append(notes, fmt.Sprintf("candidate %d's line leaves %s out, which a scope file cannot hold: %s", c.Rank, u.flags, u.problem))
 			}
-			if c.ClusterUID != "" && len(c.WithoutCluster) > 0 {
+			switch {
+			case c.ClusterUID == "" || len(c.WithoutCluster) == 0:
+			case c.WorkloadShared:
+				notes = append(notes, fmt.Sprintf("candidate %d's line keeps --cluster-uid although its %s carry no k8s.cluster.uid, so the entry returns none of them: another candidate runs %s/%s, and a binding without the cluster would select both",
+					c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
+			default:
 				notes = append(notes, fmt.Sprintf("candidate %d's line leaves --cluster-uid out: its %s carry no k8s.cluster.uid, so a binding with it would return none of them; without it the entry selects %s/%s in any cluster",
 					c.Rank, strings.Join(c.WithoutCluster, " and "), c.Namespace, c.Workload))
 			}
@@ -894,9 +1038,24 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 		why := repoScopeIDRefusal(r, c, true)
 		switch {
+		case e.HasBindings():
+			// Something binds it, and still it has no line: only a line
+			// this system's shells would not read as written is withheld.
+			values := repoScopeFlags(e)
+			if dir := repoScopeDir(r, c); dir != "." {
+				values = append(values, "--path", exec.ShellQuote(dir))
+			}
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: on Windows it would need quoting that cmd.exe and PowerShell do not read as a POSIX shell does, so pasting it could run something else; to save it, type dtctl repo-scope set with the --config and --context of this run and these values, quoted for your shell: %s %s",
+				c.Rank, exec.ShellQuote(c.Name), strings.Join(values, " ")))
+		case repoScopeUnexplained(c):
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: neither its k8s.workload.name nor its service.name is a name discovery sent, so nothing ties it to this code%s",
+				c.Rank, repoScopeConfirmHint(c)))
 		case c.Indirect != "":
 			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it is %s, so nothing shows that it runs this code%s",
 				c.Rank, c.Indirect, repoScopeConfirmHint(c)))
+		case c.WorkloadUnnamed:
+			notes = append(notes, fmt.Sprintf("candidate %d has no set line: it was found by its service.name alone, and no name of this repository is its workload's, so a line would bind everything %s reports, of which discovery read only the records under that service name%s",
+				c.Rank, cmp.Or(reposcope.Workload{Namespace: c.Namespace, Name: c.Workload}.String(), c.Workload), repoScopeConfirmHint(c)))
 		case len(unheld) > 0:
 			var all []string
 			for _, u := range unheld {
@@ -914,6 +1073,28 @@ func repoScopeNoLineNotes(r *reposcope.DiscoveryReport) []string {
 		}
 	}
 	return notes
+}
+
+// repoScopeEntityNameNote qualifies every candidate of a report that the
+// entity-name search found: that search runs only when the record queries
+// find nothing.
+const repoScopeEntityNameNote = "no span or log in 24h carries a name of this repository: the candidates were found by entity name alone, and an entity outlives its last record, so nothing shows that one of them runs now"
+
+// repoScopeByEntityNameAlone reports whether r's candidates come from the
+// entity-name search: none has a workload or a service name, which every
+// candidate of the record queries has.
+func repoScopeByEntityNameAlone(r *reposcope.DiscoveryReport) bool {
+	return len(r.Candidates) > 0 && !slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool {
+		return c.Workload != "" || c.ServiceName != ""
+	})
+}
+
+// repoScopeUnexplained reports whether c is a candidate of the record
+// queries that neither of its names explains: a row Grail returned for a
+// reason discovery cannot show in a file (an array-valued service.name that
+// holds a sent name, for one). It is listed, and nothing is proposed for it.
+func repoScopeUnexplained(c reposcope.Candidate) bool {
+	return c.Tier == "substring" && (c.Workload != "" || c.ServiceName != "")
 }
 
 // repoScopeConfirmHint is how the user says that a candidate found by
@@ -971,6 +1152,9 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, p repoScopeProp
 		}
 	case r.Verdict == reposcope.VerdictMatch:
 		s = append(s, "confirm with the user, then: "+r.Candidates[0].SetCommand)
+	case repoScopeByEntityNameAlone(r):
+		// Not "run its setCommand": nothing shows that a candidate runs.
+		s = append(s, "tell the user that "+repoScopeEntityNameNote+"; show the candidates, and offer a setCommand only for one the user says runs this code")
 	default:
 		s = append(s, "show the user the candidates and ask which runs this code, then run its setCommand")
 	}
@@ -979,8 +1163,12 @@ func repoScopeDiscoverySuggestions(r *reposcope.DiscoveryReport, p repoScopeProp
 	// What a sample can have missed is the agent's to tell the user: it is
 	// why one sampled candidate is not a match.
 	s = append(s, r.SamplingNotes()...)
-	if len(r.Candidates) > 0 {
+	switch {
+	case len(r.Candidates) == 0:
+	case len(p.selectAll) > 0 || slices.ContainsFunc(r.Candidates, func(c reposcope.Candidate) bool { return c.SetCommand != "" }):
 		s = append(s, "nothing has been saved; running the set command is the confirmation")
+	default:
+		s = append(s, "nothing has been saved, and no candidate has a set command to run")
 	}
 	if r.Partial {
 		s = append(s, "the result is partial (see notes): a query failed, timed out, was capped or was interrupted, or a sample matched nothing, so a missing candidate is not evidence that nothing runs this code")

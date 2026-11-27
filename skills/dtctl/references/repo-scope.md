@@ -14,7 +14,7 @@ dtctl repo-scope current -A
 
 ## Link a repository
 
-1. Discover. It only reads, and never writes the file:
+1. Discover. It only reads, and saves no repo scope:
 
    ```bash
    dtctl repo-scope discover -A
@@ -26,7 +26,9 @@ dtctl repo-scope current -A
 
    A candidate is a workload first: `clusterUid` and `clusterName`, `namespace`, `workload`, then `serviceName`, then the entity ids. The same namespace and workload in two clusters are two candidates (`workloadShared: true`); ask which cluster the user means, by `clusterName`. `tier: "segment"` means the repository's name is only part of the workload's name (`acme-prod-checkout` for `checkout`): such a candidate is never a `match`, so confirm it is the user's deployment before saving.
 
-3. On the user's confirmation, run the candidate's `setCommand` exactly as given. `set` replaces the whole entry of that name: if `dtctl repo-scope describe <name> -A`, run with the `--context` (and `--config`) the `setCommand` carries, shows one already (`result.code: "linked"`), show the user its bindings and segments first, because the ones the line does not repeat are removed. It already carries the `--cluster-uid` of the cluster the candidate runs in (left out, with a suggestion saying so, when some of its records name no cluster: `withoutCluster`), the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone (on a partial or sampled result only a workload binding is proposed, and ids only when they are the candidate's own); the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
+   `indirect` (a reason) or `workloadUnnamed: true` marks a candidate nothing shows to run this code: only a name that is not the unit's own matched it (a sidecar's image, a manifest not named like the unit), or only its `service.name` did while the repository does not name its workload. It has no `setCommand` and is never a `match`. Ask the user; if it is theirs, run `dtctl repo-scope discover -A --term <workload or service name>` (the report's note gives the exact command) and read the new report. A candidate found by its entity name alone (no `workload` and no `serviceName`) exists, but no span or log in 24h carried a name of the repository: say so when you show it.
+
+3. On the user's confirmation, run the candidate's `setCommand` exactly as given. A note of the report says when the line replaces an entry the file already holds, or would be refused because another entry covers its path: show it to the user first. `set` replaces the whole entry of that name: if `dtctl repo-scope describe <name> -A`, run with the `--context` (and `--config`) the `setCommand` carries, shows one already (`result.code: "linked"`), show the user its bindings and segments first, because the ones the line does not repeat are removed. It already carries the `--cluster-uid` of the cluster the candidate runs in (left out, with a suggestion saying so, when some of its records name no cluster: `withoutCluster`), the `--context` discovery ran with and the `--path` the entry should cover. A candidate without a `setCommand` has no binding that selects it alone (on a partial or sampled result only a workload binding is proposed, and ids only when they are the candidate's own); the suggestions then say what to do instead, and say when a shared service name was left out of the lines.
 
 On `none`: retry with a name the user knows (`--term <name>`) or another directory of a monorepo (`--path services/<dir>`), or ask for the namespace and workload, or the OpenTelemetry `service.name`, and set it by hand:
 

@@ -47,6 +47,11 @@ type Candidate struct {
 	// namespace, or one whose records name no workload at all. A
 	// service-name binding would select that candidate's records too.
 	ServiceNameShared bool `json:"serviceNameShared,omitempty" yaml:"serviceNameShared,omitempty"`
+	// ServiceNameOwn reports that the service name is a name the unit gives
+	// itself, or a term: not merely one the repository holds (see Indirect).
+	// A binding by a service name that is not would select what some other
+	// product reports under it.
+	ServiceNameOwn bool `json:"serviceNameOwn,omitempty" yaml:"serviceNameOwn,omitempty"`
 	// ProcessGroups and Services are the ids the records carried, up to
 	// discoveryIDLimit of each per row. A Capped flag says a row had more
 	// ids than that, so the list is not all of them. ProcessGroupCount and
@@ -80,10 +85,11 @@ type Candidate struct {
 	// these.
 	LogsByProcessGroup int64 `json:"logsByProcessGroup,omitempty" yaml:"logsByProcessGroup,omitempty"`
 	// CappedScan are the data objects (spans, logs) whose records of this
-	// candidate were seen only by the query the scan cap stopped: the sampled
-	// retry that replaced it did not return the candidate. It exists, but a
-	// partial scan gives no count and not all of its ids, so none are
-	// reported for that object.
+	// candidate were seen only by a query that did not finish: the query the
+	// scan cap stopped, when the sampled retry that replaced it did not
+	// return the candidate, or a sampled retry that was itself cut short or
+	// not sampled. It exists, but an unfinished read gives no count and not
+	// all of its ids, so none are reported for that object.
 	CappedScan []string `json:"cappedScan,omitempty" yaml:"cappedScan,omitempty"`
 	// Sampled reports that some of the candidate's records were read by a
 	// sampled retry, so a candidate quieter than the stated floor could
@@ -103,6 +109,14 @@ type Candidate struct {
 	// candidate with it is never a match and is proposed no line, since
 	// nothing shows that it runs this code.
 	Indirect string `json:"indirect,omitempty" yaml:"indirect,omitempty"`
+	// WorkloadUnnamed reports a candidate found by its service name alone:
+	// the service name is the unit's own, and no name of the unit's own is
+	// its workload's or a run of that name's segments. The queries returned
+	// the records under that service name, so what else the workload reports
+	// was never read, and a binding of the workload would take all of it in.
+	// Like a candidate with Indirect it is never a match and is proposed no
+	// line; a term that names the workload settles it.
+	WorkloadUnnamed bool `json:"workloadUnnamed,omitempty" yaml:"workloadUnnamed,omitempty"`
 	// SetCommand is the command line that saves the candidate. Discover
 	// leaves it empty: spelling a command line is the CLI's business.
 	SetCommand string `json:"setCommand,omitempty" yaml:"setCommand,omitempty"`
@@ -124,6 +138,9 @@ type Candidate struct {
 	// window, no logs did; logsChecked is the process-group lookup having
 	// answered for it. See DiscoveryReport.checkLogs.
 	logsMissed, logsChecked bool
+	// unfinished are the CappedScan objects a sampled retry that did not
+	// finish saw, which the evidence words apart.
+	unfinished []string
 }
 
 // tier is how well a candidate's name matches, best first. A row of the
@@ -168,18 +185,23 @@ type discovery struct {
 	// of the way through the window, with no sampled retry answering in its
 	// place: what it counted is a lower bound.
 	stopped map[string]bool
+	// unfinished holds, per data object, the rows of the sampled retries
+	// that were cut short or not sampled (see addUnfinished).
+	unfinished map[string][]map[string]interface{}
 }
 
 // newDiscovery prepares the matchers: every variant of every token sent, then
-// every sent value a term spells or no token explains, which came from a
-// term. A term stands beside a token of the same spelling: it is the user's
-// word that the name is this code's, which a file's may not be.
+// every sent value a term spells. A term stands beside a token of the same
+// spelling: it is the user's word that the name is this code's, which a
+// file's may not be. Only what the plan records as a term is one: a sent
+// value that neither a token nor a term explains has no matcher, so a row it
+// finds is one discovery cannot explain (see recordTier).
 func newDiscovery(p *Plan) *discovery {
-	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}, stopped: map[string]bool{}}
+	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}, stopped: map[string]bool{},
+		unfinished: map[string][]map[string]interface{}{}}
 	if p.Unit == "." && p.Dir != "." {
 		d.dirSource = dirSource(p.Dir)
 	}
-	explained := map[string]bool{}
 	for _, t := range p.tokens {
 		if t.kind == kindNamespace {
 			d.namespaces = append(d.namespaces, t)
@@ -187,7 +209,6 @@ func newDiscovery(p *Plan) *discovery {
 		}
 		for _, v := range t.variants {
 			d.matchers = append(d.matchers, matcher{value: v, token: t})
-			explained[v] = true
 		}
 	}
 	termed := map[string]bool{}
@@ -197,7 +218,7 @@ func newDiscovery(p *Plan) *discovery {
 		}
 	}
 	for _, v := range p.Sent {
-		if !explained[v] || termed[v] {
+		if termed[v] {
 			d.matchers = append(d.matchers, matcher{value: v, token: token{kind: kindTerm, value: v}})
 		}
 	}
@@ -287,10 +308,32 @@ func (d *discovery) addCapped(object string, recs []map[string]interface{}) (add
 	for _, rec := range recs {
 		if c := d.candidate(rec); c != nil && c.sampledHits(object) == 0 {
 			c.CappedScan = addSorted(c.CappedScan, object)
+			if c.ClusterName == "" {
+				c.ClusterName = stringField(rec, fieldAnyClusterName)
+			}
 			added = true
 		}
 	}
 	return added
+}
+
+// addUnfinished keeps the identities in the rows of object's sampled retries
+// that were cut short or not sampled, once the query the scan cap stopped
+// has been folded in their place. Like addCapped: a row names a workload or
+// service that exists, and one the folded query did not count becomes or
+// joins a candidate marked CappedScan, with no count and no ids.
+func (d *discovery) addUnfinished(object string) {
+	for _, rec := range d.unfinished[object] {
+		c := d.candidate(rec)
+		if c == nil || slices.ContainsFunc(c.recordCounts(), func(n recordCount) bool { return n.object == object }) {
+			continue
+		}
+		c.CappedScan, c.unfinished = addSorted(c.CappedScan, object), addSorted(c.unfinished, object)
+		if c.ClusterName == "" {
+			c.ClusterName = stringField(rec, fieldAnyClusterName)
+		}
+	}
+	delete(d.unfinished, object)
 }
 
 // sampledHits is the records of object a sampled retry matched for c.
@@ -361,6 +404,10 @@ func (d *discovery) foldClusterless() {
 		for _, n := range c.recordCounts() {
 			in[0].WithoutCluster = addSorted(in[0].WithoutCluster, n.object)
 		}
+		// Records only an unfinished read saw carry no cluster either.
+		for _, object := range c.CappedScan {
+			in[0].WithoutCluster = addSorted(in[0].WithoutCluster, object)
+		}
 		in[0].absorb(c)
 		delete(d.records, key)
 	}
@@ -385,12 +432,17 @@ func (c *Candidate) absorb(o *Candidate) {
 	if c.ClusterName == "" {
 		c.ClusterName = o.ClusterName
 	}
-	// What only the capped scan saw of o is not news when the sample
-	// returned c for the same object.
-	for _, object := range o.CappedScan {
+	// What only the capped scan saw of either is not news when the sample
+	// returned the other for the same object.
+	seen := append(slices.Clone(c.CappedScan), o.CappedScan...)
+	c.CappedScan = nil
+	for _, object := range seen {
 		if c.sampledHits(object) == 0 {
 			c.CappedScan = addSorted(c.CappedScan, object)
 		}
+	}
+	for _, object := range o.unfinished {
+		c.unfinished = addSorted(c.unfinished, object)
 	}
 }
 
@@ -400,16 +452,39 @@ func (c *Candidate) absorb(o *Candidate) {
 // neither is one discovery cannot explain, whatever Grail's in() saw in it
 // (an array-valued service.name holding a sent name, for one), and gets the
 // loosest tier: an exact match is one a reader can check against a file.
+//
+// The tier is that of the names that are the unit's own, when one of them
+// matched at all. A whole name that is only indirect (a cache's service
+// name, spelled by a manifest the unit does not claim) beside the unit's own
+// name inside the workload's is a segment match: what ties the row to this
+// code is the part, and the two must not add up to a candidate found by its
+// whole name with a name of the unit's own.
 func (d *discovery) recordTier(key recordKey) tier {
+	whole := false
 	for _, m := range d.matchers {
 		if m.value == key.workload || m.value == key.serviceName {
-			return tierExact
+			if m.own() {
+				return tierExact
+			}
+			whole = true
 		}
 	}
-	if len(d.workloadSegments(key.workload)) > 0 {
+	inside := d.workloadSegments(key.workload)
+	switch {
+	case slices.ContainsFunc(inside, matcher.own):
+		return tierSegment
+	case whole:
+		return tierExact
+	case len(inside) > 0:
 		return tierSegment
 	}
 	return tierSubstring
+}
+
+// own reports whether the matcher's name is the unit's own or a term, rather
+// than one the repository merely holds (see indirectNames).
+func (m matcher) own() bool {
+	return m.token.indirect == ""
 }
 
 // workloadSegments are the sent names that are a run of workload's segments,
@@ -462,6 +537,9 @@ func (d *discovery) addEntity(object string, rec map[string]interface{}) {
 	d.entities = append(d.entities, c)
 }
 
+// A name too short to be looked for inside a workload name (see segmentable)
+// is not a segment match here either.
+//
 // entityMatch finds the best tier at which an entity name matches a sent
 // value, and every matcher that matches at it, the longest first: the
 // evidence cites that one, and each is a file that names the entity. It is exact when the whole name is the value, as written or as its
@@ -477,7 +555,7 @@ func (d *discovery) entityMatch(name string) (best tier, matched []matcher) {
 		switch {
 		case lower == m.value || normal == m.value:
 			t = tierExact
-		case containsSegment(lower, m.value):
+		case segmentable(m.value) && containsSegment(lower, m.value):
 			t = tierSegment
 		case strings.Contains(lower, m.value):
 			t = tierSubstring
@@ -543,14 +621,27 @@ func (d *discovery) explain(c *Candidate) {
 		{fieldServiceName, c.ServiceName},
 	} {
 		var from []token
+		own := false
 		for _, m := range d.matchers {
 			if field.value != "" && m.value == field.value {
 				from = append(from, m.token)
+				own = own || m.own()
 			}
 		}
 		c.cite(field.name, field.value, from)
 		c.named = append(c.named, from...)
-		if inside := d.workloadSegments(c.Workload); len(inside) > 0 && field.name == fieldWorkload && len(from) == 0 {
+		if field.name == fieldServiceName {
+			c.ServiceNameOwn = own
+			continue
+		}
+		// The names inside the workload's are evidence when none names it
+		// whole, and the unit's own among them also when only an indirect
+		// name does.
+		inside := d.workloadSegments(c.Workload)
+		if len(from) > 0 {
+			inside = slices.DeleteFunc(inside, func(m matcher) bool { return own || !m.own() })
+		}
+		if len(inside) > 0 {
 			for _, m := range inside {
 				c.sources[m.token.file] = true
 				c.named = append(c.named, m.token)
@@ -558,6 +649,12 @@ func (d *discovery) explain(c *Candidate) {
 			c.Evidence = append(c.Evidence, fmt.Sprintf("%s %q contains %s (%s match)", fieldWorkload, c.Workload, describe(inside[0].token), tierSegment))
 		}
 	}
+	// A name of the unit's own that is the workload's, or a run of its
+	// segments, names it. Unlike the segment tier this takes a name of any
+	// length: the service name already found the row, so a short name
+	// inside the workload's ties the two rather than finding noise.
+	c.WorkloadUnnamed = c.Workload != "" && c.ServiceNameOwn &&
+		!slices.ContainsFunc(d.matchers, func(m matcher) bool { return m.own() && containsSegment(c.Workload, m.value) })
 	if c.tier == tierSubstring {
 		c.Evidence = append(c.Evidence, fmt.Sprintf("neither its %s nor its %s is a name discovery sent", fieldWorkload, fieldServiceName))
 	}
@@ -565,6 +662,10 @@ func (d *discovery) explain(c *Candidate) {
 		c.Evidence = append(c.Evidence, counts)
 	}
 	for _, object := range c.CappedScan {
+		if slices.Contains(c.unfinished, object) {
+			c.Evidence = append(c.Evidence, fmt.Sprintf("seen in a sampled retry over %s that did not finish, so without a count", object))
+			continue
+		}
 		c.Evidence = append(c.Evidence, fmt.Sprintf("seen in the %s scan the %d GB cap stopped, not in the sample that replaced it", object, ScanLimitGB))
 	}
 	if c.LogsByProcessGroup > 0 {
@@ -575,7 +676,7 @@ func (d *discovery) explain(c *Candidate) {
 
 // ownsProcessGroups reports whether c's process groups can stand for it: all
 // of them are listed, read whole, and no candidate of another workload
-// carries one. A binding by them then selects no other candidate's records.
+// carries one or lists only some of its own. A binding by them then selects no other candidate's records.
 // Candidates whose records name no workload are not one workload: each is
 // another to the rest.
 func (d *discovery) ownsProcessGroups(c *Candidate) bool {
@@ -586,7 +687,8 @@ func (d *discovery) ownsProcessGroups(c *Candidate) bool {
 		if o == c || (c.Workload != "" && o.cluster == c.cluster && o.Namespace == c.Namespace && o.Workload == c.Workload) {
 			continue
 		}
-		if slices.ContainsFunc(o.ProcessGroups, func(id string) bool { return slices.Contains(c.ProcessGroups, id) }) {
+		// A list that was cut may hold one of them among the ids not listed.
+		if o.ProcessGroupsCapped || slices.ContainsFunc(o.ProcessGroups, func(id string) bool { return slices.Contains(c.ProcessGroups, id) }) {
 			return false
 		}
 	}
@@ -763,6 +865,9 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.rate = d.rate(c)
 		all = append(all, c)
 	}
+	for _, c := range all {
+		c.Indirect = indirect(c.named)
+	}
 	sort.Slice(all, func(i, j int) bool { return before(all[i], all[j]) })
 	shared := sharedServiceNames(all)
 	inClusters := workloadClusters(all)
@@ -771,7 +876,6 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		c.ServiceNameShared = shared[c.ServiceName]
 		c.WorkloadShared = c.Workload != "" && inClusters[Workload{Namespace: c.Namespace, Name: c.Workload}] > 1
 		c.MatchedDir = d.dirSource != "" && c.sources[d.dirSource]
-		c.Indirect = indirect(c.named)
 		c.Rank, c.Tier = i+1, c.tier.String()
 		c.Name = EntryName(firstOf(c.Workload, c.ServiceName, c.matched, d.unit))
 	}
@@ -779,7 +883,7 @@ func (d *discovery) finish(r *DiscoveryReport) {
 		r.note(n)
 	}
 	for i, c := range all {
-		c.tier, c.cluster, c.sources, c.named, c.matched, c.rate, c.logsMissed, c.logsChecked = 0, "", nil, nil, "", 0, false, false
+		c.tier, c.cluster, c.sources, c.named, c.matched, c.rate, c.logsMissed, c.logsChecked, c.unfinished = 0, "", nil, nil, "", 0, false, false, nil
 		r.Candidates[i] = *c
 	}
 	// A sample can have missed a second candidate, as its note says, so what
@@ -846,8 +950,9 @@ func workloadClusters(cs []*Candidate) map[Workload]int {
 	return count
 }
 
-// before orders candidates: better tier, more repository files naming them,
-// more records per hour, then by identity, so the order never depends on the
+// before orders candidates: better tier, a name of the unit's own before
+// indirect names alone, more repository files naming them, more records per
+// hour, then by identity, so the order never depends on the
 // order rows arrived in. Records are compared per hour because a sampled
 // object may have been read over a shorter window than the other. A sampled
 // object counts its hits: every candidate of one object was read by the same
@@ -857,6 +962,8 @@ func before(c, o *Candidate) bool {
 	switch {
 	case c.tier != o.tier:
 		return c.tier < o.tier
+	case (c.Indirect == "") != (o.Indirect == ""):
+		return c.Indirect == ""
 	case len(c.sources) != len(o.sources):
 		return len(c.sources) > len(o.sources)
 	case c.rate != o.rate:
@@ -945,7 +1052,7 @@ func VerdictLabel(kind string) string {
 // verdicts decides each kind and the whole. unsure is a result that is
 // partial, that a sample read, or that rests on entity names alone: it is
 // never a match. Nor is a candidate found by its whole name when every name
-// that matched is Indirect. A kind is tallied by
+// that matched is Indirect, or when it is WorkloadUnnamed. A kind is tallied by
 // its count where it has one, so a candidate listing one of its 200 service
 // ids is 200 services, not one. No kind is a match unless the whole is.
 func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict) {
@@ -984,9 +1091,10 @@ func verdicts(candidates []Candidate, unsure bool) (Verdict, map[string]Verdict)
 }
 
 // settles reports whether c, were it the only candidate, is one a verdict can
-// rest on: found by its whole name, and by a name that is the unit's own.
+// rest on: found by its whole name, by a name that is the unit's own, and
+// not by its service name alone under a workload the unit does not name.
 func settles(c Candidate) bool {
-	return c.Tier == tierExact.String() && c.Indirect == ""
+	return c.Tier == tierExact.String() && c.Indirect == "" && !c.WorkloadUnnamed
 }
 
 func decide(distinct int, exact, unsure bool) Verdict {
@@ -1008,16 +1116,22 @@ func stringField(rec map[string]interface{}, key string) string {
 // when the field is itself an array (a log written by several processes
 // carries its process groups as one), so it is flattened. The query collects
 // one element more than discoveryIDLimit, so a column that long was cut: cut
-// says so, and only the first discoveryIDLimit elements are read. ids are
-// the ones a scope file can hold, since no other could be saved; distinct
-// counts every id read, those included.
+// says so, and only the first discoveryIDLimit elements are read. The ids
+// those flatten to are bounded the same way: past discoveryIDLimit distinct
+// ones the column is cut too, however few arrays held them. ids are the ones
+// a scope file can hold, since no other could be saved; distinct counts
+// every id read, those included.
 func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids []string, distinct int, cut bool) {
 	seen := map[string]bool{}
 	var walk func(v interface{})
 	walk = func(v interface{}) {
 		switch v := v.(type) {
 		case string:
-			if !seen[v] {
+			switch {
+			case seen[v]:
+			case len(seen) == discoveryIDLimit:
+				cut = true
+			default:
 				seen[v] = true
 				if valid.MatchString(v) {
 					ids = append(ids, v)
@@ -1035,6 +1149,15 @@ func idsField(rec map[string]interface{}, key string, valid *regexp.Regexp) (ids
 	}
 	walk(collected)
 	return ids, len(seen), cut
+}
+
+// idsClipped reports whether a row of a record query holds an id column
+// longer than a binding takes: the one case in which a limit Grail reports
+// in words alone says nothing about the rows.
+func idsClipped(rec map[string]interface{}) bool {
+	_, _, services := idsField(rec, fieldServices, serviceIDRe)
+	_, _, groups := idsField(rec, fieldProcessGroups, processGroupRe)
+	return services || groups
 }
 
 // countField reads a count, which Grail sends as a number or, for a long, as

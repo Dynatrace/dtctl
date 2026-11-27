@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -21,7 +20,6 @@ var (
 	pomParentRe    = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
 	pomArtifactRe  = regexp.MustCompile(`<artifactId>\s*([^<]+?)\s*</artifactId>`)
 	assemblyNameRe = regexp.MustCompile(`<AssemblyName>\s*([^<]+?)\s*</AssemblyName>`)
-	dockerRunRe    = regexp.MustCompile(`(?im)^[ \t]*(ENTRYPOINT|CMD)[ \t]+(.+)$`)
 
 	// The Gradle expressions read one assignment in either DSL: `name = "x"`
 	// and `name = 'x'`, and Kotlin's `name.set("x")` for a property. The
@@ -109,6 +107,11 @@ func pyprojectName(text, file string) (token, bool) {
 		return token{}, false
 	}
 	name := cmp.Or(doc.Project.Name, doc.Tool.Poetry.Name)
+	// A string that is no name is not searched for either: it can be most
+	// of the file.
+	if len(variants(name)) == 0 {
+		return token{}, false
+	}
 	// The decoder keeps no positions, so the line is the first that assigns
 	// the name; none when the file spells the key another way.
 	line := 0
@@ -138,32 +141,44 @@ var launchers = keySet("sh", "bash", "exec", "java", "node", "python", "python3"
 	"dotnet", "npm", "yarn", "pnpm", "ruby", "php", "tini", "dumb-init",
 	"nginx", "uvicorn", "gunicorn", "index", "run", "start", "wsgi", "asgi")
 
-var dockerFromRe = regexp.MustCompile(`(?im)^[ \t]*FROM[ \t]`)
+// dockerInstructionRe reads one instruction, its continued lines joined.
+var dockerInstructionRe = regexp.MustCompile(`(?is)^[ \t]*(FROM|ENTRYPOINT|CMD)[ \t]+(.+)$`)
 
 // dockerEntrypoint reads what the image runs. The image is the last stage of
 // the file, so only that stage is read: an earlier one runs a build tool.
-// Docker appends CMD to ENTRYPOINT, so the last of each are read together; a
-// jar, war or dll argument wins, since it names the artifact, and otherwise
-// the first argument that is neither a launcher nor a flag.
+// Docker appends CMD to ENTRYPOINT, so the last of each are read together,
+// and runTarget picks the name out of them. An instruction is read with the
+// lines it continues on, and cited at the line it starts.
 func dockerEntrypoint(text, file string) (token, bool) {
-	stage := 0
-	if from := dockerFromRe.FindAllStringIndex(text, -1); len(from) > 0 {
-		stage = from[len(from)-1][0]
+	type instruction struct {
+		args string
+		line int
 	}
-	var entrypoint, cmd []int
-	for _, m := range dockerRunRe.FindAllStringSubmatchIndex(text[stage:], -1) {
-		if strings.EqualFold(text[stage+m[2]:stage+m[3]], "ENTRYPOINT") {
-			entrypoint = m
-		} else {
-			cmd = m
+	var entrypoint, cmd *instruction
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		start, logical := i+1, strings.TrimRight(lines[i], "\r")
+		for strings.HasSuffix(logical, "\\") && i+1 < len(lines) {
+			i++
+			logical = strings.TrimSuffix(logical, "\\") + " " + strings.TrimRight(lines[i], "\r")
+		}
+		m := dockerInstructionRe.FindStringSubmatch(logical)
+		switch {
+		case m == nil:
+		case strings.EqualFold(m[1], "FROM"):
+			entrypoint, cmd = nil, nil
+		case strings.EqualFold(m[1], "ENTRYPOINT"):
+			entrypoint = &instruction{m[2], start}
+		default:
+			cmd = &instruction{m[2], start}
 		}
 	}
 	var args []string
 	line := 0
-	for _, m := range [][]int{cmd, entrypoint} {
-		if m != nil {
-			args = append(splitDockerArgs(text[stage+m[4]:stage+m[5]]), args...)
-			line = strings.Count(text[:stage+m[0]], "\n") + 1
+	for _, in := range []*instruction{cmd, entrypoint} {
+		if in != nil {
+			args = append(splitDockerArgs(in.args), args...)
+			line = in.line
 		}
 	}
 	name := runTarget(args)
@@ -174,33 +189,52 @@ func dockerEntrypoint(text, file string) (token, bool) {
 }
 
 // splitDockerArgs splits ENTRYPOINT/CMD arguments in exec form (a JSON
-// array) or shell form.
+// array) or shell form. A shell-form line that holds a quote has no
+// arguments here: where its words end is the shell's to say, and a quoted
+// script (sh -c "...") split at its spaces would pass for a command line of
+// its own.
 func splitDockerArgs(args string) []string {
 	var exec []string
 	if json.Unmarshal([]byte(strings.TrimSpace(args)), &exec) == nil {
 		return exec
 	}
+	if strings.ContainsAny(args, "\"'`") {
+		return nil
+	}
 	return strings.Fields(args)
 }
 
 // runTarget picks the name a command line runs, without directory or
-// extension. An argument is never a name when it is a flag, an assignment
-// (KEY=value, --key=value) or a line of its own (the script of sh -c): those
-// carry configuration, credentials among it, and a flag may hold a jar that
-// is an agent rather than the artifact.
+// extension: the first argument that is no launcher, read only up to the first
+// flag. What follows a flag may be its operand (nginx -c <file>, python -m
+// <module>, node --require <file>), and an operand is configuration, which can
+// name a tenant and is never the unit. Past the first flag one argument still
+// counts, the archive java is given with -jar. A bare "--" is no flag: it
+// ends a supervisor's own arguments (tini -- <program>).
+//
+// An argument is never a name when it is an assignment (KEY=value) or a line
+// of its own (the script of sh -c): those carry configuration, credentials
+// among it.
 func runTarget(args []string) string {
-	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool {
-		return strings.HasPrefix(a, "-") || strings.ContainsAny(a, "= \t\r\n")
-	})
-	for _, a := range args {
-		switch path.Ext(a) {
-		case ".jar", ".war", ".dll":
-			return strings.TrimSuffix(path.Base(a), path.Ext(a))
+	stem := func(a string) string { return strings.TrimSuffix(path.Base(a), path.Ext(a)) }
+	for i, a := range args {
+		switch {
+		case a == "--" || strings.ContainsAny(a, "= \t\r\n"):
+			continue
+		case strings.HasPrefix(a, "-"):
+			return jarOperand(args[i:])
+		case !launchers[stem(a)]:
+			return stem(a)
 		}
 	}
-	for _, a := range args {
-		if stem := strings.TrimSuffix(path.Base(a), path.Ext(a)); !launchers[stem] {
-			return stem
+	return ""
+}
+
+// jarOperand is the stem of the archive that follows -jar in args, or "".
+func jarOperand(args []string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if ext := path.Ext(args[i+1]); args[i] == "-jar" && (ext == ".jar" || ext == ".war") {
+			return strings.TrimSuffix(path.Base(args[i+1]), ext)
 		}
 	}
 	return ""

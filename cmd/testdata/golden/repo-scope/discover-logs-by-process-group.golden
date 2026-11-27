@@ -10,6 +10,6 @@ Unit: .
    5012 logs in 24h carry its process group, none its workload or service name
 
 Verdict: match: workload, service name, process group, service
-3 of 11 queries ran in 0.6s. Nothing was written. Save it with:
+3 of 11 queries ran in 0.6s. No repo scope was saved. Save it with:
   dtctl --context c repo-scope set checkout --cluster-uid 11111111-2222-3333-4444-555555555555 --namespace payments --workload checkout --process-group PROCESS_GROUP-FEDCBA9876543210
 Note: candidate 1 has spans, but no logs carry its k8s.workload.name or service.name; its logs carry the process group, so a process-group binding is what reaches them

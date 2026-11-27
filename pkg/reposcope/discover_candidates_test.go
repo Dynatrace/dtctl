@@ -169,19 +169,26 @@ func TestDiscover_SampledRetryKeepsWhatTheCappedScanSaw(t *testing.T) {
 // Grail says a result was limited in two ways. A typed RESULT_LIMIT_BYTES or
 // RESULT_LIMIT_RECORDS is a page that lost rows, however short it is. Only
 // the message without a type, which is also how a collected id array cut at
-// its maxLength is reported, leaves a short page whole.
+// its maxLength is reported, leaves a short page whole, and only when a row
+// shows such an array (see
+// TestDiscover_UntypedResultLimitIsACutUnlessARowShowsTheClippedArray).
 func TestDiscover_TypedResultLimitIsACutPage(t *testing.T) {
 	for name, tc := range map[string]struct {
 		answer  answer
 		partial bool
+		clipped bool // a row holds an id array longer than a binding takes
 	}{
-		"typed":                 {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit, Typed: true}}}, true},
-		"by its message alone":  {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}}}, false},
-		"both":                  {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}, {Cause: inventory.TruncationResultLimit, Typed: true}}}, true},
-		"a runner with a cause": {answer{truncation: inventory.TruncationResultLimit}, true},
+		"typed":                {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit, Typed: true}}}, true, true},
+		"by its message alone": {answer{truncations: untypedLimit}, false, true},
+		"by its message alone, with no clipped array": {answer{truncations: untypedLimit}, true, false},
+		"both":                  {answer{truncations: []inventory.Truncation{{Cause: inventory.TruncationResultLimit}, {Cause: inventory.TruncationResultLimit, Typed: true}}}, true, true},
+		"a runner with a cause": {answer{truncation: inventory.TruncationResultLimit}, true, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tc.answer.records = rows(t, "spans-checkout")
+			if tc.clipped {
+				tc.answer.records[0][fieldServices] = manyIDs(discoveryIDLimit + 1)
+			}
 			r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
 				"spans": {tc.answer},
 				"logs":  {{records: rows(t, "logs-checkout")}},
@@ -194,7 +201,7 @@ func TestDiscover_TypedResultLimitIsACutPage(t *testing.T) {
 				assert.Equal(t, VerdictAmbiguous, r.Verdict)
 				assert.Equal(t, []string{"spans stopped at Grail's result limit, so the result is partial"}, r.Notes)
 			} else {
-				assert.Equal(t, VerdictMatch, r.Verdict)
+				assert.Equal(t, VerdictMatch, r.Verdicts["workload"])
 				assert.Empty(t, r.Notes)
 			}
 		})

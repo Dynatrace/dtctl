@@ -245,16 +245,38 @@ func TestGolden_RepoScope(t *testing.T) {
 		obj     interface{}
 		formats []string
 	}{
-		"status-linked":       {repoScopeStatusLinked(), all},
-		"status-segments":     {repoScopeStatus("services/ledger"), all},
-		"status-tie":          {repoScopeStatusTie(), all},
-		"status-annotated":    {repoScopeStatusAnnotated(), all},
-		"status-unlinked":     {reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, all},
+		"status-linked":    {repoScopeStatusLinked(), all},
+		"status-segments":  {repoScopeStatus("services/ledger"), all},
+		"status-tie":       {repoScopeStatusTie(), all},
+		"status-annotated": {repoScopeStatusAnnotated(), all},
+		"status-unlinked":  {reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, all},
+	}
+	// Discovery prints a list of reports, one per unit, also when there is
+	// one: these are that list, as the command hands it to the printer.
+	lists := map[string]struct {
+		obj     reposcope.DiscoveryReport
+		formats []string
+	}{
 		"discovery-match":     {repoScopeDiscoveryMatch(), all},
 		"discovery-none":      {repoScopeDiscoveryNone(), []string{"json"}},
 		"discovery-partial":   {repoScopeDiscoveryPartial(), []string{"json"}},
 		"discovery-sampled":   {repoScopeDiscoverySampled(), []string{"json"}},
 		"discovery-ambiguous": {repoScopeDiscoveryAmbiguous(), []string{"json"}},
+	}
+	for name, list := range lists {
+		reports := []*reposcope.DiscoveryReport{&list.obj}
+		for _, format := range list.formats {
+			t.Run(name+"-"+format, func(t *testing.T) {
+				var buf bytes.Buffer
+				if err := NewPrinterWithWriter(format, &buf).PrintList(reports); err != nil {
+					t.Fatalf("PrintList failed: %v", err)
+				}
+				if format == "json" && !strings.HasPrefix(buf.String(), "[") {
+					t.Fatalf("a list of reports, as the command prints: %.40s", buf.String())
+				}
+				assertGolden(t, "repo-scope/"+name+"-"+format, buf.String())
+			})
+		}
 	}
 	for name, single := range singles {
 		obj := single.obj

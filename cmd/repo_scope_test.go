@@ -21,6 +21,7 @@ import (
 
 	"github.com/Dynatrace/dtctl/cmd/testutil"
 	"github.com/Dynatrace/dtctl/pkg/client"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
@@ -80,7 +81,20 @@ func runRepoScoped(argv []string, opts RunOptions) (code int, stdout, stderr str
 	var out, errOut bytes.Buffer
 	opts.Stdout, opts.Stderr = &out, &errOut
 	code = Run(argv, opts)
-	return code, out.String(), errOut.String()
+	return code, withoutTestConfig(out.String()), errOut.String()
+}
+
+// withoutTestConfig drops, from the set lines discovery prints, the --config
+// that names the test's own config file. A test isolates its config with
+// DTCTL_CONFIG, and a line carries the config that variable chose
+// (TestRepoScopeDiscoverCarriesTheConfigTheEnvironmentChose); the path is a
+// temporary directory's, which no expected line can spell.
+func withoutTestConfig(stdout string) string {
+	path := os.Getenv("DTCTL_CONFIG")
+	if path == "" {
+		return stdout
+	}
+	return strings.ReplaceAll(stdout, "--config "+exec.ShellQuote(path)+" ", "")
 }
 
 func agentEnvelope(t *testing.T, stdout string) output.Response {
