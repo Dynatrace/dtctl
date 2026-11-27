@@ -431,7 +431,8 @@ make test
 
 ✅ `create`, `edit`, `apply`, `delete`, `update` (all modify resources)  
 ✅ `exec` — every subcommand, with the operation matching what the execution actually does: `OperationRead` for an analysis or a preview, `OperationCreate` for a run that creates state, `OperationDelete` for ad-hoc code (`exec function --code` can do anything), and for `exec api` the operation derived from the API's own specification. Use `SetupWithSafety(op)`, not the ungated `SetupClient()`. *Guard*: `go test ./cmd/ -run TestExec.*Readonly`  
-❌ `get`, `describe`, `query`, `logs`, `history`, `ctx`, `doctor`, `commands` (read-only)
+❌ `get`, `describe`, `query`, `logs`, `history`, `ctx`, `doctor`, `commands` (read-only)  
+❌ commands that write only a file on this machine and send nothing: `config`, `ctx`, `repo-scope set` / `repo-scope delete`. The safety level is about the environment
 
 ### Pattern (after `LoadConfig()`, before client ops)
 
