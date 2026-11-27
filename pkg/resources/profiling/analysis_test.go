@@ -171,16 +171,44 @@ func TestRaw_NoData(t *testing.T) {
 	}
 }
 
-// The response a result is built from is copied, not compacted in place.
+// A result keeps the response it was built from as it is: Raw compacts a copy,
+// not the response in place.
 func TestNewHotspots_LeavesTheResponseAlone(t *testing.T) {
 	var result interface{}
 	if err := json.Unmarshal([]byte(`{"dataRootNodeId":"0","dataNodes":[{"id":"0","methodName":"m","color":"#fff","samples":{"RUNNING":1},"childIds":[]}]}`), &result); err != nil {
 		t.Fatal(err)
 	}
-	newHotspots(&sdkcla.Response{Status: "completed", Kind: sdkcla.KindHotspots, EntityID: testEntity, Result: result})
-	root := result.(map[string]interface{})["dataNodes"].([]interface{})[0].(map[string]interface{})
-	if root["color"] != "#fff" {
+	first := func(doc interface{}) map[string]interface{} {
+		return doc.(map[string]interface{})["dataNodes"].([]interface{})[0].(map[string]interface{})
+	}
+	h := newHotspots(&sdkcla.Response{Status: "completed", Kind: sdkcla.KindHotspots, EntityID: testEntity, Result: result})
+	raw := h.Raw()
+	if _, kept := first(raw["result"])["color"]; kept {
+		t.Errorf("Raw() kept the rendering field: %v", first(raw["result"]))
+	}
+	if root := first(result); root["color"] != "#fff" {
 		t.Errorf("the response was modified: %v", root)
+	}
+}
+
+// Every thread state the API counts reaches the views: the two IO states as
+// well as the three the other fixtures carry.
+func TestHotspots_IOStates(t *testing.T) {
+	h := hotspotsOf(map[string]interface{}{
+		"dataRootNodeId": "1",
+		"dataNodes": []interface{}{
+			snode("1", "C", "read", true, counts("RUNNING", float64(1), "LOCK", float64(2), "NET_IO", float64(30), "DISK_IO", float64(400), "WAIT", float64(5000))),
+		},
+	})
+	want := StackView{Samples: 1, Rows: []StackRow{{Running: 1, Lock: 2, NetIO: 30, DiskIO: 400, Wait: 5000, Stack: "C.read"}}}
+	if got := h.Stacks(false); !reflect.DeepEqual(got, want) {
+		t.Errorf("Stacks(false) = %+v\nwant %+v", got, want)
+	}
+	for state, samples := range map[State]int{StateRunning: 1, StateLock: 2, StateNetIO: 30, StateDiskIO: 400, StateWait: 5000, StateOffCPU: 5432, StateAll: 5433} {
+		v, err := h.Functions(false, state, SortBySelf)
+		if err != nil || v.Samples != samples || len(v.Rows) != 1 || v.Rows[0].Self != samples {
+			t.Errorf("Functions(%s) = %+v, %v; want %d samples on one row", state, v, err, samples)
+		}
 	}
 }
 
