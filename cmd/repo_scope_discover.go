@@ -795,11 +795,13 @@ func repoScopeDirProblem(dir string) string {
 // named, also when it was the config's current one: that is the one a later
 // `dtctl ctx` changes under a line still on the screen. (A session has no
 // context a caller could name, and no working directory either, so discovery
-// never runs in one.) The config is named only when --config named it: DTCTL_CONFIG is set for the shell, the set
-// line included, while --config names it for one command.
+// never runs in one.) The config is named whenever something other than the
+// default chose it, --config or DTCTL_CONFIG: the variable may be set for
+// one command as the flag is, and the line may be run in a shell that does
+// not have it.
 func repoScopeSelectors(ctx context.Context, cfg *config.Config) []string {
 	var args []string
-	if path := cfgFile(ctx); path != "" {
+	if path := cmp.Or(cfgFile(ctx), getenv(ctx, config.EnvConfig)); path != "" {
 		args = append(args, "--config", exec.ShellQuote(path))
 	}
 	if cfg.CurrentContext != "" {

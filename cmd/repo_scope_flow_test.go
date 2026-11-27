@@ -1252,14 +1252,19 @@ tokens:
 			for k, v := range tc.env {
 				t.Setenv(k, v)
 			}
-			args, want := tc.args, "dtctl "
+			// The config is carried whichever way it was chosen, and here
+			// DTCTL_CONFIG always chooses one.
+			args, want := tc.args, "dtctl --config "+exec.ShellQuote(configPath)+" "
 			if tc.withConfig {
 				args = append(args, "--config", configPath)
-				want += "--config " + exec.ShellQuote(configPath) + " "
 			}
 			want += tc.want + " repo-scope set "
-			report, _ := discoverReport(t, args...)
-			line := report.Candidates[0].SetCommand
+			var out, errOut bytes.Buffer
+			code := Run(append([]string{"repo-scope", "discover", "--agent"}, args...), RunOptions{Stdout: &out, Stderr: &errOut})
+			require.Zero(t, code, errOut.String())
+			var reports []reposcope.DiscoveryReport
+			agentResult(t, out.String(), &reports)
+			line := reports[0].Candidates[0].SetCommand
 			require.True(t, strings.HasPrefix(line, want), line)
 
 			// A shell without the selection, and a config that no longer

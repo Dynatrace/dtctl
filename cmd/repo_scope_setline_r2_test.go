@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 )
@@ -201,6 +203,30 @@ func TestRepoScopeDiscoverSaysWhatItsLineReplaces(t *testing.T) {
 	before, err := os.ReadFile(scopeFile)
 	require.NoError(t, err)
 	require.Equal(t, "environments:\n  "+repoScopeTestHost+":\n    - name: Not A Name\n", string(before), "discovery writes nothing")
+}
+
+// A config the environment chose is carried on the line like one --config
+// chose: DTCTL_CONFIG may be set for the one command, and the line is run in
+// a shell that need not have it.
+func TestRepoScopeDiscoverCarriesTheConfigTheEnvironmentChose(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	repo := chdirCheckoutRepo(t)
+	configPath := os.Getenv("DTCTL_CONFIG")
+	require.NotEmpty(t, configPath)
+
+	var out, errOut bytes.Buffer
+	code := Run([]string{"repo-scope", "discover", "--agent"}, RunOptions{Stdout: &out, Stderr: &errOut})
+	require.Zero(t, code, errOut.String())
+	var reports []reposcope.DiscoveryReport
+	agentResult(t, out.String(), &reports)
+	line := reports[0].Candidates[0].SetCommand
+	require.True(t, strings.HasPrefix(line, "dtctl --config "+exec.ShellQuote(configPath)+" --context c repo-scope set checkout "), line)
+
+	// In a shell without the variable the line still saves for the
+	// environment discovery ran against.
+	t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	runSetCommand(t, line)
+	require.Equal(t, []string{repoScopeTestHost}, loadScopeFile(t, repo).Hosts())
 }
 
 // A report is one value per unit, so only the formats that print one are
