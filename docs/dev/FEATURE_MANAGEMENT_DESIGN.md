@@ -221,7 +221,7 @@ contexts:
 
 Targeting changes are the riskiest FM writes, so each one is an explicit command that says what it changes and in which stage, rather than a whole-stage file: `create` / `update` / `delete fm feature-targeting <feature> --stage <s> --position <#|id>` change one rule, and `enable` / `disable fm feature --stage <s>` turn a release stage's targeting on or off. `apply fm feature-targeting -f` covers anything else (decision 4).
 
-- **One resource.** A stage's targeting always exists and the API has no create or delete for it, so the stage and its rules are one resource, with no separate rule resource or alias. `delete --all` clears every rule, asks first, and keeps the stage on or off as it was.
+- **One resource.** A stage's targeting always exists and the API has no create or delete for it, so the stage and its rules are one resource rather than a parent and a rule child; `feature-targeting-rule` is an alias. `delete --all` clears every rule, asks first, and keeps the stage on or off as it was.
 - **Addressing.** Rules have no key, so `--position` takes a 0-based position, a rule id or a unique id prefix, like `--config-id` on `describe extension-config`. On `create` it is where the new rule goes (an id means in that rule's place; the default is last), and `update --move-position` moves a rule. `update` and `delete` without `--position` (or `--all` on delete) are an error. The UI numbers rules from 1, so `get` and `describe` show the 0-based position dtctl takes. Positions shift on reorder, so scripts and agents should use ids.
 - **Safety.** Every write is a read-modify-write of the whole stage that preserves every rule `id`, since a new id re-buckets users. `--stage` (`-s`) is required and never defaulted, so the stage is always visible in the command. Rollback (`--rollout now=0`) is safe unattended: a no-op exits 0, and a 409 is retried once.
 - **Flags.** `--condition '<context-key> <op> <values>'` adds a condition (all must match), named after the API's `conditions[]`, with operators by value type taken from the context attribute; `--condition-add` / `--condition-remove` take the same expression and add or remove values on the matching list condition, and removing its last value removes it; `--condition-clear <key>` drops a condition; `--variant` serves a variant or a split; `--rollout <time>=<pct>[,linear]` accepts `now`, exact-duration offsets like `+1d`, RFC 3339 times that carry a zone (`2026-12-01T09:00Z`), and Unix seconds (`1796115600`), all resolved to UTC client-side; a time with no zone is an error, and so is a number of 13 or more digits, with a hint that it looks like milliseconds. `DATE_TIME` condition values take the same forms.
@@ -269,8 +269,8 @@ FM commands start in the `development` tier, like `account`: each verb gets an `
 
 | Tier | When |
 |---|---|
-| `development` | While phases 1 and 2 are being built |
-| `experimental` | Once phase 2 is complete |
+| `development` | While phase 1 is being built |
+| `experimental` | Once the read path (phase 1) is complete; phase 2 writes land there as they are built |
 | `stable` | After the FM API reaches GA (targeted for February 2027), with the `nativeCoverage` entry |
 
 The `sdk/api/featuremanagement` Go API stays stable across releases even while the CLI is `experimental`, since other Go code imports it.
@@ -301,7 +301,7 @@ Tracked in [AI-1674](https://dt-rnd.atlassian.net/browse/AI-1674).
 
 Jira: [AI-1675](https://dt-rnd.atlassian.net/browse/AI-1675)
 
-**Goal**: `get` and `describe` for every resource.
+**Goal**: `get` and `describe` for every resource; promotion to `experimental`.
 
 - `sdk/api/featuremanagement`, one package for the whole surface, types generated from the public OpenAPI document.
 - `pkg/resources/featuremanagement` handlers, `get` / `describe` for project, release-stage, feature (with `flags[]`), feature-targeting (with its rules), context-attribute, sdk-key (secret masked unless `--reveal`) and override.
@@ -312,7 +312,7 @@ Jira: [AI-1675](https://dt-rnd.atlassian.net/browse/AI-1675)
 
 Jira: [AI-1676](https://dt-rnd.atlassian.net/browse/AI-1676)
 
-**Goal**: every write, targeting first; promotion to `experimental`.
+**Goal**: every write, targeting first.
 
 - `create` / `update` / `delete fm feature-targeting` with `--variant`, `--rollout`, `--condition` with `=` on string keys, and `--condition-add` / `--condition-remove`, plus `enable` / `disable fm feature` (decision 2). The other operators and value types follow.
 - `create`, `update`, `delete` for every resource with read-modify-write and safety checks, including `update fm feature --status`, the metadata flags, field flags on `update fm project`, `release-stage` and `context-attribute`, `update fm release-stages --order`, `update fm feature --add-variant` / `--remove-variant` / `--add-flag` / `--remove-flag`, `create fm sdk-key`, and override writes.
