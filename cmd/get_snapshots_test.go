@@ -37,3 +37,24 @@ func TestGetSnapshots_ReversionedBreakpoint(t *testing.T) {
 		require.Equal(t, tc.want, suggestions[0])
 	}
 }
+
+// A flag value that cannot be used is refused before anything is read: the
+// first request a breakpoint command sends finds its workspace, and creates
+// one where there is none.
+func TestGetSnapshots_ValidatesItsFlagsBeforeAnyRequest(t *testing.T) {
+	for _, tc := range []struct{ flag, want string }{
+		{"--decode-snapshots=bogus", `unsupported --decode-snapshots value "bogus" (use "simplified" or "full")`},
+		{"--metadata=bogus", "bogus"},
+	} {
+		srv := newLiveDebuggerStub(t, "readonly")
+		srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+		t.Chdir(t.TempDir())
+
+		code, stdout, stderr := runRepoScoped([]string{"get", "snapshots", "A.java:1", tc.flag, "--agent"}, RunOptions{})
+		require.NotZero(t, code)
+		require.Contains(t, agentError(t, stdout).Message, tc.want)
+		require.Empty(t, srv.ops())
+		require.Empty(t, srv.sentQueries())
+		require.Empty(t, stderr)
+	}
+}

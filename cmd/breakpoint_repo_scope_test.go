@@ -86,6 +86,10 @@ type liveDebuggerStub struct {
 	activeRules int
 	// fail makes an operation answer with this GraphQL error.
 	fail map[string]string
+	// queries are the DQL queries sent, in order, and records the JSON
+	// records every one of them is answered with.
+	queries []string
+	records string
 }
 
 // liveDebuggerOperations are the operations the stub answers, by the
@@ -119,7 +123,15 @@ func newLiveDebuggerStub(t *testing.T, safetyLevel string, seed ...string) *live
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/platform/storage/query/v1/query:execute" {
-			_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":{"records":[]}}`))
+			var req struct {
+				Query string `json:"query"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &req)
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			s.queries = append(s.queries, req.Query)
+			_, _ = fmt.Fprintf(w, `{"state":"SUCCEEDED","result":{"records":[%s]}}`, s.records)
 			return
 		}
 		if r.URL.Path != "/platform/dob/graphql" {
@@ -243,6 +255,13 @@ func (s *liveDebuggerStub) variablesOf(op string) []map[string]interface{} {
 		}
 	}
 	return sent
+}
+
+// sentQueries lists the DQL queries the stub was sent, in order.
+func (s *liveDebuggerStub) sentQueries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.queries)
 }
 
 // mutations lists the operations the stub was sent that change something.
