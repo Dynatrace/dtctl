@@ -1,6 +1,7 @@
 package dql
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,6 +107,15 @@ var insertFilterTests = []struct {
 	{"a comment before the filter command", `fetch logs | /* c */ filter k8s.workload.name == "x"`, UserFilter, "logs", ""},
 	{"a capitalised filter command", `fetch logs | Filter k8s.workload.name == "x"`, UserFilter, "logs", ""},
 	{"an upper-case filterOut", `fetch logs | FILTEROUT k8s.workload.name == "x"`, UserFilter, "logs", ""},
+	{"a bound field beside an index is still the user's filter", `fetch logs | filter enrichment[0] == "x" and k8s.workload.name == "y"`, UserFilter, "logs", ""},
+	// Inside square brackets a bound field's name is a subquery's own field
+	// or an index into another one, not a condition on the fetched record.
+	{"a bound field named in a subquery of a filter", `fetch logs | filter loglevel in [data record(k8s.workload.name="ERROR") | fields k8s.workload.name]`, Applied, "logs",
+		"fetch logs " + logsStage + "\n" + `| filter loglevel in [data record(k8s.workload.name="ERROR") | fields k8s.workload.name]`},
+	{"a bound field as an index", `fetch logs | filter enrichment[k8s.workload.name] == "x"`, Applied, "logs",
+		"fetch logs " + logsStage + "\n" + `| filter enrichment[k8s.workload.name] == "x"`},
+	{"a backtick-quoted bound field as an index", "fetch logs | filter enrichment[(`k8s.workload.name`)] == \"x\"", Applied, "logs",
+		"fetch logs " + logsStage + "\n| filter enrichment[(`k8s.workload.name`)] == \"x\""},
 	// Field names, unlike commands, are case-sensitive: this is another field.
 	{"a bound field in another case", `fetch logs | filter K8S.Workload.Name == "x"`, Applied, "logs",
 		"fetch logs " + logsStage + "\n" + `| filter K8S.Workload.Name == "x"`},
@@ -145,6 +155,9 @@ var insertFilterTests = []struct {
 	{"unterminated identifier", "fetch logs | fields `x", Unscannable, "", ""},
 	{"unbalanced bracket", "fetch logs | filter (a == 1", Unscannable, "", ""},
 	{"single quote", "fetch logs | filter it's", Unscannable, "", ""},
+	// Where a run of four quotes ends a triple-quoted string is Grail's to
+	// say. Read as closing at the first three, the append below is text.
+	{"a fourth quote after a triple-quoted string", `fetch logs | fieldsAdd x = """foo"""" | append [fetch logs] | fieldsAdd y = """"bar"""`, Unscannable, "", ""},
 	// A # outside a literal is the byte the scan masks with, so the scan
 	// could not tell it from a comment: the text after it would be skipped.
 	{"a # glued to the object", "fetch logs#| limit 1", Unscannable, "", ""},
@@ -162,11 +175,14 @@ func TestInsertFilter(t *testing.T) {
 				assert.Equal(t, tt.query, got.Query, "a refusal sends the input byte for byte")
 				assert.NotEmpty(t, got.Reason)
 				assert.Empty(t, got.Filter)
+				assert.Empty(t, got.Inserted)
 				return
 			}
 			assert.Equal(t, tt.want, got.Query)
 			assertOnlyInserted(t, tt.query, got.Query)
 			assert.Equal(t, testFilters[tt.object].Expr, got.Filter)
+			assert.Equal(t, 1, strings.Count(got.Query, got.Inserted), "the inserted run occurs once")
+			assert.Equal(t, tt.query, strings.Replace(got.Query, got.Inserted, "", 1), "and removing it leaves the input")
 			assert.Empty(t, got.Reason)
 		})
 	}
@@ -216,6 +232,11 @@ func TestInsertFilter_ScanBounded(t *testing.T) {
 		{"fetch logs, scanLimitGBytes: $limit", true, false},
 		{"fetch logs, samplingRatio: toLong(100)", true, false},
 		{"fetch logs, samplingRatio: 1e5", true, false},
+		{"fetch logs, scanLimitGBytes:-1 + 2", true, false},
+		{"fetch logs, scanLimitGBytes: -1 /* x */ * -1 | limit 5", true, false},
+		{"fetch logs, scanLimitGBytes: 0 + 1", true, false},
+		{"fetch logs, scanLimitGBytes: -1 /* x */ , from:now()-1h", false, true},
+		{"fetch logs, scanLimitGBytes: -1 // x\n", false, true},
 		// Each parameter is judged by itself.
 		{"fetch logs, scanLimitGBytes: -1, samplingRatio: 100", true, true},
 		{"fetch logs, myscanLimitGBytes: 10", false, false},
@@ -257,4 +278,16 @@ func TestInsertFilter_ObjectWithoutCondition(t *testing.T) {
 	assert.Equal(t, Subquery, InsertFilter("fetch logs | append [fetch spans]", filters).Outcome)
 	assert.Equal(t, "repo scope has no filter for spans (it filters logs)", InsertFilter("fetch spans", filters).Reason)
 	assert.Equal(t, UnsupportedObject, InsertFilter("fetch logs", nil).Outcome)
+}
+
+// A filter built by another caller may name no field, or an empty one. An
+// empty name is no field of the query: not a word of it, and not the empty
+// identifier.
+func TestInsertFilter_EmptyFieldName(t *testing.T) {
+	filters := map[string]Filter{"logs": {Expr: logsExpr, Fields: []string{"", "k8s.workload.name"}}}
+
+	assert.Equal(t, Applied, InsertFilter("fetch logs | filter x == 1", filters).Outcome)
+	assert.Equal(t, Applied, InsertFilter("fetch logs | filter `` == 1", filters).Outcome)
+	assert.Equal(t, UserFilter, InsertFilter(`fetch logs | filter k8s.workload.name == "x"`, filters).Outcome)
+	assert.NotPanics(t, func() { InsertFilter("fetch logs |filter", filters) })
 }

@@ -38,7 +38,11 @@ type Rewrite struct {
 	Outcome    Outcome
 	DataObject string
 	Filter     string
-	Reason     string // one sentence for a person, when not applied
+	// Inserted is the run of bytes added to the input, when applied: the
+	// filter stage with the line break that keeps it on a line of its own.
+	// Removed from Query it leaves the input.
+	Inserted string
+	Reason   string // one sentence for a person, when not applied
 	// ScanBounded reports that the fetch stage itself bounds what Grail
 	// scans: a scanLimitGBytes above 0, a samplingRatio above 1, or either
 	// with a value that is not a plain number and so may be one. The
@@ -78,7 +82,7 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 	m, ok := Scan(query)
 	if !ok || m.singleQuote || m.typedMask {
 		return refuse(Unscannable, "",
-			"dtctl cannot read the query text safely (an unterminated string or comment, unbalanced brackets, a single quote, or a # outside a string)")
+			"dtctl cannot read the query text safely (an unterminated string or comment, unbalanced brackets, a single quote, a # outside a string, or a fourth quote right after a triple-quoted string)")
 	}
 	first := m.Segments[0]
 	object, ok := leadingFetch(m.Code[:first.End])
@@ -115,6 +119,7 @@ func InsertFilter(query string, filters map[string]Filter) Rewrite {
 		Outcome:         Applied,
 		DataObject:      object,
 		Filter:          f.Expr,
+		Inserted:        insert,
 		ScanBounded:     limit == scanBound || sampling == scanBound,
 		ScanLimitLifted: limit == scanLifted,
 	}
@@ -201,19 +206,46 @@ func asciiLower(s string) string {
 
 // userFilterField returns the first of fields that a filtering stage names,
 // bare or as a backtick identifier.
+//
+// A name inside square brackets is not the stage's: there it is a field of a
+// subquery's records or an index into another field, and neither is a
+// condition on the fetched record. Taking it for one would drop the scope
+// for a filter the user never wrote. An empty name in fields is no field.
 func userFilterField(q string, m Masked, fields []string) (field string, found bool) {
 	for _, seg := range m.Segments {
 		if !filteringCommands[asciiLower(seg.Command)] {
 			continue
 		}
-		code := m.Code[seg.Start:seg.End]
+		code := outsideSquareBrackets(m.Code[seg.Start:seg.End])
 		for _, f := range fields {
+			if f == "" {
+				continue
+			}
 			if containsWholeWord(code, f) || hasBacktickName(q[seg.Start:seg.End], code, f) {
 				return f, true
 			}
 		}
 	}
 	return "", false
+}
+
+// outsideSquareBrackets returns a masked stage with everything between a [
+// and its ] blanked, at any nesting, so offsets stay offsets. Scan has
+// already balanced the brackets.
+func outsideSquareBrackets(code string) string {
+	out := []byte(code)
+	square := 0
+	for i, c := range out {
+		switch {
+		case c == '[':
+			square++
+		case c == ']':
+			square--
+		case square > 0:
+			out[i] = ' '
+		}
+	}
+	return string(out)
 }
 
 // hasBacktickName reports whether a `…` identifier in text spells name.
@@ -295,8 +327,12 @@ func scanParameter(stage, param string, neutral float64) scanEffect {
 		value := stage[skipSpaceAndComments(stage, colon+1):]
 		number := numberRe.FindString(value)
 		n, err := strconv.ParseFloat(number, 64)
-		switch rest := value[len(number):]; {
-		case err != nil || (rest != "" && isNameByte(rest[0])):
+		// The number is the whole value only when the parameter ends after
+		// it: anything else before the next comma is an expression (-1 + 2).
+		rest := value[len(number):]
+		rest = rest[skipSpaceAndComments(rest, 0):]
+		switch {
+		case err != nil || (rest != "" && rest[0] != ','):
 			return scanBound
 		case n < 0:
 			return scanLifted

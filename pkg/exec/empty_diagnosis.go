@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dynatrace/dtctl/pkg/dql"
 	"github.com/Dynatrace/dtctl/pkg/output"
 	"github.com/Dynatrace/dtctl/pkg/suggest"
 )
@@ -124,8 +125,8 @@ func probeIsPartial(r *DQLQueryResponse) bool {
 // that occur in none of the sampled records.
 //
 // For a caller that sent a rewritten text (opts.TypedQuery), the sample is
-// taken where the query ran: under the stages the caller inserted after
-// fetch, and with the filter segments it sent. A field absent from the whole
+// taken where the query ran: under the stage the caller inserted after
+// fetch (insertedHead), and with the filter segments it sent. A field absent from the whole
 // data object may be present on every record the query could return, and the
 // other way round.
 func diagnoseFields(ctx context.Context, probe probeFunc, query, sent, object string, fields []string, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
@@ -140,8 +141,11 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, sent, object st
 	probeOpts.DefaultTimeframeEnd = opts.DefaultTimeframeEnd
 	if opts.TypedQuery != "" {
 		probeOpts.Segments = opts.Segments
-		if sentStages := splitStages(sent); len(sentStages) > len(stages) {
-			head = strings.Join(sentStages[:1+len(sentStages)-len(stages)], " | ")
+		if sent != query {
+			var ok bool
+			if head, ok = insertedHead(query, sent); !ok {
+				return nil, nil
+			}
 			sampled += " and the stage inserted after it"
 		}
 	}
@@ -193,6 +197,43 @@ func diagnoseFields(ctx context.Context, probe probeFunc, query, sent, object st
 	return reason, suggestions
 }
 
+// scanLimitParameter is the fetch parameter that sets a query's own scan
+// limit, in lower case.
+const scanLimitParameter = "scanlimitgbytes"
+
+// insertedHead returns the head of the sample for a query its caller
+// rewrote: sent up to the end of the one stage inserted after typed's fetch
+// stage. ok is false, and no sample is taken, when
+//
+//   - sent is not typed plus exactly that stage, as dql.Scan reads both.
+//     splitStages cannot say: it does not know a block comment, and a head
+//     that ends before the inserted stage samples outside the scope while
+//     the evidence says inside;
+//   - the fetch stage sets its own scan limit. The head is copied into the
+//     probe, where that parameter replaces the probe's 1 GB default, and the
+//     sample filters before its limit, so it reads until enough records match
+//     instead of stopping at the first ones.
+func insertedHead(typed, sent string) (head string, ok bool) {
+	before, scanned := dql.Scan(typed)
+	after, scannedSent := dql.Scan(sent)
+	if !scanned || !scannedSent || len(after.Segments) != len(before.Segments)+1 {
+		return "", false
+	}
+	at, added := before.Segments[0].End, len(sent)-len(typed)
+	if added <= 0 || sent[:at] != typed[:at] || sent[at+added:] != typed[at:] {
+		return "", false
+	}
+	// The added run is one stage: white space at most, then its pipe.
+	run := sent[at : at+added]
+	if after.Segments[0].End != at+len(run)-len(strings.TrimLeft(run, " \t\r\n")) {
+		return "", false
+	}
+	if strings.Contains(strings.ToLower(after.Code[:after.Segments[0].End]), scanLimitParameter) {
+		return "", false
+	}
+	return strings.TrimRight(sent[:at+added], " \t\r\n"), true
+}
+
 // queriedMetricKeys returns the metric keys Grail reports for a timeseries
 // query, in order and without duplicates.
 func queriedMetricKeys(result *DQLQueryResponse) []string {
@@ -212,7 +253,9 @@ func queriedMetricKeys(result *DQLQueryResponse) []string {
 
 // diagnoseMetricKeys lists the metric keys with series in the query window
 // (clamped to its last emptyProbeMetricWindow) and reports queried keys that
-// are not among them.
+// are not among them. For a caller that changed the request
+// (opts.TypedQuery) the listing carries the filter segments the query was
+// sent with, so a near match is a key the query could have returned.
 func diagnoseMetricKeys(ctx context.Context, probe probeFunc, keys []string, result *DQLQueryResponse, opts DQLExecuteOptions) (*output.EmptyReason, []string) {
 	meta := result.GetMetadata()
 	if meta == nil || meta.AnalysisTimeframe == nil {
@@ -232,6 +275,10 @@ func diagnoseMetricKeys(ctx context.Context, probe probeFunc, keys []string, res
 	probeOpts.MaxResultRecords = emptyProbeMaxMetricKeys
 	probeOpts.DefaultTimeframeStart = from
 	probeOpts.DefaultTimeframeEnd = to
+	if opts.TypedQuery != "" {
+		// As in diagnoseFields: the listing is taken where the query ran.
+		probeOpts.Segments = opts.Segments
+	}
 	resp, err := probe(ctx, "metrics | summarize n = count(), by:{metric.key} | fields metric.key", probeOpts)
 	if err != nil || resp == nil || probeIsPartial(resp) {
 		return nil, nil

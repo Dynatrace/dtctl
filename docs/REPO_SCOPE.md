@@ -1,7 +1,7 @@
 # Repo Scope Guide
 
-> **Experimental:** the `repo-scope` commands, `--repo-scope`/`--no-repo-scope` on `query` and
-> `verify query`, `--repo-scope` on `wait query`, and the breakpoint commands that read a scope may change in any release.
+> **Experimental:** the `repo-scope` commands, `--repo-scope`/`--no-repo-scope` on `query`,
+> `--repo-scope` on `verify query` and `wait query`, and the breakpoint commands that read a scope may change in any release.
 > A context with `min-stability: stable` withholds them and runs every query as typed; exceptions for both flags
 > (`'query --repo-scope'`, `'query --no-repo-scope'`) bring default scoping back. See [STABILITY.md](STABILITY.md#choosing-what-this-environment-accepts).
 
@@ -11,9 +11,9 @@ This guide explains how to link a git repository to the Dynatrace entities that 
 
 A **repo scope** is a data-only file at the repository root, `.dtctl-repo-scope.yaml`, committed like code. For each Dynatrace environment it names the Kubernetes workloads, service names, process groups and services that run the repository's code. Inside a linked repository:
 
-- `dtctl query` and `dtctl verify query` narrow `fetch logs` and `fetch spans` to those entities by default, and say so on stderr
+- `dtctl query` narrows `fetch logs` and `fetch spans` to those entities by default, and says so on stderr
 - `--no-repo-scope` runs one query exactly as typed; `DTCTL_NO_REPO_SCOPE=1` does it for a whole shell or CI job
-- `dtctl wait query` is scoped only when you name the entry (`--repo-scope <name>`): its answer is an exit code, read where nobody reads stderr. Without the name it runs as typed and says in one line that an entry covers the directory
+- `dtctl wait query` and `dtctl verify query` are scoped only when you name the entry (`--repo-scope <name>`): their answers are read by programs, an exit code where nobody reads stderr, a canonical text that is written back to a file. Without the name they run as typed and say in one line that an entry covers the directory
 - `--repo-scope <name>` picks one entry where several exist, as in a monorepo
 
 The commands that manage the file:
@@ -213,7 +213,7 @@ When a scoped query returns no records, a second line says so, `0 records under 
 
 ### What a scope costs
 
-A scope narrows the rows a query returns, not what Grail reads. Its `==` filter right after `fetch` helps the scan, but on a busy environment a day of logs is far more than the cap, scoped or not. So when nothing bounds the scan (no `scanLimitGBytes:` or `samplingRatio:` in the `fetch`, and no positive `--default-scan-limit-gbytes` or `query-limits` in the context), the scope line says so before the query is sent, as above. With a scan limit of `-1`, in the `fetch` or as the flag, it says instead that no scan limit applies at all. That is advice. A scoped query that the cap then stops gets one line afterwards, whatever was said before; `wait query` prints either line once:
+A scope narrows the rows a query returns, not what Grail reads. Its `==` filter right after `fetch` helps the scan, but on a busy environment a day of logs is far more than the cap, scoped or not. So when nothing bounds the scan (no `scanLimitGBytes:` or `samplingRatio:` in the `fetch`, and no positive `--default-scan-limit-gbytes` or `query-limits` in the context), the scope line says so before the query is sent, as above. With `scanLimitGBytes: -1` in the `fetch` it says instead that no scan limit applies at all. A negative `--default-scan-limit-gbytes` lifts nothing: only a positive value is sent, so the environment's default cap stands. That is advice. A scoped query that the cap then stops gets one line afterwards, whatever was said before; `wait query` prints either line once:
 
 ```text
 repo scope checkout already filters early with ==, and the scan still hit its cap; scan less another way the scan-limit hint lists
@@ -223,11 +223,13 @@ The scope is applied only where dtctl is sure of the result. The query runs exac
 
 - it does not start with `fetch logs` or `fetch spans`
 - the entry binds nothing that data object is filtered by (an entry with only `--service` cannot filter logs)
-- a `filter` or `filterOut` stage already compares a field the scope filters on: your own filter wins. Grouping or projecting by such a field (`summarize … by:`, `fields`) is not an override
+- a `filter` or `filterOut` stage already compares a field the scope filters on: your own filter wins. Grouping or projecting by such a field (`summarize … by:`, `fields`) is not an override, and neither is naming it inside square brackets, in a subquery or as an index
 - the data object is fetched again inside a subquery (`append`, `join`, `lookup`), which the inserted filter cannot reach
-- dtctl cannot read the text safely: an unterminated string or comment, unbalanced brackets, a single quote, or a `#` outside a string or comment
+- dtctl cannot read the text safely: an unterminated string or comment, unbalanced brackets, a single quote, a `#` outside a string or comment, or a fourth quote right after a triple-quoted string (`"""a""""`)
 
 With `--repo-scope <name>` each of these is an error instead, and nothing is sent: you asked for that entry's rows. To run the query as typed from there, replace `--repo-scope <name>` with `--no-repo-scope`, which is what the error advises: the two flags exclude each other, and dropping the name alone applies the entry that covers the directory. The exception is your own filter on a scoped field, which still wins under a name too: that query succeeds, runs as typed with your filter and no inserted one, and the warning says so.
+
+`verify query --repo-scope <name>` verifies the scoped text, so `--canonical` then returns the canonical form of the query with the filter inserted, and positions in its diagnostics count in that text. Without the name it verifies what you typed, as it does outside a linked repository. To drop the scope from a named `verify query` or `wait query`, drop the flag: they have no `--no-repo-scope`.
 
 `dtctl exec dql` is the raw passthrough and is never scoped.
 
@@ -249,10 +251,10 @@ applying repo scope checkout to fetch logs: (k8s.namespace.name == "payments" an
 - **Both must hold.** The bindings are alternatives among themselves; the filter they render and every segment narrow the query together. What neither reaches is under [Limits](#limits).
 - **Segments alone.** An entry may hold only segments (`dtctl repo-scope set platform --segment Ab3dEf9hIjk`). It inserts no filter and applies to every query, `timeseries` and events included, which bindings do not reach.
 - **Where the filter cannot go.** When the filter cannot be inserted for one of the reasons above, the entry's segments are still sent, and a warning says which half applied. Such a query is narrower than the one you typed and wider than the entry, so in agent mode it is reported with `applied: false` and the reason the filter was refused, with the segments that were sent listed.
-- **With your own.** `--segment` and `--segments-file` are sent as well. A segment you name that the entry also lists is sent once, with your variables, and the scope line then lists only the segments the entry added. To give an entry's segment other variables for one query, name it: `--segment "Ab3dEf9hIjk?environment=staging"` (`--segment-var` works only on a segment you gave with `--segment`). A query takes ten segments; more than that, yours and the entry's together, is an error.
+- **With your own.** `--segment` and `--segments-file` are sent as well. A segment you name that the entry also lists is sent once, with your variables, and the scope line then lists only the segments the entry added; in agent mode the scope is then reported as not applied in full (`user_segment`), since that segment went out as typed and not as committed. To give an entry's segment other variables for one query, name it: `--segment "Ab3dEf9hIjk?environment=staging"`, or `--segment Ab3dEf9hIjk --segment-var "Ab3dEf9hIjk:environment=staging"` for a value that holds `&` or `,` (`--segment-var` works only on a segment you gave with `--segment` or `--segments-file`). A query takes ten segments; more than that, yours and the entry's together, is an error.
 - **A segment that is gone.** Before sending, dtctl reads each segment the entry references. If one was deleted, is not shared with you, or your token cannot read segments (`storage:filter-segments:read`), the query runs exactly as typed, without the filter either, and a warning names the segment. With `--repo-scope <name>` it is an error, which covers every scoped `wait query`, and `query --live` fails as well rather than refresh over the whole environment. A read that fails for any other reason (a server error, a rate limit, a timeout) is always an error and nothing is sent: it says nothing about the segment, so retry, or pass `--no-repo-scope`.
 - **Variables.** The entry has to give a value for every variable the segment requires. dtctl does not check that before sending: the platform fails the query, and the error names the segment, the variable and the entry, and says to give the variable a value in `.dtctl-repo-scope.yaml` or pass `--no-repo-scope`. A segment can also need a variable that only some data can supply. It then fails other queries run in the repository, an entity query for example, with an error that names the entry in the same way; remove that segment from the entry, or give it an entry of its own under a narrower `path`. `wait query` ends on either error at the first attempt, as on any query the platform refuses for good, and prints it with the text that was sent.
-- **Commands.** `query` sends the segments, and so does `wait query` under `--repo-scope <name>`. `verify query` checks the query text only: it neither reads nor sends them, and says so, so a segment that cannot be read shows on `query`, not there. `repo-scope describe` lists them and says that they are sent where no filter is inserted. Breakpoints are not affected: see [Live Debugger](#4-live-debugger).
+- **Commands.** `query` sends the segments, and so does `wait query` under `--repo-scope <name>`. `verify query --repo-scope <name>` checks the query text only: it neither reads nor sends them, and says so, so a segment that cannot be read shows on `query`, not there. `repo-scope describe` lists them and says that they are sent where no filter is inserted. Breakpoints are not affected: see [Live Debugger](#4-live-debugger).
 
 ### Check your scope
 

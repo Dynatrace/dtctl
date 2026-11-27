@@ -180,6 +180,21 @@ func TestSuggest_HabitRewrites(t *testing.T) {
 			want:  "fetch logs | fieldsAdd x = 1 | limit 1",
 			match: "command-synonym",
 		},
+		{
+			// A blank stage has no command word to rewrite; the others are.
+			name: "head before a blank last stage",
+			err: Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+				Query: "fetch logs | head 1 | ", Span: span(14, 17)},
+			want:  "fetch logs | limit 1 | ",
+			match: "command-synonym",
+		},
+		{
+			name: "head between a triple-quoted string and a blank last stage",
+			err: Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+				Query: `fetch logs | fieldsAdd note = """a"b""" | head 1 |  `, Span: span(43, 46)},
+			want:  `fetch logs | fieldsAdd note = """a"b""" | limit 1 |  `,
+			match: "command-synonym",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,6 +239,10 @@ func TestSuggest_HabitsConservative(t *testing.T) {
 			Query: "fetch logs | count by log.source", Span: span(14, 18)}},
 		{"an unknown command with no DQL synonym", Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"groupby"},
 			Query: "fetch logs | groupby log.source", Span: span(14, 20)}},
+		// The scan reads a # as masked text, so the command it reports for
+		// the last stage does not start where the stage's text does.
+		{"a # typed before a later command word", Error{Type: "UNKNOWN_COMMAND", Arguments: []string{"head"},
+			Query: "fetch logs | head 1 | #where x == 1", Span: span(14, 17)}},
 		{"unterminated single quote", Error{Type: "PARSE_ERROR_SINGLE_QUOTES",
 			Query: "fetch logs | filter a == 'x", Span: span(26, 27)}},
 	}

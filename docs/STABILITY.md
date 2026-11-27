@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 29 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 1008
+- entries below (commands + flags): 1007
 
 ## Surface
 
@@ -1196,7 +1196,6 @@ verify query                         stable
   --fail-on-warn                     stable
   --file                             stable
   --locale                           stable
-  --no-repo-scope                    experimental  since 0.48.0  (declared)
   --repo-scope                       experimental  since 0.48.0  (declared)
   --set                              stable
   --timezone                         stable

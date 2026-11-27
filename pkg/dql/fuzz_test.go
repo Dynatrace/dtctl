@@ -85,6 +85,9 @@ func FuzzScan(f *testing.F) {
 	for _, tt := range insertFilterTests {
 		f.Add(tt.query)
 	}
+	for _, q := range []string{`"""a""""`, `""""a"""`, `""""""`, `"""""""`, `"""a"""" """"b"""`} {
+		f.Add(q)
+	}
 	f.Fuzz(func(t *testing.T, query string) {
 		m, ok := Scan(query)
 		if !ok {
@@ -121,6 +124,9 @@ func FuzzUngroupedCount(f *testing.F) {
 		"fetch logs\n| summarize c = count() // every record\n",
 		"fetch logs | summarize c = count(), by:{host}",
 		"fetch logs | summarize `my count` = count()",
+		"fetch logs | summarize total = count(), by /* note */ : {host}",
+		"fetch logs | summarize total = /* note */ count()",
+		`fetch logs | summarize total = count(), note = """a""""`,
 	} {
 		f.Add(q)
 	}
@@ -135,7 +141,34 @@ func FuzzUngroupedCount(f *testing.F) {
 	})
 }
 
-// FuzzQuote: whatever the value, the literal is one string on one line.
+// unquote reads a "…" string the way DQL does for the escapes Quote writes.
+// ok is false for anything else: a missing quote, an unescaped quote inside,
+// or an escape Quote never produces.
+func unquote(literal string) (value string, ok bool) {
+	if len(literal) < 2 || literal[0] != '"' || literal[len(literal)-1] != '"' {
+		return "", false
+	}
+	escapes := map[byte]byte{'\\': '\\', '"': '"', 'n': '\n', 'r': '\r', 't': '\t'}
+	var b strings.Builder
+	for body := literal[1 : len(literal)-1]; body != ""; body = body[1:] {
+		switch body[0] {
+		case '"':
+			return "", false
+		case '\\':
+			if len(body) < 2 || escapes[body[1]] == 0 {
+				return "", false
+			}
+			b.WriteByte(escapes[body[1]])
+			body = body[1:]
+		default:
+			b.WriteByte(body[0])
+		}
+	}
+	return b.String(), true
+}
+
+// FuzzQuote: whatever the value, the literal is one string on one line, and
+// reading it back gives the value.
 func FuzzQuote(f *testing.F) {
 	for _, v := range []string{"checkout", `say "hi"`, `C:\path`, "line\nbreak", `\"`, `""`, "✓"} {
 		f.Add(v)
@@ -148,6 +181,9 @@ func FuzzQuote(f *testing.F) {
 		}
 		if strings.ContainsAny(got, "\n\r") {
 			t.Fatalf("Quote(%q) = %q spans lines", v, got)
+		}
+		if back, ok := unquote(got); !ok || back != v {
+			t.Fatalf("Quote(%q) = %q reads back as %q (ok %v)", v, got, back, ok)
 		}
 	})
 }

@@ -303,13 +303,14 @@ and `note` says so, because a count over 2h reads exactly like a count over
 
 Inside a git repository linked to the entities that run its code by a
 `.dtctl-repo-scope.yaml` at its root (see `dtctl repo-scope --help`),
-`dtctl query` and `verify query` narrow `fetch logs` and
+`dtctl query` narrows `fetch logs` and
 `fetch spans` to the entry covering the working directory, by inserting one
-`| filter (...)` after the `fetch` stage. `wait query` does the same only
-under `--repo-scope <name>`: its answer is an exit code, so it applies no
-scope it was not asked for, and without the name it prints one line on stderr
-when an entry covers the directory (`repo scope <name> covers this directory
-and is not applied: ...`). `dtctl query`'s envelope says what was applied;
+`| filter (...)` after the `fetch` stage. `wait query` and `verify query` do
+the same only under `--repo-scope <name>`: their answers are read by programs
+(an exit code, a canonical text, positions), so they apply no scope they were
+not asked for, and without the name they print one line on stderr when an
+entry covers the directory (`repo scope <name> covers this directory and is
+not applied: ...`). `dtctl query`'s envelope says what was applied;
 `wait query` and `verify query` have no agent envelope, and report the scope
 only in the stderr line every scoped run prints:
 
@@ -329,13 +330,17 @@ records do not carry looks exactly like a quiet service. One suggestion says
 when nothing bounds an applied scope's scan, or, for a scan the limit
 stopped, points at the executor's scan-limit advice.
 
-`applied: true` means everything the entry holds went out: its filter, and
-its filter segments when it references any. `applied: false` means the scope
-was not applied in full, and `code` and `reason` say why. The query text was
-then sent exactly as typed, and it ran unscoped unless `segments` is there:
-an entry whose filter was refused still sends its filter segments, which
-`segments` lists and `reason` says, and it is not reported as applied because
-the rows are wider than the entry says.
+`applied: true` means everything the entry holds went out as the entry holds
+it: its filter, and its filter segments when it references any. `applied:
+false` means the scope was not applied in full, and `code` and `reason` say
+why. `filter` is there only when the filter was inserted; without it the
+query text was sent exactly as typed, and it ran unscoped unless `segments`
+is there. An entry whose filter was refused still sends its filter segments,
+which `segments` lists and `reason` says, and it is not reported as applied
+because the rows are wider than the entry says. Neither is an entry one of
+whose segments `--segment` or `--segments-file` also gave (`user_segment`):
+that segment went out with the variables typed, not the ones committed, so
+`filter` and `segments` list what of the entry was still sent.
 
 | Code | The scope was not applied because |
 |---|---|
@@ -344,12 +349,12 @@ the rows are wider than the entry says.
 | `no_binding` | the entry binds nothing that data object is filtered by; `reason` says which binding to add |
 | `user_filter` | a `filter`/`filterOut` stage compares a field the scope filters on, and the query's own filter wins |
 | `subquery` | the data object is fetched again inside `[...]`, which the scope cannot reach (a subquery on another data object, or literal `data` rows, does not refuse the scope and is not narrowed by it) |
-| `unscannable` | dtctl cannot read the text safely (an unterminated string or comment, unbalanced brackets, a single quote, a `#` outside a string) |
+| `unscannable` | dtctl cannot read the text safely (an unterminated string or comment, unbalanced brackets, a single quote, a `#` outside a string, a fourth quote right after a triple-quoted string) |
 | `no_entry` | no entry covers the working directory; pick one with `--repo-scope <name>` |
 | `ambiguous_entry` | several entries cover the working directory as closely; `reason` names them; pick one with `--repo-scope <name>` |
 | `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
 | `segment_unavailable` | a filter segment the entry references could not be read (deleted, not shared with you, or the token lacks `storage:filter-segments:read`); `reason` names it |
-| `user_segment` | the entry references only filter segments, and `--segment` gave every one of them: those were sent and the entry added nothing |
+| `user_segment` | the command line gave a filter segment the entry references, and that one was sent as typed in place of the entry's; `reason` names it and says what of the entry was still sent (nothing, for an entry that references only segments when every one was given) |
 | `segments_not_sent` | the entry references only filter segments, and the command sends none (`verify query` checks the query text only) |
 
 An entry may also reference existing filter segments, which the query then
@@ -371,8 +376,9 @@ file says, so `applied` is false: `code` is the refusal's (one of the codes
 above), `filter` is absent, `reason` ends with `the entry's filter segments
 were sent`, and `segments` lists them. A segment the
 command line also gives (`--segment`) is the caller's: it is sent with the
-caller's variables and is not listed under `segments`. `wait query` sends
-the segments too; `verify query` does not, and says so on stderr.
+caller's variables and is not listed under `segments`. A named `wait query`
+sends the segments too; a named `verify query` does not, and says so on
+stderr.
 
 When the scope file holds document keys this dtctl does not know (a typo, or a
 newer dtctl's), the entry still applies and `reason` names the keys. An unknown
@@ -397,11 +403,15 @@ and nothing is sent: the message names the code (`not_fetch`,
 `unsupported_object`, `no_binding`, `subquery` or `unscannable`) and the
 reason. `user_filter` is not an error: the query runs as typed, with
 `applied: false`, because the query's own filter on a scoped field is what was
-asked for. A segment the named entry references that cannot be read is a
+asked for. Nor is `verify query --repo-scope <name>` for an entry that holds
+only filter segments: it sends none, so it verifies the text as typed, exits
+by the verdict and says on stderr that the segments were not part of it
+(`segments_not_sent`). A segment the named entry references that cannot be read is a
 `validation_error` as well, and more segments than a query takes (ten, the
 entry's and `--segment`'s together) is an error in every case. A scoped query that fails keeps the query's own error code and
 position, which points into the text that was sent; `suggestions` shows that
-text and the `--no-repo-scope` retry.
+text and the `--no-repo-scope` retry, and a runnable repair among them is of
+the query as typed, with `--repo-scope <name>` when the run named one.
 
 `dtctl repo-scope discover` returns a list of reports as `result`, one per
 unit: one report in most repositories, and one per deployable from a

@@ -136,39 +136,6 @@ Examples:
 			quiet, _ := cmd.Flags().GetBool("quiet")
 			verbose, _ := cmd.Flags().GetBool("verbose")
 
-			// A scope is applied only when it is named. Without a name the
-			// wait is the one it always was, and says in one line when the
-			// directory's entry would have narrowed it.
-			scoped, err := applyRepoScope(cmd, cfg, query)
-			if err != nil {
-				return err
-			}
-			ctx := cmdContext(cmd)
-			if hint := repoScopeHint(cmd, cfg, query); hint != "" && !quiet {
-				output.FprintInfo(currentStderr(ctx), "%s", hint)
-			}
-			// --timeout bounds the whole wait, so for a scope that has
-			// segments to read the deadline starts before the reads. The
-			// waiter applies the same duration to this context, and the
-			// earlier deadline is the one that holds. A wait without such a
-			// scope keeps the waiter's deadline alone.
-			if timeout > 0 && scoped.readsSegments() {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, timeout)
-				defer cancel()
-			}
-			// Read once here, however often the wait polls.
-			if err := scoped.checkSegments(ctx, c); err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
-					if !quiet {
-						fmt.Fprintf(currentStderr(ctx), "Timeout reached before the first attempt: %v\n", err)
-					}
-					return &silentExitError{code: 1, reason: "wait: timeout"}
-				}
-				return err
-			}
-			segments := scoped.withSegments(nil)
-
 			// Build backoff config
 			backoffConfig := wait.BackoffConfig{
 				MinInterval:  minInterval,
@@ -187,6 +154,49 @@ Examples:
 			if err != nil {
 				return err
 			}
+
+			// The command line is checked by now: what follows reads the
+			// entry's segments from the environment.
+			//
+			// A scope is applied only when it is named. Without a name the
+			// wait is the one it always was, and says in one line when the
+			// directory's entry would have narrowed it. A quiet wait prints
+			// no such line, so it does not look for the entry either.
+			scoped, err := applyRepoScope(cmd, cfg, query)
+			if err != nil {
+				return err
+			}
+			invocation := cmdContext(cmd)
+			ctx := invocation
+			if !quiet {
+				if hint := repoScopeHint(cmd, cfg, query, true); hint != "" {
+					output.FprintInfo(currentStderr(ctx), "%s", hint)
+				}
+			}
+			// --timeout bounds the whole wait, so for a scope that has
+			// segments to read the deadline starts before the reads. The
+			// waiter applies the same duration to this context, and the
+			// earlier deadline is the one that holds. A wait without such a
+			// scope keeps the waiter's deadline alone.
+			if timeout > 0 && scoped.readsSegments() {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+			// Read once here, however often the wait polls.
+			if err := scoped.checkSegments(ctx, c); err != nil {
+				// Only the deadline set above is the wait's timeout. A read
+				// that ended on the client's own, or on the invocation's, is
+				// the failed read checkSegments says it is.
+				if invocation.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					if !quiet {
+						fmt.Fprintf(currentStderr(ctx), "Timeout reached before the first attempt: %v\n", err)
+					}
+					return &silentExitError{code: 1, reason: "wait: timeout"}
+				}
+				return err
+			}
+			segments := scoped.withSegments(nil)
 			scoped.announce(&queryLimits)
 			fetchTimeoutSeconds, _ := cmd.Flags().GetInt32("fetch-timeout-seconds")
 			defaultTimeframeStart, _ := cmd.Flags().GetString("default-timeframe-start")
@@ -244,8 +254,9 @@ Examples:
 			}
 
 			// A refused query is not an outcome of the condition. The waiter
-			// printed it, as the scope words it (ExplainError).
-			if result.Err == nil {
+			// printed it, as the scope words it (ExplainError). Neither is a
+			// wait that ended before its first attempt: nothing was compared.
+			if result.Err == nil && result.Attempts > 0 {
 				scoped.noticeWaitOutcome(result.Success, result.RecordCount)
 			}
 
@@ -299,7 +310,7 @@ Examples:
 	stability.MarkStable(c)
 	markFlagRequiredNonEmpty(c, "for")
 	addQueryLimitFlags(c)
-	addRepoScopeFlags(c, waitRepoScopeUsage, "")
+	addRepoScopeFlags(c, namedRepoScopeUsage, "")
 	rejectEmptyFlag(c, "file")
 	return c
 }

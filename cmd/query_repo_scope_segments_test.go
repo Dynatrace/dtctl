@@ -279,6 +279,34 @@ func TestQueryLive_SegmentUnavailable(t *testing.T) {
 	require.NotContains(t, stderr, "the query runs unscoped")
 }
 
+// Live mode that the caller may not run is refused before the scope reads or
+// says anything, as every other command line that cannot run is.
+func TestQueryLive_RefusedBeforeTheScopeActs(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
+	chdirTestRepo(t, segmentScope)
+
+	code, _, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--live"}, RunOptions{Capabilities: &Capabilities{HostWorkingDirectory: true}})
+	require.NotZero(t, code)
+	require.Contains(t, stderr, "live mode")
+	require.Empty(t, srv.requests())
+	require.NotContains(t, stderr, "repo scope")
+}
+
+// A live query the platform refuses is reported like a buffered one: with
+// the text the scope sent and the way to run it as typed.
+func TestQueryLive_ErrorWrapsScope(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusBadRequest,
+		`{"error":{"code":400,"message":"The parameter 'x' is not defined.","details":{"errorType":"PARSE_ERROR"}}}`))
+	chdirTestRepo(t, segmentScope)
+
+	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--live", "--agent"}, RunOptions{})
+	require.NotZero(t, code, stderr)
+	require.NotEmpty(t, srv.queries())
+	suggestions := strings.Join(agentError(t, stdout).Suggestions, "\n")
+	require.Contains(t, suggestions, "the text sent was: "+repoScopeScopedQuery)
+	require.Contains(t, suggestions, "--no-repo-scope")
+}
+
 // What is typed wins over what is committed: a segment the user also names
 // is sent once, with the user's variables. Together they cannot exceed what a
 // query takes, and that is an error rather than a silent choice.
@@ -298,7 +326,14 @@ func TestQueryRepoScope_SegmentsBesideTheUsers(t *testing.T) {
 	// entry lists: the overridden segment is the user's now, and it is not
 	// read a second time for the entry.
 	require.Contains(t, stderr, "applying repo scope checkout to fetch logs: "+checkoutLogsFilter+" with segments plain-1 (use --no-repo-scope to ignore it)")
-	require.Equal(t, []output.RepoScopeSegment{{ID: "plain-1"}}, repoScopeContext(t, stdout).Segments)
+	scope := repoScopeContext(t, stdout)
+	require.Equal(t, []output.RepoScopeSegment{{ID: "plain-1"}}, scope.Segments)
+	// The entry commits environment=production for that segment and the
+	// request carried staging, so the scope was not applied as the file says.
+	require.Equal(t, []any{false, "user_segment",
+		"segment Ab3dEf9hIjk is given on the command line, and what is given there is sent in place of the entry's; the entry's filter was inserted and its segments plain-1 were sent"},
+		[]any{scope.Applied, scope.Code, scope.Reason})
+	require.Equal(t, checkoutLogsFilter, scope.Filter)
 
 	// Eleven named, ten sent: a segment both name counts once.
 	fits := []string{"query", repoScopeTypedQuery, "--agent", "--segment", "plain-1"}
@@ -314,6 +349,10 @@ func TestQueryRepoScope_SegmentsBesideTheUsers(t *testing.T) {
 	_, sentSegments, found := strings.Cut(body, `"filterSegments"`)
 	require.True(t, found, body)
 	require.Equal(t, 10, strings.Count(sentSegments, `"id":`))
+	scope = repoScopeContext(t, stdout)
+	require.Equal(t, []any{false, "user_segment",
+		"segment plain-1 is given on the command line, and what is given there is sent in place of the entry's; the entry's filter was inserted and its segments Ab3dEf9hIjk?environment=production were sent"},
+		[]any{scope.Applied, scope.Code, scope.Reason})
 
 	args := []string{"query", repoScopeTypedQuery, "--agent"}
 	for _, id := range []string{"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"} {
@@ -359,16 +398,27 @@ func TestQueryRepoScope_SegmentVarForAnEntrysSegment(t *testing.T) {
 
 	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--segment-var", "Ab3dEf9hIjk:environment=staging"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Equal(t, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, pass --segment "Ab3dEf9hIjk?environment=staging"`,
+	require.Equal(t, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, name the segment too: add --segment "Ab3dEf9hIjk"`,
 		agentError(t, stdout).Message)
 	require.Empty(t, srv.requests(), "nothing is read or sent")
 	require.Empty(t, stderr)
+
+	// The advice, followed: a value that holds what --segment's own spelling
+	// splits on reaches the request whole.
+	code, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment-var", "Ab3dEf9hIjk:environment=a&b"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, stderr, `add --segment "Ab3dEf9hIjk"`)
+	code, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment-var", "Ab3dEf9hIjk:environment=a&b", "--segment", "Ab3dEf9hIjk"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	body, _ := srv.executed(t)
+	require.Contains(t, body, `{"id":"Ab3dEf9hIjk","variables":[{"name":"environment","values":["a\u0026b"]}]}`)
+	srv.reset()
 
 	// Still refused beside a --segment that names another segment.
 	srv.segments["other-2"] = http.StatusOK
 	code, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment", "other-2", "--segment-var", " Ab3dEf9hIjk : environment=staging"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Contains(t, stderr, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, pass --segment "Ab3dEf9hIjk?environment=staging"`)
+	require.Contains(t, stderr, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, name the segment too: add --segment "Ab3dEf9hIjk"`)
 	require.Empty(t, srv.queries())
 }
 
@@ -391,8 +441,8 @@ func TestQueryRepoScope_SegmentVarForASegmentGivenByName(t *testing.T) {
 }
 
 // wait query, under a named entry, sends its segments on every attempt and
-// reads them once. verify query checks the text alone, and says the segments are not
-// part of what it checked.
+// reads them once. verify query, under one, checks the text alone, and says
+// the segments are not part of what it checked.
 func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 	srv := segmentRecorder(t, answer(http.StatusOK, oneRecord))
 	chdirTestRepo(t, segmentScope)
@@ -405,27 +455,19 @@ func TestWaitQueryAndVerifyQuery_EntrySegments(t *testing.T) {
 	require.Contains(t, stderr, " with segments "+entrySegmentRefs+"; ")
 
 	srv = segmentRecorder(t, answer(http.StatusOK, `{"valid":true}`))
-	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery}, RunOptions{})
+	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery, "--repo-scope", "checkout"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.Equal(t, repoScopeScopedQuery, srv.first(t))
 	for _, r := range srv.requests() {
 		require.NotContains(t, r, "filter-segments", "verification reads no segment")
 		require.NotContains(t, r, "filterSegments")
 	}
-	require.True(t, strings.HasPrefix(stderr, repoScopeApplying+"\n"+
+	require.True(t, strings.HasPrefix(stderr, strings.TrimSuffix(repoScopeApplying, " (use --no-repo-scope to ignore it)")+"\n"+
 		"repo scope checkout: its segments "+entrySegmentRefs+" are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
 
 	// An entry that is only segments has nothing verify query applies.
-	repo := chdirTestRepo(t, segmentScope)
-	writeRepoFiles(t, repo, map[string]string{"tools/README.md": "tools\n"})
-	chdirSubdir(t, "tools")
-	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery}, RunOptions{})
-	require.Zero(t, code, stderr)
-	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
-	require.NotContains(t, stderr, "applying repo scope")
-
-	// Named, it is the same: verifying is not refused, and nothing says
-	// that a scope was applied.
+	// Named, verifying is not refused, and nothing says that a scope was
+	// applied.
 	code, _, stderr = runRepoScoped([]string{"verify", "query", repoScopeTypedQuery, "--repo-scope", "tools"}, RunOptions{})
 	require.Zero(t, code, stderr)
 	require.True(t, strings.HasPrefix(stderr, "repo scope tools: its segments plain-1 are neither read nor sent: verify query checks the query text only; query sends them\n"), stderr)
@@ -557,6 +599,35 @@ func TestQueryRepoScope_EmptyResultSampleStaysInScope(t *testing.T) {
 		require.Contains(t, post, sentSegments)
 	}
 	require.Contains(t, posts[1], filter+` | limit 100"`)
+
+	// A block comment that holds a pipe does not move the sample out of the
+	// scope: its head is cut where the scan placed the inserted stage.
+	const commented = `fetch logs, from:now()-1h /* | filter x */ | filter loglevl == "ERROR"`
+	srv = segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
+	code, _, stderr = runRepoScoped([]string{"query", commented, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	posts = nil
+	for _, r := range srv.requests() {
+		if strings.Contains(r, "/query:execute") {
+			posts = append(posts, r)
+		}
+	}
+	require.Len(t, posts, 2, "the query and its sample")
+	require.Contains(t, posts[1], `/* | filter x */ | `+filter+` | limit 100"`)
+	require.Contains(t, posts[1], sentSegments)
+
+	// A fetch stage with its own scan limit would carry it into the sample,
+	// over the sample's 1 GB cap, so a scoped query takes none.
+	srv = segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
+	code, _, stderr = runRepoScoped([]string{"query", `fetch logs, scanLimitGBytes:-1 | filter loglevl == "ERROR"`, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	posts = nil
+	for _, r := range srv.requests() {
+		if strings.Contains(r, "/query:execute") {
+			posts = append(posts, r)
+		}
+	}
+	require.Len(t, posts, 1, "the query alone")
 
 	// Unscoped, the sample is main's: the fetch stage alone, and no segment
 	// the query was given.

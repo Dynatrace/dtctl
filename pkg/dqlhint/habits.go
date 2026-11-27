@@ -153,8 +153,17 @@ func commandSynonym(c *queryContext) (hint, bool) {
 	}
 	var edits []edit
 	for _, seg := range c.segs {
+		if seg.Command == "" {
+			continue // a blank stage (a trailing pipe) has no word to rewrite
+		}
 		text := c.q[seg.Start:seg.End]
 		lead := len(text) - len(strings.TrimLeft(text, " \t\r\n"))
+		if !strings.HasPrefix(text[lead:], seg.Command) {
+			// The scan found the command word past something that is not
+			// white space, a typed # for one. Every offset below is measured
+			// from the word, so there is no repair to offer.
+			return hint{}, false
+		}
 		tail := trailingSpace.FindString(text)
 		body := strings.TrimSpace(text[lead+len(seg.Command) : len(text)-len(tail)])
 		var out string
