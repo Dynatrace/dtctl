@@ -107,6 +107,11 @@ func pyprojectName(text, file string) (token, bool) {
 		return token{}, false
 	}
 	name := cmp.Or(doc.Project.Name, doc.Tool.Poetry.Name)
+	// A string that is no name is not searched for either: it can be most
+	// of the file.
+	if len(variants(name)) == 0 {
+		return token{}, false
+	}
 	// The decoder keeps no positions, so the line is the first that assigns
 	// the name; none when the file spells the key another way.
 	line := 0
