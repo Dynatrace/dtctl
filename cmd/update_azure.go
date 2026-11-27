@@ -256,16 +256,16 @@ func init() {
 
 	updateAzureProviderCmd.AddCommand(updateAzureConnectionCmd)
 	updateAzureProviderCmd.AddCommand(updateAzureMonitoringConfigCmd)
-	// Every path through this command needs a flag the rename takes away
-	// (every one of --directory-id, --application-id and --client-secret), so at a stable floor it has no usable
-	// invocation left. Marking the command says that plainly instead of
-	// hiding the flags and then failing on a "required" flag help no
-	// longer lists.
-	// Every path through this command needs a flag the rename takes away
-	// (both --locations and --feature-sets), so at a stable floor it has no usable
-	// invocation left. Marking the command says that plainly instead of
-	// hiding the flags and then failing on a "required" flag help no
-	// longer lists.
+	// Every path through this command needs one of the kebab-case flags (every one of --directory-id, --application-id and --client-secret),
+	// which are new names in 0.48.0 and not yet proven stable (experimental):
+	// at a stable floor they would be hidden, leaving this command with no usable
+	// invocation. Marking the command says that plainly instead of hiding the
+	// flags and then failing on a "required" flag help no longer lists.
+	// Every path through this command needs one of the kebab-case flags (both --locations and --feature-sets),
+	// which are new names in 0.48.0 and not yet proven stable (experimental):
+	// at a stable floor they would be hidden, leaving this command with no usable
+	// invocation. Marking the command says that plainly instead of hiding the
+	// flags and then failing on a "required" flag help no longer lists.
 }
 
 // Declared stable: the invocation and output contract of this command is

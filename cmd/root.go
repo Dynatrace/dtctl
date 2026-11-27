@@ -430,7 +430,8 @@ func adviseFlag(cmd *cobra.Command, flag string) *suggest.FlagError {
 	}
 	if to, ok := renamedCloudFlag(cmd, flag); ok {
 		return &suggest.FlagError{Flag: flag,
-			Message: fmt.Sprintf("unknown flag: --%s (renamed to --%s)", flag, to)}
+			Message:    fmt.Sprintf("unknown flag: --%s (renamed to --%s)", flag, to),
+			Suggestion: &suggest.Suggestion{Value: to}}
 	}
 	return nil
 }
@@ -452,15 +453,23 @@ var renamedCloudFlags = map[string]string{
 }
 
 // renamedCloudFlag reports the kebab-case replacement for a removed cloud
-// flag. It only applies when the current command defines the replacement, so a
-// command that never took the flag (get aws monitoring --featureSets) keeps
-// cobra's plain error instead of a pointer to a flag it also rejects.
+// flag. It applies only below an aws, azure or gcp command (the same word on
+// `auth login` was never a cloud flag) and only when the command defines the
+// replacement, so a command that never took the flag (get aws monitoring
+// --featureSets) keeps cobra's plain error instead of a pointer to a flag it
+// also rejects.
 func renamedCloudFlag(cmd *cobra.Command, flag string) (string, bool) {
 	to, ok := renamedCloudFlags[strings.ToLower(flag)]
 	if !ok || cmd.Flags().Lookup(to) == nil {
 		return "", false
 	}
-	return to, true
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "aws", "azure", "gcp":
+			return to, true
+		}
+	}
+	return "", false
 }
 
 // verbSynonyms maps verbs agents guess from other CLIs to the dtctl verb that

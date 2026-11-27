@@ -20,5 +20,6 @@ const pre10Since = "0.39.0"
 // cloudFlagsKebabSince is the version in which the kebab-case cloud flags
 // (--role-arn, --feature-sets, --locations, --application-id, --directory-id,
 // --client-secret, --service-account-id) first shipped. They are new names, so
-// they cannot claim the 0.39.0 of the camelCase flags they replace.
+// they cannot claim the 0.39.0 of the camelCase flags they replace, and they
+// stay experimental until they have proven themselves (promotion: #809).
 const cloudFlagsKebabSince = "0.48.0"

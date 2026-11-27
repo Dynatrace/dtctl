@@ -95,10 +95,7 @@ Examples:
 	c.Flags().StringVar(&updateGCPConnectionServiceAccountID, "service-account-id", "", "Service account email to set")
 	stability.Mark(c, stability.Experimental, pre10Since)
 	stability.MarkFlag(c, "service-account-id", stability.Experimental, cloudFlagsKebabSince)
-	// Not MarkFlagRequired: --serviceaccountid sets the same value, and an
-	// invocation using only that spelling is valid. The command body reports
-	// both left out; an explicitly empty value is rejected at parse time.
-	rejectEmptyFlag(c, "service-account-id")
+	markFlagRequiredNonEmpty(c, "service-account-id")
 	return c
 }
 
@@ -201,11 +198,11 @@ Examples:
 	for _, name := range []string{"locations", "feature-sets"} {
 		rejectEmptyFlag(c, name)
 	}
-	// Every path through this command needs a flag the rename takes away
-	// (both --locations and --feature-sets), so at a stable floor it has
-	// no usable invocation left. Marking the command says that plainly instead
-	// of hiding the flags and then failing on a "required" flag help no longer
-	// lists.
+	// Every path through this command needs one of the kebab-case flags (both --locations and --feature-sets),
+	// which are new names in 0.48.0 and not yet proven stable (experimental):
+	// at a stable floor they would be hidden, leaving this command with no usable
+	// invocation. Marking the command says that plainly instead of hiding the
+	// flags and then failing on a "required" flag help no longer lists.
 	stability.Mark(c, stability.Experimental, pre10Since)
 	stability.MarkFlag(c, "locations", stability.Experimental, cloudFlagsKebabSince)
 	stability.MarkFlag(c, "feature-sets", stability.Experimental, cloudFlagsKebabSince)

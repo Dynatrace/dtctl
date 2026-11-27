@@ -25,9 +25,10 @@ type pre10Demotion struct {
 // is exactly why this list is a test: the mark has to be provably in effect,
 // not merely written down.
 var pre10Demotions = []pre10Demotion{
-	// breaking-changes/cloud-flags-kebab-case.md — every cloud flag becomes
-	// kebab-case and the spelling aliases (including the `aplicationID` typo)
-	// are removed.
+	// breaking-changes/cloud-flags-kebab-case.md — the cloud flags are the
+	// kebab-case names that first shipped in 0.48.0 (the camelCase names and
+	// the spelling aliases, including the `aplicationID` typo, are gone). They
+	// are new and not yet proven, so they are experimental, not stable.
 	{"create aws connection", "--role-arn", "cloud-flags-kebab-case"},
 	{"update aws connection", "--role-arn", "cloud-flags-kebab-case"},
 	{"enable aws monitoring", "--role-arn", "cloud-flags-kebab-case"},
@@ -255,7 +256,8 @@ func manifestFlagLevels(t *testing.T, manifest string) map[string]string {
 }
 
 // pre10DemotedCommands are the commands the audit demoted whole, because every
-// path through them requires a flag an accepted breaking change takes away.
+// path through them requires a flag that is experimental (an accepted breaking
+// change takes it away, or it is a new name not yet proven stable).
 //
 // A flag-level mark is the right tool when a usable stable invocation survives
 // it — `create azure connection --type federatedIdentityCredential` still works

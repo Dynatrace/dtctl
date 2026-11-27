@@ -50,3 +50,26 @@ func TestRenamedCloudFlagHintOnlyWhereReplacementExists(t *testing.T) {
 	require.Contains(t, stderr.String(), "unknown flag")
 	require.NotContains(t, stderr.String(), "renamed to")
 }
+
+// TestRenamedCloudFlagHintStaysOffNonCloudCommands: `auth login` never had
+// --clientSecret, so it must not be told the flag was renamed.
+func TestRenamedCloudFlagHintStaysOffNonCloudCommands(t *testing.T) {
+	isolatedConfig(t, "contexts: []\n")
+	var stderr bytes.Buffer
+	code := Run([]string{"auth", "login", "--clientSecret", "x", "--no-agent"}, RunOptions{Stderr: &stderr})
+	require.NotZero(t, code)
+	require.Contains(t, stderr.String(), "unknown flag")
+	require.NotContains(t, stderr.String(), "renamed to")
+}
+
+// TestRenamedCloudFlagHintIsStructuredInAgentMode: the agent envelope carries
+// the replacement as a suggestion, like the --format hint.
+func TestRenamedCloudFlagHintIsStructuredInAgentMode(t *testing.T) {
+	isolatedConfig(t, "contexts: []\n")
+	var stdout bytes.Buffer
+	code := Run([]string{"create", "aws", "connection", "--name", "c", "--roleArn", "x", "--agent"}, RunOptions{Stdout: &stdout})
+	require.NotZero(t, code)
+	require.Contains(t, stdout.String(), "unknown flag: --roleArn (renamed to --role-arn)")
+	require.Contains(t, stdout.String(), `"suggestions"`)
+	require.Contains(t, stdout.String(), "did you mean --role-arn?")
+}
