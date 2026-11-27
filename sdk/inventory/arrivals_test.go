@@ -2114,6 +2114,15 @@ func TestBiasBelowASecondIsNotPrinted(t *testing.T) {
 	}
 }
 
+// TestSubSecondBandNamesTheThresholdExactly: the sentence measures the age
+// from the threshold, so it may not round the threshold to the minute.
+func TestSubSecondBandNamesTheThresholdExactly(t *testing.T) {
+	got := sampledAmbiguousEvidence("logs", 5*time.Minute+31*time.Second+50*time.Millisecond, 93*time.Millisecond, 5*time.Minute+31*time.Second, 1000)
+	if !strings.Contains(got, "past the 5m31s stale threshold by less than a second") {
+		t.Errorf("evidence = %q", got)
+	}
+}
+
 // TestOneSampledRecordReadsAsOne: the evidence counts one record in the
 // singular, verb included.
 func TestOneSampledRecordReadsAsOne(t *testing.T) {

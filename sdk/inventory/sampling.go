@@ -253,11 +253,13 @@ func sampledZeroEvidence(object string, ratio int64, since string, scanLimitGB f
 //
 // A bias below a second is not printed as a duration, since it and the age's
 // distance from the threshold both round to nothing: the sentence says so in
-// words instead.
+// words instead. It names the threshold exactly, as roundDuration prints one
+// of a minute or more to the minute, and "less than a second past 6m0s" is
+// false of a record 5m31s old.
 func sampledAmbiguousEvidence(object string, age, bias, staleAfter time.Duration, ratio int64) string {
 	if bias < time.Second {
 		return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and the newest record it matched is past the %s stale threshold by less than a second — within the fraction of a second the sampling itself can shift last-seen, so live and stale cannot be told apart here; run it again, or raise --scan-limit-gbytes for an exact answer",
-			object, formatCount(ratio), roundDuration(staleAfter))
+			object, formatCount(ratio), staleAfter)
 	}
 	return fmt.Sprintf("not evaluated: %s had to be sampled at 1-in-%s to fit under the scan cap, and the newest record it matched is %s old against a %s stale threshold — within the ~%s the sampling itself can shift last-seen, so live and stale cannot be told apart here; raise --scan-limit-gbytes for an exact answer",
 		object, formatCount(ratio), roundDuration(age), roundDuration(staleAfter), roundDuration(bias))
