@@ -293,6 +293,25 @@ func TestDiscover_IndirectNamesDoNotAddUp(t *testing.T) {
 		assert.Equal(t, []string{"auth-proxy", "auth.proxy", "auth_proxy", "authproxy"}, p.Sent)
 		r := discoverOne(t, repo, "services/checkout", nil, workloadRow("payments", "checkout"))
 		assert.Equal(t, VerdictMatch, r.Verdict)
+
+		// Nor does an image place a manifest kept beside the units, or a
+		// workload name move one out of the unit it lies in.
+		repo["deploy/edge.yaml"] = file(deployment("edge-gateway", "acme/auth-proxy:1"))
+		repo["services/checkout/k8s/proxy.yaml"] = file(deployment("auth-proxy", "acme/edge-proxy:1"))
+		p, err = PlanDiscovery(repo, "services/auth-proxy", nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"auth-proxy", "auth.proxy", "auth_proxy", "authproxy"}, p.Sent)
+		for _, tok := range p.tokens {
+			assert.NotContains(t, tok.file, "services/checkout/", "%s %s", tok.kind, tok.value)
+		}
+	})
+	t.Run("a manifest without a name does not claim another", func(t *testing.T) {
+		patch := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  generateName: patch-\nspec:\n  template:\n    spec:\n      containers:\n" +
+			"        - name: app\n          env:\n            - name: OTEL_SERVICE_NAME\n              value: shared-redis\n"
+		repo := fstest.MapFS{"go.mod": checkoutModule, "deploy/patch.yaml": file(patch), "deploy/cache.yaml": file(deployment("shared-redis", "redis:7.2"))}
+		r := discoverOne(t, repo, ".", nil, workloadRow("infra", "shared-redis"))
+		assert.Equal(t, VerdictAmbiguous, r.Verdict)
+		assert.Equal(t, "named only by a manifest or chart that is not named like the unit", r.Candidates[0].Indirect)
 	})
 	for name, metadata := range map[string]string{
 		"a workload manifest without a name or an image": "  generateName: patch-\n",
