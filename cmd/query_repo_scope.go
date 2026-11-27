@@ -43,8 +43,9 @@ const (
 	// repoScopeSegmentUnavailable is an entry one of whose filter segments
 	// could not be read: the query runs as typed, without the filter either.
 	repoScopeSegmentUnavailable = "segment_unavailable"
-	// repoScopeUserSegment is an entry that references only segments, each
-	// of which the command line gives too: the scope sent nothing of its own.
+	// repoScopeUserSegment is an entry one of whose segments the command line
+	// gives too. That segment went out as typed, not as committed, so the
+	// scope was not applied as the file says, whatever else of it was.
 	repoScopeUserSegment = "user_segment"
 	// repoScopeSegmentsNotSent is an entry that references only segments,
 	// under a command that sends none: nothing of the scope was applied.
@@ -226,9 +227,9 @@ type repoScopedQuery struct {
 	// still to be sent; unsent says a command that sends none dropped them.
 	segments []reposcope.Segment
 	unsent   string
-	// overridden says the user named a segment the entry references, which
-	// is then theirs and no longer among segments.
-	overridden bool
+	// overridden are the segments of the entry the user named too. Each is
+	// then theirs and no longer among segments.
+	overridden []string
 	// userSegments are the ids of the segments the command line sent beside
 	// the entry's, for a failure that names none.
 	userSegments []string
@@ -336,38 +337,62 @@ func (q *repoScopedQuery) rewrite(res *reposcope.Status) (refused string) {
 }
 
 // settle derives what the envelope says from the two halves. The scope is
-// applied when everything the entry holds went out: its filter, and its
-// segments when it has any. An entry whose filter was refused is not applied
-// even though its segments are sent, because the rows are then wider than
-// the file says; it carries the refusal's code, and lists the segments.
+// applied when everything the entry holds went out as the entry holds it:
+// its filter, and its segments when it has any. An entry whose filter was
+// refused is not applied even though its segments are sent, because the rows
+// are then wider than the file says; it carries the refusal's code, and
+// lists the segments. Nor is an entry one of whose segments the command line
+// replaced: the variables sent for it are the user's, and the file's may
+// have been the narrower ones.
 func (q *repoScopedQuery) settle() {
 	s := q.scope
 	s.Segments = nil
 	for _, seg := range q.segments {
 		s.Segments = append(s.Segments, output.RepoScopeSegment{ID: seg.ID, Variables: seg.Variables})
 	}
-	s.Applied = q.filtered || (!q.bound && len(q.segments) > 0)
+	sent := q.filtered || (!q.bound && len(q.segments) > 0)
+	s.Applied = sent && len(q.overridden) == 0
 	switch {
 	case q.unavailable != "":
 		s.Code = repoScopeSegmentUnavailable
 		q.setReason(q.unavailable)
-	case !q.bound && !s.Applied && q.overridden:
+	case !sent && !q.bound && len(q.overridden) > 0:
 		s.Code = repoScopeUserSegment
 		q.setReason("every segment it references is given on the command line, and those are sent")
-	case !q.bound && !s.Applied:
+	case !sent && !q.bound:
 		// Only a command that sends no segments gets here (withoutSegments).
 		s.Code = repoScopeSegmentsNotSent
 		q.setReason("the entry references only filter segments, and verify query checks the query text only")
-	case q.filtered || !q.bound:
-		s.Code = string(dql.Applied)
-		q.setReason("")
-	case len(q.segments) > 0:
+	case !sent && len(q.segments) > 0:
 		s.Code = q.refusedCode
 		q.setReason(q.refusedReason + "; the entry's filter segments were sent")
-	default:
+	case !sent:
 		s.Code = q.refusedCode
 		q.setReason(q.refusedReason)
+	case len(q.overridden) > 0:
+		s.Code = repoScopeUserSegment
+		q.setReason(q.replacedReason())
+	default:
+		s.Code = string(dql.Applied)
+		q.setReason("")
 	}
+}
+
+// replacedReason says which segments of the entry the command line replaced,
+// and what of the entry went out all the same.
+func (q *repoScopedQuery) replacedReason() string {
+	which := "segment " + q.overridden[0] + " is"
+	if len(q.overridden) > 1 {
+		which = "segments " + strings.Join(q.overridden, ", ") + " are"
+	}
+	var rest []string
+	if q.filtered {
+		rest = append(rest, "the entry's filter was inserted")
+	}
+	if len(q.segments) > 0 {
+		rest = append(rest, "its segments "+q.segmentList()+" were sent")
+	}
+	return which + " given on the command line, and what is given there is sent in place of the entry's; " + strings.Join(rest, " and ")
 }
 
 // segmentList spells the entry's segments the way --segment takes them.
@@ -581,7 +606,7 @@ func (q *repoScopedQuery) yieldTo(user []exec.FilterSegmentRef) error {
 	for _, seg := range q.segments {
 		if slices.ContainsFunc(user, func(u exec.FilterSegmentRef) bool { return u.ID == seg.ID }) {
 			output.FprintInfo(q.stderr, "repo scope %s: segment %s is also given on the command line; its variables there are used", q.scope.Name, seg.ID)
-			q.overridden = true
+			q.overridden = append(q.overridden, seg.ID)
 			continue
 		}
 		kept = append(kept, seg)

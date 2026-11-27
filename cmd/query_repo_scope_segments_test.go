@@ -298,7 +298,14 @@ func TestQueryRepoScope_SegmentsBesideTheUsers(t *testing.T) {
 	// entry lists: the overridden segment is the user's now, and it is not
 	// read a second time for the entry.
 	require.Contains(t, stderr, "applying repo scope checkout to fetch logs: "+checkoutLogsFilter+" with segments plain-1 (use --no-repo-scope to ignore it)")
-	require.Equal(t, []output.RepoScopeSegment{{ID: "plain-1"}}, repoScopeContext(t, stdout).Segments)
+	scope := repoScopeContext(t, stdout)
+	require.Equal(t, []output.RepoScopeSegment{{ID: "plain-1"}}, scope.Segments)
+	// The entry commits environment=production for that segment and the
+	// request carried staging, so the scope was not applied as the file says.
+	require.Equal(t, []any{false, "user_segment",
+		"segment Ab3dEf9hIjk is given on the command line, and what is given there is sent in place of the entry's; the entry's filter was inserted and its segments plain-1 were sent"},
+		[]any{scope.Applied, scope.Code, scope.Reason})
+	require.Equal(t, checkoutLogsFilter, scope.Filter)
 
 	// Eleven named, ten sent: a segment both name counts once.
 	fits := []string{"query", repoScopeTypedQuery, "--agent", "--segment", "plain-1"}
@@ -314,6 +321,10 @@ func TestQueryRepoScope_SegmentsBesideTheUsers(t *testing.T) {
 	_, sentSegments, found := strings.Cut(body, `"filterSegments"`)
 	require.True(t, found, body)
 	require.Equal(t, 10, strings.Count(sentSegments, `"id":`))
+	scope = repoScopeContext(t, stdout)
+	require.Equal(t, []any{false, "user_segment",
+		"segment plain-1 is given on the command line, and what is given there is sent in place of the entry's; the entry's filter was inserted and its segments Ab3dEf9hIjk?environment=production were sent"},
+		[]any{scope.Applied, scope.Code, scope.Reason})
 
 	args := []string{"query", repoScopeTypedQuery, "--agent"}
 	for _, id := range []string{"u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"} {

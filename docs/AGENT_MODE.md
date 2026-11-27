@@ -329,13 +329,17 @@ records do not carry looks exactly like a quiet service. One suggestion says
 when nothing bounds an applied scope's scan, or, for a scan the limit
 stopped, points at the executor's scan-limit advice.
 
-`applied: true` means everything the entry holds went out: its filter, and
-its filter segments when it references any. `applied: false` means the scope
-was not applied in full, and `code` and `reason` say why. The query text was
-then sent exactly as typed, and it ran unscoped unless `segments` is there:
-an entry whose filter was refused still sends its filter segments, which
-`segments` lists and `reason` says, and it is not reported as applied because
-the rows are wider than the entry says.
+`applied: true` means everything the entry holds went out as the entry holds
+it: its filter, and its filter segments when it references any. `applied:
+false` means the scope was not applied in full, and `code` and `reason` say
+why. `filter` is there only when the filter was inserted; without it the
+query text was sent exactly as typed, and it ran unscoped unless `segments`
+is there. An entry whose filter was refused still sends its filter segments,
+which `segments` lists and `reason` says, and it is not reported as applied
+because the rows are wider than the entry says. Neither is an entry one of
+whose segments `--segment` or `--segments-file` also gave (`user_segment`):
+that segment went out with the variables typed, not the ones committed, so
+`filter` and `segments` list what of the entry was still sent.
 
 | Code | The scope was not applied because |
 |---|---|
@@ -349,7 +353,7 @@ the rows are wider than the entry says.
 | `ambiguous_entry` | several entries cover the working directory as closely; `reason` names them; pick one with `--repo-scope <name>` |
 | `invalid_file` | the scope file failed to load or validate; `reason` names the file and the field |
 | `segment_unavailable` | a filter segment the entry references could not be read (deleted, not shared with you, or the token lacks `storage:filter-segments:read`); `reason` names it |
-| `user_segment` | the entry references only filter segments, and `--segment` gave every one of them: those were sent and the entry added nothing |
+| `user_segment` | the command line gave a filter segment the entry references, and that one was sent as typed in place of the entry's; `reason` names it and says what of the entry was still sent (nothing, for an entry that references only segments when every one was given) |
 | `segments_not_sent` | the entry references only filter segments, and the command sends none (`verify query` checks the query text only) |
 
 An entry may also reference existing filter segments, which the query then
