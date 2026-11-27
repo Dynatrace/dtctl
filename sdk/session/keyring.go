@@ -138,7 +138,11 @@ func (ts *TokenStore) DeleteToken(name string) error {
 }
 
 // MigrateTokensToKeyring migrates tokens from config file to keyring
-// Returns the number of tokens migrated and any error
+// Returns the number of tokens migrated and any error.
+//
+// Tokens written as environment-variable references stay in the config file:
+// migrating one would freeze its current value into the keyring, or the
+// unexpanded literal when loaded without expansion.
 func MigrateTokensToKeyring(cfg *Config) (int, error) {
 	if !IsKeyringAvailable() {
 		return 0, fmt.Errorf("keyring not available")
@@ -150,6 +154,9 @@ func MigrateTokensToKeyring(cfg *Config) (int, error) {
 	for i, nt := range cfg.Tokens {
 		if nt.Token == "" {
 			continue // Already migrated or empty
+		}
+		if cfg.tokenFromEnvRef(nt.Name) {
+			continue // Resolved from the environment at runtime
 		}
 
 		// Store in keyring
@@ -167,10 +174,15 @@ func MigrateTokensToKeyring(cfg *Config) (int, error) {
 
 // GetTokenWithFallback tries to get a token from keyring first, then falls back to config
 func GetTokenWithFallback(cfg *Config, tokenRef string) (string, error) {
-	// Try keyring first
-	if IsKeyringAvailable() {
-		ts := NewTokenStore()
-		token, err := ts.GetToken(tokenRef)
+	return getTokenWithFallback(cfg, tokenRef, newOSKeyring())
+}
+
+func getTokenWithFallback(cfg *Config, tokenRef string, kr keyringBackend) (string, error) {
+	// Try keyring first, except for a ${VAR} reference: a keyring entry of
+	// that name can only be a stale value, so it resolves through the config
+	// (see Config.GetToken).
+	if kr.Available() && !cfg.tokenFromEnvRef(tokenRef) {
+		token, err := kr.Get(tokenRef)
 		if err == nil && token != "" {
 			return token, nil
 		}

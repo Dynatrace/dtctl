@@ -165,6 +165,15 @@ string. Management commands that rewrite the file must load with
 3. **Context overrides are session-local.** The `--context` flag and the `DTCTL_CONTEXT` env var override the current context in
    memory only. The sole way to persist a switch is `dtctl ctx <name>`
    (or `dtctl config use-context`).
+4. **A `${VAR}` reference is written back as written.** `LoadFrom` resolves
+   references in memory only. `SaveTo` writes the reference back for every
+   value that is unchanged since load, including one whose variable was unset,
+   so a load-modify-save cycle never puts a resolved secret on disk or blanks a
+   credential (#697). A value the command changed is written as changed. A
+   token that is a reference stays in the config file: `set-credentials` does
+   not put it in the keyring and `migrate-tokens` skips it, because the keyring
+   stores the literal and nothing expands it there. `config view` shows the
+   reference, not the resolved token.
 
 ## Environment variable overrides
 
