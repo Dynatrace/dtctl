@@ -538,6 +538,11 @@ func serviceNameProblem(name string) string {
 		return fmt.Sprintf("is longer than %d characters", maxServiceNameRunes)
 	case strings.ContainsAny(name, `"\`):
 		return `must not contain " or \`
+	case strings.TrimSpace(name) != name:
+		// A record's service.name is compared whole, so a padded name is
+		// either a slip or a name no other spelling of the binding (a flag,
+		// a Live Debugger filter) can carry.
+		return "must not start or end with a space"
 	}
 	if !printable(name) {
 		return "must not contain control or non-printing characters"

@@ -183,6 +183,10 @@ func TestCheck(t *testing.T) {
 			msg: `environment "." is not a host name`},
 		{name: "host of user info alone", doc: "environments:\n  \"user@\":\n    - name: checkout\n      service-names: [checkout]\n",
 			msg: `environment "user@" is not a host name`},
+		{name: "a service name of spaces", doc: entry("name: checkout", `service-names: ["   "]`),
+			msg: `service-names[0] "   " must not start or end with a space`},
+		{name: "a service name with a space after it", doc: entry("name: checkout", `service-names: ["checkout "]`),
+			msg: `service-names[0] "checkout " must not start or end with a space`},
 		{name: "not a host", doc: "environments:\n  abc_12345:\n    - name: checkout\n      service-names: [checkout]\n",
 			msg: `environment "abc_12345" is not a host name`},
 
