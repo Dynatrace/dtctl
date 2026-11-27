@@ -106,7 +106,7 @@ dtctl delete fm feature new-checkout
 
 *Per feature and release stage: whether targeting is on, and the ordered rules that pick a variant. Each rule has conditions that must all match, the variant or split it serves, and an optional rollout.*
 
-Every stage of a feature always has a targeting, so `create`, `update` and `delete` work on one rule in it, addressed by its 0-based position or its id (decision 2). A targeting can have no rules and still be on; every request then gets the default defined in code.
+Every stage of a feature always has a targeting, so `create`, `update` and `delete` work on one rule in it, addressed by its 0-based position or its id (decision 2). A targeting can have no rules and still be on; every request then gets the default defined in code. Rules are evaluated in order. A rule with no conditions and no rollout matches every request and shadows the rules after it, so dtctl warns about it; a rollout compiles to a match condition server-side, so requests outside the percentage, before the first step, or without the bucketing attribute fall through to the next rule.
 
 ```bash
 dtctl get fm feature-targeting new-checkout                          # every stage: on/off and its rules
@@ -128,8 +128,8 @@ dtctl create fm feature-targeting new-checkout --stage production --variant vari
   --bucketing-key account.id --rollout now=10 --rollout +1d=50,linear --rollout +3d=100
 dtctl update fm feature-targeting new-checkout --stage production --position a93d07e1 --rollout now=0   # roll back
 
-# Typed conditions, all of which must match, serving a split
-dtctl create fm feature-targeting new-checkout --stage production --variant baseline=50,variation-a=50 \
+# Typed conditions, all of which must match
+dtctl create fm feature-targeting new-checkout --stage production --variant variation-a \
   --condition 'plan.tier = enterprise,pro' --condition 'app.version >= 2.3.0'
 
 dtctl update fm feature-targeting new-checkout --stage production --position 2 --move-position 0   # move to the top
@@ -162,10 +162,10 @@ production (on, v6)
 
 ```bash
 dtctl get fm context-attributes
-dtctl describe fm context-attribute plan-tier   # includes the features that reference it
+dtctl describe fm context-attribute plan-tier   # features whose rule conditions or bucketing key use it
 dtctl create fm context-attribute plan-tier --name "Plan tier" --type STRING --context-key plan.tier
 dtctl update fm context-attribute plan-tier --description "Customer plan tier"
-dtctl delete fm context-attribute plan-tier
+dtctl delete fm context-attribute plan-tier     # the service refuses while a rule uses it
 ```
 
 ### sdk-key
@@ -224,7 +224,7 @@ Targeting changes are the riskiest FM writes, so each one is an explicit command
 - **One resource.** A stage's targeting always exists and the API has no create or delete for it, so the stage and its rules are one resource rather than a parent and a rule child; `feature-targeting-rule` is an alias. `delete --all` clears every rule, asks first, and keeps the stage on or off as it was.
 - **Addressing.** Rules have no key, so `--position` takes a 0-based position, a rule id or a unique id prefix, like `--config-id` on `describe extension-config`. On `create` it is where the new rule goes (an id means in that rule's place; the default is last), and `update --move-position` moves a rule. `update` and `delete` without `--position` (or `--all` on delete) are an error. The UI numbers rules from 1, so `get` and `describe` show the 0-based position dtctl takes. Positions shift on reorder, so scripts and agents should use ids.
 - **Safety.** Every write is a read-modify-write of the whole stage that preserves every rule `id`, since a new id re-buckets users. `--stage` (`-s`) is required and never defaulted, so the stage is always visible in the command. Rollback (`--rollout now=0`) is safe unattended: a no-op exits 0, and a 409 is retried once.
-- **Flags.** `--condition '<context-key> <op> <values>'` adds a condition (all must match), named after the API's `conditions[]`, with operators by value type taken from the context attribute; `--condition-add` / `--condition-remove` take the same expression and add or remove values on the matching list condition, and removing its last value removes it; `--condition-clear <key>` drops a condition; `--variant` serves a variant or a split; `--rollout <time>=<pct>[,linear]` accepts `now`, exact-duration offsets like `+1d`, RFC 3339 times that carry a zone (`2026-12-01T09:00Z`), and Unix seconds (`1796115600`), all resolved to UTC client-side; a time with no zone is an error, and so is a number of 13 or more digits, with a hint that it looks like milliseconds. `DATE_TIME` condition values take the same forms.
+- **Flags.** `--condition '<context-key> <op> <values>'` adds a condition (all must match), named after the API's `conditions[]`, with operators by value type taken from the context attribute; `--condition-add` / `--condition-remove` take the same expression and add or remove values on the matching list condition, and removing its last value removes it; `--condition-clear <key>` drops a condition; `--variant` serves a variant, and a split (`--variant a=50,b=50`) once the service supports it (today it returns `INVALID_SERVE`, which dtctl passes through); `--rollout <time>=<pct>[,linear]` accepts `now`, exact-duration offsets like `+1d`, RFC 3339 times that carry a zone (`2026-12-01T09:00Z`), and Unix seconds (`1796115600`), all resolved to UTC client-side (rollouts and `--bucketing-key` are enabled per tenant, and dtctl passes the service's 412 through where they are not); a time with no zone is an error, and so is a number of 13 or more digits, with a hint that it looks like milliseconds. `DATE_TIME` condition values take the same forms.
 - **Output.** `get` and `describe` print rules as the UI does, with conditions in `--condition` syntax, so what an agent reads is what it can write. `-o json` is the API's rules unchanged.
 
 ### 3. Resource names (needs sign-off)
@@ -259,7 +259,7 @@ Not chosen: a kubectl-style `--local -f`, a client-side draft, and change-reques
 | Guarded stages | Direct writes fail with a hint | They need a change request, which arrives in phase 3. |
 | Flag values | `--flag-value` on `create fm feature` and `update --add-flag` takes one value per variant or none; `update --add-variant` and `apply fm feature -f` need one for every flag on every variant | With none, the service fills type defaults on create, and dtctl fills the same defaults for `--add-flag`, since update fills nothing. A flag with a schema must carry values, so it is added with `apply fm feature -f`. A partial set is rejected client-side, since create stores it as given and update returns a 400. |
 | Adding and removing variants and flags | `update fm feature --add-variant`, `--remove-variant`, `--add-flag <key>` (with `--flag-type`, default `BOOLEAN`, `--flag-name`, default the key, `--flag-description` and `--flag-value`) and `--remove-flag`, combinable in one write | All four are one full update of the feature, so they need `features:write`, need no new endpoint, and can be combined; values are checked against the resulting variants and flags. Mixing them with `--status` or the descriptive flags is an error, since those use other endpoints. dtctl adds no rules of its own on top of the API: `--add-flag` fails if the key exists only because a flag's type is fixed after create, and `--remove-flag` may remove the last flag. The service refuses `--remove-variant` (409) only while an enabled stage serves the variant; a disabled stage keeps rules that name it, and its next targeting write, including `enable`, fails with `UNKNOWN_VARIANT_KEY`, so dtctl warns with those stages after the removal. |
-| Safety levels | `readwrite-mine` allows only your own overrides; project, release-stage and SDK key delete need `dangerously-unrestricted` | FM config is shared: a new stage gets a targeting for every feature, and a new rule rewrites a stage. So FM creates are checked as shared updates, and the three deletes use the `delete bucket` gate (`OperationDeleteBucket`). Levels gate dtctl only; the hard boundary is the scopes a token is granted. |
+| Safety levels | `readwrite-mine` allows only your own overrides; project, release-stage and SDK key delete need `dangerously-unrestricted` | FM config is shared: a new stage gets a targeting for every feature, and a new rule rewrites a stage. So FM creates are checked as shared updates, and the three deletes use the `delete bucket` gate (`OperationDeleteBucket`). `dtctl auth login` picks the OAuth scopes from the level, so the deletes need `dtctl auth login --safety-level dangerously-unrestricted`; raising the context's level afterwards doesn't add the delete scopes. Levels gate dtctl only; the hard boundary is the scopes a token is granted. |
 
 ---
 
