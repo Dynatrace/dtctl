@@ -177,9 +177,14 @@ breakpoint command: `get breakpoints`, `describe breakpoint`,
 `delete breakpoint`, `get snapshots` and `update breakpoint <id>` take it only
 to name the workspace. `DTCTL_NO_REPO_SCOPE` does not change the name.
 
+A workspace is one environment's, so a context that does not exist or has no
+environment URL fails every breakpoint command, dry runs included.
+
 A scope file that is there and does not load (invalid YAML, an unknown key
 inside an entry, a newer `apiVersion`) names no workspace, and `dtctl` does not
-guess one:
+guess one. The same holds for a file that loads with no entry at all and a
+top-level key `dtctl` does not know, which is what a misspelled
+`environments:` looks like:
 
 - `create`, `update` and `delete breakpoint`, and their dry runs, fail with
   what is wrong with the file and send nothing. Working in the directory's
@@ -190,33 +195,58 @@ guess one:
   the file would name (on stderr, and in `context.warnings` in agent mode).
   With `--repo-scope <name>` they fail too, since the name asks for the file.
 
-`dtctl repo-scope current` says what is wrong with the file.
+`dtctl repo-scope current` says what is wrong with the file. A file whose
+entries name the workspace and which also holds a top-level key `dtctl` does
+not know is used, and every breakpoint command says so once (on stderr, and in
+`context.warnings`).
 
-`create`, `update` and `delete breakpoint` in a workspace named after the
-repository open with one line, also in `context.warnings`, because two things
-such a workspace relies on are not verified (see
+`create`, `update` and `delete breakpoint` in a workspace of a linked checkout
+open with one line, also in `context.warnings`. Where the origin remote named
+it, two things such a workspace relies on are not verified (see
 [What is not verified](#what-is-not-verified)):
 
 ```text
 workspace storefront/checkout is named after the repository, so every clone of it names the same one: it is not verified that Live Debugger accepts "/" in a workspace name, nor that a workspace is private to its user
 ```
 
+Where the checkout directory named it, for want of an origin remote, no other
+clone is promised the same workspace, and the line says that instead:
+
+```text
+workspace storefront-wt/checkout is named after the checkout directory, as no origin remote names the repository, so a clone in a directory of another name works in another one: it is not verified that Live Debugger accepts "/" in a workspace name
+```
+
 **Breakpoints from before the scope file.** Until a checkout has entries for
 an environment, its breakpoints live in workspaces named after the directories
 the commands ran in. Once it has entries, the commands run inside it use
-`<repo>` and `<repo>/<entry>` and no longer look in those workspaces; nothing
-is moved or deleted. A directory-named workspace stays reachable from any
-directory of the same base name that is outside a linked checkout:
+`<repo>` and `<repo>/<entry>`; nothing is moved or deleted. They no longer
+look in the directory-named workspaces, with one exception: a clone whose
+directory is called like the repository, the usual case, has a root workspace
+of the same name before and after, so `<repo>` still holds the breakpoints
+created at the checkout root. Any other directory-named workspace stays
+reachable from a directory of the same base name outside every linked
+checkout:
 
 ```bash
 mkdir -p /tmp/old-workspace/src && cd /tmp/old-workspace/src
 dtctl get breakpoints          # the workspace "src"
-dtctl delete breakpoint --all  # clean it up
+dtctl delete breakpoint --all  # deletes every breakpoint in "src"
 ```
 
-Saving a further entry likewise moves the directories it covers from `<repo>`
-to `<repo>/<entry>`: clean up with `dtctl delete breakpoint --all` before
-saving, or afterwards from a directory of the checkout no entry covers.
+That directory is outside the checkout, so a `.dtctl.yaml` the repository
+carries no longer applies there: name the context with `--context` if the
+repository's file chose it.
+
+Saving a further entry likewise moves the directories it covers to
+`<repo>/<entry>`: from `<repo>` if no entry covered them, or from
+`<repo>/<wider>` if a wider entry did. In a Gradle build the entry that covers
+a shared library module follows the modules that depend on it, so linking a
+second deployable can move such a module to `<repo>`. `delete breakpoint --all`
+deletes every breakpoint of one workspace, those created from the other
+directories that share it included: to clean up before saving an entry, delete
+the breakpoints of the directories it will cover one by one, or use `--all`
+only where the whole workspace may go. Afterwards the old workspace is the one
+`--repo-scope <wider>` names, or `<repo>` from a directory no entry covers.
 
 ```bash
 dtctl create breakpoint OrderController.java:306 --repo-scope checkout  # set the entry's filters, then create
@@ -256,8 +286,10 @@ relies on has not been tried against an environment:
   it did before repo scopes.
 
 After setting filters from an entry, check with
-`dtctl describe breakpoint <id>` that the breakpoint reaches the processes you
-expect.
+`dtctl describe breakpoint <id> --repo-scope <name>` that the breakpoint
+reaches the processes you expect. The entry is named because the filters were
+set in `<repo>/<name>`, which is where a bare `describe breakpoint` looks only
+from a directory that entry covers.
 
 ## 2. Create a breakpoint
 
@@ -309,7 +341,20 @@ List breakpoints in the current workspace:
 
 ```bash
 dtctl get breakpoints
+dtctl get breakpoints --repo-scope checkout   # the workspace <repo>/checkout, from any directory
 ```
+
+The table is preceded by one line on stderr that names the workspace, since it
+depends on where the command runs (see
+[Which workspace a command works in](#which-workspace-a-command-works-in)):
+
+```text
+workspace: storefront/checkout
+```
+
+Agent mode and `-o json`/`-o yaml` print no such line. `describe breakpoint`
+shows the workspace as a field, and `get snapshots` prints the same line;
+both take `--repo-scope <name>` to name the workspace as well.
 
 Default output is a table with:
 
@@ -473,7 +518,7 @@ By default, `--decode-snapshots` simplifies variant wrappers to plain values (e.
 
 ### Default behavior
 
-- successful mutating commands are quiet by default
+- successful mutating commands print one line, ending with the workspace they worked in; in a linked checkout `create`, `update` and `delete breakpoint` first say on stderr what about the workspace is not verified (see [Which workspace a command works in](#which-workspace-a-command-works-in))
 - listing and describe commands use human-readable output by default
 
 ### Verbose and debug modes
