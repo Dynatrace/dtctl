@@ -100,6 +100,43 @@ func TestResolve_SelectsNothingThroughABuildNotReadWhole(t *testing.T) {
 	assert.Contains(t, r.Reason, "was not read whole")
 }
 
+// Whether a build was read whole does not depend on where in the repository
+// it lies: the walk counts its depth from the build's own directory, so a
+// build further down than a walk from the repository root would go is read
+// with its modules, and an entry is selected through it. Within such a build
+// a module the walk does not reach still leaves it not read whole.
+func TestResolve_ABuildDeepInTheRepositoryIsReadWhole(t *testing.T) {
+	base := strings.TrimSuffix(strings.Repeat("d/", maxDepth+2), "/")
+	under := func(repo fstest.MapFS) fstest.MapFS {
+		moved := fstest.MapFS{}
+		for name, file := range repo {
+			moved[base+"/"+name] = file
+		}
+		return moved
+	}
+	entries := func(appB string) *File {
+		return &File{Environments: map[string][]Entry{prodHost: {
+			{Name: "a", Path: base + "/app-a", ServiceNames: []string{"a"}},
+			{Name: "b", Path: base + "/" + appB, ServiceNames: []string{"b"}},
+		}}}
+	}
+
+	// app-b does not use the library, so it is app-a's alone.
+	alone := &fstest.MapFile{Data: []byte("")}
+	r, err := Resolve(under(twoAppsOneLibrary("app-b", alone)), entries("app-b"), prodHost, base+"/lib", "")
+	require.NoError(t, err)
+	require.NotNil(t, r.Entry, r.Reason)
+	assert.Equal(t, "a", r.Entry.Name)
+	assert.NotContains(t, r.Reason, "was not read whole")
+
+	// The same build with app-b further below it than its walk goes.
+	deep := "x/" + strings.Repeat("e/", 2*maxDepth) + "app-b"
+	r, err = Resolve(under(twoAppsOneLibrary(deep, alone)), entries(deep), prodHost, base+"/lib", "")
+	require.NoError(t, err)
+	assert.Nil(t, r.Entry)
+	assert.Contains(t, r.Reason, fmt.Sprintf("the Gradle build at %q was not read whole (", base))
+}
+
 // A literal project path names one module, by its directory. Only a
 // type-safe accessor is matched by words, since projects.billingApi is how
 // Gradle spells billing-api.
