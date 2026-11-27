@@ -76,6 +76,30 @@ func TestParseTime_NowRelative(t *testing.T) {
 	}
 }
 
+// Every unit, each with a value its neighbours would get wrong, and fractions
+// to the nearest nanosecond: 2.01s is 2010 ms, not the 2009 ms that cutting
+// off 2.01 * 1e9 gives.
+func TestParseDuration(t *testing.T) {
+	cases := map[string]time.Duration{
+		"7ns": 7, "7us": 7 * time.Microsecond, "7µs": 7 * time.Microsecond, "7ms": 7 * time.Millisecond,
+		"7s": 7 * time.Second, "7m": 7 * time.Minute, "7min": 7 * time.Minute, "7h": 7 * time.Hour,
+		"2d": 48 * time.Hour, "2w": 14 * 24 * time.Hour,
+		"1h30m": 90 * time.Minute, "1m 30s": 90 * time.Second, "1.5h": 90 * time.Minute,
+		"2.01s": 2010 * time.Millisecond, "0.07s": 70 * time.Millisecond, "4.35s": 4350 * time.Millisecond,
+		"0.5ns": 1, "0.4ns": 0,
+	}
+	for in, want := range cases {
+		if got, err := parseDuration(in); err != nil || got != want {
+			t.Errorf("parseDuration(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "5", "1y", "1h-", "9223372036854775807h", "9223372036854775808ns"} {
+		if got, err := parseDuration(in); err == nil {
+			t.Errorf("parseDuration(%q) = %v, want an error", in, got)
+		}
+	}
+}
+
 func TestResolveWindow(t *testing.T) {
 	const now = int64(1_700_100_000_000)
 	const h = int64(3600_000)

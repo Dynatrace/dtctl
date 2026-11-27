@@ -227,7 +227,8 @@ func parseDuration(s string) (time.Duration, error) {
 		}
 		// float64(math.MaxInt64) is 2^63, the first value a Duration cannot
 		// hold; converting it would not fail but give an arbitrary one.
-		part := n * float64(durationUnits[m[2]])
+		// Rounded, not cut off: 2.01 * 1e9 is 2009999999.9999998.
+		part := math.Round(n * float64(durationUnits[m[2]]))
 		if part >= float64(math.MaxInt64) || time.Duration(part) > math.MaxInt64-d {
 			return 0, fmt.Errorf("duration %q is out of range", whole)
 		}
