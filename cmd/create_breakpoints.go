@@ -119,8 +119,8 @@ Examples:
 			// A named entry is a filter source like --filters, resolved before
 			// any network call.
 			notes := workspace.changeNotes()
+			var entryNotes []string
 			if scopeName != "" {
-				var entryNotes []string
 				if filterSets, entryNotes, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
 					return err
 				}
@@ -172,8 +172,8 @@ Examples:
 				if err != nil {
 					return err
 				}
-				changed = &workspaceFiltersChange{workspace: workspace.shown(), before: before, after: filterSummary, scopeName: scopeName, location: location,
-					selectors: breakpointSelectors(cmdContext(cmd), cfg)}
+				changed = &workspaceFiltersChange{workspace: workspace.shown(), before: selectingFilterSets(before), after: filterSummary, scopeName: scopeName, location: location,
+					selectors: breakpointSelectors(cmdContext(cmd), cfg), notes: entryNotes}
 				if scopeName == "" {
 					changed.covering = coveringBreakpointEntry(cmd, workspace)
 				}

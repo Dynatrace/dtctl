@@ -42,8 +42,9 @@ func breakpointCommandLine(selectors []string, args ...string) string {
 // second can fail with the first already applied.
 type workspaceFiltersChange struct {
 	workspace string
-	// before are the filter sets the workspace held, and after the summary
-	// of the ones this run set.
+	// before are the filter sets the workspace held, without those that
+	// carry no value (see selectingFilterSets), and after the summary of
+	// the ones this run set.
 	before []livedebugger.FilterSet
 	after  string
 	// scopeName is the entry --repo-scope named, "" for --filters.
@@ -55,6 +56,9 @@ type workspaceFiltersChange struct {
 	covering coveringEntry
 	// selectors go into every line the error suggests.
 	selectors []string
+	// notes are what the command said before the write about the filters
+	// it set from an entry (entryFilterNotes).
+	notes []string
 }
 
 // thenFailed is the error of a create that failed after the change.
@@ -71,9 +75,9 @@ type filtersChangedError struct {
 }
 
 // Error is the headline and, indented under it, what to do: a person reads
-// nothing but the error.
+// nothing but the error, and has read the notes on stderr before it.
 func (e *filtersChangedError) Error() string {
-	return e.Headline() + "\n  " + strings.Join(e.Suggestions(), "\n  ")
+	return e.Headline() + "\n  " + strings.Join(e.recovery(), "\n  ")
 }
 
 func (e *filtersChangedError) Unwrap() error { return e.err }
@@ -92,9 +96,16 @@ func (e *filtersChangedError) Headline() string {
 	return fmt.Sprintf("workspace %s's filters were set to %s (it had none), then creating the breakpoint at %s failed: %v", c.workspace, after, c.location, e.err)
 }
 
-// Suggestions are the commands that show the workspace, restore its
-// previous filters where one command can, and try the create again.
+// Suggestions are what agent mode reports beside the headline: the recovery
+// lines, then the notes about the filters that are now set. A successful
+// run carries those in context.warnings, which an error envelope lacks.
 func (e *filtersChangedError) Suggestions() []string {
+	return append(e.recovery(), e.change.notes...)
+}
+
+// recovery are the commands that show the workspace, restore its previous
+// filters where one command can, and try the create again.
+func (e *filtersChangedError) recovery() []string {
 	c := e.change
 	var named []string
 	if c.scopeName != "" {
@@ -132,8 +143,19 @@ func (c workspaceFiltersChange) restore() string {
 	return "the previous filters are in this message; --filters cannot spell them"
 }
 
+// selectingFilterSets are the sets among sets that carry a value. A set
+// without one selects by nothing; the summaries and workspaceHolds skip it,
+// and so does whatever counts the sets.
+func selectingFilterSets(sets []livedebugger.FilterSet) []livedebugger.FilterSet {
+	return slices.DeleteFunc(slices.Clone(sets), func(set livedebugger.FilterSet) bool {
+		return len(fieldValues(set.Labels)) == 0 && len(fieldValues(set.Filters)) == 0
+	})
+}
+
 // pasteableFilterSet is the --filters value that sets exactly sets: there
-// is one when they are a single set of labels that parses back to itself.
+// is one when they are a single set of labels that parses back to itself
+// and prints as itself. The values are the environment's, and one with a
+// control character is printed with a replacement, which is another value.
 func pasteableFilterSet(sets []livedebugger.FilterSet) (string, bool) {
 	if len(sets) != 1 || len(fieldValues(sets[0].Filters)) > 0 {
 		return "", false
@@ -141,7 +163,7 @@ func pasteableFilterSet(sets []livedebugger.FilterSet) (string, bool) {
 	labels := fieldValues(sets[0].Labels)
 	spelled := formatFilters(labels)
 	parsed, err := parseFilters(spelled)
-	if err != nil || !maps.EqualFunc(parsed, labels, slices.Equal) {
+	if err != nil || !maps.EqualFunc(parsed, labels, slices.Equal) || repoScopeText(spelled) != spelled {
 		return "", false
 	}
 	return spelled, true

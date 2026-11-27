@@ -81,7 +81,12 @@ func TestCreateBreakpoint_SaysWhatItChangedWhenTheCreateFails(t *testing.T) {
 			for i, s := range tc.suggest {
 				require.Equal(t, in(s), detail.Suggestions[i])
 			}
-			require.Len(t, detail.Suggestions, len(tc.suggest))
+			// After them, only what was said about the entry's filters.
+			notes := []string{}
+			if tc.args[0] == "--repo-scope" {
+				notes = []string{"repo scope ledger sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>"}
+			}
+			require.Equal(t, notes, detail.Suggestions[len(tc.suggest):])
 			require.Equal(t, []string{"GetOrCreateWorkspaceV2", "UpdateWorkspaceV2", "CreateRule"}, srv.ops(), "nothing is rolled back")
 
 			// A person gets the same, in the error.
@@ -196,7 +201,7 @@ func TestCreateBreakpoint_RecoveryLinesKeepTheContext(t *testing.T) {
 			code, stdout, _ := runRepoScoped(append(argv, tc.args...), RunOptions{})
 			require.NotZero(t, code)
 			suggestions := agentError(t, stdout).Suggestions
-			require.Len(t, suggestions, 4)
+			require.GreaterOrEqual(t, len(suggestions), 4)
 			require.Equal(t, []string{ws}, staging.workedIn())
 			sent := staging.sentFilterSets(t)
 
@@ -272,4 +277,58 @@ func TestCreateBreakpoint_RecoveryLinesNameNoContextInASession(t *testing.T) {
 	require.Equal(t, "dtctl get breakpoints -v", suggestedCommand(t, suggestions[1]))
 	require.Equal(t, "dtctl update breakpoint --filters k8s.namespace.name:web", suggestedCommand(t, suggestions[2]))
 	require.Equal(t, "dtctl create breakpoint A.java:1", suggestedCommand(t, suggestions[3]))
+}
+
+// A set without a value selects by nothing: beside one real set it does not
+// make the previous filters "several sets", and the one set is restored.
+func TestCreateBreakpoint_AnEmptySetIsNotAPreviousFilter(t *testing.T) {
+	srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON, `{"filters":[],"labels":[]}`)
+	srv.fail["CreateRule"] = "rule limit reached"
+	chdirTestRepo(t, "")
+
+	code, stdout, _ := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:payments", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, "to restore the previous filters: dtctl --context c update breakpoint --filters k8s.namespace.name:web", agentError(t, stdout).Suggestions[2])
+}
+
+// A workspace's filters are whatever the environment returns. A value with a
+// control character is printed with U+FFFD in its place, in the error and in
+// the hint, and no restore line is offered: the line would not set the value
+// the workspace held.
+func TestCreateBreakpoint_PrintsNoControlCharacterOfAWorkspaceFilter(t *testing.T) {
+	const escaped = `{"filters":[],"labels":[{"field":"service.name","values":["svc\u001b[31mRED"]}]}`
+	const shown = "service.name:svc�[31mRED"
+
+	srv := newLiveDebuggerStub(t, "readwrite-all", escaped)
+	srv.fail["CreateRule"] = "rule limit reached"
+	chdirTestRepo(t, breakpointScope)
+	code, stdout, stderr := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:payments", "--no-agent", "--yes"}, RunOptions{})
+	require.NotZero(t, code)
+	require.NotContains(t, stdout+stderr, "\x1b")
+	require.Contains(t, stderr, "filters were changed from "+shown+" to ")
+	require.Contains(t, stderr, "the previous filters are in this message; --filters cannot spell them")
+	require.NotContains(t, stderr, "to restore the previous filters")
+
+	newLiveDebuggerStub(t, "readwrite-all", escaped)
+	code, stdout, stderr = runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--no-agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.NotContains(t, stdout+stderr, "\x1b")
+	require.Contains(t, stderr, "filters ("+shown+") are not the ones repo scope checkout")
+}
+
+// What the filters set from an entry leave out, and carry unverified, was
+// said before the write. When the create then fails the agent's envelope is
+// an error, which has no context.warnings, so the lines close its
+// suggestions: the filters they describe are set.
+func TestCreateBreakpoint_AFailedCreateKeepsTheEntrysNotes(t *testing.T) {
+	srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+	srv.fail["CreateRule"] = "rule limit reached"
+	chdirTestRepo(t, breakpointScope)
+
+	code, stdout, _ := runRepoScoped([]string{"create", "breakpoint", "A.java:1", "--repo-scope", "split", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	suggestions := agentError(t, stdout).Suggestions
+	require.Len(t, suggestions, 6)
+	require.Equal(t, "repo scope split's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label", suggestions[4])
+	require.True(t, strings.HasPrefix(suggestions[5], "repo scope split sets service.name, which is not verified as a workspace label"), suggestions[5])
 }

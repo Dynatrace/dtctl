@@ -176,7 +176,9 @@ func workspaceHolds(sets []livedebugger.FilterSet, want []map[string][]string) b
 }
 
 // workspaceFilterSummary renders the workspace's filter sets the way
-// filterSetsSummary renders the sets dtctl sends.
+// filterSetsSummary renders the sets dtctl sends, for a message: the values
+// are whatever the environment returned, so they are shown as repoScopeText
+// shows them.
 func workspaceFilterSummary(sets []livedebugger.FilterSet) string {
 	parts := make([]string, 0, len(sets))
 	for _, set := range sets {
@@ -186,7 +188,7 @@ func workspaceFilterSummary(sets []livedebugger.FilterSet) string {
 			parts = append(parts, formatFilters(fields))
 		}
 	}
-	return strings.Join(parts, "; ")
+	return repoScopeText(strings.Join(parts, "; "))
 }
 
 // fieldValues collects a filter set's fields into the map --filters parses
