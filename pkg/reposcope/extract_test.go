@@ -792,6 +792,20 @@ func TestExtract_Gradle(t *testing.T) {
 			tokens: []string{"chart checkout charts/checkout/Chart.yaml:1", "chart ledger charts/ledger/Chart.yaml:1", "project storefront settings.gradle:1"},
 		},
 		{
+			// Nor from a file that carries the module's name.
+			name: "an included module that is a file",
+			fsys: fstest.MapFS{
+				"settings.gradle":            {Data: []byte("rootProject.name = 'storefront'\ninclude ':checkout', ':ledger'\n")},
+				"checkout":                   {Data: []byte("x\n")},
+				"ledger":                     {Data: []byte("x\n")},
+				"charts/checkout/Chart.yaml": {Data: []byte("name: checkout\n")},
+				"charts/ledger/Chart.yaml":   {Data: []byte("name: ledger\n")},
+			},
+			dir:    ".",
+			unit:   ".",
+			tokens: []string{"chart checkout charts/checkout/Chart.yaml:1", "chart ledger charts/ledger/Chart.yaml:1", "project storefront settings.gradle:1"},
+		},
+		{
 			// A test module is part of its build, and its directory name is
 			// not sent.
 			name: "a test module",
