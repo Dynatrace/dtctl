@@ -153,7 +153,7 @@ that do not parse the envelope:
 |---|---|---|
 | `0` | Success | -- |
 | `1` | General failure | every code not listed below |
-| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, `header_refused`, and `validation_error` for an empty flag value or for a repo scope value or file that is refused |
+| `2` | Usage error | `unknown_command`, `profile_blocked`, `stability_blocked`, `deprecated_surface`, `development_disabled`, `unsupported_in_service`, `header_refused`, and `validation_error` for an empty flag value, for a repo scope value or file that is refused, and for a breakpoint command's own refusals (a blank identifier, a misplaced `--enabled` value, `create breakpoint` in a workspace without filters) |
 | `3` | Not authenticated (HTTP 401) | `auth_required` |
 | `4` | Resource does not exist (HTTP 404) | `not_found` |
 | `5` | Not allowed (HTTP 403) | `permission_denied`, `insufficient_scope` |

@@ -119,16 +119,16 @@ Examples:
 			// A named entry is a filter source like --filters, resolved before
 			// any network call.
 			notes := workspace.changeNotes()
+			var entryNotes []string
 			if scopeName != "" {
-				var entryNotes []string
-				if filterSets, entryNotes, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
+				if filterSets, entryNotes, err = namedBreakpointFilters(workspace, breakpointSelectors(cmdContext(cmd), cfg)); err != nil {
 					return err
 				}
 				filterSummary = filterSetsSummary(filterSets)
 				notes = append(notes, entryNotes...)
 			}
 			// Said before the confirmation and before anything is sent.
-			ctx := sayBreakpointWarnings(cmdContext(cmd), notes...)
+			ctx := sayBreakpointWarnings(workspace.warnScopeFile(cmdContext(cmd)), notes...)
 
 			// A preview sends nothing, not even the read that finds the
 			// workspace: asking for a workspace may create it.
@@ -172,7 +172,11 @@ Examples:
 				if err != nil {
 					return err
 				}
-				changed = &workspaceFiltersChange{workspace: workspace.shown(), before: before, after: filterSummary, scopeName: scopeName, location: location}
+				changed = &workspaceFiltersChange{workspace: workspace.shown(), before: selectingFilterSets(before), after: filterSummary, scopeName: scopeName, location: location,
+					selectors: breakpointSelectors(cmdContext(cmd), cfg), notes: entryNotes}
+				if scopeName == "" {
+					changed.covering = coveringBreakpointEntry(cmd, workspace)
+				}
 				cancelled, err := applyWorkspaceFilters(ctx, handler, workspaceID, filterSets,
 					workspaceFilterChange{creating: true, skipConfirm: skipConfirm})
 				if err != nil {
@@ -181,7 +185,7 @@ Examples:
 				if cancelled {
 					return printBreakpointMessage(ctx, "create", "Cancelled")
 				}
-			} else if hint, err = unfilteredCreate(cmd, workspace, workspaceResp, location); err != nil {
+			} else if hint, err = unfilteredCreate(cmd, cfg, workspace, workspaceResp, location); err != nil {
 				return err
 			}
 
@@ -231,7 +235,7 @@ Examples:
 // unfilteredCreate is a create at location that names no filters, in the
 // workspace workspaceResp describes: it fails when the workspace has none,
 // and otherwise returns the hint to print once the breakpoint exists.
-func unfilteredCreate(cmd *cobra.Command, workspace breakpointWorkspace, workspaceResp map[string]interface{}, location string) (hint string, err error) {
+func unfilteredCreate(cmd *cobra.Command, cfg *config.Config, workspace breakpointWorkspace, workspaceResp map[string]interface{}, location string) (hint string, err error) {
 	cov := coveringBreakpointEntry(cmd, workspace)
 	hasFilters, err := livedebugger.WorkspaceHasFilters(workspaceResp)
 	if err != nil {
@@ -244,7 +248,7 @@ func unfilteredCreate(cmd *cobra.Command, workspace breakpointWorkspace, workspa
 	if err != nil {
 		return "", err
 	}
-	return cov.hint(workspace.shown(), current), nil
+	return cov.hint(workspace.shown(), current, breakpointSelectors(cmdContext(cmd), cfg)), nil
 }
 
 // liveDebuggerHandler is the Live Debugger handler for cfg's current context.

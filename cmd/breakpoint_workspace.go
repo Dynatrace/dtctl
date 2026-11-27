@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -28,8 +29,18 @@ type breakpointWorkspace struct {
 	// unusable is why the repository's scope file is there and did not
 	// load, naming the file as the repository does. The workspace is then
 	// the working directory's, which is not where a loading file would put
-	// this command.
+	// this command. A file that loads with no entry for any environment
+	// and a document key this dtctl does not know is unusable too: the key
+	// is most likely a misspelled "environments", with every entry under it.
 	unusable string
+	// fileWarning names the document keys of the scope file this dtctl
+	// does not know, where the file's entries named the workspace. They
+	// apply without those keys, and every command says so (warnScopeFile).
+	fileWarning string
+	// byDirectory is set when a workspace of a linked checkout starts with
+	// the checkout directory's name, for want of an origin remote to take
+	// the repository's from.
+	byDirectory bool
 }
 
 // resolveBreakpointWorkspace names the workspace of this invocation.
@@ -59,9 +70,20 @@ type breakpointWorkspace struct {
 // command that changes something must refuse (requireScopeFile) rather than
 // work in the directory's workspace, and one that only reads says where it
 // read (readWarnings).
+//
+// A workspace belongs to one environment, so a context that does not exist,
+// or has no environment, is an error here, for a dry run too: the working
+// directory's workspace is the answer only where there is no repository or
+// no working directory, never where the question could not be asked.
 func resolveBreakpointWorkspace(cmd *cobra.Command, cfg *config.Config) (breakpointWorkspace, error) {
 	ctx := cmdContext(cmd)
 	name, _ := cmd.Flags().GetString(repoScopeFlag)
+	if _, err := cfg.CurrentContextObj(); err != nil {
+		return breakpointWorkspace{}, err
+	}
+	if _, err := repoScopeHost(cfg); err != nil {
+		return breakpointWorkspace{}, fmt.Errorf("context %q has no environment URL, and a Live Debugger workspace is one environment's", cfg.CurrentContext)
+	}
 	scope, err := openRepoScope(ctx, cfg)
 	switch {
 	case err != nil && scope != nil && name != "":
@@ -70,18 +92,41 @@ func resolveBreakpointWorkspace(cmd *cobra.Command, cfg *config.Config) (breakpo
 		return breakpointWorkspace{}, err
 	case err != nil && scope != nil:
 		return breakpointWorkspace{name: workingDirectoryWorkspace(ctx), unusable: scope.unusable(err)}, nil
-	case err != nil || (name == "" && len(scope.file.Entries(scope.host)) == 0):
+	case err != nil:
 		return breakpointWorkspace{name: workingDirectoryWorkspace(ctx)}, nil
+	case name == "" && len(scope.file.Entries(scope.host)) == 0:
+		// A file that says nothing about this environment moves nobody's
+		// breakpoints and is not spoken of, unless it says nothing at all
+		// and was meant to.
+		ws := breakpointWorkspace{name: workingDirectoryWorkspace(ctx)}
+		if warning := scope.file.Warning(); warning != "" && scope.file.Empty() {
+			ws.unusable = reposcope.FileName + ": no entry was read from it, and it holds " + warning
+		}
+		return ws, nil
 	}
 	status, err := scope.resolve(name)
 	if err != nil {
 		return breakpointWorkspace{}, err
 	}
-	ws := breakpointWorkspace{name: repositoryWorkspace(scope.loc), scope: status}
+	repo, fromOrigin := repositoryWorkspace(scope.loc)
+	ws := breakpointWorkspace{name: repo, scope: status, fileWarning: status.Warning, byDirectory: !fromOrigin}
 	if status.Entry != nil {
 		ws.name += "/" + status.Entry.Name
 	}
 	return ws, nil
+}
+
+// warnScopeFile says which document keys of the scope file this dtctl does
+// not know, on stderr, and returns a context that carries the line to the
+// agent envelope's context.warnings. A command that changes something calls
+// it before it says anything else; one that only reads gets the line from
+// readWarnings.
+func (w breakpointWorkspace) warnScopeFile(ctx context.Context) context.Context {
+	if w.fileWarning == "" {
+		return ctx
+	}
+	warnRepoScopeFile(currentStderr(ctx), w.fileWarning)
+	return carryBreakpointWarnings(ctx, reposcope.FileName+": "+w.fileWarning)
 }
 
 // shown is the name as a message prints it. A workspace named after a
@@ -110,11 +155,17 @@ func (w breakpointWorkspace) requireScopeFile() error {
 // and two things it relies on have not been tried against an environment:
 // that a name may hold the "/" of <repo>/<entry>, and that a workspace
 // belongs to one user, since every clone of the repository now names the
-// same one.
+// same one. Where the checkout directory stands in for the repository's name
+// (byDirectory) no clone is promised the same workspace, and the line says
+// that instead.
 func (w breakpointWorkspace) changeNotes() []string {
 	switch {
 	case w.scope == nil:
 		return nil
+	case w.byDirectory && strings.Contains(w.name, "/"):
+		return []string{"workspace " + w.shown() + ` is named after the checkout directory, as no origin remote names the repository, so a clone in a directory of another name works in another one: it is not verified that Live Debugger accepts "/" in a workspace name`}
+	case w.byDirectory:
+		return []string{"workspace " + w.shown() + " is named after the checkout directory, as no origin remote names the repository, so a clone in a directory of another name works in another one"}
 	case strings.Contains(w.name, "/"):
 		return []string{"workspace " + w.shown() + ` is named after the repository, so every clone of it names the same one: it is not verified that Live Debugger accepts "/" in a workspace name, nor that a workspace is private to its user`}
 	}
@@ -134,12 +185,12 @@ func unusableScopeFile(unusable, consequence string) error {
 }
 
 // readWarnings is what a command that only reads says about the workspace it
-// read: nothing, unless the scope file did not load and the working
-// directory named it. It prints the lines on stderr and returns them for the
+// read: the scope file's unknown keys, or that the file did not load and the
+// working directory named the workspace. It prints the lines on stderr and returns them for the
 // agent envelope's context.warnings.
 func (w breakpointWorkspace) readWarnings(ctx context.Context) []string {
 	if w.unusable == "" {
-		return nil
+		return breakpointWarnings(w.warnScopeFile(ctx))
 	}
 	warning := w.unusable + "; reading workspace " + w.shown() + ", the one named after the working directory, not the one the file would name"
 	output.FprintWarning(currentStderr(ctx), "%s", warning)
@@ -176,10 +227,11 @@ var plainRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 // worktree) or its last segment is not a plain name. The remote is text from
 // a file, and the name is sent to the environment and printed: a query
 // string, a quote or a parent directory in it names no repository.
-func repositoryWorkspace(loc reposcope.Location) string {
+// fromOrigin reports which of the two named it.
+func repositoryWorkspace(loc reposcope.Location) (name string, fromOrigin bool) {
 	repo := reposcope.RepositoryName(reposcope.RepoFS(loc))
 	if !plainRepositoryName.MatchString(repo) || repo == "." || repo == ".." {
-		return directoryWorkspace(loc.Root)
+		return directoryWorkspace(loc.Root), false
 	}
-	return repo
+	return repo, true
 }

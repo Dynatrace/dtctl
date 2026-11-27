@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -391,6 +392,29 @@ func filterChangeConfirmMessage(count int, creating bool) string {
 		return fmt.Sprintf("In addition to creating this breakpoint, this will change the workspace filters for %d active %s. Continue?", count, noun)
 	}
 	return fmt.Sprintf("This will change the workspace filters for %d active %s. Continue?", count, noun)
+}
+
+// breakpointNotFoundError is a breakpoint command that found no breakpoint
+// for the identifier it was given. It is a type so that the agent code is
+// not read off the message, which ends with the workspace, and the workspace
+// with whatever a directory is called.
+type breakpointNotFoundError struct{ msg string }
+
+func (e *breakpointNotFoundError) Error() string { return e.msg }
+
+// breakpointNotFound words a breakpointNotFoundError.
+func breakpointNotFound(format string, args ...interface{}) error {
+	return &breakpointNotFoundError{msg: fmt.Sprintf(format, args...)}
+}
+
+// requireBreakpointIdentifier refuses an identifier of nothing but spaces:
+// it names no breakpoint, and sent as a rule id it would be reported as
+// changed.
+func requireBreakpointIdentifier(identifier string) error {
+	if strings.TrimSpace(identifier) == "" {
+		return &invalidInputError{errors.New("the breakpoint identifier is empty: name a breakpoint by its id or as filename:line")}
+	}
+	return nil
 }
 
 func parseBreakpoint(input string) (string, int, error) {

@@ -44,6 +44,11 @@ func sayBreakpointWarnings(ctx context.Context, lines ...string) context.Context
 	for _, line := range lines {
 		output.FprintInfo(stderr, "%s", line)
 	}
+	return carryBreakpointWarnings(ctx, lines...)
+}
+
+// carryBreakpointWarnings adds lines already said to the ones ctx carries.
+func carryBreakpointWarnings(ctx context.Context, lines ...string) context.Context {
 	return context.WithValue(ctx, breakpointWarningsKey{}, append(slices.Clip(breakpointWarnings(ctx)), lines...))
 }
 

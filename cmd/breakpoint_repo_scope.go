@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Dynatrace/dtctl/pkg/config"
+	"github.com/Dynatrace/dtctl/pkg/exec"
 	"github.com/Dynatrace/dtctl/pkg/reposcope"
 	"github.com/Dynatrace/dtctl/pkg/resources/livedebugger"
 )
@@ -30,21 +30,19 @@ const (
 	breakpointWorkspaceRepoScopeUsage = "name the workspace after this entry of the repository's .dtctl-repo-scope.yaml, wherever the command runs"
 )
 
-// namedBreakpointFilters is every filter set of the entry --repo-scope names,
-// with what the caller says before it sets them (entryFilterNotes). Every
-// failure is an error, as on query: the caller asked for that entry's
-// filters. resolveRepoScope resolves a name to its entry or fails.
-func namedBreakpointFilters(cmd *cobra.Command, cfg *config.Config, name string) (sets []map[string][]string, notes []string, err error) {
-	res, err := resolveRepoScope(cmd, cfg, name)
-	if err != nil {
-		return nil, nil, err
-	}
-	warnRepoScopeFile(currentStderr(cmdContext(cmd)), res.Warning)
-	sets, ok, reason := res.Status.LiveDebuggerFilterSets()
+// namedBreakpointFilters is every filter set of the entry --repo-scope
+// named, with what the caller says before it sets them (entryFilterNotes).
+// The entry is the one the workspace was named after: the scope file is read
+// once per invocation, so the filters and the workspace cannot come from two
+// states of it. An entry that renders no filter set is an error, as on
+// query: the caller asked for that entry's filters, and sending none would
+// clear the workspace's.
+func namedBreakpointFilters(workspace breakpointWorkspace, selectors []string) (sets []map[string][]string, notes []string, err error) {
+	sets, ok, reason := workspace.scope.LiveDebuggerFilterSets()
 	if !ok {
 		return nil, nil, &reposcope.InvalidError{Source: "--" + repoScopeFlag, Msg: reason}
 	}
-	return sets, entryFilterNotes(res.Status.Entry), nil
+	return sets, entryFilterNotes(workspace.scope.Entry, selectors), nil
 }
 
 // entryFilterNotes says how the filters set from e differ from e, one line
@@ -53,8 +51,12 @@ func namedBreakpointFilters(cmd *cobra.Command, cfg *config.Config, name string)
 // queries the entry narrows, and they carry service.name, which nothing has
 // shown a workspace to honour. Every path that sets, or previews setting,
 // filters from an entry says these before it asks or writes, and an agent
-// gets them in context.warnings (sayBreakpointWarnings).
-func entryFilterNotes(e *reposcope.Entry) []string {
+// gets them in context.warnings (sayBreakpointWarnings). The check the last
+// line advises names the entry, and carries selectors (breakpointSelectors):
+// the filters were set in the workspace --repo-scope named, in one
+// environment, which is not where a bare describe looks unless that entry
+// covers the working directory and that context is current.
+func entryFilterNotes(e *reposcope.Entry, selectors []string) []string {
 	var notes []string
 	if len(e.Services) > 0 {
 		notes = append(notes, fmt.Sprintf("repo scope %s's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label", e.Name))
@@ -66,7 +68,8 @@ func entryFilterNotes(e *reposcope.Entry) []string {
 		notes = append(notes, fmt.Sprintf("repo scope %s's filter segments are not applied: a workspace is filtered by labels and takes no segment, so the filters are wider than the entry's queries", e.Name))
 	}
 	if len(e.ServiceNames) > 0 {
-		notes = append(notes, fmt.Sprintf("repo scope %s sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>", e.Name))
+		notes = append(notes, fmt.Sprintf("repo scope %s sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with %s <id> --%s %s",
+			e.Name, breakpointCommandLine(selectors, "describe", "breakpoint"), repoScopeFlag, exec.ShellQuote(e.Name)))
 	}
 	return notes
 }
@@ -94,7 +97,6 @@ func coveringBreakpointEntry(cmd *cobra.Command, workspace breakpointWorkspace) 
 	if status == nil || truthyEnv(ctx, noRepoScopeEnv) || !repoScopeAdmitted(cmd, repoScopeFlag) {
 		return coveringEntry{}
 	}
-	warnRepoScopeFile(currentStderr(ctx), status.Warning)
 	if status.Entry == nil {
 		return coveringEntry{skipped: repoScopeReason(status)}
 	}
@@ -122,13 +124,15 @@ func (cov coveringEntry) noFilters(workspace, location string) error {
 // hint is the one line a create prints after it made a breakpoint in a
 // workspace whose filters are not the covering entry's: the entry exists,
 // and this command applies it. It is empty when there is no such entry or
-// the workspace already holds its filters.
-func (cov coveringEntry) hint(workspace string, current []livedebugger.FilterSet) string {
+// the workspace already holds its filters. The command changes the
+// workspace's filters, so it carries selectors (breakpointSelectors).
+func (cov coveringEntry) hint(workspace string, current []livedebugger.FilterSet, selectors []string) string {
 	if cov.name == "" || workspaceHolds(current, cov.sets) {
 		return ""
 	}
-	return fmt.Sprintf("workspace %s's filters (%s) are not the ones repo scope %s, which covers this directory, renders (%s); to apply them: dtctl update breakpoint --%s %s",
-		workspace, workspaceFilterSummary(current), cov.name, filterSetsSummary(cov.sets), repoScopeFlag, cov.name)
+	return fmt.Sprintf("workspace %s's filters (%s) are not the ones repo scope %s, which covers this directory, renders (%s); to apply them: %s",
+		workspace, workspaceFilterSummary(current), cov.name, filterSetsSummary(cov.sets),
+		breakpointCommandLine(selectors, "update", "breakpoint", "--"+repoScopeFlag, cov.name))
 }
 
 // preview is what a dry run of such a create says after naming the
@@ -176,7 +180,9 @@ func workspaceHolds(sets []livedebugger.FilterSet, want []map[string][]string) b
 }
 
 // workspaceFilterSummary renders the workspace's filter sets the way
-// filterSetsSummary renders the sets dtctl sends.
+// filterSetsSummary renders the sets dtctl sends, for a message: the values
+// are whatever the environment returned, so they are shown as repoScopeText
+// shows them.
 func workspaceFilterSummary(sets []livedebugger.FilterSet) string {
 	parts := make([]string, 0, len(sets))
 	for _, set := range sets {
@@ -186,7 +192,7 @@ func workspaceFilterSummary(sets []livedebugger.FilterSet) string {
 			parts = append(parts, formatFilters(fields))
 		}
 	}
-	return strings.Join(parts, "; ")
+	return repoScopeText(strings.Join(parts, "; "))
 }
 
 // fieldValues collects a filter set's fields into the map --filters parses

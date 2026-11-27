@@ -83,6 +83,9 @@ func runDescribeBreakpoint(cmd *cobra.Command, identifier string) error {
 }
 
 func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps liveDebuggerDeps) error {
+	if err := requireBreakpointIdentifier(identifier); err != nil {
+		return err
+	}
 	verbose := isDebugVerbose(cmdContext(cmd))
 
 	cfg, err := deps.loadConfig(cmdContext(cmd))
@@ -149,7 +152,7 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 		return err
 	}
 	if allowDirectID {
-		return fmt.Errorf("no breakpoint found with identifier %q in workspace %s", strings.TrimSpace(identifier), workspace)
+		return breakpointNotFound("no breakpoint found with identifier %q in workspace %s", strings.TrimSpace(identifier), workspace)
 	}
 
 	results := make([]breakpointStatusResult, 0, len(targetRules))

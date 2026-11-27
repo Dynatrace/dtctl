@@ -76,7 +76,7 @@ Examples:
 			}
 			workspace := ws.shown()
 			// Said before the confirmation and before anything is sent.
-			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
+			ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), ws.changeNotes()...)
 
 			handler, err := liveDebuggerHandler(ctx, cfg)
 			if err != nil {
@@ -122,7 +122,7 @@ Examples:
 			if fileName, lineNumber, err := parseBreakpoint(identifier); err == nil {
 				targets := findBreakpointRowsByLocation(rows, fileName, lineNumber)
 				if len(targets) == 0 {
-					return fmt.Errorf("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
+					return breakpointNotFound("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 				}
 				return runDeleteBreakpointRowsWithOps(ctx, handler, workspaceID, workspace, targets, yes, verbose, ops)
 			}
@@ -159,7 +159,7 @@ func validateDeleteBreakpointArgs(cmd *cobra.Command, args []string) error {
 		return cobra.ExactArgs(1)(cmd, args)
 	}
 
-	return nil
+	return requireBreakpointIdentifier(args[0])
 }
 
 func runDeleteAllBreakpoints(ctx context.Context, handler *livedebugger.Handler, workspaceID, workspace string, rows []breakpointRow, yes bool, verbose bool) error {

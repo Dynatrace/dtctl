@@ -1054,6 +1054,17 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// A breakpoint command that found no breakpoint. Its message ends with
+	// the workspace, named after a directory, so the fallback's reading of
+	// the message would make the code depend on what a directory is called.
+	var breakpointNotFound *breakpointNotFoundError
+	if errors.As(err, &breakpointNotFound) {
+		return &output.ErrorDetail{
+			Code:    "not_found",
+			Message: err.Error(),
+		}
+	}
+
 	// suggest.FlagError — unknown flag with "did you mean?" suggestion
 	var flagErr *suggest.FlagError
 	if errors.As(err, &flagErr) {
@@ -1429,6 +1440,11 @@ func exitCodeForError(err error) int {
 	var repoScopeInvalid *reposcope.InvalidError
 	if errors.As(err, &repoScopeInvalid) {
 		return client.ExitUsageError
+	}
+	// A breakpoint that is not found, for the same reason.
+	var breakpointNotFound *breakpointNotFoundError
+	if errors.As(err, &breakpointNotFound) {
+		return client.ExitNotFoundError
 	}
 
 	var flagErr *suggest.FlagError

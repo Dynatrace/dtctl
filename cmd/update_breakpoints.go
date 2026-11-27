@@ -89,19 +89,9 @@ Examples:
 
 			conditionChanged := cmd.Flags().Changed("condition")
 			logMessageChanged := cmd.Flags().Changed("log-message")
-			// "--enabled false" leaves the flag bare and "false" as an
-			// argument, where the breakpoint identifier goes. An argument
-			// that reads as a boolean and is the first after the flag, with
-			// none before it, is that mistake: no breakpoint is named, and
-			// enabling a rule called "false" helps nobody. An identifier is
-			// whatever a rule was created with, so one that reads as a
-			// boolean exists; before the flag it is never refused. After
-			// it, it cannot be told from the mistake.
-			if len(args) > 0 && enabledFlag.set && enabledFlag.argsBefore == 0 {
-				if value, err := strconv.ParseBool(strings.TrimSpace(args[0])); err == nil {
-					return &invalidInputError{fmt.Errorf(`%q follows --enabled, where it reads as the flag's value, so no breakpoint is named: name it first, as in dtctl update breakpoint <id|filename:line> --enabled=%t; a breakpoint whose identifier is %q goes before the flag as well`,
-						args[0], value, args[0])}
-				}
+			trailingArgs, err := enabledFlag.trailingValue(args, trailingArgs, filtersChanged)
+			if err != nil {
+				return err
 			}
 			enabled, enabledChanged, err := getOptionalBoolFlag(cmd, "enabled", trailingArgs)
 			if err != nil {
@@ -153,7 +143,7 @@ Examples:
 				notes := ws.changeNotes()
 				if scopeName != "" {
 					var entryNotes []string
-					if sets, entryNotes, err = namedBreakpointFilters(cmd, cfg, scopeName); err != nil {
+					if sets, entryNotes, err = namedBreakpointFilters(ws, breakpointSelectors(cmdContext(cmd), cfg)); err != nil {
 						return err
 					}
 					origin = " from repo scope " + scopeName
@@ -166,7 +156,7 @@ Examples:
 					sets = []map[string][]string{parsed}
 				}
 				// Said before the confirmation and before anything is sent.
-				ctx := sayBreakpointWarnings(cmdContext(cmd), notes...)
+				ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), notes...)
 
 				if dryRun(ctx) {
 					return printBreakpointMessage(ctx, "update", fmt.Sprintf("Dry run: would update workspace %s's filters%s (%s) (note: this also re-scopes existing breakpoints in the workspace)", workspace, origin, filterSetsSummary(sets)))
@@ -217,6 +207,9 @@ Examples:
 			condition, _ := cmd.Flags().GetString("condition")
 			logMessage, _ := cmd.Flags().GetString("log-message")
 			identifier := strings.TrimSpace(args[0])
+			if err := requireBreakpointIdentifier(identifier); err != nil {
+				return err
+			}
 
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -238,7 +231,7 @@ Examples:
 				return err
 			}
 			workspace := ws.shown()
-			ctx := sayBreakpointWarnings(cmdContext(cmd), ws.changeNotes()...)
+			ctx := sayBreakpointWarnings(ws.warnScopeFile(cmdContext(cmd)), ws.changeNotes()...)
 			if dryRun(ctx) {
 				changes := describeBreakpointEdits(conditionChanged, condition, logMessageChanged, logMessage, enabledChanged, enabled)
 				return printBreakpointMessage(ctx, "update", inWorkspace(fmt.Sprintf("Dry run: would update breakpoint %s (%s)", identifier, changes), workspace))
@@ -287,7 +280,7 @@ Examples:
 
 			if conditionChanged || logMessageChanged {
 				if len(targetRules) == 0 {
-					return fmt.Errorf("breakpoint %q not found in workspace %s", identifier, workspace)
+					return breakpointNotFound("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				for _, rule := range targetRules {
 					ruleSettings, err := buildEditBreakpointSettings(rule, condition, conditionChanged, logMessage, logMessageChanged)
@@ -320,7 +313,7 @@ Examples:
 					ruleIDs = append(ruleIDs, identifier)
 				}
 				if len(ruleIDs) == 0 {
-					return fmt.Errorf("breakpoint %q not found in workspace %s", identifier, workspace)
+					return breakpointNotFound("breakpoint %q not found in workspace %s", identifier, workspace)
 				}
 				enableResp, err := handler.EnableOrDisableBreakpoints(workspaceID, ruleIDs, !enabled)
 				if err != nil {
@@ -363,7 +356,7 @@ func resolveBreakpointRulesForEdit(rules []livedebugger.BreakpointRule, identifi
 	if fileName, lineNumber, err := parseBreakpoint(identifier); err == nil {
 		matches := findBreakpointRulesByLocation(rules, fileName, lineNumber)
 		if len(matches) == 0 {
-			return nil, "", false, fmt.Errorf("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
+			return nil, "", false, breakpointNotFound("no breakpoints found at %s:%d in workspace %s", fileName, lineNumber, workspace)
 		}
 		return matches, fmt.Sprintf("%s:%d", fileName, lineNumber), false, nil
 	}
@@ -656,6 +649,51 @@ func (v *enabledFlagValue) Set(s string) error {
 // Reset returns the flag to its default between invocations; Set would
 // record a place.
 func (v *enabledFlagValue) Reset() { v.value, v.set, v.argsBefore = "", false, 0 }
+
+// trailingValue decides which of args is the value of --enabled: trailing,
+// the arguments after the first, when "<id> --enabled false" was written,
+// and none otherwise. The flag takes an optional value, so a value written
+// after a space arrives as an argument, and only where it stands tells it
+// from an identifier.
+//
+// A bare flag sets exactly "true", so any other value was written with "="
+// and is the flag's own: one argument is then the identifier, wherever it
+// stands, and a second is refused rather than read as a value that overrides
+// the written one. (--enabled=true cannot be told from the bare flag and is
+// treated as one.)
+//
+// After a bare flag an argument is the value only in the documented place,
+// following the one identifier. With no identifier before the flag, an
+// argument that reads as a boolean is the mistake "--enabled false": no
+// breakpoint is named, and enabling a rule called "false" helps nobody. An
+// identifier is whatever a rule was created with, so one that reads as a
+// boolean exists; before the flag it is never refused, and after it, it
+// cannot be told from the mistake. filtersChanged leaves that to the caller,
+// which refuses --filters with --enabled for what it is.
+func (v *enabledFlagValue) trailingValue(args, trailing []string, filtersChanged bool) ([]string, error) {
+	const spelling = "dtctl update breakpoint <id|filename:line> --enabled"
+	switch {
+	case !v.set:
+		return trailing, nil
+	case v.value != "true":
+		if _, err := strconv.ParseBool(strings.TrimSpace(v.value)); err != nil {
+			return nil, &invalidInputError{fmt.Errorf("invalid boolean value %q for --enabled", v.value)}
+		}
+		if len(args) > 1 {
+			return nil, &invalidInputError{fmt.Errorf("--enabled=%s carries its value, so one breakpoint identifier is expected beside it, and %d arguments were given", v.value, len(args))}
+		}
+		return nil, nil
+	case len(args) > 0 && v.argsBefore == 0 && !filtersChanged:
+		if value, err := strconv.ParseBool(strings.TrimSpace(args[0])); err == nil {
+			return nil, &invalidInputError{fmt.Errorf(`%q follows --enabled, where it reads as the flag's value, so no breakpoint is named: name it first, as in %s=%t; a breakpoint whose identifier is %q goes before the flag as well`,
+				args[0], spelling, value, args[0])}
+		}
+	}
+	if len(args) > 1 && !(len(args) == 2 && v.argsBefore == 1) {
+		return nil, &invalidInputError{fmt.Errorf("%d arguments were given, and --enabled takes a value only right after the one breakpoint identifier, as in %s false", len(args), spelling)}
+	}
+	return trailing, nil
+}
 
 func getOptionalBoolFlag(cmd *cobra.Command, flagName string, trailingArgs []string) (bool, bool, error) {
 	flag := cmd.Flags().Lookup(flagName)

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -29,16 +30,57 @@ var entryNotes = []string{
 	"repo scope checkout's service ids are not sent: Live Debugger does not honour dt.entity.service as a workspace label",
 	"repo scope checkout binds a cluster, which a Live Debugger workspace is not narrowed by: the filters include the same workload in other clusters",
 	"repo scope checkout's filter segments are not applied: a workspace is filtered by labels and takes no segment, so the filters are wider than the entry's queries",
-	"repo scope checkout sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl describe breakpoint <id>",
+	"repo scope checkout sets service.name, which is not verified as a workspace label: a filter set a workspace does not honour selects nothing, and a breakpoint under it is created and never hits; check with dtctl --context c describe breakpoint <id> --repo-scope checkout",
 }
 
 // workspaceNote is the line a command that changes something in a workspace
-// named after the repository says about it.
+// of a linked checkout says about it. The test repositories have no origin
+// remote, so the checkout directory names their workspaces.
 func workspaceNote(workspace string) string {
+	const byDirectory = " is named after the checkout directory, as no origin remote names the repository, so a clone in a directory of another name works in another one"
+	if strings.Contains(workspace, "/") {
+		return "workspace " + workspace + byDirectory + `: it is not verified that Live Debugger accepts "/" in a workspace name`
+	}
+	return "workspace " + workspace + byDirectory
+}
+
+// originWorkspaceNote is workspaceNote for a workspace the origin remote
+// named.
+func originWorkspaceNote(workspace string) string {
 	if strings.Contains(workspace, "/") {
 		return "workspace " + workspace + ` is named after the repository, so every clone of it names the same one: it is not verified that Live Debugger accepts "/" in a workspace name, nor that a workspace is private to its user`
 	}
 	return "workspace " + workspace + " is named after the repository, so every clone of it names the same one: it is not verified that a workspace is private to its user"
+}
+
+// Only a workspace the origin remote named is the same one in every clone,
+// and only there the line says so, with what that relies on.
+func TestBreakpoint_OnlyAnOriginNamedWorkspaceIsSharedByEveryClone(t *testing.T) {
+	newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+	root := chdirTestRepo(t, breakpointScope)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"),
+		[]byte("[remote \"origin\"]\n\turl = git@example.invalid:shop/storefront.git\n"), 0o644))
+
+	notes := func() []string {
+		code, stdout, stderr := runRepoScoped([]string{"update", "breakpoint", "--filters", "k8s.namespace.name:web", "--agent", "--dry-run"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		return agentEnvelope(t, stdout).Context.Warnings
+	}
+	require.Equal(t, []string{originWorkspaceNote("storefront/checkout")}, notes())
+
+	chdirTestRepo(t, "environments:\n  127.0.0.1:\n    - name: ledger\n      path: services/ledger\n      service-names: [ledger]\n")
+	root, _ = os.Getwd()
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config"),
+		[]byte("[remote \"origin\"]\n\turl = git@example.invalid:shop/storefront.git\n"), 0o644))
+	require.Equal(t, []string{originWorkspaceNote("storefront")}, notes())
+
+	// A worktree: .git is a file, and there is no origin to read.
+	root = t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".dtctl-repo-scope.yaml"), []byte(breakpointScope), 0o644))
+	t.Chdir(root)
+	require.Equal(t, []string{workspaceNote(filepath.Base(root) + "/checkout")}, notes())
+	require.NotContains(t, notes()[0], "every clone")
 }
 
 // Filters set from an entry are not the entry: what they leave out, and what

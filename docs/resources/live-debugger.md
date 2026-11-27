@@ -61,6 +61,8 @@ dtctl auth login
 
 Workspace filters scope which monitored processes are eligible for breakpoints. Use them in large environments to avoid unnecessary overhead. Filters are workspace-scoped: a single filter set applies to every breakpoint in the workspace. Because of this, changing the filters re-scopes not only breakpoints you create afterwards but all existing breakpoints in the workspace as well.
 
+In a repository linked with `dtctl repo-scope`, `--repo-scope <name>` on `create breakpoint` and `update breakpoint` sets the filters from the named entry instead, and the breakpoint commands work in a workspace named `<repo>/<entry>` rather than after the working directory. See [Filters from the repo scope](../LIVE_DEBUGGER.md#filters-from-the-repo-scope).
+
 You can set filters in the same step as creating a breakpoint, so a separate filter command isn't required. Use the standalone command when you want to set or change filters without creating a breakpoint:
 
 ```bash

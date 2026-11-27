@@ -59,6 +59,30 @@ Use -o json / -o yaml for structured output.`,
 			if listShapeFields(cmdContext(cmd)) != "" {
 				return fmt.Errorf("--fields is not supported by get snapshots; project fields in DQL instead: dtctl query 'fetch application.snapshots | fields ...'")
 			}
+			if err := requireBreakpointIdentifier(args[0]); err != nil {
+				return err
+			}
+			// Flag values are checked before anything is read: the first
+			// request finds the workspace, and creates one where there is
+			// none.
+			decodeVal, _ := cmd.Flags().GetString("decode-snapshots")
+			var decodeMode exec.DecodeMode
+			if cmd.Flags().Changed("decode-snapshots") {
+				switch decodeVal {
+				case "", "simplified":
+					decodeMode = exec.DecodeSimplified
+				case "full":
+					decodeMode = exec.DecodeFull
+				default:
+					return fmt.Errorf("unsupported --decode-snapshots value %q (use \"simplified\" or \"full\")", decodeVal)
+				}
+			}
+
+			metadataFields, metadataDefaulted, err := resolveMetadataFlag(cmd, agentMode(cmdContext(cmd)))
+			if err != nil {
+				return err
+			}
+
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -109,7 +133,7 @@ Use -o json / -o yaml for structured output.`,
 				return err
 			}
 			if len(matchedRules) == 0 {
-				return fmt.Errorf("no breakpoint found with identifier %q in workspace %s", identifier, workspace)
+				return breakpointNotFound("no breakpoint found with identifier %q in workspace %s", identifier, workspace)
 			}
 
 			rule := matchedRules[0]
@@ -125,28 +149,10 @@ Use -o json / -o yaml for structured output.`,
 			printWorkspaceName(cmdContext(cmd), workspace)
 			fmt.Fprintln(currentStderr(cmdContext(cmd)), "Note: only snapshots since the breakpoint was last changed are shown")
 
-			decodeVal, _ := cmd.Flags().GetString("decode-snapshots")
-			var decodeMode exec.DecodeMode
-			if cmd.Flags().Changed("decode-snapshots") {
-				switch decodeVal {
-				case "", "simplified":
-					decodeMode = exec.DecodeSimplified
-				case "full":
-					decodeMode = exec.DecodeFull
-				default:
-					return fmt.Errorf("unsupported --decode-snapshots value %q (use \"simplified\" or \"full\")", decodeVal)
-				}
-			}
-
 			maxResultRecords, _ := cmd.Flags().GetInt64("max-result-records")
 			defaultTimeframeStart, _ := cmd.Flags().GetString("default-timeframe-start")
 			defaultTimeframeEnd, _ := cmd.Flags().GetString("default-timeframe-end")
 			noProgress, _ := cmd.Flags().GetBool("no-progress")
-
-			metadataFields, metadataDefaulted, err := resolveMetadataFlag(cmd, agentMode(cmdContext(cmd)))
-			if err != nil {
-				return err
-			}
 
 			executor := newDQLExecutorFromConfig(cmdContext(cmd), cfg, c)
 
