@@ -149,8 +149,13 @@ var ErrMalformedResult = errors.New("profiling: malformed analysis result")
 func checkResult(status string, result interface{}) error {
 	switch status {
 	case statusCompleted:
-		if _, ok := result.(map[string]interface{}); !ok {
+		m, ok := result.(map[string]interface{})
+		if !ok {
 			return fmt.Errorf("%w: the result of a completed analysis is %s, not an object", ErrMalformedResult, jsonKind(result))
+		}
+		if m == nil {
+			// Only a document built in Go holds one; a decoder gives {}.
+			return fmt.Errorf("%w: the result of a completed analysis is a nil map, not an object", ErrMalformedResult)
 		}
 	case statusNoData:
 		if result != nil {
@@ -229,13 +234,28 @@ func openEnvelope(kind sdkcla.Kind, raw map[string]interface{}) (envelope, error
 	if err := checkResult(e.status, raw["result"]); err != nil {
 		return envelope{}, err
 	}
-	e.entity, _ = raw["entityId"].(string)
+	// The two keys below may be absent, as in a document written by hand;
+	// present, each has the type Raw gives it.
+	switch id := raw["entityId"].(type) {
+	case nil:
+	case string:
+		e.entity = id
+	default:
+		return envelope{}, fmt.Errorf("%w: entityId is %s, not a string", ErrMalformedResult, jsonKind(id))
+	}
 	polls, err := decodedLeaf(raw["pollCount"])
 	if err != nil {
 		return envelope{}, fmt.Errorf("%w: pollCount%w", ErrMalformedResult, err)
 	}
-	if n, ok := polls.(float64); ok {
+	switch n := polls.(type) {
+	case nil:
+	case float64:
+		if n < 0 || n != math.Trunc(n) {
+			return envelope{}, fmt.Errorf("%w: pollCount is %v, not a count", ErrMalformedResult, n)
+		}
 		e.pollCount = count(n)
+	default:
+		return envelope{}, fmt.Errorf("%w: pollCount is %s, not a count", ErrMalformedResult, jsonKind(n))
 	}
 	if e.result, err = compact(raw["result"], decodedLeaf); err != nil {
 		return envelope{}, fmt.Errorf("%w: result%w", ErrMalformedResult, err)

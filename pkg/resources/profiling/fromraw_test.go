@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/Dynatrace/dtctl/pkg/client"
 	"github.com/Dynatrace/dtctl/pkg/resources/profiling"
 )
@@ -330,5 +332,68 @@ func TestFromRaw_SharesNothing(t *testing.T) {
 	node(first)["childIds"].([]interface{})[0] = "9"
 	if got := hs.Raw(); !reflect.DeepEqual(got, want) {
 		t.Errorf("after the caller changed an earlier Raw(), Raw() = %#v\nwant %#v", got, want)
+	}
+}
+
+// --raw -o yaml prints the document too, and a YAML decoder gives its integers
+// as int. Such a document is refused, not read as a process without samples:
+// the constructors take the document as decoded from JSON.
+func TestFromRaw_DocumentDecodedFromYAML(t *testing.T) {
+	hs, _ := analyses(t)
+	data, err := yaml.Marshal(hs.Raw())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	again, err := profiling.HotspotsFromRaw(doc)
+	if again != nil || !errors.Is(err, profiling.ErrMalformedResult) {
+		t.Fatalf("HotspotsFromRaw of a YAML-decoded document = %+v, %v; want ErrMalformedResult", again, err)
+	}
+	if want := "profiling: malformed analysis result: pollCount has the type int, which no JSON decoder produces"; err.Error() != want {
+		t.Errorf("error %q\nwant  %q", err, want)
+	}
+}
+
+// The envelope keys are read strictly: a value of the wrong type is not a
+// document Raw wrote.
+func TestFromRaw_EnvelopeOfTheWrongTypes(t *testing.T) {
+	build := func(key string, value interface{}) map[string]interface{} {
+		doc := map[string]interface{}{"status": "completed", "kind": "methodHotspots", "entityId": "PROCESS-1", "pollCount": float64(0), "result": map[string]interface{}{}}
+		doc[key] = value
+		return doc
+	}
+	cases := []struct {
+		name string
+		doc  map[string]interface{}
+		want string
+	}{
+		{"an entity id that is a number", build("entityId", float64(5)),
+			"profiling: malformed analysis result: entityId is a number, not a string"},
+		{"a poll count that is a string", build("pollCount", "bad"),
+			"profiling: malformed analysis result: pollCount is a string, not a count"},
+		{"a negative poll count", build("pollCount", float64(-1)),
+			"profiling: malformed analysis result: pollCount is -1, not a count"},
+		{"a poll count with a fraction", build("pollCount", 1.5),
+			"profiling: malformed analysis result: pollCount is 1.5, not a count"},
+		{"a nil map as the result", build("result", map[string]interface{}(nil)),
+			"profiling: malformed analysis result: the result of a completed analysis is a nil map, not an object"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs, err := profiling.HotspotsFromRaw(tc.doc)
+			if hs != nil || !errors.Is(err, profiling.ErrMalformedResult) || err.Error() != tc.want {
+				t.Errorf("HotspotsFromRaw = %v, %v\nwant the error %q", hs, err, tc.want)
+			}
+		})
+	}
+	// Absent, both keys are what a zero value holds.
+	doc := build("entityId", "")
+	delete(doc, "entityId")
+	delete(doc, "pollCount")
+	if hs, err := profiling.HotspotsFromRaw(doc); err != nil || hs.Entity != "" || hs.PollCount != 0 {
+		t.Errorf("HotspotsFromRaw without entityId and pollCount = %+v, %v", hs, err)
 	}
 }
