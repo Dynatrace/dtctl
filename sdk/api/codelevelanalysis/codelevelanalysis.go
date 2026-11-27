@@ -300,10 +300,18 @@ func (h *Handler) submit(ctx context.Context, path string) (*resty.Response, err
 func throttleWait(resp *resty.Response, attempt int) time.Duration {
 	wait := throttleBaseWait << (attempt - 1)
 	if v := strings.TrimSpace(resp.Header().Get("Retry-After")); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		// Parsed at 64 bits whatever the platform's int is. A number too
+		// large even for that is still a number of seconds: ParseInt then
+		// returns the nearest int64, which waits the cap when it is positive
+		// and falls through to the backoff when it is negative.
+		secs, err := strconv.ParseInt(v, 10, 64)
+		if errors.Is(err, strconv.ErrRange) {
+			err = nil
+		}
+		if err == nil && secs >= 0 {
 			// Capped before the multiplication, which would wrap around to a
 			// negative wait for a large enough number of seconds.
-			wait = time.Duration(min(secs, int(maxThrottleWait/time.Second))) * time.Second
+			wait = time.Duration(min(secs, int64(maxThrottleWait/time.Second))) * time.Second
 		} else if t, err := http.ParseTime(v); err == nil {
 			wait = max(time.Until(t), 0)
 		}

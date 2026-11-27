@@ -646,6 +646,9 @@ func TestThrottleWait(t *testing.T) {
 		{"61", 1, 60 * time.Second},
 		{"10000000000", 1, 60 * time.Second},
 		{"9223372036854775807", 1, 60 * time.Second},
+		// More seconds than an int64 holds is still a number of seconds.
+		{"99999999999999999999", 1, 60 * time.Second},
+		{"-99999999999999999999", 1, 5 * time.Second},
 		{"-1", 1, 5 * time.Second},
 		{"soon", 2, 10 * time.Second},
 	}
