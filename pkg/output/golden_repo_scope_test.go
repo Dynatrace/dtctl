@@ -209,9 +209,9 @@ func TestGolden_RepoScope(t *testing.T) {
 		obj     interface{}
 		formats []string
 	}{
-		"status-linked":       {repoScopeStatusLinked(), all},
-		"status-segments":     {repoScopeStatus("services/ledger"), all},
-		"status-unlinked":     {reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, all},
+		"status-linked":   {repoScopeStatusLinked(), all},
+		"status-segments": {repoScopeStatus("services/ledger"), all},
+		"status-unlinked": {reposcope.Status{Code: reposcope.StatusNotARepository, Reason: "not inside a git repository"}, all},
 	}
 	// Discovery prints a list of reports, one per unit, also when there is
 	// one: these are that list, as the command hands it to the printer.
