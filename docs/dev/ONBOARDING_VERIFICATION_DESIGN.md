@@ -620,11 +620,12 @@ telemetry is not implicated.
     sample `events`, `bizevents` and `security.events`, and rounds every ratio down to a power
     of ten — reporting both as a warning on a **200**, with a full unsampled result. Trusting
     the requested ratio would have overstated a refused object's volume by that entire factor,
-    so the probe sums `dt.system.sampling_ratio` and the runner reads `metadata.sampled`
+    so the probe sums `dt.system.sampling_ratio` and the runner reads the `sampled` flag of
+    the response's Grail metadata block through `inventory.SampledOf`
     (`TestSampledCountIgnoresRequestedRatio`, `TestSamplingRefusalIsNotRetried`). A rung
     without the flag is a refusal only if it matched a record or was itself cut short. One
     that matched nothing and ran to completion is an empty rung: the walk continues past it,
-    and it supplies no bound, since nothing in the response confirms the ratio
+    and it supplies no bound, since nothing in the response confirms that it sampled at all
     (`TestUnflaggedEmptyRungDoesNotEndTheWalk`, `TestSampledBoundComesFromAFlaggedRung`).
     A refusal met after a thin hit ends the walk on that hit rather than discarding it
     (`TestThinSampleSurvivesARefusedNextRung`).
@@ -824,7 +825,7 @@ is evidence the walk has and does not use, or a case it reads conservatively.
 | `sdk/inventory/discover.go` | `Since`/`Scope`/`StaleAfter`/`Signals` options; `RunResult.ColumnTypes`; view→bucket/table resolution from the catalog's `query_string` |
 | `sdk/inventory/definitions.go` | `spans`/`rum` → `start_time`; Davis `backingBuckets`; `timeField` and `backingBuckets` validation |
 | `cmd/inventory.go` | Parent command reduced to its original shape; shared discovery flags, definition loading, budget, and runner construction extracted for both commands |
-| `sdk/inventory/runner.go` | The Runner author's half of the contract: `ColumnTypesOf`, `TruncationCauseOf`, `FirstTruncationCause`, `NormalizeSince`, `DefaultStaleAfter` |
+| `sdk/inventory/runner.go` | The Runner author's half of the contract: `ColumnTypesOf`, `TruncationCauseOf`, `FirstTruncationCause`, `SampledOf`, `NormalizeSince`, `DefaultStaleAfter` |
 | `sdk/inventory/require.go` | `CheckRequired`/`RequireVerdict`, `ValidateSignalNames`, and the exit-code contract |
 | `cmd/inventory_signals.go` | The `arrivals` subcommand: flags, the signal table, rendering, result-specific agent suggestions — all decisions delegated to the SDK |
 | `pkg/auth/resource_scopes.go` | `arrivals` → query scopes |
@@ -903,6 +904,7 @@ existed. So the SDK now performs the translation instead of documenting it:
 |---|---|
 | `ColumnTypesOf` | flattens the API's per-index-range type blocks (a known type beats `undefined`) |
 | `TruncationCauseOf` / `FirstTruncationCause` | classifies which limit cut a result short |
+| `SampledOf` | reads whether the environment applied sampling; omitting it loses the sampled recovery of a capped stream, which stays `unknown` (`TestRunnerWithoutTheSampledFlagDegradesToUnknown`) |
 
 | Convenience | |
 |---|---|

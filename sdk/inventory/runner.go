@@ -29,10 +29,11 @@ import (
 // translation, so a Runner over the Dynatrace query API can hand the response
 // straight through. See RunResult.
 //
-// A third field needs no helper because it is a plain copy, and omitting it
-// degrades rather than misleads: RunResult.Sampled is the response's
-// metadata.sampled. A Runner that leaves it false gets no sampled recovery for
-// a scan-capped stream, which then stays "unknown".
+// A third translation degrades rather than misleads, and has a helper for the
+// same reason the other two do: Sampled is what the environment says it did,
+// read from the response by SampledOf, never what the query asked for. A
+// Runner that leaves it false gets no sampled recovery for a scan-capped
+// stream, which then stays "unknown".
 
 // ColumnTypesOf flattens the query API's per-index-range type blocks into the
 // single column→type map RunResult carries.
@@ -114,6 +115,18 @@ func FirstTruncationCause(notifications []query.Notification) TruncationCause {
 		}
 	}
 	return ""
+}
+
+// SampledOf reports whether the environment applied sampling to a response,
+// which is what RunResult.Sampled carries.
+//
+// The flag sits in the response's Grail metadata block, and a response without
+// metadata reports nothing, so nil is false. It is read from the response and
+// never derived from the query text: Grail answers 200 both when it declines to
+// sample a data object and when it rounds a ratio down, so a query that asked
+// for sampling says nothing about whether it happened.
+func SampledOf(meta *query.GrailMetadata) bool {
+	return meta != nil && meta.Sampled
 }
 
 // NormalizeSince turns a window given as a duration into the DQL timeframe

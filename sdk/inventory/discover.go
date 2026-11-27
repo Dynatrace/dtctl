@@ -45,8 +45,7 @@ type RunResult struct {
 	// is read as the capped query run again, which ends the retries. Either
 	// way an unflagged result supplies no count and no bound, so a Runner
 	// that leaves Sampled unset loses every sampled verdict: the signal stays
-	// "unknown", it never gets a wrong count. Copy the flag from the
-	// response's metadata.
+	// "unknown", it never gets a wrong count. Set it with SampledOf.
 	Sampled bool
 }
 
@@ -75,9 +74,10 @@ const (
 // Returning records is not the whole job. RunResult also carries the response's
 // column types and the reason a result was cut short, and several verdicts are
 // only as good as those two fields — a Runner that omits ColumnTypes turns every
-// "n/a" into a confident "empty", with no error to say so. Build the result with
-// ColumnTypesOf and FirstTruncationCause rather than filling those fields by
-// hand; see runner.go.
+// "n/a" into a confident "empty", with no error to say so. A third field,
+// Sampled, decides whether a scan-capped stream can be recovered at all. Build
+// the result with ColumnTypesOf, FirstTruncationCause and SampledOf rather than
+// filling those fields by hand; see runner.go.
 type Runner interface {
 	RunQuery(ctx context.Context, dql string) (*RunResult, error)
 }

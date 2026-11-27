@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - `sdk/api/document` — `DocumentMetadata.IsReshareable` (`*bool`, nil when the API omits it) says whether users with write access may share the document.
 
+- `sdk/inventory` — `SampledOf` reads from a query response's Grail metadata whether the environment applied sampling, which is what a `Runner` puts in `RunResult.Sampled`. It joins `ColumnTypesOf` and `FirstTruncationCause` as the third field a `Runner` should fill through a helper. A `Runner` that leaves the field unset loses the sampled recovery of a scan-capped signal, which then stays `unknown`.
+
 ### Fixed
 
 - `sdk/inventory` — The sampled recovery of a scan-capped signal (`Discover` in windowed mode) changes as follows. A rung that comes back without the sampled flag and matched nothing no longer ends the walk, and a refusal met after a thin hit keeps that hit. A sampled hit is dated by the newest record any response of the walk matched, the capped probe's included, and against a clock reading taken before the rung that returned it. A hit of fewer than 30 sampled records is never `stale`: it is `live` or `unknown`, and the `unknown` keeps `Records`, `SamplingRatio` and `RecordsSampled`. The evidence no longer says the environment does not support sampling after a rung that was flagged as sampled or after an unflagged rung cut short by something other than the scan limit. The wrong-scope note is not added when any signal carries a count. A count a `Runner` hands over as `json.Number` is read instead of counted as zero.
