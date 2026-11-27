@@ -117,15 +117,25 @@ func TestBreakpoint_AScopeFileForAnotherEnvironmentNamesNoWorkspace(t *testing.T
 	require.Equal(t, "workspace: src\n", stderr)
 }
 
-// misspelledScope is a scope file whose one document key is misspelled: it
-// loads, and no entry is read from it.
-const misspelledScope = "Environments:\n  127.0.0.1:\n    - name: checkout\n      service-names: [checkout]\n"
+// unusableScopes are scope files that were meant to say something and from
+// which no entry can be taken. The first does not load: its one document
+// key is misspelled, which the reader refuses with the spelling to use. The
+// second loads and holds nothing: its environments are empty beside a key
+// this dtctl does not know, so whatever that key was meant to hold is not
+// read. said is what the commands say of each.
+var unusableScopes = []struct {
+	name, content, said string
+}{
+	{"a misspelled document key", "Environments:\n  127.0.0.1:\n    - name: checkout\n      service-names: [checkout]\n",
+		`.dtctl-repo-scope.yaml: key "Environments" on line 1 must be written "environments"`},
+	{"no entry beside an unknown key", "environments: {}\nworkloads:\n  - name: checkout\n",
+		`.dtctl-repo-scope.yaml: no entry was read from it, and it holds unknown key "workloads" on line 2 (a typo, or written by a newer dtctl)`},
+}
 
-// A file that loads with no entry at all and a document key this dtctl does
-// not know was meant to say something and says nothing: most likely the key
-// is misspelled, and every entry under it would have named a workspace. It
-// is treated as a file that does not load. Every change is refused, its dry
-// run included, before anything is sent.
+// A file no entry can be taken from, though it was meant to hold some, would
+// have named a workspace. Whether it fails to load or loads empty, every
+// change is refused, its dry run included, before anything is sent: neither
+// file leaves a change to the working directory's workspace.
 func TestBreakpoint_AScopeFileThatReadNoEntryRefusesEveryChange(t *testing.T) {
 	commands := slices.Concat(mutatingBreakpointCommands, []struct {
 		name string
@@ -134,54 +144,62 @@ func TestBreakpoint_AScopeFileThatReadNoEntryRefusesEveryChange(t *testing.T) {
 		{"create", []string{"create", "breakpoint", "A.java:1"}},
 		{"create with filters", []string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:web"}},
 	})
-	for _, tc := range commands {
-		for _, mode := range []string{"", "--dry-run"} {
-			t.Run(tc.name+mode, func(t *testing.T) {
-				srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
-				srv.rules = []interface{}{ruleAt("A.java", 1, "")}
-				chdirTestRepo(t, misspelledScope)
-				argv := slices.Concat(tc.argv, []string{"--agent", "--yes"})
-				if mode != "" {
-					argv = append(argv, mode)
-				}
+	for _, scope := range unusableScopes {
+		for _, tc := range commands {
+			for _, mode := range []string{"", "--dry-run"} {
+				t.Run(scope.name+"/"+tc.name+mode, func(t *testing.T) {
+					srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+					srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+					chdirTestRepo(t, scope.content)
+					argv := slices.Concat(tc.argv, []string{"--agent", "--yes"})
+					if mode != "" {
+						argv = append(argv, mode)
+					}
 
-				code, stdout, _ := runRepoScoped(argv, RunOptions{})
-				require.NotZero(t, code, stdout)
-				detail := agentError(t, stdout)
-				if slices.Contains(tc.argv, "--repo-scope") {
-					// The name is looked up in the file, and is not in it.
-					require.Equal(t, "not_found", detail.Code)
-				} else {
-					require.Equal(t, "validation_error", detail.Code)
-					require.Equal(t, `.dtctl-repo-scope.yaml: no entry was read from it, and it holds unknown key "Environments" on line 1 (a typo, or written by a newer dtctl); it decides which Live Debugger workspace this command works in, so nothing was changed`, detail.Message)
-				}
-				require.Empty(t, srv.ops())
-			})
+					code, stdout, _ := runRepoScoped(argv, RunOptions{})
+					require.NotZero(t, code, stdout)
+					detail := agentError(t, stdout)
+					switch {
+					case !slices.Contains(tc.argv, "--repo-scope"):
+						require.Equal(t, "validation_error", detail.Code)
+						require.Equal(t, scope.said+"; it decides which Live Debugger workspace this command works in, so nothing was changed", detail.Message)
+					case strings.Contains(scope.said, "no entry was read"):
+						// The file loaded, so the name is looked up in it, and is not there.
+						require.Equal(t, "not_found", detail.Code)
+					default:
+						require.Equal(t, "validation_error", detail.Code)
+						require.Equal(t, scope.said+"; --repo-scope ledger names an entry of it, so nothing was sent", detail.Message)
+					}
+					require.Empty(t, srv.ops())
+				})
+			}
 		}
 	}
 }
 
 // A read under such a file carries on in the working directory's workspace
-// and says so, as under a file that does not load.
+// and says so, whether the file failed to load or loaded empty.
 func TestBreakpoint_AScopeFileThatReadNoEntryWarnsEveryRead(t *testing.T) {
-	const warning = `.dtctl-repo-scope.yaml: no entry was read from it, and it holds unknown key "Environments" on line 1 (a typo, or written by a newer dtctl); reading workspace src, the one named after the working directory, not the one the file would name`
-	for _, argv := range [][]string{
-		{"get", "breakpoints"},
-		{"describe", "breakpoint", "A.java:1"},
-		{"get", "snapshots", "A.java:1"},
-	} {
-		t.Run(strings.Join(argv[:2], " "), func(t *testing.T) {
-			srv := newLiveDebuggerStub(t, "readonly")
-			srv.rules = []interface{}{ruleAt("A.java", 1, "")}
-			chdirTestRepo(t, misspelledScope)
-			chdirSubdir(t, "src")
+	for _, scope := range unusableScopes {
+		warning := scope.said + "; reading workspace src, the one named after the working directory, not the one the file would name"
+		for _, argv := range [][]string{
+			{"get", "breakpoints"},
+			{"describe", "breakpoint", "A.java:1"},
+			{"get", "snapshots", "A.java:1"},
+		} {
+			t.Run(scope.name+"/"+strings.Join(argv[:2], " "), func(t *testing.T) {
+				srv := newLiveDebuggerStub(t, "readonly")
+				srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+				chdirTestRepo(t, scope.content)
+				chdirSubdir(t, "src")
 
-			code, stdout, stderr := runRepoScoped(append(argv, "--agent"), RunOptions{})
-			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-			require.Equal(t, []string{"src"}, srv.projectPaths())
-			require.Equal(t, []string{warning}, agentEnvelope(t, stdout).Context.Warnings)
-			require.True(t, strings.HasPrefix(stderr, "Warning: "+warning+"\n"), stderr)
-		})
+				code, stdout, stderr := runRepoScoped(append(argv, "--agent"), RunOptions{})
+				require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+				require.Equal(t, []string{"src"}, srv.projectPaths())
+				require.Equal(t, []string{warning}, agentEnvelope(t, stdout).Context.Warnings)
+				require.True(t, strings.HasPrefix(stderr, "Warning: "+warning+"\n"), stderr)
+			})
+		}
 	}
 }
 
