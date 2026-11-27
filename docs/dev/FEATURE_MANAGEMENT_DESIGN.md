@@ -92,7 +92,10 @@ dtctl create fm feature new-checkout --name "New checkout" --type RELEASE --vari
 dtctl create fm feature new-checkout -f feature.yaml       # variants and flags[] from the file
 dtctl update fm feature new-checkout --add-variant variation-b --value new-checkout=true --value checkout-layout=express
 dtctl update fm feature new-checkout --remove-variant variation-b   # fails while a stage serves it
-dtctl get fm feature new-checkout -o yaml > feature.yaml   # change it, e.g. add a flag, then
+dtctl update fm feature new-checkout --add-flag checkout-layout --flag-type STRING \
+  --flag-value baseline=classic --flag-value variation-a=express
+dtctl update fm feature new-checkout --remove-flag checkout-layout  # refuses the last flag
+dtctl get fm feature new-checkout -o yaml > feature.yaml   # change several things, then
 dtctl apply fm feature -f feature.yaml --show-diff         # one write (decision 4)
 dtctl update fm feature new-checkout --status ARCHIVED
 dtctl update fm feature new-checkout --owner checkout-team --maintainers alice,bob --description "One-page checkout"
@@ -221,7 +224,7 @@ Targeting changes are the riskiest FM writes, so each one is an explicit command
 - **One resource.** A stage's targeting always exists and the API has no create or delete for it, so the stage and its rules are one resource, with no separate rule resource or alias. `delete --all` clears every rule, asks first, and keeps the stage on or off as it was.
 - **Addressing.** Rules have no key, so `--position` takes a 0-based position, a rule id or a unique id prefix, like `--config-id` on `describe extension-config`. On `create` it is where the new rule goes (an id means in that rule's place; the default is last), and `update --move-position` moves a rule. `update` and `delete` without `--position` (or `--all` on delete) are an error. The UI numbers rules from 1, so `get` and `describe` show the 0-based position dtctl takes. Positions shift on reorder, so scripts and agents should use ids.
 - **Safety.** Every write is a read-modify-write of the whole stage that preserves every rule `id`, since a new id re-buckets users. `--stage` (`-s`) is required and never defaulted, so the stage is always visible in the command. Rollback (`--rollout now=0`) is safe unattended: a no-op exits 0, and a 409 is retried once.
-- **Flags.** `--condition '<context-key> <op> <values>'` adds a condition (all must match), named after the API's `conditions[]`, with operators by value type taken from the context attribute; `--condition-add` / `--condition-remove` take the same expression and add or remove values on the matching list condition, and removing its last value removes it; `--condition-clear <key>` drops a condition; `--variant` serves a variant or a split; `--rollout <time>=<pct>[,linear]` accepts `now`, exact-duration offsets like `+1d`, and RFC 3339 times that carry a zone (`2026-12-01T09:00Z`), all resolved to UTC client-side; a time with no zone is an error.
+- **Flags.** `--condition '<context-key> <op> <values>'` adds a condition (all must match), named after the API's `conditions[]`, with operators by value type taken from the context attribute; `--condition-add` / `--condition-remove` take the same expression and add or remove values on the matching list condition, and removing its last value removes it; `--condition-clear <key>` drops a condition; `--variant` serves a variant or a split; `--rollout <time>=<pct>[,linear]` accepts `now`, exact-duration offsets like `+1d`, RFC 3339 times that carry a zone (`2026-12-01T09:00Z`), and Unix seconds (`1796115600`), all resolved to UTC client-side; a time with no zone is an error, and so is a number of 13 or more digits, with a hint that it looks like milliseconds. `DATE_TIME` condition values take the same forms.
 - **Output.** `get` and `describe` print rules as the UI does, with conditions in `--condition` syntax, so what an agent reads is what it can write. `-o json` is the API's rules unchanged.
 
 ### 3. Resource names (needs sign-off)
@@ -249,13 +252,14 @@ Not chosen: a kubectl-style `--local -f`, a client-side draft, and change-reques
 | Optimistic locking | `update` reads, merges and sends the version it read, and `apply -f` sends the file's; `--version` asserts one | Every FM write takes a version. A 409 maps to a typed "changed since read; re-run" error. |
 | Merge | On the raw JSON from the GET, not generated structs | Full-replace endpoints clear omitted fields, so an older dtctl would silently drop fields added later. |
 | Errors | Read `error.message` from the nested error envelope | FM errors are `{"error": {"code", "message", "details"}}`. |
-| `update` vs `apply` | `update` sets fields from flags; `apply -f` writes an exported object | Status (`--status`), stage order (`update fm release-stages --order`) and adding or removing a variant are `update` flags. `edit` (`$EDITOR`) arrives in phase 4. |
-| Descriptive feature edits | `update fm feature --name/--description/--owner/--maintainers` use the metadata endpoint | It has its own `features.metadata:write` scope. Mixing with `--status` is an error; adding or removing flags is `apply fm feature -f`. |
+| `update` vs `apply` | `update` sets fields from flags; `apply -f` writes an exported object | Status (`--status`), stage order (`update fm release-stages --order`) and adding or removing one variant or one flag are `update` flags, one per command; several changes are `apply -f`. `edit` (`$EDITOR`) arrives in phase 4. |
+| Descriptive feature edits | `update fm feature --name/--description/--owner/--maintainers` use the metadata endpoint | It has its own `features.metadata:write` scope. Mixing with `--status` is an error. |
 | SDK key values | `get` masks the secret part unless `--reveal`; `create` prints the full key | The list endpoint returns full keys. The public identifier (the first two dot-separated parts) is log-safe and the secret is not, so output shows only the identifier by default. `delete` takes either and resolves the identifier through the list, since the API path needs the full key. `--reveal` needs only the read scope, so it works at `readonly`. dtctl never stores a key. |
 | Overrides | Writes need read scopes only, but still go through `SetupWithSafety` | They change only the caller's own state. `update fm override` keeps the other stages, since the API's `PUT` replaces them all. |
 | Guarded stages | Direct writes fail with a hint | They need a change request, which arrives in phase 3. |
-| Flag values | `--flag-value` on `create fm feature` takes one value per variant or none; `update --add-variant` and `apply fm feature -f` need one for every flag on every variant | With none, the service fills type defaults, except for a flag with a schema, which must carry values. A partial set is rejected client-side, since create stores it as given and update returns a 400. |
-| Safety levels | `readwrite-mine` allows only your own overrides; project and release-stage delete need `dangerously-unrestricted` | FM config is shared: a new stage gets a targeting for every feature, and a new rule rewrites a stage. So FM creates are checked as shared updates, and the two deletes use the `delete bucket` gate (`OperationDeleteBucket`). Levels gate dtctl only; the hard boundary is the scopes a token is granted. |
+| Flag values | `--flag-value` on `create fm feature` and `update --add-flag` takes one value per variant or none; `update --add-variant` and `apply fm feature -f` need one for every flag on every variant | With none, the service fills type defaults on create, and dtctl fills the same defaults for `--add-flag`, since update fills nothing. A flag with a schema must carry values, so it is added with `apply fm feature -f`. A partial set is rejected client-side, since create stores it as given and update returns a 400. |
+| Adding and removing flags | `update fm feature --add-flag <key>` with `--flag-type` (default `BOOLEAN`), `--flag-name` (default the key), `--flag-description`, `--flag-value`; `--remove-flag <key>` | Both are a full update of the feature, like `--add-variant`, so they need `features:write` and need no new endpoint. `--add-flag` fails if the key exists, since a flag's type is fixed after create. `--remove-flag` refuses to remove the last flag and suggests `delete fm feature`. |
+| Safety levels | `readwrite-mine` allows only your own overrides; project, release-stage and SDK key delete need `dangerously-unrestricted` | FM config is shared: a new stage gets a targeting for every feature, and a new rule rewrites a stage. So FM creates are checked as shared updates, and the three deletes use the `delete bucket` gate (`OperationDeleteBucket`). Levels gate dtctl only; the hard boundary is the scopes a token is granted. |
 
 ---
 
@@ -287,7 +291,7 @@ Tracked in [AI-1674](https://dt-rnd.atlassian.net/browse/AI-1674).
 "fm/override":          {Read: overrideScopes, Write: overrideScopes, Delete: overrideScopes}, // projects:read, features:read, release-stages:read
 ```
 
-`readonly` and `readwrite-mine` request the read scopes only, `readwrite-all` adds write and delete, and the project and release-stage delete scopes are added only for `dangerously-unrestricted`, like `bucket`. `features.metadata:write` covers the descriptive `update fm feature` path. The dtctl OAuth clients already allow these scopes. [docs/TOKEN_SCOPES.md](../TOKEN_SCOPES.md) is updated in phase 1 for platform tokens.
+`readonly` and `readwrite-mine` request the read scopes only, `readwrite-all` adds write and delete, and the project, release-stage and SDK key delete scopes are added only for `dangerously-unrestricted`, like `bucket`. `features.metadata:write` covers the descriptive `update fm feature` path. The dtctl OAuth clients already allow these scopes. [docs/TOKEN_SCOPES.md](../TOKEN_SCOPES.md) is updated in phase 1 for platform tokens.
 
 ---
 
@@ -311,9 +315,9 @@ Jira: [AI-1676](https://dt-rnd.atlassian.net/browse/AI-1676)
 **Goal**: every write, targeting first; promotion to `experimental`.
 
 - `create` / `update` / `delete fm feature-targeting` with `--variant`, `--rollout`, `--condition` with `=` on string keys, and `--condition-add` / `--condition-remove`, plus `enable` / `disable fm feature` (decision 2). The other operators and value types follow.
-- `create`, `update`, `delete` for every resource with read-modify-write and safety checks, including `update fm feature --status`, the metadata flags, field flags on `update fm project`, `release-stage` and `context-attribute`, `update fm release-stages --order`, `update fm feature --add-variant` / `--remove-variant`, `create fm sdk-key`, and override writes.
+- `create`, `update`, `delete` for every resource with read-modify-write and safety checks, including `update fm feature --status`, the metadata flags, field flags on `update fm project`, `release-stage` and `context-attribute`, `update fm release-stages --order`, `update fm feature --add-variant` / `--remove-variant` / `--add-flag` / `--remove-flag`, `create fm sdk-key`, and override writes.
 - `apply fm feature -f` and `apply fm feature-targeting -f` with `--dry-run` and `--show-diff` (decision 4).
-- `destructivePatterns` entries in `pkg/resources/api/classify.go` mapping project and release-stage `DELETE` to `OperationDeleteBucket`.
+- `destructivePatterns` entries in `pkg/resources/api/classify.go` mapping project, release-stage and SDK key `DELETE` to `OperationDeleteBucket`.
 
 ### Later Phases
 
@@ -329,5 +333,5 @@ Planned, and designed in an update to this doc after phase 2:
 
 1. Is the nested `feature-management` context block, with `--fm-project` on `config set-context`, acceptable (decision 1)?
 2. Nothing in `sdk/api` uses codegen today. Any objection to generating the FM types from the public OpenAPI document, or a preferred generator?
-3. The checker's refusal for `OperationDeleteBucket` says "bucket deletion". Should it be generalized for project and release-stage delete, or should they get a sibling operation with the same gate?
+3. The checker's refusal for `OperationDeleteBucket` says "bucket deletion". Should it be generalized for project, release-stage and SDK key delete, or should they get a sibling operation with the same gate?
 4. Are typed `apply fm feature -f` and `apply fm feature-targeting -f` subcommands acceptable alongside the untyped `apply -f` (decision 4)?
