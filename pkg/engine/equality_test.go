@@ -43,15 +43,32 @@ func TestEngineOutputEqualsCLI(t *testing.T) {
 		"get bucket missing_bucket --agent",
 		"totally-unknown-command --agent",
 		"config --agent",
+		// exec profiling chooses the stream of each note itself. A fixed
+		// window keeps the envelope's timestamps equal between the two runs.
+		"exec profiling hotspots PROCESS-00000000000000AA" + profilingWindow + " --agent",
+		"exec profiling hotspots PROCESS-00000000000000AA" + profilingWindow,
+		"exec profiling hotspots PROCESS-00000000000000AA" + profilingWindow + " --view functions",
+		"exec profiling hotspots PROCESS-00000000000000AA" + profilingWindow + " --plain --output=",
+		"exec profiling hotspots PROCESS-00000000000000AA" + profilingWindow + " --raw --plain --output=",
+		"exec profiling hotspots PROCESS-00000000000000BB" + profilingWindow + " --view functions -o json",
+		"exec profiling hotspots PROCESS-00000000000000BB" + profilingWindow,
+		"exec profiling hotspots PROCESS-00000000000000CC" + profilingWindow,
+		"exec profiling hotspots PROCESS-00000000000000CC" + profilingWindow + " --agent",
 	} {
 		t.Run(command, func(t *testing.T) {
 			cliCode, cliStdout, cliStderr := runCLI(t, exe, cfgPath, command)
 
-			res, err := engine.Execute(context.Background(), engine.Request{
+			req := engine.Request{
 				Command:        command,
 				EnvironmentURL: env.URL,
 				Token:          "tenant-token",
-			})
+			}
+			if strings.HasPrefix(command, "exec profiling") {
+				// An experimental command: a request admits it by name, where
+				// the CLI's default floor already does.
+				req.MinStability = "experimental"
+			}
+			res, err := engine.Execute(context.Background(), req)
 			require.NoError(t, err)
 
 			// The one deliberate divergence: host-only commands exist locally
@@ -70,6 +87,9 @@ func TestEngineOutputEqualsCLI(t *testing.T) {
 		})
 	}
 }
+
+// profilingWindow is a fixed one-minute window for the exec profiling cases.
+const profilingWindow = " --default-timeframe-start 1000 --default-timeframe-end 61000"
 
 // buildCLI compiles the real dtctl binary once per test run.
 func buildCLI(t *testing.T) string {
