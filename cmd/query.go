@@ -559,7 +559,7 @@ Examples:
 				fetcher := func(fetchCtx context.Context) (interface{}, error) {
 					result, err := executor.ExecuteQueryWithContext(fetchCtx, query, opts)
 					if err != nil {
-						return nil, err
+						return nil, scoped.wrapError(err)
 					}
 					if result == nil {
 						return nil, nil // context cancelled; message already printed

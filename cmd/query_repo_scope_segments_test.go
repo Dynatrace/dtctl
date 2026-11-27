@@ -292,6 +292,21 @@ func TestQueryLive_RefusedBeforeTheScopeActs(t *testing.T) {
 	require.NotContains(t, stderr, "repo scope")
 }
 
+// A live query the platform refuses is reported like a buffered one: with
+// the text the scope sent and the way to run it as typed.
+func TestQueryLive_ErrorWrapsScope(t *testing.T) {
+	srv := segmentRecorder(t, answer(http.StatusBadRequest,
+		`{"error":{"code":400,"message":"The parameter 'x' is not defined.","details":{"errorType":"PARSE_ERROR"}}}`))
+	chdirTestRepo(t, segmentScope)
+
+	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--live", "--agent"}, RunOptions{})
+	require.NotZero(t, code, stderr)
+	require.NotEmpty(t, srv.queries())
+	suggestions := strings.Join(agentError(t, stdout).Suggestions, "\n")
+	require.Contains(t, suggestions, "the text sent was: "+repoScopeScopedQuery)
+	require.Contains(t, suggestions, "--no-repo-scope")
+}
+
 // What is typed wins over what is committed: a segment the user also names
 // is sent once, with the user's variables. Together they cannot exceed what a
 // query takes, and that is an error rather than a silent choice.
