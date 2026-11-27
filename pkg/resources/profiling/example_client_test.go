@@ -17,6 +17,16 @@ import (
 // host's credential stores hold under the same name: an example that asked
 // them would read a developer's login on every `go test`.
 func TestExampleClient_IgnoresHostCredentialStores(t *testing.T) {
+	before := xdg.DataHome
+	t.Run("token", testExampleClientToken)
+	// The store was a temp dir that is gone now: the later tests of the
+	// package must find the data home the process started with.
+	if xdg.DataHome != before {
+		t.Errorf("xdg.DataHome = %q after the test, want it back at %q", xdg.DataHome, before)
+	}
+}
+
+func testExampleClientToken(t *testing.T) {
 	var got string
 	env := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got = r.Header.Get("Authorization")
@@ -24,9 +34,11 @@ func TestExampleClient_IgnoresHostCredentialStores(t *testing.T) {
 	defer env.Close()
 
 	// A host store that holds a login under the example's token name.
+	// Cleanups run last registered first: the reload is registered before
+	// the variable is set, so it runs after the variable is restored.
+	t.Cleanup(xdg.Reload)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	xdg.Reload()
-	t.Cleanup(xdg.Reload)
 	t.Setenv(session.EnvTokenStorage, "file")
 	tm, err := session.NewTokenManager(session.OAuthConfigFromEnvironmentURL(env.URL, "", nil))
 	if err != nil {
