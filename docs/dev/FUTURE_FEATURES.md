@@ -412,6 +412,88 @@ Support global flags:
 
 ---
 
+## Profiling follow-ups
+
+Known limits of `exec profiling`, `pkg/resources/profiling` and
+`sdk/api/codelevelanalysis`, recorded so that a later change or review can
+start from them. None is a planned API category; each is a defect or a gap
+with a known place in the code.
+
+- **Samples on frames without a label are reported as absent.** A result whose
+  running samples sit on an unlabelled root gives `no_samples` or
+  `no_state_samples` although the process was sampled (`collapsed.go`,
+  `functions.go`). With `--app-only` the functions view has the same root: its
+  percentages are shares of the samples on application frames, and the view
+  has no second figure for every sample in the window. Cure: count the sampled
+  mass before any frame is filtered, and report both.
+- **A stack is one `;`-joined string.** A frame whose label contains `;`
+  merges with a real path of the same text, and a consumer cannot recover the
+  frames (`collapsed.go`). Cure: an additive `Frames []string` on the rows and
+  a fold keyed by the frame sequence.
+- **Views recompute the call tree on every call.** The stack fold copies the
+  path at every node, so it is quadratic in depth, and an empty per-function
+  view runs the stack fold again to find its reason (`collapsed.go`,
+  `analysis.go`). Fine for one command run; to be cured (a shared path buffer,
+  the reason from the first walk) before a program re-reads views on a key
+  press.
+- **Two retry layers for the two analysis requests.** The session client
+  retries a 429 three times within seconds inside each of the SDK's own
+  throttled submits and polls, and those inner retries ignore `Retry-After`
+  (`sdk/session/client.go`, `codelevelanalysis.go`): up to 16 submits and 160
+  polls. A terminal status whose body fails to read is also polled out and
+  loses its status. Cure: one retry policy for these requests that honours
+  `Retry-After` once and keeps a status it has seen.
+- **No progress hook and no injectable timing.** A caller cannot observe the
+  throttle waits and the polls, and the poll and throttle timings are package
+  variables only the SDK's own tests can shorten. `Response.Status` and
+  `FocusRow.Relation` are untyped strings.
+- **An unclassified analysis error has no display-safe message.** The text of
+  an error `ClassifyError` reports false for is the SDK's and can hold the
+  request URL or the token of the task.
+- **Any JSON object passes for a completed analysis.** A 200 whose body is
+  `{}` or an object of another shape has no rows in any view and reads as a
+  process without samples (`checkResult` in `analysis.go`). The keys each view
+  reads are known, but what the API answers for a process that really was idle
+  (an empty tree, `{}` or 204) has not been observed, so refusing an object
+  without those keys could refuse a true answer. Needs one live observation
+  before the rule is written.
+- **Errors without a type are read by their text, in every command.** A 404
+  whose body quotes a failed token refresh gets the log-in hint, and a 200
+  with invalid JSON is coded `validation_error` (`classifyGenericError`,
+  `isTokenRefreshError` in `cmd/root.go`). `exec profiling` types the errors
+  it words itself; `cmd/root.go` knows that type by name in four places, which
+  an interface the root asks for would replace.
+  Three poll errors and the submit's transport error are still untyped, so
+  their code follows the task token or the entity id their text quotes (a
+  token that holds `config` gives `config_error`); only the timeout was given
+  a fixed code. `suggest.ParseFlagError` and `suggest.ParseCommandError`
+  rebuild a bare error for any text that holds `unknown flag` or `unknown
+  command`, which drops the chain of every command's error. And a refused
+  value is `validation_error` with exit code 1 here, where the root ties that
+  code to exit code 2: kept from 0.47.0, to be decided with the interface.
+- **The envelope's window span rounds to minutes.** A window under 30 seconds
+  shows `"span":"0s"` beside correct bounds (`spanString` in
+  `cmd/query_window.go`, shared by every command with a window).
+- **The handler keeps the uncompacted response** for the life of a result,
+  data points included, and the three tree walks recurse one Go frame per
+  level of the tree.
+- **A Node.js frame with a Windows path** keeps its `node_modules\` prefix and
+  gets a `\/` in its label (`nodeLabel` in `nodes.go`). Whether the API sends
+  backslashes is not known; a cure changes labels people search for.
+- **Allocation frames of the agent's bridge classes survive `appOnly`.**
+  `isAgentFrame` reads `className`, which an allocation node does not have;
+  its name-only match covers the prefixes alone, and the comment above it says
+  otherwise.
+- **A redirect loop is retried by the shared client** like a failed dial
+  (`sdk/httpclient/retry.go`), for every API; part of the retry policy above.
+- **An empty output format beside `--plain` is read two ways.**
+  `output.IsTabularFormat` treats `--output=` as a table that `--plain` turns
+  into JSON, and `output.NewPrinterWithOpts` turns only `table` and `wide`
+  into JSON, so `--plain --output=` prints a table in other commands.
+  `exec profiling` settles the format itself (`profilingFormat`).
+
+---
+
 ## Notes
 
 - All new features require corresponding API tokens with appropriate scopes

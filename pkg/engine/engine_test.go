@@ -65,6 +65,17 @@ func newUnstartedMockEnv() *mockEnv {
 			_, _ = w.Write([]byte(`{"id":"wf-generated-1","title":"engine-created"}`))
 		case r.URL.Path == "/platform/openpipeline/v1/matcher/lqlToDql" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"query":"matchesValue(log.source, \"stdin-test\")"}`))
+		// Code-level analysis, answered with the result at once: a process
+		// with samples and an idle one. Any other entity is a 404. The API is
+		// asked for PROCESS_GROUP_INSTANCE-<suffix>, whichever prefix the
+		// caller wrote.
+		case strings.HasPrefix(r.URL.Path, "/platform-reserved/codelevelanalysis/") && strings.Contains(r.URL.Path, "-00000000000000AA/"):
+			_, _ = w.Write([]byte(`{"dataRootNodeId":"0","dataNodes":[` +
+				`{"id":"0","className":"","methodName":"","samples":{"RUNNING":0},"childIds":["A"]},` +
+				`{"id":"A","className":"app.Main","methodName":"main","apiInfo":{"systemApi":true},"samples":{"RUNNING":7,"LOCK":2},"childIds":["B"]},` +
+				`{"id":"B","className":"lib.Json","methodName":"parse","apiInfo":{"systemApi":false},"samples":{"RUNNING":4},"childIds":[]}]}`))
+		case strings.HasPrefix(r.URL.Path, "/platform-reserved/codelevelanalysis/") && strings.Contains(r.URL.Path, "-00000000000000BB/"):
+			_, _ = w.Write([]byte(`{"dataRootNodeId":"0","dataNodes":[]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":{"code":404,"message":"not found"}}`))

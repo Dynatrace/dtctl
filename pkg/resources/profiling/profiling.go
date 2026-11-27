@@ -1,42 +1,84 @@
+// Package profiling runs code-level profiling analyses and reads their results:
+// the logic behind `dtctl exec profiling`, for the command and for a program
+// that uses dtctl as a library.
+//
+// The sequence is: ResolveWindow turns a requested timeframe into a Window,
+// Handler.Hotspots or Handler.Allocations runs the analysis, and the methods of
+// the returned Hotspots or Allocations read it as rows (Stacks, Functions,
+// Focus) or whole (Raw). Each kind of analysis has its own result type, so a
+// view is only there for the kind it reads. HotspotsFromRaw and
+// AllocationsFromRaw rebuild a result from a Raw document that was kept, with
+// no environment to ask.
+//
+// What went wrong is reported as a value, not as text to match: ResolveWindow
+// and the views return typed errors, ClassifyError names the reason an
+// analysis failed, and a view without rows says why in its Empty field. The
+// package words none of this for a command line; `dtctl exec profiling` does
+// that in cmd/, where the flag names are.
+//
+// The HTTP calls are the SDK's (sdk/api/codelevelanalysis); this package adds
+// the window rules and the folds.
+//
+// This package is experimental. Any exported name, signature, value or
+// behaviour here may change or be removed in any dtctl release, without a
+// deprecation period, and so may the API of the environment it calls. That is
+// this package's own promise: it does not change when the tier of the
+// `dtctl exec profiling` command changes (docs/STABILITY.md describes
+// commands and flags, not Go packages), and it holds until this paragraph
+// says otherwise. A program that imports the package should pin the dtctl
+// version it builds against.
 package profiling
 
 import (
-	"context"
-
 	"github.com/Dynatrace/dtctl/pkg/client"
 	sdkcla "github.com/Dynatrace/dtctl/sdk/api/codelevelanalysis"
 	"github.com/Dynatrace/dtctl/sdk/httpclient"
 )
 
-// Kind maps user-facing shorthand to API kind strings.
-var Kind = sdkcla.Kind
+// LeafType selects which CPU samples a hotspots analysis attributes. The zero
+// value counts as LeafTypeTotal. The type and its values are the SDK's.
+type LeafType = sdkcla.LeafType
 
-// Leaf-type selections for hotspots, re-exported from the SDK.
 const (
-	LeafTypeTotal      = sdkcla.LeafTypeTotal
-	LeafTypeService    = sdkcla.LeafTypeService
+	// LeafTypeTotal attributes every sample.
+	LeafTypeTotal = sdkcla.LeafTypeTotal
+	// LeafTypeService attributes the samples taken inside a traced service
+	// context.
+	LeafTypeService = sdkcla.LeafTypeService
+	// LeafTypeBackground attributes the samples taken outside any service
+	// context.
 	LeafTypeBackground = sdkcla.LeafTypeBackground
 )
+
+// ErrUnknownLeafType is the error for a LeafType that is none of the
+// constants.
+var ErrUnknownLeafType = sdkcla.ErrUnknownLeafType
+
+// ParseLeafType returns the LeafType named s, LeafTypeTotal for the empty
+// string. A name that is none of the constants is an error that wraps
+// ErrUnknownLeafType.
+func ParseLeafType(s string) (LeafType, error) { return sdkcla.ParseLeafType(s) }
 
 // APIEntityID is the id the API is asked about for entityID: PROCESS-<id>
 // becomes PROCESS_GROUP_INSTANCE-<id> (the same entity), classic ids pass
 // through.
 func APIEntityID(entityID string) string { return sdkcla.NormalizeEntityID(entityID) }
 
-// Payload is the analysis request; re-exported from the SDK for CLI use.
-type Payload = sdkcla.Payload
+// EligibleEntity reports whether entityID names something an analysis can run
+// on: a process (PROCESS-xxx), or by its classic ids a process group instance
+// or a whole process group. A service is not eligible. An analysis on any
+// other id fails before a request is sent.
+func EligibleEntity(entityID string) bool { return sdkcla.EligibleEntity(entityID) }
 
-// Response is the analysis result; re-exported from the SDK for CLI use.
-type Response = sdkcla.Response
-
+// Handler runs analyses against one environment.
 type Handler struct {
 	sdk *sdkcla.Handler
 }
 
+// NewHandler returns a Handler that sends its requests through c. A program
+// other than dtctl builds c with sdk/session (session.NewClientFromConfig and
+// its own User-Agent), of whose Client client.Client is an alias; pkg/client
+// builds dtctl's own, which identifies itself as dtctl.
 func NewHandler(c *client.Client) *Handler {
 	return &Handler{sdk: sdkcla.NewHandler(httpclient.Wrap(c.HTTP()))}
-}
-
-func (h *Handler) Run(ctx context.Context, p Payload) (*Response, error) {
-	return h.sdk.Run(ctx, p)
 }

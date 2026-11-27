@@ -1,0 +1,10 @@
+- alloc_bytes: 52428800
+  survived_bytes: 157286400
+  alloc_count: 1200
+  survived_count: 3600
+  stack: com.example.Cache.put;com.example.OrderService.load
+- alloc_bytes: 1048576
+  survived_bytes: 0
+  alloc_count: 16
+  survived_count: 0
+  stack: com.example.Buffer.grow

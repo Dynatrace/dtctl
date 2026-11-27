@@ -1,7 +1,6 @@
 package profiling
 
 import (
-	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -10,88 +9,35 @@ import (
 // StackRow is one row of the hotspots stack view: a unique call stack with its
 // own (self) samples in each thread state.
 type StackRow struct {
-	Running int    `json:"running" table:"RUNNING"`
-	Lock    int    `json:"lock" table:"LOCK"`
-	NetIO   int    `json:"net_io" table:"NET_IO"`
-	DiskIO  int    `json:"disk_io" table:"DISK_IO"`
-	Wait    int    `json:"wait" table:"WAIT"`
-	Stack   string `json:"stack" table:"STACK"`
+	Running int    `json:"running" yaml:"running" table:"RUNNING"`
+	Lock    int    `json:"lock" yaml:"lock" table:"LOCK"`
+	NetIO   int    `json:"net_io" yaml:"net_io" table:"NET_IO"`
+	DiskIO  int    `json:"disk_io" yaml:"disk_io" table:"DISK_IO"`
+	Wait    int    `json:"wait" yaml:"wait" table:"WAIT"`
+	Stack   string `json:"stack" yaml:"stack" table:"STACK"`
 }
-
-// SurvivedNote says what the survived figures are, for every output that
-// prints them: the API sums them over each GC an object lives through, so
-// they read as a size (and as heap held) when they are not one.
-const SurvivedNote = "survived_bytes/survived_count are summed over every GC an object lived through within about a minute (10 bytes surviving 3 GCs = 30): not a size, can exceed alloc_bytes, not heap used or retained; survived/allocated ~1 = dies young, higher tracks GC frequency, not a leak signal alone"
 
 // AllocationRow is one row of the allocations stack view: an allocation path,
 // allocation site first, with its own share of the window's allocations.
-// SurvivedBytes and SurvivedCount are summed per GC survived (SurvivedNote).
+// SurvivedBytes and SurvivedCount are summed over every GC an object lived
+// through until the agent's next report, about a minute (10 bytes surviving 3
+// GCs are 30): they are not sizes, can exceed the allocated figures, and say
+// nothing about the heap in use.
+// The figures are int64, as the view's totals are: a byte count outgrows an
+// int on a 32-bit platform.
 type AllocationRow struct {
-	AllocBytes    int    `json:"alloc_bytes" table:"ALLOC_BYTES"`
-	SurvivedBytes int    `json:"survived_bytes" table:"SURVIVED_BYTES"`
-	AllocCount    int    `json:"alloc_count" table:"ALLOC_COUNT"`
-	SurvivedCount int    `json:"survived_count" table:"SURVIVED_COUNT"`
-	Stack         string `json:"stack" table:"STACK"`
+	AllocBytes    int64  `json:"alloc_bytes" yaml:"alloc_bytes" table:"ALLOC_BYTES"`
+	SurvivedBytes int64  `json:"survived_bytes" yaml:"survived_bytes" table:"SURVIVED_BYTES"`
+	AllocCount    int64  `json:"alloc_count" yaml:"alloc_count" table:"ALLOC_COUNT"`
+	SurvivedCount int64  `json:"survived_count" yaml:"survived_count" table:"SURVIVED_COUNT"`
+	Stack         string `json:"stack" yaml:"stack" table:"STACK"`
 }
 
-// ToCollapsed renders collapsed (folded) stacks: one line per unique stack,
-// `frame1;frame2;...;frameN running=.. lock=.. net_io=.. disk_io=.. wait=..`,
-// sorted by RUNNING descending. Unlike single-metric folded output it keeps all
-// five thread-state counts on each line, so one read shows whether a stack is
-// CPU-bound or blocked without emitting a separate flamegraph per state.
-// top > 0 caps the number of rows; it does not change the shape. appOnly strips
-// frames the profiler did not classify as application code (apiInfo.systemApi)
-// from each path — see nodeIsApp. Returns empty string for unsupported kinds or
-// missing data.
-func ToCollapsed(kind string, raw interface{}, top int, appOnly bool) string {
-	switch kind {
-	case "memoryAllocation", "memoryAllocationDetails":
-		return FoldAllocations(capRows(AllocationStacks(raw, appOnly, false), top), false)
-	case "methodHotspots", "threadAnalysis":
-		return FoldStacks(capRows(HotspotStacks(raw, appOnly), top))
-	}
-	return ""
-}
-
-func capRows[T any](rows []T, top int) []T {
-	if top > 0 && len(rows) > top {
-		return rows[:top]
-	}
-	return rows
-}
-
-// FoldStacks renders stack rows as folded lines carrying all five counters.
-func FoldStacks(rows []StackRow) string {
-	var sb strings.Builder
-	for _, r := range rows {
-		fmt.Fprintf(&sb, "%s running=%d lock=%d net_io=%d disk_io=%d wait=%d\n",
-			r.Stack, r.Running, r.Lock, r.NetIO, r.DiskIO, r.Wait)
-	}
-	return sb.String()
-}
-
-// FoldAllocations renders allocation rows as folded lines weighted by bytes,
-// under a header that names the sort key.
-func FoldAllocations(rows []AllocationRow, bySurvivors bool) string {
-	if len(rows) == 0 {
-		return ""
-	}
-	key := "alloc"
-	if bySurvivors {
-		key = "surv"
-	}
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "# ALLOCATIONS (bytes, sorted by %s; surv = bytes x GCs survived: not a size, can exceed alloc, not live heap)\n", key)
-	for _, l := range rows {
-		fmt.Fprintf(&sb, "%s alloc=%d surv=%d alloc_count=%d surv_count=%d\n",
-			l.Stack, l.AllocBytes, l.SurvivedBytes, l.AllocCount, l.SurvivedCount)
-	}
-	return sb.String()
-}
-
-// HotspotStacks folds a hotspots result into one row per unique stack, sorted
-// by running samples, descending. Returns nil for missing data.
-func HotspotStacks(raw interface{}, appOnly bool) []StackRow {
+// hotspotStacks folds a hotspots result into one row per unique stack, sorted
+// by running samples, descending. appOnly strips frames the profiler did not
+// classify as application code (apiInfo.systemApi) from each path; see
+// nodeIsApp. Returns nil for missing data.
+func hotspotStacks(raw interface{}, appOnly bool) []StackRow {
 	nodeMap, rootID := hotspotTree(raw)
 	if nodeMap == nil {
 		return nil
@@ -141,7 +87,7 @@ func HotspotStacks(raw interface{}, appOnly bool) []StackRow {
 			path = append(slices.Clip(stack), n.label)
 		}
 		self := n.self(nodeMap)
-		if len(path) > 0 && sampleTotal(self) > 0 {
+		if len(path) > 0 && hasSamples(self) {
 			key := strings.Join(path, ";")
 			m := agg[key]
 			if m == nil {
@@ -150,7 +96,7 @@ func HotspotStacks(raw interface{}, appOnly bool) []StackRow {
 				order = append(order, key)
 			}
 			for k, v := range self {
-				m[k] += v
+				m[k] = satAddInt(m[k], v)
 			}
 		}
 		for _, cid := range n.children {
@@ -174,17 +120,18 @@ func HotspotStacks(raw interface{}, appOnly bool) []StackRow {
 	return rows
 }
 
-// sampleTotal sums a node's per-state sample counts; a node with zero total
-// contributes no line to the fold.
-func sampleTotal(s map[string]int) int {
-	t := 0
+// hasSamples reports whether a node has samples of its own in any thread
+// state; a node with none contributes no line to the fold.
+func hasSamples(s map[string]int) bool {
 	for _, v := range s {
-		t += v
+		if v > 0 {
+			return true
+		}
 	}
-	return t
+	return false
 }
 
-// AllocationStacks folds a memory allocation result into one row per unique
+// allocationStacks folds a memory allocation result into one row per unique
 // allocation path, weighted by bytes and sorted by allocated bytes (by survived
 // bytes when bySurvivors), descending.
 //
@@ -199,12 +146,8 @@ func sampleTotal(s map[string]int) int {
 // alloc/surv are allocation pressure and GC-survivors within the window, not live
 // retained heap. appOnly keeps only profiler-classified application frames
 // (apiInfo.systemApi; see nodeIsApp) in each path. Returns nil for missing data.
-func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRow {
-	envelope, ok := raw.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	result, _ := envelope["result"].(map[string]interface{})
+func allocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRow {
+	result, _ := raw.(map[string]interface{})
 	ar, _ := result["analysisResult"].(map[string]interface{})
 	if ar == nil {
 		return nil
@@ -231,16 +174,20 @@ func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 		md.ai, _ = nm["allocationInfo"].(map[string]interface{})
 		if cids, ok := nm["childIds"].([]interface{}); ok {
 			for _, c := range cids {
-				md.children = append(md.children, nodeIDStr(c))
+				if cid, ok := nodeIDStr(c); ok {
+					md.children = append(md.children, cid)
+				}
 			}
 		}
-		nodeMap[nodeIDStr(nm["id"])] = md
+		if id, ok := nodeIDStr(nm["id"]); ok {
+			nodeMap[id] = md
+		}
 	}
 
 	type line struct {
 		path                  string
-		allocSize, survSize   int
-		allocCount, survCount int
+		allocSize, survSize   int64
+		allocCount, survCount int64
 	}
 	var all []*line
 	byPath := map[string]*line{}
@@ -253,14 +200,14 @@ func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 	// leaf-only fold would drop that. Summed over the tree, the shares add
 	// back up to the roots. Paths that coincide (recursion, or --app-only
 	// dropping the frames that told them apart) are merged into one line.
-	selfOf := func(n *mnode, key string) int {
+	selfOf := func(n *mnode, key string) int64 {
 		v := intVal(n.ai, key)
 		for _, cid := range n.children {
 			if c := nodeMap[cid]; c != nil {
-				v -= intVal(c.ai, key)
+				v = max(v-intVal(c.ai, key), 0) // at every step, as treeNode.self
 			}
 		}
-		return max(v, 0)
+		return v
 	}
 
 	visited := make(map[string]bool, len(nodeMap))
@@ -268,7 +215,7 @@ func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 	dfs = func(id string, stack []string) {
 		n := nodeMap[id]
 		if n == nil || visited[id] {
-			return // a node reached twice: malformed result, see ToCollapsed
+			return // a node reached twice: malformed result, see hotspotStacks
 		}
 		visited[id] = true
 		path := stack
@@ -291,10 +238,10 @@ func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 					byPath[key] = l
 					all = append(all, l)
 				}
-				l.allocSize += self.allocSize
-				l.survSize += self.survSize
-				l.allocCount += self.allocCount
-				l.survCount += self.survCount
+				l.allocSize = satAdd(l.allocSize, self.allocSize)
+				l.survSize = satAdd(l.survSize, self.survSize)
+				l.allocCount = satAdd(l.allocCount, self.allocCount)
+				l.survCount = satAdd(l.survCount, self.survCount)
 			}
 		}
 		for _, cid := range n.children {
@@ -302,7 +249,9 @@ func AllocationStacks(raw interface{}, appOnly, bySurvivors bool) []AllocationRo
 		}
 	}
 	for _, rid := range rootIDs {
-		dfs(nodeIDStr(rid), nil)
+		if id, ok := nodeIDStr(rid); ok {
+			dfs(id, nil)
+		}
 	}
 	if len(all) == 0 {
 		return nil

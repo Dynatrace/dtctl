@@ -1,0 +1,32 @@
+[
+  {
+    "relation": "total",
+    "samples": 50,
+    "share": 100,
+    "function": "com.example.Util.wrap"
+  },
+  {
+    "relation": "self",
+    "samples": 50,
+    "share": 100,
+    "function": "com.example.Util.wrap"
+  },
+  {
+    "relation": "caller",
+    "samples": 30,
+    "share": 60,
+    "function": "com.example.Loader.load"
+  },
+  {
+    "relation": "caller",
+    "samples": 20,
+    "share": 40,
+    "function": "(root)"
+  },
+  {
+    "relation": "callee",
+    "samples": 5,
+    "share": 12.5,
+    "function": "com.example.Json.parse"
+  }
+]

@@ -1,7 +1,8 @@
 package profiling
 
 import (
-	"fmt"
+	"math"
+	"strconv"
 	"strings"
 )
 
@@ -17,14 +18,11 @@ type treeNode struct {
 	children []string
 }
 
-// hotspotTree indexes a hotspots result's dataNodes by id and returns the root
-// id. It returns a nil map when the result holds no nodes.
+// hotspotTree indexes the dataNodes of a hotspots result (raw, the API's
+// decoded document) by id and returns the root id. It returns a nil map when
+// the result holds no nodes.
 func hotspotTree(raw interface{}) (map[string]*treeNode, string) {
-	envelope, ok := raw.(map[string]interface{})
-	if !ok {
-		return nil, ""
-	}
-	result, _ := envelope["result"].(map[string]interface{})
+	result, _ := raw.(map[string]interface{})
 	nodes := dataNodes(result)
 	if len(nodes) == 0 {
 		return nil, ""
@@ -42,14 +40,20 @@ func hotspotTree(raw interface{}) (map[string]*treeNode, string) {
 		}
 		if cids, ok := nm["childIds"].([]interface{}); ok {
 			for _, c := range cids {
-				if s, ok := c.(string); ok {
-					nd.children = append(nd.children, s)
+				// Read as a node's own id is: the API writes either form.
+				if cid, ok := nodeIDStr(c); ok {
+					nd.children = append(nd.children, cid)
 				}
 			}
 		}
-		nodeMap[nodeIDStr(nm["id"])] = nd
+		// A node without an id is one nothing can name; see nodeIDStr.
+		if id, ok := nodeIDStr(nm["id"]); ok {
+			nodeMap[id] = nd
+		}
 	}
-	return nodeMap, nodeIDStr(result["dataRootNodeId"])
+	// Without a root id the empty one is returned, which names no node.
+	root, _ := nodeIDStr(result["dataRootNodeId"])
+	return nodeMap, root
 }
 
 // self derives a node's own (exclusive) per-state counts from the cumulative API
@@ -66,12 +70,10 @@ func (n *treeNode) self(nodeMap map[string]*treeNode) map[string]int {
 			continue
 		}
 		for k, v := range c.samples {
-			self[k] -= v
-		}
-	}
-	for k, v := range self {
-		if v < 0 {
-			self[k] = 0
+			// Clamped at every step, not once at the end: no count is
+			// negative, so the result is the same, and children that
+			// together exceed the largest count cannot wrap it around.
+			self[k] = max(self[k]-v, 0)
 		}
 	}
 	return self
@@ -191,20 +193,27 @@ func nodeSamples(n map[string]interface{}) map[string]int {
 	}
 	for k := range out {
 		if v, ok := s[k].(float64); ok {
-			out[k] = int(v)
+			out[k] = count(v)
 		}
 	}
 	return out
 }
 
-func nodeIDStr(v interface{}) string {
+// nodeIDStr is a node id as the text ids are compared by, and whether v is an
+// id at all. The API writes an id as a string or as a number, and a number is
+// spelled the way JSON writes an integer, without an exponent: %g gives 1e+06
+// for a million, which is not the "1000000" a string id of the same node
+// holds. Anything else, a missing id and an empty one are no id: read as the
+// empty id, a node without one would be what a null child id and a missing
+// root id resolve to.
+func nodeIDStr(v interface{}) (string, bool) {
 	switch x := v.(type) {
 	case string:
-		return x
+		return x, x != ""
 	case float64:
-		return fmt.Sprintf("%g", x)
+		return strconv.FormatFloat(x, 'f', -1, 64), true
 	}
-	return ""
+	return "", false
 }
 
 func strVal(m map[string]interface{}, key string) string {
@@ -212,7 +221,33 @@ func strVal(m map[string]interface{}, key string) string {
 	return v
 }
 
-func intVal(m map[string]interface{}, key string) int {
+// intVal is the count under key, as count reads one.
+func intVal(m map[string]interface{}, key string) int64 {
 	v, _ := m[key].(float64)
-	return int(v)
+	return max(floatInt64(v), 0)
+}
+
+// count is the count a JSON number stands for. A negative one is no count: it
+// would turn into samples of the frame above, whose own share is its count
+// minus its children's.
+func count(v float64) int { return max(floatInt(v), 0) }
+
+// floatInt64 is the integer a JSON number stands for, held at the nearest
+// int64 where it has none: converting a float64 out of range does not fail but
+// gives an arbitrary value.
+func floatInt64(v float64) int64 {
+	switch {
+	case v >= float64(math.MaxInt64): // 2^63, the first value an int64 cannot hold
+		return math.MaxInt64
+	case v <= float64(math.MinInt64):
+		return math.MinInt64
+	case v != v: // NaN
+		return 0
+	}
+	return int64(v)
+}
+
+// floatInt is floatInt64 for an int, which is narrower on a 32-bit platform.
+func floatInt(v float64) int {
+	return int(min(max(floatInt64(v), math.MinInt), math.MaxInt))
 }

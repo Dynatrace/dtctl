@@ -558,6 +558,13 @@ func applySurface(root *cobra.Command, args []string, devEnabled map[string]bool
 // into dtctl's typed ones, so they carry suggestions and the usage exit code.
 // Execute and Parse share it, so both report a command line the same way.
 func classifyCommandLineError(root *cobra.Command, err error, devSignpost bool) error {
+	// A failure `exec profiling` worded itself is none of cobra's, whatever
+	// its text quotes: --view 'unknown flag: --agin' was answered with a flag
+	// suggestion and the usage exit code.
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return err
+	}
 	errStr := err.Error()
 	if strings.Contains(errStr, "unknown command") {
 		// A disabled development feature explains itself only to a caller who
@@ -995,6 +1002,17 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
+	// A failure `exec profiling` worded itself. Its text quotes the caller's
+	// input and the function names of a profile, so the code is the one the
+	// command chose, not one the text suggests.
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return &output.ErrorDetail{
+			Code:    profilingErr.code,
+			Message: err.Error(),
+		}
+	}
+
 	// suggest.FlagError — unknown flag with "did you mean?" suggestion
 	var flagErr *suggest.FlagError
 	if errors.As(err, &flagErr) {
@@ -1239,6 +1257,10 @@ func isTokenRefreshError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "failed to refresh token") ||
 		strings.Contains(msg, "token expired and refresh failed")
@@ -1274,6 +1296,13 @@ func isURLRelatedError(err error) bool {
 	var apiErr *httpclient.APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == 401 || apiErr.StatusCode == 403
+	}
+
+	// A failure `exec profiling` worded itself is no answer of an environment,
+	// and its text quotes the caller's input.
+	var profilingErr *profilingError
+	if errors.As(err, &profilingErr) {
+		return false
 	}
 
 	// Check untyped error messages (since resource handlers use fmt.Errorf)

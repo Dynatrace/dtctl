@@ -1,0 +1,3 @@
+ALLOC_BYTES,SURVIVED_BYTES,ALLOC_COUNT,SURVIVED_COUNT,STACK
+52428800,157286400,1200,3600,com.example.Cache.put;com.example.OrderService.load
+1048576,0,16,0,com.example.Buffer.grow

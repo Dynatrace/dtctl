@@ -11,7 +11,7 @@ import (
 
 // cyclicHotspots: main -> load -> main (a cycle), and handle lists itself.
 func cyclicHotspots() map[string]interface{} {
-	return envelope("A",
+	return hotspotsResult("A",
 		hnode("A", "app", "main", true, 100, 0, "B", "D"),
 		hnode("B", "lib", "load", false, 60, 0, "A"),
 		hnode("D", "app", "handle", true, 30, 0, "D"),
@@ -19,7 +19,7 @@ func cyclicHotspots() map[string]interface{} {
 }
 
 func TestToCollapsed_CyclicTreeTerminates(t *testing.T) {
-	out := ToCollapsed("methodHotspots", cyclicHotspots(), 0, false)
+	out := toCollapsed("methodHotspots", cyclicHotspots(), 0, false)
 	if !strings.Contains(out, "app.main") {
 		t.Errorf("want the reachable stacks, got %q", out)
 	}
@@ -31,10 +31,10 @@ func TestToCollapsed_CyclicTreeTerminates(t *testing.T) {
 }
 
 func TestHotspotViews_CyclicTreeTerminates(t *testing.T) {
-	if HotspotFunctions(cyclicHotspots(), false, "running", "self") == nil {
+	if len(hotspotFunctions(cyclicHotspots(), false, "running", "self").Rows) == 0 {
 		t.Fatal("functions view: want rows for the reachable nodes")
 	}
-	if _, _, _, _, err := HotspotFocus(cyclicHotspots(), false, "running", "main", 10); err != nil {
+	if _, err := hotspotFocus(cyclicHotspots(), false, "running", "main", false); err != nil {
 		t.Fatalf("focus view: %v", err)
 	}
 }
@@ -47,15 +47,15 @@ func TestMemoryCollapsed_CyclicTreeTerminates(t *testing.T) {
 			"allocationInfo": map[string]interface{}{"allocationSize": float64(100), "allocationCount": float64(1)},
 		}
 	}
-	raw := map[string]interface{}{"result": map[string]interface{}{"analysisResult": map[string]interface{}{
+	raw := map[string]interface{}{"analysisResult": map[string]interface{}{
 		"stacktreeRootIds": []interface{}{float64(1)},
 		"stacktreeNodes": []interface{}{
 			mnode(1, "Site.alloc", float64(2), float64(3)),
 			mnode(2, "Caller.run", float64(1)), // back to the root
 			mnode(3, "Other.run"),
 		},
-	}}}
-	if out := ToCollapsed("memoryAllocation", raw, 0, false); !strings.Contains(out, "Site.alloc;Other.run") {
+	}}
+	if out := toCollapsed("memoryAllocation", raw, 0, false); !strings.Contains(out, "Site.alloc;Other.run") {
 		t.Errorf("want the acyclic path, got %q", out)
 	}
 }
