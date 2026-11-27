@@ -248,6 +248,14 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		scanLimitGB: reposcope.ScanLimitGB, clientContext: "repo-scope-discover"}}
 	selectors := repoScopeSelectors(ctx, cfg)
 	names := repoScopeNames{}
+	// What the scope file already holds for this environment, so a line
+	// that would replace an entry, or that set would refuse, says so.
+	// Discovery does not need the file: one that is missing, or does not
+	// load, holds nothing to speak of here, and set says what is wrong.
+	var held []reposcope.Entry
+	if scope, err := openRepoScope(ctx, cfg); err == nil && scope != nil && scope.file != nil {
+		held = scope.file.Entries(host)
+	}
 	// Each plan is a run of its own with its own time bound. After a Ctrl-C
 	// the rest still report, every query marked as never run, so in table
 	// output no deployable drops out of the answer unsaid. The only error is
@@ -285,6 +293,9 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 					c.Rank, name, holder, c.Name))
 				c.Name = name
 				c.SetCommand = repoScopeSetCommand(report, *c, selectors)
+			}
+			if note := repoScopeHeldNote(held, c.Name, repoScopeDir(report, *c)); note != "" {
+				report.Notes = append(report.Notes, fmt.Sprintf("candidate %d's line %s", c.Rank, note))
 			}
 		}
 		if errors.Is(err, context.DeadlineExceeded) && runCtx.Err() == nil {
@@ -530,6 +541,42 @@ func repoScopeSetCommand(r *reposcope.DiscoveryReport, c reposcope.Candidate, se
 		return ""
 	}
 	return repoScopeSetLine(exec.ShellQuote(c.Name), repoScopeFlags(e), repoScopeDir(r, c), selectors)
+}
+
+// repoScopeHeldNote says what the scope file's entries for this environment
+// mean for a line that saves name for dir: set replaces an entry of that
+// name, bindings and path, and refuses a second entry for a path another
+// entry covers. It returns "" when the line adds an entry.
+func repoScopeHeldNote(held []reposcope.Entry, name, dir string) string {
+	covers := func(p string) string {
+		if p == "" {
+			return "the whole repository"
+		}
+		return strconv.Quote(p)
+	}
+	entryPath := ""
+	if dir != "." {
+		entryPath = norm.NFC.String(dir)
+	}
+	for _, old := range held {
+		if old.Name == name {
+			what := "which covers " + covers(old.Path)
+			if old.Path != entryPath {
+				what += ", and moves it to " + covers(entryPath)
+			}
+			return fmt.Sprintf("replaces the entry %q that %s already holds for this environment, %s: set replaces an entry of the same name, its bindings, segments and path",
+				name, reposcope.FileName, what)
+		}
+	}
+	for _, old := range held {
+		// As the file compares paths: composed, and without regard to case,
+		// since one directory has both spellings on macOS and Windows.
+		if strings.EqualFold(norm.NFC.String(old.Path), entryPath) {
+			return fmt.Sprintf("would be refused: the entry %q of %s already covers %s; save the candidate under that name to replace it, or delete it first (dtctl repo-scope delete %s)",
+				old.Name, reposcope.FileName, covers(old.Path), exec.ShellQuote(old.Name))
+		}
+	}
+	return ""
 }
 
 // repoScopeBindings is what a line for c binds, as the entry `set` would

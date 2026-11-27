@@ -137,6 +137,72 @@ func TestRepoScopeDoubtOfAnUnexplainedRow(t *testing.T) {
 	require.Equal(t, ": one candidate, matched by a substring of its name rather than the whole of it", repoScopeDoubt(r), "an entity found by its name")
 }
 
+// What the scope file already holds decides what running a line does: set
+// replaces an entry of the same name, path and bindings, and refuses a second
+// entry for a path another one covers. A line says which.
+func TestRepoScopeHeldNote(t *testing.T) {
+	held := []reposcope.Entry{
+		{Name: "checkout", Path: "services/checkout"},
+		{Name: "everything"},
+		{Name: "ledger", Path: "Services/Ledger"},
+	}
+	for _, tc := range []struct{ name, dir, want string }{
+		{"billing", "services/billing", ""},
+		{"checkout", "services/checkout", `replaces the entry "checkout" that .dtctl-scope.yaml already holds for this environment, which covers "services/checkout": set replaces an entry of the same name, its bindings, segments and path`},
+		{"checkout", ".", `replaces the entry "checkout" that .dtctl-scope.yaml already holds for this environment, which covers "services/checkout", and moves it to the whole repository: set replaces an entry of the same name, its bindings, segments and path`},
+		{"storefront", ".", `would be refused: the entry "everything" of .dtctl-scope.yaml already covers the whole repository; save the candidate under that name to replace it, or delete it first (dtctl repo-scope delete everything)`},
+		{"books", "services/ledger", `would be refused: the entry "ledger" of .dtctl-scope.yaml already covers "Services/Ledger"; save the candidate under that name to replace it, or delete it first (dtctl repo-scope delete ledger)`},
+	} {
+		got := repoScopeHeldNote(held, tc.name, tc.dir)
+		require.Equal(t, strings.ReplaceAll(tc.want, ".dtctl-scope.yaml", reposcope.FileName), got, "%s for %s", tc.name, tc.dir)
+	}
+	require.Empty(t, repoScopeHeldNote(nil, "checkout", "."))
+}
+
+// Through the command: the repository already has an entry named like the
+// candidate, with a path and a segment of its own. The line still comes, and
+// the report says what running it replaces, to the terminal and to an agent.
+// A scope file that does not load keeps discovery from nothing.
+func TestRepoScopeDiscoverSaysWhatItsLineReplaces(t *testing.T) {
+	newDQLRecorder(t, "readonly", rowsByObject(checkoutRows))
+	repo := chdirCheckoutRepo(t)
+	scopeFile := filepath.Join(repo, reposcope.FileName)
+	write := func(content string) { require.NoError(t, os.WriteFile(scopeFile, []byte(content), 0o644)) }
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "deploy"), 0o755))
+	const note = `candidate 1's line replaces the entry "checkout" that ` + reposcope.FileName + ` already holds for this environment, which covers "deploy", and moves it to the whole repository: set replaces an entry of the same name, its bindings, segments and path`
+
+	write("environments:\n  " + repoScopeTestHost + ":\n    - name: checkout\n      path: deploy\n      service-names: [legacy-checkout]\n")
+	report, suggestions := discoverReport(t)
+	require.NotEmpty(t, report.Candidates[0].SetCommand)
+	require.Contains(t, report.Notes, note)
+	require.NotContains(t, suggestions, note, "a note of the report, which the envelope carries once")
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "discover", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	require.Contains(t, stdout, "Note: "+note+"\n")
+
+	write("environments:\n  " + repoScopeTestHost + ":\n    - name: everything\n      service-names: [legacy-checkout]\n")
+	report, _ = discoverReport(t)
+	require.Contains(t, report.Notes, `candidate 1's line would be refused: the entry "everything" of `+reposcope.FileName+
+		` already covers the whole repository; save the candidate under that name to replace it, or delete it first (dtctl repo-scope delete everything)`)
+
+	// Another environment's entries are not this one's.
+	write("environments:\n  other.example.invalid:\n    - name: checkout\n      service-names: [legacy-checkout]\n")
+	report, _ = discoverReport(t)
+	for _, n := range report.Notes {
+		require.NotContains(t, n, "replaces the entry")
+	}
+
+	for _, broken := range []string{"environments: [", "environments:\n  " + repoScopeTestHost + ":\n    - name: Not A Name\n"} {
+		write(broken)
+		report, _ = discoverReport(t)
+		require.Equal(t, reposcope.VerdictMatch, report.Verdict)
+		require.NotEmpty(t, report.Candidates[0].SetCommand)
+	}
+	before, err := os.ReadFile(scopeFile)
+	require.NoError(t, err)
+	require.Equal(t, "environments:\n  "+repoScopeTestHost+":\n    - name: Not A Name\n", string(before), "discovery writes nothing")
+}
+
 // A report is one value per unit, so only the formats that print one are
 // taken, and the others are refused before anything is sent: the printer
 // answers a format it does not know with a table of its own.
