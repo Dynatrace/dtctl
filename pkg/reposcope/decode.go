@@ -22,12 +22,12 @@ const fileHeader = "# dtctl repo scope: links this repository to the Dynatrace e
 // never be wider than the file says. So the document is parsed into nodes and
 // read key by key, and nothing in it is read past: a value left empty, a key
 // given twice, a key that is not a plain string and a value of another shape
-// each fail the read, naming the line. Under a key that narrows an entry, a
-// value written empty ("", [] or {}) is a value left empty: read as the key
-// left out, it would give the widest meaning the key has (see written). An
-// anchor, an alias or a merge key
-// fails it too: a committed data file needs none, and each is a way to make a
-// line mean something other than what it shows.
+// each fail the read, naming the line. Under a key that narrows an entry, and
+// under a list of bindings, a value written empty ("", [] or {}) is a value
+// left empty: read as the key left out, it would give the widest meaning the
+// key has (see written). An anchor, an alias or a merge key fails it too: a
+// committed data file needs none, and each is a way to make a line mean
+// something other than what it shows.
 //
 // A key this dtctl does not know is a typo or a newer dtctl's key, and the
 // two look the same here. Where it sits decides what it does to the read.
@@ -191,8 +191,13 @@ func noValue(p place) *InvalidError {
 // of these keys means its widest when it is left out (the whole repository,
 // every cluster, no segment, a segment as it stands), so an empty value read
 // as "left out" would turn an unfinished constraint into none. Save never
-// writes one: it leaves the key out. A list of bindings may be empty, since
-// bindings are alternatives and one fewer selects no more.
+// writes one: it leaves the key out.
+//
+// A list of bindings is held to the same rule. Bindings are alternatives, so
+// one list fewer selects no more, but that stops being true of the last one:
+// beside segments, an entry whose only list of bindings is written empty would
+// read as an entry of segments alone, which is everything in the segment.
+// Refusing the empty list wherever it stands is the rule that needs no "last".
 func written(n *yaml.Node, p place) *InvalidError {
 	switch n.Kind {
 	case yaml.ScalarNode:
@@ -269,6 +274,14 @@ func text(n *yaml.Node, p place) (string, *InvalidError) {
 	return n.Value, nil
 }
 
+// writtenItems reads the list at p, which must hold an item (see written).
+func writtenItems[T any](n *yaml.Node, p place, read func(*yaml.Node, place) (T, *InvalidError)) ([]T, *InvalidError) {
+	if err := written(n, p); err != nil {
+		return nil, err
+	}
+	return items(n, p, read)
+}
+
 // items reads the list at p, each item through read.
 func items[T any](n *yaml.Node, p place, read func(*yaml.Node, place) (T, *InvalidError)) ([]T, *InvalidError) {
 	switch {
@@ -323,17 +336,15 @@ func (r *reader) entry(n *yaml.Node, p place) (e Entry, err *InvalidError) {
 		case "path":
 			e.Path, err = constraint(v, p)
 		case "workloads":
-			e.Workloads, err = items(v, p, r.workload)
+			e.Workloads, err = writtenItems(v, p, r.workload)
 		case "service-names":
-			e.ServiceNames, err = items(v, p, text)
+			e.ServiceNames, err = writtenItems(v, p, text)
 		case "process-groups":
-			e.ProcessGroups, err = items(v, p, text)
+			e.ProcessGroups, err = writtenItems(v, p, text)
 		case "services":
-			e.Services, err = items(v, p, text)
+			e.Services, err = writtenItems(v, p, text)
 		case "segments":
-			if err = written(v, p); err == nil {
-				e.Segments, err = items(v, p, r.segment)
-			}
+			e.Segments, err = writtenItems(v, p, r.segment)
 		case "annotations":
 			err = r.mapping(v, p, func(name string, k, v *yaml.Node) (err *InvalidError) {
 				if e.Annotations == nil {
