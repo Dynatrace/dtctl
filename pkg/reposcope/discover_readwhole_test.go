@@ -237,3 +237,23 @@ func TestDiscover_InterruptionDuringTheProcessGroupLookup(t *testing.T) {
 		}
 	}
 }
+
+// A process group is a candidate's own only while no other workload carries
+// it, and a workload that lists 50 of its process groups may carry it as the
+// 51st. Beside such a candidate the logs are not looked up by process group,
+// and no line is credited with them.
+func TestDiscover_ProcessGroupsAreNotOwnedBesideACutList(t *testing.T) {
+	spans := rows(t, "spans-checkout")
+	other := map[string]interface{}{fieldNamespace: "payments", fieldWorkload: "checkout-worker", fieldServiceName: "checkout",
+		fieldRecords: "40", fieldProcessGroupCount: "51", fieldProcessGroups: append(processGroups(50), pgID)}
+	runner := &fakeRunner{answers: map[string][]answer{
+		"spans": {{records: append(spans, other)}},
+		"logs":  {{}, {records: []map[string]interface{}{pgLogs(77, pgID)}}},
+	}}
+	r, err := Discover(context.Background(), runner, singleGo(t), prodHost)
+	require.NoError(t, err)
+	assert.Len(t, runner.sent, 2, "the lookup by process group is not sent")
+	for _, c := range r.Candidates {
+		assert.Zero(t, c.LogsByProcessGroup, c.Workload)
+	}
+}
