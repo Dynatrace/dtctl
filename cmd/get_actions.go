@@ -68,7 +68,7 @@ Examples:
   # Wide output (adds description, stateful and approval flags)
   dtctl get actions -o wide
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateGetActionsInput(cmd, args); err != nil {
 				return err
@@ -110,12 +110,8 @@ Examples:
 // validateGetActionsInput rejects input the command would otherwise ignore or
 // the API would refuse, naming the flag the user typed.
 func validateGetActionsInput(cmd *cobra.Command, args []string) error {
-	if len(args) > 0 {
-		for _, flag := range []string{"app", "name", "filter"} {
-			if cmd.Flags().Changed(flag) {
-				return fmt.Errorf("--%s is a list filter and cannot be combined with an action id", flag)
-			}
-		}
+	if err := rejectFiltersWithID(cmd, args, "app", "name", "filter", "limit"); err != nil {
+		return err
 	}
 	limits := []struct {
 		flag string

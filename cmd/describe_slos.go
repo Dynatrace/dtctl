@@ -26,7 +26,7 @@ Examples:
   # Describe an SLO by ID
   dtctl describe slo <slo-id>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sloID := args[0]
 

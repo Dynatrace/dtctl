@@ -32,7 +32,11 @@ Examples:
   # Output as JSON
   dtctl get settings-schemas -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -85,7 +89,11 @@ Examples:
   # Output as JSON
   dtctl get settings --schema builtin:openpipeline.logs.pipelines -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "schema", "scope", "limit"); err != nil {
+				return err
+			}
 			schemaID, _ := cmd.Flags().GetString("schema")
 			scope, _ := cmd.Flags().GetString("scope")
 
@@ -144,7 +152,7 @@ Examples:
   dtctl delete settings <object-id> -y
 `,
 		Aliases: []string{"setting"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			objectID := args[0]
 

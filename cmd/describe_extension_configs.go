@@ -26,7 +26,7 @@ Examples:
   # Describe a specific monitoring configuration
   dtctl describe extension-config com.dynatrace.extension.host-monitoring --config-id <config-id>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			extensionName := args[0]
 			configID, _ := cmd.Flags().GetString("config-id")

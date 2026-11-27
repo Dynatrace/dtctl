@@ -134,6 +134,8 @@ cron: "{{.schedule | default "0 0 * * *"}}"
 ```
 `dtctl apply -f file.yaml --set environment=prod --set schedule="0 6 * * *"`
 
+A variable with no `--set` and no `default` is an error, and so is a `--set` the template does not use.
+
 ## Dashboards
 
 Create/update: `dtctl apply -f dashboard.yaml`. Export for reference: `dtctl get dashboard <id> -o yaml --plain`. Full schema + visualizationSettings: [references/resources/dashboards.md](references/resources/dashboards.md).

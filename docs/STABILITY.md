@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 22 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 980
+- entries below (commands + flags): 979
 
 ## Surface
 
@@ -890,7 +890,6 @@ get workflows                        stable
   --interval                         stable
   --limit                            stable
   --mine                             stable
-  --trigger                          experimental  since 0.39.0  (declared)
   --type                             stable
   --watch                            stable
   --watch-only                       stable

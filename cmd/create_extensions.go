@@ -45,6 +45,7 @@ Examples:
   # Preview what would be installed (dry run)
   dtctl create extension -f my-extension.zip --dry-run
 `,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 			hubExtension, _ := cmd.Flags().GetString("hub-extension")

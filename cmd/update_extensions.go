@@ -56,7 +56,7 @@ Examples:
   # Preview what would happen
   dtctl update extension com.dynatrace.extension.host-monitoring --latest --dry-run
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUpdateOneExtension(cmd, args[0])
 		},
@@ -104,7 +104,7 @@ Examples:
   # Preview what would happen
   dtctl update extensions --all --latest --dry-run
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			all, _ := cmd.Flags().GetBool("all")
 			withConfigs, _ := cmd.Flags().GetBool("with-configurations")

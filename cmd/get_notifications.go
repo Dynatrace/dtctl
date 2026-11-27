@@ -35,7 +35,11 @@ Examples:
   # Output as JSON
   dtctl get notifications -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "type", "limit"); err != nil {
+				return err
+			}
 			notifType, _ := cmd.Flags().GetString("type")
 
 			_, c, printer, err := setup(cmdContext(cmd))
@@ -86,7 +90,7 @@ Examples:
   dtctl delete notification <notification-id> -y
 `,
 		Aliases: []string{"notif"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			notifID := args[0]
 

@@ -47,7 +47,7 @@ Examples:
   # Dry run to preview
   dtctl apply extension-config com.dynatrace.extension.host-monitoring -f config.yaml --dry-run
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			extensionName := args[0]
 			file, _ := cmd.Flags().GetString("file")

@@ -32,7 +32,11 @@ Examples:
   # Output as JSON
   dtctl get extensions -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "name", "limit"); err != nil {
+				return err
+			}
 			name, _ := cmd.Flags().GetString("name")
 
 			_, c, printer, err := setup(cmdContext(cmd))

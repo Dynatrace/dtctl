@@ -17,7 +17,7 @@ var accountListServiceUserCmd = &cobra.Command{
 	Use:     "service-user",
 	Aliases: []string{"service-users"},
 	Short:   "List service users",
-	Args:    cobra.NoArgs,
+	Args:    noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		accountClient, accountUUID, err := setupServiceUserAccount()
 		if err != nil {
@@ -39,7 +39,7 @@ var accountCreateServiceUserCmd = &cobra.Command{
 	Use:     "service-user",
 	Aliases: []string{"service-users"},
 	Short:   "Create a service user",
-	Args:    cobra.NoArgs,
+	Args:    noArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 		description, _ := cmd.Flags().GetString("description")
@@ -85,7 +85,7 @@ var accountDeleteServiceUserCmd = &cobra.Command{
 	Use:     "service-user <userUuid>",
 	Aliases: []string{"service-users"},
 	Short:   "Delete a service user",
-	Args:    cobra.ExactArgs(1),
+	Args:    exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		userUUID := args[0]
 		if dryRun(cmdContext(cmd)) {

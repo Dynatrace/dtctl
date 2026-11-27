@@ -19,7 +19,7 @@ var verifyOpenPipelineMatcherCmd = newVerifyOpenPipelineMatcherCmd()
 func newVerifyOpenPipelineMatcherCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "openpipeline-matcher [matcher-expression]",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  maximumNArgs(1),
 		Short: "Verify an OpenPipeline DQL matcher expression",
 		Long: `Verify an OpenPipeline DQL matcher expression without applying it.
 

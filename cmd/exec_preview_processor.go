@@ -17,7 +17,7 @@ var execPreviewProcessorCmd = newExecPreviewProcessorCmd()
 func newExecPreviewProcessorCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "preview-processor",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		Short: "Preview an OpenPipeline processor definition against sample records",
 		Long: `Preview an OpenPipeline processor definition against sample records.
 

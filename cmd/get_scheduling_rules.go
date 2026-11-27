@@ -32,7 +32,11 @@ Examples:
   # Output as JSON
   dtctl get scheduling-rules -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -126,7 +130,7 @@ Examples:
   # Delete without confirmation
   dtctl delete scheduling-rule a1b2c3d4-e5f6-7890-abcd-ef1234567890 -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 

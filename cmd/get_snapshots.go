@@ -48,7 +48,7 @@ Use -o json / -o yaml for structured output.`,
   dtctl get snapshots OrderController.java:306 \
     --default-timeframe-start 2024-01-01T00:00:00Z \
     --default-timeframe-end   2024-01-02T00:00:00Z`,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Snapshots print through the DQL executor, not the get printer, so
 			// the get-wide --fields would be silently ignored here.

@@ -23,7 +23,7 @@ func newDescribeAWSConnectionCmd() *cobra.Command {
 		Use:     "connection <id-or-name>",
 		Aliases: []string{"connections", "awsconn"},
 		Short:   "Show details of an AWS connection",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -68,7 +68,7 @@ func newDescribeAWSMonitoringConfigCmd() *cobra.Command {
 		Use:     "monitoring <id-or-name>",
 		Aliases: []string{"monitoring-config", "monitoring-configs", "awsmon"},
 		Short:   "Show details of an AWS monitoring configuration",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

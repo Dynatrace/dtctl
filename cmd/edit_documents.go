@@ -60,7 +60,7 @@ Examples:
   # Keep the pre-edit content as a snapshot
   dtctl edit dashboard <dashboard-id> --create-snapshot
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -225,7 +225,7 @@ Examples:
   # Keep the pre-edit content as a snapshot
   dtctl edit notebook <notebook-id> --create-snapshot
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -388,7 +388,7 @@ Examples:
   # Keep the pre-edit content as a snapshot
   dtctl edit document <document-id> --create-snapshot
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

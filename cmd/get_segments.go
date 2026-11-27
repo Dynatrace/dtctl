@@ -35,7 +35,11 @@ Examples:
   # Wide output with description and owner
   dtctl get segments -o wide
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -86,7 +90,7 @@ Examples:
   # Delete without confirmation (use with caution)
   dtctl delete segment <uid> -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			uid := args[0]
 

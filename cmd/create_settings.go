@@ -37,6 +37,7 @@ Examples:
   dtctl create settings -f settings.yaml --schema builtin:openpipeline.logs.pipelines --scope environment --validate-only
 `,
 		Aliases: []string{"setting"},
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 			schemaID, _ := cmd.Flags().GetString("schema")

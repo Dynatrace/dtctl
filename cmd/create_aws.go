@@ -33,6 +33,7 @@ connection's objectId as sts:ExternalId).
 Examples:
   dtctl create aws connection --name "my-aws"
   dtctl create aws connection --name "my-aws" --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if createAWSConnectionRoleArn != "" {
 				if err := awsconnection.ValidateRoleArn(createAWSConnectionRoleArn); err != nil {
@@ -102,6 +103,7 @@ is in place. The --regions flag is required (comma-separated AWS regions).
 Examples:
   dtctl create aws monitoring --name "my-aws" --credentials "my-aws" --regions us-east-1,eu-central-1
   dtctl create aws monitoring --name "my-aws" --credentials "my-aws" --regions us-east-1 --featureSets EC2_essential,RDS_essential`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationCreate)

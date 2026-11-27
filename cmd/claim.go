@@ -55,7 +55,7 @@ Examples:
   dtctl claim environment-share 018f1234-abcd-7000-8000-000000000000
   dtctl claim environment-share 'https://xyz.apps.dynatrace.com/ui/document/v0/#share=018f1234-abcd-7000-8000-000000000000'
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			shareID, host, err := document.ParseShareRef(args[0])
 			if err != nil {

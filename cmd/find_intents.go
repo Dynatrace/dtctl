@@ -53,6 +53,7 @@ Examples:
   # Output as JSON
   dtctl find intents --data trace_id=abc123 -o json
 `,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if findIntentsData == "" && findIntentsDataFile == "" {
 				return fmt.Errorf("either --data or --data-file must be specified")

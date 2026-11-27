@@ -42,7 +42,7 @@ Examples:
   # Dry run to preview
   dtctl create breakpoint OrderController.java:306 --dry-run
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := strings.TrimSpace(args[0])
 			fileName, lineNumber, err := parseBreakpoint(identifier)

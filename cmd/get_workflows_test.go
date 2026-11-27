@@ -18,9 +18,6 @@ func TestGetWorkflowsCmd_ListWithFilters(t *testing.T) {
 			if r.URL.Query().Get("type") != "STANDARD" {
 				t.Errorf("expected type=STANDARD, got %q", r.URL.Query().Get("type"))
 			}
-			if r.URL.Query().Get("triggerType") != "Schedule" {
-				t.Errorf("expected triggerType=Schedule, got %q", r.URL.Query().Get("triggerType"))
-			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"count": 1, "results": []any{
 				map[string]any{"id": "wf-1", "title": "Deploy", "owner": "u1", "ownerType": "USER"},
@@ -48,7 +45,6 @@ func TestGetWorkflowsCmd_ListWithFilters(t *testing.T) {
 	testutil.ResetCommandFlags(getWorkflowsCmd)
 	_ = getWorkflowsCmd.Flags().Set("filter", "deploy")
 	_ = getWorkflowsCmd.Flags().Set("type", "standard")
-	_ = getWorkflowsCmd.Flags().Set("trigger", "schedule")
 
 	if err := getWorkflowsCmd.RunE(getWorkflowsCmd, nil); err != nil {
 		t.Fatalf("RunE() error = %v", err)

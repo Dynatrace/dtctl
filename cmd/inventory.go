@@ -71,6 +71,7 @@ These verdicts are retention-scoped: a stream that received data once last week
 reads as present. To ask whether data is arriving for one source right now — after
 an instrumentation change or an ingest — use 'dtctl inventory arrivals'.
 `,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, c, err := setupClient(cmdContext(cmd))
 			if err != nil {

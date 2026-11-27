@@ -90,13 +90,6 @@ var pre10Demotions = []pre10Demotion{
 	// Only this one loses something a caller can type: `--wait=false` is valid
 	// today and has no successor.
 	{"exec analyzer", "--wait", "exec-wait-default"},
-
-	// breaking-changes/reject-unusable-input.md — the only row of that
-	// document that removes a flag dtctl actually has. (Its other removal row,
-	// `-y`/`--force` on a command with no prompt, matches nothing today.) The
-	// rest reject input dtctl already ignores; see
-	// pre10RejectUnusableInputSpared.
-	{"get workflows", "--trigger", "reject-unusable-input"},
 }
 
 // TestPre10DemotionsAreInEffect asserts every audited flag really carries the

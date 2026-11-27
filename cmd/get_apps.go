@@ -32,7 +32,11 @@ Examples:
   # Output as JSON
   dtctl get apps -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -79,6 +83,7 @@ Examples:
   # Output as JSON
   dtctl get sdk-versions -o json
 `,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -117,7 +122,7 @@ Examples:
   # Uninstall without confirmation
   dtctl delete app my.custom-app -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appID := args[0]
 

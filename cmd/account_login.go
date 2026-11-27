@@ -33,6 +33,7 @@ Dynatrace Account Management console (myaccount.dynatrace.com).`,
 
   # Or provide it via the environment
   DTCTL_ACCOUNT_UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx dtctl account login`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			uuidFlag, _ := cmd.Flags().GetString("account-uuid")
 			timeoutStr, _ := cmd.Flags().GetString("timeout")

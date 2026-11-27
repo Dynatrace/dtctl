@@ -248,6 +248,7 @@ JWT token's 'sub' claim.`,
 
   # Output as JSON
   dtctl auth whoami -o json`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -341,6 +342,7 @@ OAuth-specific fields.`,
 
   # Output as JSON
   dtctl auth status -o json`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -600,6 +602,7 @@ Non-interactive login (CI/CD):
   export DTCTL_ACCOUNT_URN=urn:dtaccount:00000000-0000-0000-0000-000000000000
   export DTCTL_TOKEN_STORAGE=file
   dtctl auth login --context ci --environment https://abc12345.apps.dynatrace.com --safety-level readonly`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Get flags
 			contextName, _ := cmd.Flags().GetString("context")
@@ -888,6 +891,7 @@ If no context name is provided, the current context will be used.`,
 
   # Logout and remove context
   dtctl auth logout my-env --remove-context`,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Load config
 			cfg, err := loadConfig(cmdContext(cmd))
@@ -985,6 +989,7 @@ to force a refresh.`,
 
   # Refresh tokens for specific context
   dtctl auth refresh my-env`,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Load config
 			cfg, err := loadConfig(cmdContext(cmd))

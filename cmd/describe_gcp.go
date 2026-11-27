@@ -23,7 +23,7 @@ func newDescribeGCPConnectionCmd() *cobra.Command {
 		Use:     "connection <id>",
 		Aliases: []string{"connections", "gcpconn"},
 		Short:   "Show details of a GCP connection",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -67,7 +67,7 @@ func newDescribeGCPMonitoringConfigCmd() *cobra.Command {
 		Use:     "monitoring <id-or-name>",
 		Aliases: []string{"monitoring-config", "monitoring-configs", "gcpmon"},
 		Short:   "Show details of a GCP monitoring configuration",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

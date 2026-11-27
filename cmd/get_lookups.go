@@ -53,7 +53,11 @@ Examples:
   # List all lookups with additional columns
   dtctl get lookups -o wide
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -125,7 +129,7 @@ Examples:
   # Delete without confirmation
   dtctl delete lookup /lookups/grail/pm/error_codes -y
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
 

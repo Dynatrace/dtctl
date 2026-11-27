@@ -66,7 +66,7 @@ Examples:
   # Follow logs in real-time (stream until execution completes)
   dtctl logs wfe <execution-id> --follow
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			executionID := args[0]
 

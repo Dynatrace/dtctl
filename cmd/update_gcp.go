@@ -28,8 +28,11 @@ func newUpdateGCPConnectionCmd() *cobra.Command {
 Examples:
   dtctl update gcp connection --name "my-gcp-connection" --serviceAccountId "my-reader@project.iam.gserviceaccount.com"
   dtctl update gcp connection <id> --serviceAccountId "my-reader@project.iam.gserviceaccount.com"`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if updateGCPConnectionServiceAccountID == "" {
 				return fmt.Errorf("--serviceAccountId is required")
 			}
@@ -122,8 +125,11 @@ Examples:
   dtctl update gcp monitoring --name "my-monitoring" --featureSets "compute_engine_essential,cloud_run_essential"
   dtctl update gcp monitoring <id> --locationFiltering "us-central1,europe-west1"
   dtctl update gcp monitoring --name "my-monitoring" --locationFiltering all   # remove the location filter`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if strings.TrimSpace(updateGCPMonitoringConfigLocationFiltering) == "" &&
 				strings.TrimSpace(updateGCPMonitoringConfigFeatureSets) == "" {
 				return fmt.Errorf("at least one of --locationFiltering or --featureSets is required")

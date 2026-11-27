@@ -232,23 +232,11 @@ Examples:
   # Apply segments with variables from a YAML file
   dtctl query "fetch logs | limit 10" --segments-file segments.yaml
 `,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !isSupportedQueryOutputFormat(outputFormat(cmdContext(cmd))) {
 				return fmt.Errorf("unsupported output format %q for query", outputFormat(cmdContext(cmd)))
 			}
-
-			cfg, c, err := setupClient(cmdContext(cmd))
-			if err != nil {
-				return err
-			}
-
-			executor := newDQLExecutorFromConfig(cmdContext(cmd), cfg, c)
-
-			// Set up signal handling so a running Grail query is cancelled on Ctrl+C / SIGTERM.
-			// NotifyContext leaves no goroutine behind when the command ends or the
-			// caller's context is cancelled first.
-			ctx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
-			defer stop()
 
 			queryFile, _ := cmd.Flags().GetString("file")
 			setFlags, _ := cmd.Flags().GetStringArray("set")
@@ -292,6 +280,19 @@ Examples:
 
 				query = rendered
 			}
+
+			cfg, c, err := setupClient(cmdContext(cmd))
+			if err != nil {
+				return err
+			}
+
+			executor := newDQLExecutorFromConfig(cmdContext(cmd), cfg, c)
+
+			// Set up signal handling so a running Grail query is cancelled on Ctrl+C / SIGTERM.
+			// NotifyContext leaves no goroutine behind when the command ends or the
+			// caller's context is cancelled first.
+			ctx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
+			defer stop()
 
 			// Fail fast, before any request, when the query provably needs a
 			// storage scope the token lacks — instead of one NOT_AUTHORIZED_FOR_TABLE

@@ -33,6 +33,7 @@ Examples:
   # Dry run to preview
   dtctl create workflow -f workflow.yaml --dry-run
 `,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 

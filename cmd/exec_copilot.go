@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -39,7 +40,11 @@ Examples:
   # Add formatting instructions
   dtctl exec copilot "List top errors" --instruction "Answer in bullet points"
 `,
+		Args: copilotMessageArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "file"); err != nil {
+				return err
+			}
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
 				return err
@@ -140,7 +145,11 @@ Examples:
   # Output as JSON (includes messageToken for feedback)
   dtctl exec copilot nl2dql "find hosts with high CPU" -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "file"); err != nil {
+				return err
+			}
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
 				return err
@@ -207,7 +216,11 @@ Examples:
   # Output as JSON
   dtctl exec copilot dql2nl "fetch logs | limit 10" -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "file"); err != nil {
+				return err
+			}
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
 				return err
@@ -278,6 +291,7 @@ Examples:
   # Output as JSON
   dtctl exec copilot document-search "kubernetes" --collections notebooks -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, err := setupWithSafety(cmdContext(cmd), safety.OperationRead)
 			if err != nil {
@@ -336,4 +350,14 @@ func init() {
 // Declared stable: the invocation and output contract of these commands is
 // additive-only. Stable is never implied -- see AGENTS.md "Stability Tiers".
 func init() {
+}
+
+// copilotMessageArgs takes the message as one argument, so an unquoted message
+// ("exec copilot what is dql") is an error instead of sending only "what".
+func copilotMessageArgs(cmd *cobra.Command, args []string) error {
+	if len(args) > 1 {
+		return &invalidInputError{err: fmt.Errorf("%q takes one message, got %d arguments; quote the message: %s \"%s\"",
+			cmd.CommandPath(), len(args), cmd.CommandPath(), strings.Join(args, " "))}
+	}
+	return nil
 }

@@ -47,11 +47,10 @@ type WorkflowList struct {
 
 // WorkflowFilters contains filter options for listing workflows.
 type WorkflowFilters struct {
-	Owner       string // Filter by owner ID (user ID)
-	Search      string // Full-text search on title
-	Type        string // Workflow type: STANDARD or SIMPLE
-	TriggerType string // Trigger type: Manual, Schedule, Event, Workflow
-	Fields      string // Optional field projection (comma-separated); empty fetches full objects
+	Owner  string // Filter by owner ID (user ID)
+	Search string // Full-text search on title
+	Type   string // Workflow type: STANDARD or SIMPLE
+	Fields string // Optional field projection (comma-separated); empty fetches full objects
 }
 
 // List retrieves workflows with optional filters.
@@ -90,9 +89,6 @@ func (h *Handler) List(ctx context.Context, filters WorkflowFilters, chunkSize, 
 		}
 		if filters.Type != "" {
 			req.SetQueryParam("type", filters.Type)
-		}
-		if filters.TriggerType != "" {
-			req.SetQueryParam("triggerType", filters.TriggerType)
 		}
 
 		if pageSize > 0 {

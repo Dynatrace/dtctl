@@ -44,7 +44,7 @@ Examples:
   # (the editor still opens; changes are validated but not persisted)
   dtctl edit setting vu9U3hXa3q0AAAABABRidWlsdGluOnJ1bS53ZWIubmFtZQ... --validate-only
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 			validateOnly, _ := cmd.Flags().GetBool("validate-only")

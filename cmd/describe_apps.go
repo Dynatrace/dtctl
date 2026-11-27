@@ -24,7 +24,7 @@ Examples:
   # Describe an app
   dtctl describe app my.custom-app
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appID := args[0]
 

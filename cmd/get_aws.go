@@ -48,7 +48,11 @@ func newGetAWSConnectionCmd() *cobra.Command {
 		Aliases: []string{"connection"},
 		Short:   "Get AWS connections",
 		Long:    `Get one or more AWS connections (authentication credentials).`,
+		Args:    maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -100,7 +104,11 @@ func newGetAWSMonitoringConfigCmd() *cobra.Command {
 		Aliases: []string{"monitoring-config", "monitoring-configs"},
 		Short:   "Get AWS monitoring configurations",
 		Long:    `Get one or more AWS monitoring configurations.`,
+		Args:    maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -142,6 +150,7 @@ func newGetAWSMonitoringConfigRegionsCmd() *cobra.Command {
 		Aliases: []string{"monitoring-region"},
 		Short:   "Get available AWS monitoring config regions",
 		Long:    `Get available AWS regions from the latest da-aws extension schema.`,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -166,6 +175,7 @@ func newGetAWSMonitoringConfigFeatureSetsCmd() *cobra.Command {
 		Aliases: []string{"monitoring-feature-set"},
 		Short:   "Get available AWS monitoring config feature sets",
 		Long:    `Get available FeatureSetsType values from the latest da-aws extension schema.`,
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

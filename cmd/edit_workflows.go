@@ -40,7 +40,7 @@ Examples:
   # Edit a workflow in JSON
   dtctl edit workflow <workflow-id> --format=json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

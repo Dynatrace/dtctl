@@ -35,7 +35,7 @@ Examples:
   # Output as YAML
   dtctl describe intent dynatrace.logs/view-log-entry -o yaml
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

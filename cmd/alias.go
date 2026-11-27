@@ -60,7 +60,7 @@ func newAliasSetCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "set <name> <expansion>",
 		Short: "Create or update an alias",
-		Args:  cobra.ExactArgs(2),
+		Args:  exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, expansion := args[0], args[1]
 
@@ -92,6 +92,7 @@ func newAliasListCmd() *cobra.Command {
 		Use:     "list",
 		Short:   "List all aliases",
 		Aliases: []string{"ls"},
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigRaw(cmdContext(cmd))
 			if err != nil {
@@ -120,7 +121,7 @@ func newAliasDeleteCmd() *cobra.Command {
 		Use:     "delete <name> [name...]",
 		Short:   "Delete one or more aliases",
 		Aliases: []string{"rm"},
-		Args:    cobra.MinimumNArgs(1),
+		Args:    minimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigRaw(cmdContext(cmd))
 			if err != nil {
@@ -147,6 +148,7 @@ func newAliasExportCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "export",
 		Short: "Export aliases to a YAML file",
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 
@@ -179,6 +181,7 @@ func newAliasImportCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "import",
 		Short: "Import aliases from a YAML file",
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 			overwrite, _ := cmd.Flags().GetBool("overwrite")

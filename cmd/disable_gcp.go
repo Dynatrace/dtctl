@@ -42,8 +42,11 @@ enabled flag is toggled off.
 Examples:
   dtctl disable gcp monitoring --name "my-gcp-monitoring"
   dtctl disable gcp monitoring <id>`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if len(args) == 0 && disableGCPMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")
 			}

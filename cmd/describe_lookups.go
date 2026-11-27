@@ -28,7 +28,7 @@ Examples:
   # Output as JSON
   dtctl describe lookup /lookups/grail/pm/error_codes -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
 

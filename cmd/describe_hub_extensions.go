@@ -24,7 +24,7 @@ Examples:
   # Output as YAML
   dtctl describe hub-extensions my-extension-id -o yaml
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 

@@ -15,7 +15,7 @@ func newGetEnvironmentCmd() *cobra.Command {
 		Use:     "environment",
 		Aliases: []string{"env"},
 		Short:   "Get environment information",
-		Args:    cobra.NoArgs,
+		Args:    noArgs,
 		Long: `Get information about the current Dynatrace environment.
 
 Examples:
@@ -69,6 +69,7 @@ Examples:
   # Output as JSON
   dtctl get license-settings -o json
 `,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
@@ -95,7 +96,7 @@ func newGetLicenseCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "license",
 		Short: "Get environment license information",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		Long: `Get license information for the current Dynatrace environment.
 
 Examples:

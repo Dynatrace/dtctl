@@ -83,6 +83,7 @@ Examples:
   # Get results as JSON when condition is met
   dtctl wait query "..." --for=count=1 -o json > result.json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Parse the condition
 			conditionStr, _ := cmd.Flags().GetString("for")

@@ -17,6 +17,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Long:  `Print the version, commit, and build date of dtctl.`,
+		Args:  noArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(currentStdout(cmdContext(cmd)), "dtctl version %s\n", version.Version)
 			fmt.Fprintf(currentStdout(cmdContext(cmd)), "commit: %s\n", version.Commit)

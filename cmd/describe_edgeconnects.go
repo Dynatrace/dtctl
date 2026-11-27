@@ -25,7 +25,7 @@ Examples:
   dtctl describe edgeconnect <id>
   dtctl describe ec <id>
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ecID := args[0]
 

@@ -93,7 +93,7 @@ func newExecWorkflowCmd() *cobra.Command {
 			"  # Execute, wait, and print each task's return value when done",
 			"  dtctl exec workflow my-workflow-id --wait --show-results",
 		}, "\n"),
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			showResults, _ := cmd.Flags().GetBool("show-results")
 			wait, _ := cmd.Flags().GetBool("wait")

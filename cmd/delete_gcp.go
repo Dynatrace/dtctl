@@ -19,7 +19,7 @@ func newDeleteGCPConnectionCmd() *cobra.Command {
 		Use:     "connection [ID|NAME]",
 		Short:   "Delete a GCP connection",
 		Aliases: []string{"connections"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
@@ -60,7 +60,7 @@ func newDeleteGCPMonitoringConfigCmd() *cobra.Command {
 		Use:     "monitoring [ID|NAME]",
 		Short:   "Delete a GCP monitoring config",
 		Aliases: []string{"monitoring-config", "monitoring-configs"},
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 

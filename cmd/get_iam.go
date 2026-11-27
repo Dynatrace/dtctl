@@ -30,7 +30,11 @@ Examples:
   # Output as JSON
   dtctl get users -o json
 `,
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectFiltersWithID(cmd, args, "filter", "limit"); err != nil {
+				return err
+			}
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {
 				return err
@@ -67,7 +71,7 @@ var getGroupsCmd = newGetGroupsCmd()
 
 func newGetGroupsCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:     "groups [uuid]",
+		Use:     "groups",
 		Aliases: []string{"group"},
 		Short:   "Get IAM groups",
 		Long: `Get groups from Identity and Access Management.
@@ -82,6 +86,7 @@ Examples:
   # Output as JSON
   dtctl get groups -o json
 `,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

@@ -41,8 +41,11 @@ Examples:
   dtctl enable aws monitoring --name "my-aws" --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
   dtctl enable aws monitoring <id> --roleArn arn:aws:iam::123456789012:role/DynatraceMonitoringRole
   dtctl enable aws monitoring --name "my-aws"`,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectArgWithFlags(cmd, args, "name"); err != nil {
+				return err
+			}
 			if len(args) == 0 && enableAWSMonitoringName == "" {
 				return fmt.Errorf("provide monitoring config ID argument or --name")
 			}

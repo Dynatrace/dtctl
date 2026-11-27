@@ -153,6 +153,7 @@ Examples:
 Note: The 'create' command always creates new resources. Use 'apply' to keep
 resources in sync with their file definitions.
 `,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 

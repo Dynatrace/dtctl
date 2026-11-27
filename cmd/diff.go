@@ -57,7 +57,7 @@ Exit Codes:
   0 - No differences found
   1 - Differences found
   2 - Error occurred`,
-		Args: cobra.RangeArgs(0, 3),
+		Args: rangeArgs(0, 3),
 		RunE: runDiff,
 	}
 	c.Flags().StringSliceP("file", "f", []string{}, "Files to compare (can specify twice; - reads one side from stdin)")

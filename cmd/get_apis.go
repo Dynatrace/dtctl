@@ -48,7 +48,7 @@ Examples:
   # Structured output
   dtctl get apis -o json
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, c, printer, err := setup(cmdContext(cmd))
 			if err != nil {

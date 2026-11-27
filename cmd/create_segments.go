@@ -33,6 +33,7 @@ Examples:
   dtctl create segment -f segment.yaml --dry-run
 `,
 		Aliases: []string{"seg", "filter-segment", "filter-segments"},
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 

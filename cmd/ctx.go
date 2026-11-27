@@ -47,7 +47,7 @@ Examples:
   # Delete a context
   dtctl ctx delete old-env
 `,
-		Args: cobra.MaximumNArgs(1),
+		Args: maximumNArgs(1),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
@@ -87,7 +87,7 @@ func newCtxTokenCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "token [context-name]",
 		Short: "Print the resolved token for a context",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  maximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -120,6 +120,7 @@ func newCtxCurrentCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "current",
 		Short: "Display the current context name",
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmdContext(cmd))
 			if err != nil {
@@ -140,7 +141,7 @@ func newCtxDescribeCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "describe <context-name>",
 		Short: "Show detailed information about a context",
-		Args:  cobra.ExactArgs(1),
+		Args:  exactArgs(1),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
@@ -185,7 +186,7 @@ Examples:
   dtctl ctx set prod --environment https://prod.example.com --safety-level readonly
   dtctl ctx set staging --environment https://staging.example.com --token-ref my-token
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return setContext(cmdContext(cmd), args[0], contextSettingsFromFlags(cmd))
 		},
@@ -203,7 +204,7 @@ func newCtxDeleteCmd() *cobra.Command {
 		Use:     "delete <context-name>",
 		Aliases: []string{"rm"},
 		Short:   "Delete a context",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactArgs(1),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp

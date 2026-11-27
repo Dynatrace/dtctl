@@ -69,6 +69,7 @@ Examples:
   dtctl create lookup -f error_codes.csv --path /lookups/test --lookup-field id --dry-run
 `,
 		Aliases: []string{"lkup", "lu"},
+		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file, _ := cmd.Flags().GetString("file")
 			path, _ := cmd.Flags().GetString("path")

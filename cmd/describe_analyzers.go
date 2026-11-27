@@ -38,7 +38,7 @@ Examples:
   # Structured output (includes inputSchema and resultSchema)
   dtctl describe analyzer dt.statistics.GenericForecastAnalyzer -o json
 `,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 

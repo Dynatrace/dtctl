@@ -95,7 +95,7 @@ Enable one for a single process:
   ` + config.DevelopmentEnvVar + `=<feature> dtctl <command>
   ` + config.DevelopmentEnvVar + `=` + config.DevelopmentAll + ` dtctl <command>   # every feature
 `,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			features := stability.DefaultRegistry().Features()
 			// Resolved from the config this invocation actually loaded (honoring
