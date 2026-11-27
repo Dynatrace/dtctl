@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,6 +33,27 @@ func TestRepoScopeSetRefusalFollowsTheModeTheRunIsIn(t *testing.T) {
 	// The command is named once.
 	_, _, stderr := runRepoScoped([]string{"repo-scope", "set", "x", "--namespace", "a", "--namespace", "b", "--workload", "w"}, RunOptions{})
 	require.Equal(t, "Error: repo-scope set: --namespace takes one value, for every --workload of the command\n", strings.SplitAfter(stderr, "\n")[0])
+}
+
+// A directory inside a checkout of its own never reads this repository's
+// file: the walk up from it stops at the inner .git. An entry for it would be
+// committed and cover no query.
+func TestRepoScopeSetRefusesAPathInANestedCheckout(t *testing.T) {
+	localRepoScopeConfig(t)
+	repo := chdirTestRepo(t, "")
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "vendor", "sub", "inner"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "vendor", "sub", ".git"), []byte("gitdir: ../../.git/modules/sub\n"), 0o644))
+	for _, dir := range []string{"vendor/sub/inner", "vendor/sub"} {
+		code, stdout, _ := runRepoScoped([]string{"repo-scope", "set", "sub", "--service-name", "sub", "--path", dir, "--agent"}, RunOptions{})
+		require.Equal(t, client.ExitUsageError, code, dir)
+		detail := agentError(t, stdout)
+		require.Equal(t, `--path: "`+dir+`" is in the checkout at "vendor/sub", which has a .git of its own, so no query run there reads this repository's `+reposcope.FileName, detail.Message)
+		require.Equal(t, []string{"run 'dtctl repo-scope set' inside vendor/sub to link that checkout"}, detail.Suggestions)
+		require.NoFileExists(t, filepath.Join(repo, reposcope.FileName))
+	}
+	// The directory above the inner checkout is this repository's.
+	code, _, stderr := runRepoScoped([]string{"repo-scope", "set", "vendor", "--service-name", "vendor", "--path", "vendor"}, RunOptions{})
+	require.Zero(t, code, stderr)
 }
 
 // --path names a directory below the root. The root itself is the entry

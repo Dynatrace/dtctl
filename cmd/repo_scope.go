@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"path/filepath"
 	"slices"
@@ -590,6 +591,13 @@ func setRepoScope(cmd *cobra.Command, entry reposcope.Entry) error {
 			return &reposcope.InvalidError{Source: "--path", Msg: err.Error(),
 				Suggestions: []string{"name the directory relative to the repository root, e.g. services/checkout"}}
 		}
+		// Nor would a path inside a checkout of its own: the walk up from a
+		// directory there stops at the inner .git, and never reads this file.
+		if inner := nestedCheckout(reposcope.RepoFS(scope.loc), dir); inner != "" {
+			return &reposcope.InvalidError{Source: "--path",
+				Msg:         fmt.Sprintf("%q is in the checkout at %q, which has a .git of its own, so no query run there reads this repository's %s", dir, inner, reposcope.FileName),
+				Suggestions: []string{"run 'dtctl repo-scope set' inside " + inner + " to link that checkout"}}
+		}
 		entry.Path = norm.NFC.String(dir)
 	}
 	// set replaces the bindings of an entry. Its annotations are not among
@@ -695,6 +703,18 @@ func listRepoScopes(cmd *cobra.Command, _ []string) error {
 		entries = []reposcope.Entry{}
 	}
 	return printer.PrintList(entries)
+}
+
+// nestedCheckout is the directory at or above dir, below the repository
+// root, that holds a .git of its own (a submodule, a vendored clone), or "".
+func nestedCheckout(repo fs.FS, dir string) string {
+	inner := ""
+	for d := dir; d != "."; d = path.Dir(d) {
+		if _, err := fs.Stat(repo, path.Join(d, ".git")); err == nil {
+			inner = d
+		}
+	}
+	return inner
 }
 
 // emptyReason says why the current environment has no entries.
