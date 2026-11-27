@@ -171,6 +171,9 @@ func TestDecode_ReadsWhatTheLegacyReaderRead(t *testing.T) {
 		for _, name := range []string{"example.yaml", "newer-dtctl.yaml"} {
 			assert.True(t, compareWithLegacy(t, string(readFixture(t, name))), name)
 		}
+		// No annotations, written as an empty map: one reader keeps the
+		// map and the other does not, and both mean the same.
+		assert.True(t, compareWithLegacy(t, "environments:\n  "+prodHost+":\n    - name: checkout\n      service-names: [checkout]\n      annotations: {}\n"))
 	})
 	// Files as people and generators write them: block and flow style, every
 	// quoting, comments, numbers and booleans where text is meant, keys in

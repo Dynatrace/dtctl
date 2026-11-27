@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// twoAppsOneLibrary is a build whose library both deployables depend on, the
 // second deployable at appB, with its build file as given.
 func twoAppsOneLibrary(appB string, buildB *fstest.MapFile) fstest.MapFS {
 	uses := &fstest.MapFile{Data: []byte(`dependencies { implementation(project(":lib")) }`)}
@@ -29,6 +30,10 @@ func twoAppsOneLibrary(appB string, buildB *fstest.MapFile) fstest.MapFS {
 	}
 }
 
+// An entry is selected through the build only when the build was read whole.
+// A deployable whose build file was not read may depend on the same library,
+// and the library then belongs to neither: read in part, the build would hand
+// it to the one deployable that was read, and a query from the library would
 // run scoped to the wrong service and say applied.
 func TestResolve_SelectsNothingThroughABuildNotReadWhole(t *testing.T) {
 	f := &File{Environments: map[string][]Entry{prodHost: {
@@ -94,6 +99,8 @@ func TestResolve_SelectsNothingThroughABuildNotReadWhole(t *testing.T) {
 	assert.Contains(t, r.Reason, "was not read whole")
 }
 
+// A literal project path names one module, by its directory. Only a
+// type-safe accessor is matched by words, since projects.billingApi is how
 // Gradle spells billing-api.
 func TestResolve_LiteralProjectPathNamesOneModule(t *testing.T) {
 	repo := fstest.MapFS{
@@ -111,6 +118,8 @@ func TestResolve_LiteralProjectPathNamesOneModule(t *testing.T) {
 	}
 }
 
+// The closest entry is the one whose path has the most segments. Counted in
+// bytes, a parent whose spelling is longer than the same path folded or
 // composed outranks its child.
 func TestResolve_ClosestIsDeepestNotLongest(t *testing.T) {
 	prev := foldPathCase
@@ -153,6 +162,7 @@ func TestResolve_ClosestIsDeepestNotLongest(t *testing.T) {
 	}
 }
 
+// A Status is a result, and a result is printed and read back. The reason an
 // entry renders no Live Debugger filters is still there afterwards.
 func TestStatus_LiveDebuggerReasonSurvivesJSON(t *testing.T) {
 	f := &File{Environments: map[string][]Entry{prodHost: {{Name: "seg", Segments: []Segment{{ID: "Ab3dEf9hIjk"}}}}}}
@@ -171,13 +181,16 @@ func TestStatus_LiveDebuggerReasonSurvivesJSON(t *testing.T) {
 	assert.Equal(t, want, reason)
 }
 
+// A directory name is whatever the filesystem holds, and on Linux that need
+// not be UTF-8. Such a directory is still a directory of the repository: the
 // entry that covers the whole of it applies there, and no build is read.
 func TestResolve_DirectoryThatIsNotUTF8(t *testing.T) {
 	f := &File{Environments: map[string][]Entry{prodHost: {
 		{Name: "all", ServiceNames: []string{"all"}},
 		{Name: "svc", Path: "services", ServiceNames: []string{"svc"}},
 	}}}
-	repo := fstest.MapFS{"settings.gradle": {Data: []byte("include ':services'\n")}}
+	repo := &countingFS{MapFS: fstest.MapFS{"settings.gradle": {Data: []byte("include ':services'\n")}}}
+	defer func() { assert.Zero(t, repo.calls, "an fs.FS cannot name the directory, so nothing is asked of it") }()
 	r, err := Resolve(repo, f, prodHost, "other/\xff", "")
 	require.NoError(t, err)
 	require.NotNil(t, r.Entry)
@@ -194,6 +207,7 @@ func TestResolve_DirectoryThatIsNotUTF8(t *testing.T) {
 	}
 }
 
+// Reading a build's references is linear in its modules: resolving reads the
 // build on every scoped query.
 func TestGradleBuildAt_ManyModules(t *testing.T) {
 	const modules, refs = 500, 40

@@ -52,8 +52,8 @@ type gradleBuild struct {
 	dir        string
 	modules    map[string][]string
 	deployable map[string]bool
-	// byWords is accessed's index, nil until asked for and after a module
-	// is added.
+	// byWords is accessed's index, nil until asked for. Every module is
+	// known by then: gradleBuildAt reads the references last.
 	byWords map[string][]string
 	// partial says why the build was not read whole, "" when it was. It is
 	// set by gradleBuildAt only: what a module depends on is then not known
@@ -165,7 +165,6 @@ func (bs gradleBuilds) absorbs(f string) bool {
 func (b *gradleBuild) addModule(m string) {
 	if _, ok := b.modules[m]; !ok && m != b.dir {
 		b.modules[m] = nil
-		b.byWords = nil
 	}
 }
 
