@@ -82,7 +82,6 @@ func TestDiscover_NestedIDsAreBounded(t *testing.T) {
 	assert.Equal(t, int64(discoveryIDLimit+1), c.ProcessGroupCount)
 }
 
-
 // A sampled retry that was cut short, or that Grail did not sample, is not
 // the answer, but the rows it returned name candidates that exist. They are
 // listed without a count beside what the capped scan returned.
@@ -204,4 +203,37 @@ func TestDiscover_ACutRetryIsNoSample(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, r.SampledRecords())
 	assert.Len(t, r.SamplingNotes(), 1)
+}
+
+// An interruption while the lookup of logs by process group runs leaves a
+// binding unread, never a candidate, like one before it started.
+func TestDiscover_InterruptionDuringTheProcessGroupLookup(t *testing.T) {
+	for cause, want := range map[error]string{
+		context.Canceled:         "discovery was interrupted while it looked for logs by process group",
+		context.DeadlineExceeded: "discovery ran out of time while it looked for logs by process group",
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		runner := &fakeRunner{answers: map[string][]answer{
+			"spans": {{records: rows(t, "spans-checkout")}},
+			"logs":  {{}, {err: cause}},
+		}}
+		sent := 0
+		runner.onRun = func(_ context.Context, object string) {
+			if object == "logs" {
+				if sent++; sent == 2 {
+					cancel()
+				}
+			}
+		}
+		r, _ := Discover(ctx, runner, singleGo(t), prodHost)
+		cancel()
+		require.NotNil(t, r)
+		assert.False(t, r.Partial)
+		assert.Equal(t, VerdictMatch, r.Verdict)
+		assert.Equal(t, want, r.Notes[0])
+		for _, n := range r.Notes {
+			assert.NotContains(t, n, "incomplete")
+			assert.NotContains(t, n, "a narrower directory")
+		}
+	}
 }

@@ -1024,14 +1024,17 @@ func failureCause(ctx context.Context, err error) string {
 // report. It names the consequence that holds whatever was found: a result
 // with no candidate has no verdict to cap.
 func failureNote(q *Query) string {
-	if q.ProcessGroupCheck() && q.Skipped {
+	if q.ProcessGroupCheck() && (q.Skipped || q.Cause == causeTimeout || q.Cause == causeCancelled) {
 		// What this lookup would have found is a binding, never a
 		// candidate, so the note does not call the result incomplete.
-		why := "was interrupted"
+		why, when := "was interrupted", "before"
 		if q.Cause == causeTimeout {
 			why = "ran out of time"
 		}
-		return fmt.Sprintf("discovery %s before it looked for logs by process group", why)
+		if !q.Skipped {
+			when = "while"
+		}
+		return fmt.Sprintf("discovery %s %s it looked for logs by process group", why, when)
 	}
 	switch q.Cause {
 	case causeAuth:
