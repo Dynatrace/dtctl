@@ -62,3 +62,13 @@ func TestToken_TestName(t *testing.T) {
 		})
 	}
 }
+
+// A name is split into words in its composed form: a letter written as a
+// base and a combining mark is one letter, not the end of a word.
+func TestVariantsOfADecomposedName(t *testing.T) {
+	composed := variants("r\u00e9sum\u00e9-service")
+	require.Equal(t, []string{"r\u00e9sum\u00e9-service", "r\u00e9sum\u00e9_service", "r\u00e9sum\u00e9.service", "r\u00e9sum\u00e9service"}, composed)
+	assert.Equal(t, composed, variants("re\u0301sume\u0301-service"))
+	// A mark with no composed form stays in its word.
+	assert.Equal(t, []string{"x\u0301yz"}, variants("x\u0301yz"))
+}

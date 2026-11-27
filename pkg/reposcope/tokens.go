@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // What a repository-derived name was read from.
@@ -164,6 +166,9 @@ func baseName(raw string) string {
 // splitWords lowercases s and splits it at every non-alphanumeric rune and at
 // camelCase boundaries: "paymentService" and "HTTPServer" become
 // [payment service] and [http server]. Digits stay with the word before them.
+// s is read in its composed form, and a combining mark that has none stays
+// with its letter: read decomposed, an accented letter would end the word and
+// lose its accent.
 func splitWords(s string) []string {
 	var words []string
 	var cur []rune
@@ -173,9 +178,9 @@ func splitWords(s string) []string {
 			cur = cur[:0]
 		}
 	}
-	runes := []rune(s)
+	runes := []rune(norm.NFC.String(s))
 	for i, r := range runes {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) {
 			flush()
 			continue
 		}
