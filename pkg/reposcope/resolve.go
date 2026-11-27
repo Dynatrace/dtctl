@@ -140,6 +140,9 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		return s, nil
 	default:
 		var tied []*Entry
+		// Said whatever is selected instead: an entry that covers the
+		// directory by its path, the repository's, or none.
+		s.Reason = build().partial
 		if entry, tied = closestEntry(entries, relDir, build()); tied != nil {
 			s.Tied = []string{entry.Name}
 			for _, e := range tied {
@@ -154,6 +157,9 @@ func Resolve(repo fs.FS, f *File, host, relDir, name string) (*Status, error) {
 		if s.Code == "" {
 			s.Code = StatusNoEntry
 			s.Reason = fmt.Sprintf("no entry covers %q; entries here cover %s", relDir, strings.Join(entryPaths(entries), ", "))
+			if partial := build().partial; partial != "" {
+				s.Reason += "; " + partial
+			}
 		}
 		s.Others = othersThan(entries, "")
 		return s, nil
@@ -259,6 +265,10 @@ func joinAnd(words []string) string {
 type gradleCoverage struct {
 	module string
 	owners []string
+	// partial says that the build was not read whole, and why: it then
+	// covers nothing, since a deployable that was not read may hold the
+	// module as well. It names the build's directory.
+	partial string
 }
 
 func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverage {
@@ -268,6 +278,10 @@ func newGradleCoverage(repo fs.FS, entries []Entry, relDir string) gradleCoverag
 	}
 	b := gradleBuildAt(repo, relDir)
 	if b == nil {
+		return c
+	}
+	if b.partial != "" {
+		c.partial = fmt.Sprintf("the Gradle build at %q was not read whole (%s), so no entry is selected through it", b.dir, b.partial)
 		return c
 	}
 	// Sorted: two module directories that differ only in case cover relDir

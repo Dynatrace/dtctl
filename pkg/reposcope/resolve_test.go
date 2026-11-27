@@ -100,7 +100,8 @@ func TestResolve(t *testing.T) {
 		{code: StatusLinked, selected: SelectedByName, name: "selected by name outside its build closure", repo: gradle, file: gradleFile(), host: prodHost, dir: "admin", pick: "webproxy",
 			entry: "webproxy", reason: `selected by name; its path "webproxy" does not cover "admin"`, others: []string{"admin"}},
 		{code: StatusNoEntry, name: "a build file that does not read", repo: symlinked, file: gradleFile(), host: prodHost, dir: "webproxy-api",
-			reason: `no entry covers "webproxy-api"; entries here cover admin, webproxy`, others: []string{"admin", "webproxy"}},
+			reason: `no entry covers "webproxy-api"; entries here cover admin, webproxy; the Gradle build at "." was not read whole ("webproxy/build.gradle.kts" was not read), so no entry is selected through it`,
+			others: []string{"admin", "webproxy"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
