@@ -124,7 +124,12 @@ func otherVersion(root *yaml.Node) *InvalidError {
 	}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		k, v := root.Content[i], root.Content[i+1]
-		if k.Value == "apiVersion" && k.Kind == yaml.ScalarNode && v.Kind == yaml.ScalarNode && v.Value != "" && !isNull(v) && v.Value != apiVersion {
+		// A tagged key or value is refused as such (see plainNodes), not
+		// read as the version it spells.
+		if k.Value != "apiVersion" || k.Kind != yaml.ScalarNode || v.Kind != yaml.ScalarNode || tagged(k) || tagged(v) {
+			continue
+		}
+		if v.Value != "" && !isNull(v) && v.Value != apiVersion {
 			return invalid(fmt.Sprintf("apiVersion %q on line %d is not supported (this dtctl reads %q)", v.Value, k.Line, apiVersion),
 				"upgrade dtctl to read this file")
 		}
@@ -152,19 +157,32 @@ func onlyDocument(stream *yaml.Decoder) *InvalidError {
 }
 
 // emptyDocument reports a document that holds no value: nothing at all, or
-// an explicit null.
+// a null as it is written, without an anchor or a tag that would make it
+// something to keep.
 func emptyDocument(doc *yaml.Node) bool {
 	for _, n := range doc.Content {
-		if !isNull(n) {
+		if !isNull(n) || n.Anchor != "" || tagged(n) {
 			return false
 		}
 	}
 	return true
 }
 
-// plainNodes refuses an anchor or a merge key anywhere under n. An alias
-// needs an anchor before it, so refusing the anchor refuses both.
+// tagged reports a node written with a tag of its own (!!str, !custom).
+func tagged(n *yaml.Node) bool {
+	return n.Style&yaml.TaggedStyle != 0
+}
+
+// plainNodes refuses an anchor, a merge key or an explicit tag anywhere under
+// n, keys included. An alias needs an anchor before it, so refusing the anchor
+// refuses both. A tag says a value is something other than the text its line
+// shows (!!binary), or is ignored and so says nothing (!!int abc); every value
+// of the format is read as its spelling, so no tag is needed.
 func plainNodes(n *yaml.Node) *InvalidError {
+	if tagged(n) {
+		return invalid(fmt.Sprintf("the tag %s on line %d is not accepted", n.ShortTag(), n.Line),
+			"write the value without a tag; it is read as the text the line shows")
+	}
 	if n.Anchor != "" {
 		return invalid(fmt.Sprintf("the anchor &%s on line %d is not accepted, nor is an alias of it", n.Anchor, n.Line),
 			"write each value out where it is used")
@@ -304,8 +322,6 @@ func text(n *yaml.Node, p place) (string, *InvalidError) {
 		return "", noValue(p)
 	case n.Kind != yaml.ScalarNode:
 		return "", wrongShape(p, "a single value")
-	case n.ShortTag() == "!!binary":
-		return "", invalid(p.String() + " must be plain text, not !!binary data")
 	}
 	return n.Value, nil
 }

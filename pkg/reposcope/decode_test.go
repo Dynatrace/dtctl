@@ -37,9 +37,7 @@ func TestDecode_MalformedIsRefused(t *testing.T) {
 		{"an empty path", scopeDoc("name: checkout", `path: ""`, "service-names: [checkout]"),
 			"path on line 4 has no value"},
 		{"an empty path under a tag", scopeDoc("name: checkout", `path: !!str ""`, "service-names: [checkout]"),
-			"path on line 4 has no value"},
-		{"binary data", scopeDoc("name: !!binary Y2hlY2tvdXQ=", "service-names: [checkout]"),
-			"name on line 3 must be plain text, not !!binary data"},
+			"the tag !!str on line 4 is not accepted"},
 		{"an empty block for a path", scopeDoc("name: checkout", "path: |", "service-names: [checkout]"),
 			"path on line 4 has no value"},
 		{"an empty cluster uid", scopeDoc("name: checkout", "workloads:", "  - cluster-uid: ''", "    namespace: payments", "    name: checkout"),
@@ -313,6 +311,31 @@ func TestFileTypesCarryEveryField(t *testing.T) {
 	assert.NotRegexp(t, `(?m)^[ -]*[A-Za-z-]*[a-z][A-Z][A-Za-z]*:`, strings.SplitN(string(data), "apiVersion: v1\n", 2)[1], "a camelCase key in the file")
 }
 
+// A value is read as the text its line shows, and a tag is a way to say it is
+// something else. None is accepted, on a value, on a key, on the document or
+// on what follows it.
+func TestDecode_RefusesAnExplicitTag(t *testing.T) {
+	for name, tt := range map[string]struct{ doc, msg string }{
+		"an item":                      {scopeDoc("name: checkout", "service-names: [!!int abc]"), "the tag !!int on line 4 is not accepted"},
+		"a tag of its own":             {scopeDoc("name: checkout", "service-names: [!foo abc]"), "the tag !foo on line 4 is not accepted"},
+		"a string said to be one":      {scopeDoc("name: checkout", "service-names: [!!str 5]"), "the tag !!str on line 4 is not accepted"},
+		"a path":                       {scopeDoc("name: checkout", "path: !!float a", "service-names: [checkout]"), "the tag !!float on line 4 is not accepted"},
+		"a key":                        {scopeDoc("!!binary bmFtZQ==: checkout", "service-names: [checkout]"), "the tag !!binary on line 3 is not accepted"},
+		"a value in binary":            {scopeDoc("name: !!binary Y2hlY2tvdXQ=", "service-names: [checkout]"), "the tag !!binary on line 3 is not accepted"},
+		"a version in binary":          {"apiVersion: !!binary djI=\n" + scopeDoc("name: checkout", "service-names: [checkout]"), "the tag !!binary on line 1 is not accepted"},
+		"the document":                 {"!!null whatever\n", "the tag !!null on line 1 is not accepted"},
+		"a list":                       {scopeDoc("name: checkout", "service-names: !!seq [checkout]"), "the tag !!seq on line 4 is not accepted"},
+		"a second document":            {scopeDoc("name: checkout", "service-names: [checkout]") + "--- !!null \"environments: {}\"\n", "holds more than one YAML document"},
+		"an anchor after the document": {scopeDoc("name: checkout", "service-names: [checkout]") + "--- &a\n", "holds more than one YAML document"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := decode([]byte(tt.doc))
+			require.NotNil(t, err, "loaded as %+v", f)
+			assert.Equal(t, tt.msg, err.Msg)
+		})
+	}
+}
+
 // What a file makes dtctl say is bounded like what it makes dtctl do: a
 // warning is printed by every scoped query and travels in its envelope.
 func TestDecode_HostileFileGetsAShortAnswer(t *testing.T) {
@@ -336,6 +359,7 @@ func TestDecode_HostileFileGetsAShortAnswer(t *testing.T) {
 		"unknown entry keys": entryKeys,
 		"a long version":     []byte("apiVersion: " + long + "\n"),
 		"a long anchor":      []byte("environments: &" + long + " {}\n"),
+		"a long tag":         []byte("environments: !" + long + " {}\n"),
 		"a long name":        []byte(scopeDoc("name: "+long, "service-names: [checkout]")),
 		"a long service":     []byte(scopeDoc("name: checkout", "service-names: ["+long+"]")),
 	} {
