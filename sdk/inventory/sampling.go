@@ -479,12 +479,25 @@ func (b *budgetRunner) sampledVerdict(sig Signal, def *CapabilityDef, opts Disco
 	if newest != nil {
 		lastSeen, askedAt = newest.lastSeen, newest.askedAt
 	}
+	// A thick sample shifts last-seen by a fraction of a second. That is
+	// below what the evidence can print and below what a verdict should turn
+	// on, so it counts as no bias at all.
 	bias := samplingBias(windowDuration(opts.Since), p.matched)
+	if bias < time.Second {
+		bias = 0
+	}
 	applyFreshness(&sig, lastSeen, timeField, askedAt, opts.StaleAfter)
+
+	// The age is taken exactly, as applyFreshness compared it. AgeSeconds is
+	// truncated, and a record half a second past the threshold would read as
+	// sitting on it.
+	age := time.Duration(sig.AgeSeconds) * time.Second
+	if newest != nil && askedAt.After(newest.at) {
+		age = askedAt.Sub(newest.at)
+	}
 
 	// A hit below the floor proves arrival and cannot date it, so it never
 	// says stale: an old timestamp there is unknown, with the count kept.
-	age := time.Duration(sig.AgeSeconds) * time.Second
 	if sig.State == SignalStale && p.matched < minSampledRecords {
 		sig.State = SignalUnknown
 		sig.Evidence = sampledThinEvidence(def.DataObject, p, age, opts.StaleAfter)

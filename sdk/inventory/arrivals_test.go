@@ -1964,6 +1964,42 @@ func TestSampledStaleBeyondTheBiasIsStale(t *testing.T) {
 	}
 }
 
+// TestBiasBelowASecondIsNotABand: a thick sample shifts last-seen by a
+// fraction of a second, which is the feature's ordinary good case. Such a bias
+// is neither printed, since it rounds to "~0s", nor used to withhold a stale
+// verdict: the age is compared exactly, not after truncation to whole seconds.
+func TestBiasBelowASecondIsNotABand(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ago   time.Duration
+		state SignalState
+	}{
+		{"half a second past the threshold", 5*time.Minute + 500*time.Millisecond, SignalStale},
+		{"fresh", 30 * time.Second, SignalLive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := windowRunner()
+			runner.responses = append([]mockResponse{
+				cappedLogs(),
+				// 15m over 9688 records is 93ms of bias.
+				sampledRung(1000, 9688, 9688000, fixedNow.Add(-tc.ago).Format(time.RFC3339Nano)),
+				sampledRung(100000, 0, 0, ""), sampledRung(10000, 0, 0, ""),
+			}, runner.responses...)
+
+			logs := signalByName(t, discoverWith(t, runner, windowOpts()), "logs")
+			if logs.State != tc.state {
+				t.Errorf("state = %q, want %q (evidence: %s)", logs.State, tc.state, logs.Evidence)
+			}
+			if strings.Contains(logs.Evidence, "~0s") || strings.Contains(logs.Evidence, "biased") {
+				t.Errorf("evidence %q states a bias that rounds to nothing", logs.Evidence)
+			}
+			if !strings.Contains(logs.Evidence, "9688 sampled records extrapolate to about 9.7M") {
+				t.Errorf("evidence %q should still disclose the sample", logs.Evidence)
+			}
+		})
+	}
+}
+
 // TestNoSampleKeepsTheCappedVerdict: a caller who would rather have no answer
 // than an approximate one can say so, and then no sampled query runs at all.
 func TestNoSampleKeepsTheCappedVerdict(t *testing.T) {
