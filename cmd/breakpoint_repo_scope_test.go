@@ -232,6 +232,19 @@ func (s *liveDebuggerStub) ops() []string {
 	return ops
 }
 
+// variablesOf lists the variables of each request of operation op, in order.
+func (s *liveDebuggerStub) variablesOf(op string) []map[string]interface{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sent []map[string]interface{}
+	for _, c := range s.calls {
+		if c.op == op {
+			sent = append(sent, c.variables)
+		}
+	}
+	return sent
+}
+
 // mutations lists the operations the stub was sent that change something.
 func (s *liveDebuggerStub) mutations() []string {
 	s.mu.Lock()

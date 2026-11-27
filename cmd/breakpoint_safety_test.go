@@ -327,18 +327,85 @@ func TestUpdateBreakpoint_EnabledValueIsNotAnIdentifier(t *testing.T) {
 			require.Contains(t, breakpointMessage(t, stdout), fmt.Sprintf("enabled=%t)", tc.enabled))
 		})
 	}
-	for _, argv := range [][]string{
-		{"update", "breakpoint", "dtctl-rule-0001", "--enabled", "false"},
-		{"update", "breakpoint", "dtctl-rule-0001", "--enabled=false"},
-		{"update", "breakpoint", "dtctl-rule-0001", "--enabled"},
+}
+
+// What --enabled sends is what was typed: the rule named, and disabled
+// exactly when the value is false. A value written with "=" is the flag's
+// own, so the one argument beside it is the identifier wherever it stands,
+// one that reads as a boolean included.
+func TestUpdateBreakpoint_EnabledSendsWhatWasTyped(t *testing.T) {
+	for _, tc := range []struct {
+		argv     []string
+		id       string
+		disabled bool
+	}{
+		{[]string{"dtctl-rule-0001", "--enabled", "false"}, "dtctl-rule-0001", true},
+		{[]string{"dtctl-rule-0001", "--enabled=false"}, "dtctl-rule-0001", true},
+		{[]string{"dtctl-rule-0001", "--enabled"}, "dtctl-rule-0001", false},
+		{[]string{"dtctl-rule-0001", "--enabled", "true"}, "dtctl-rule-0001", false},
+		{[]string{"dtctl-rule-0001", "--enabled", "--", "false"}, "dtctl-rule-0001", true},
+		{[]string{"--enabled=false", "1"}, "1", true},
+		{[]string{"--enabled=0", "true"}, "true", true},
+		{[]string{"1", "--enabled=false"}, "1", true},
+		{[]string{"--enabled", "dtctl-rule-0001"}, "dtctl-rule-0001", false},
 	} {
-		srv := newLiveDebuggerStub(t, "readwrite-all")
-		srv.rules = []interface{}{ruleAt("A.java", 1, "")}
-		chdirTestRepo(t, breakpointScope)
-		code, stdout, stderr := runRepoScoped(append(argv, "--plain"), RunOptions{})
-		require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
-		require.Len(t, srv.mutations(), 1)
+		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readwrite-all")
+			srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+			chdirTestRepo(t, breakpointScope)
+
+			code, stdout, stderr := runRepoScoped(slices.Concat([]string{"--plain", "update", "breakpoint"}, tc.argv), RunOptions{})
+			require.Zero(t, code, "stdout: %s\nstderr: %s", stdout, stderr)
+			require.Equal(t, []string{"EnableOrDisableRules"}, srv.mutations())
+			sent := srv.variablesOf("EnableOrDisableRules")[0]
+			require.Equal(t, []interface{}{tc.id}, sent["rulesIds"])
+			require.Equal(t, tc.disabled, sent["isDisabled"])
+			require.Contains(t, breakpointMessage(t, stdout), fmt.Sprintf("Updated breakpoint %s (enabled=%t)", tc.id, !tc.disabled))
+		})
 	}
+}
+
+// A second argument is the value of --enabled only where the documented
+// spelling puts it: after a bare flag that follows the one identifier.
+// Anywhere else it is one argument too many, and nothing is sent: read as
+// the value, it would override the one the flag carries, or enable what the
+// caller meant to disable.
+func TestUpdateBreakpoint_EnabledTakesNoStrayValue(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"dtctl-rule-0001", "1", "--enabled=false"}, `--enabled=false carries its value, so one breakpoint identifier is expected beside it, and 2 arguments were given`},
+		{[]string{"dtctl-rule-0001", "--enabled=false", "true"}, `--enabled=false carries its value, so one breakpoint identifier is expected beside it, and 2 arguments were given`},
+		{[]string{"dtctl-rule-0001", "--enabled=bogus", "true"}, `invalid boolean value "bogus" for --enabled`},
+		{[]string{"--enabled=bogus", "1"}, `invalid boolean value "bogus" for --enabled`},
+		{[]string{"dtctl-rule-0001", "0", "--enabled"}, `2 arguments were given, and --enabled takes a value only right after the one breakpoint identifier, as in dtctl update breakpoint <id|filename:line> --enabled false`},
+		{[]string{"--enabled", "dtctl-rule-0001", "false"}, `2 arguments were given, and --enabled takes a value only right after the one breakpoint identifier, as in dtctl update breakpoint <id|filename:line> --enabled false`},
+	} {
+		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
+			srv := newLiveDebuggerStub(t, "readwrite-all")
+			srv.rules = []interface{}{ruleAt("A.java", 1, "")}
+			chdirTestRepo(t, breakpointScope)
+
+			code, stdout, _ := runRepoScoped(slices.Concat([]string{"update", "breakpoint"}, tc.argv, []string{"--agent"}), RunOptions{})
+			require.Equal(t, 2, code, stdout)
+			require.Equal(t, "validation_error", agentError(t, stdout).Code)
+			require.Equal(t, tc.want, agentError(t, stdout).Message)
+			require.Empty(t, srv.ops())
+		})
+	}
+}
+
+// --filters with --enabled is refused for what it is, two changes in one
+// call, whatever follows the flag.
+func TestUpdateBreakpoint_FiltersWithEnabledIsTwoChanges(t *testing.T) {
+	srv := newLiveDebuggerStub(t, "readwrite-all")
+	chdirTestRepo(t, breakpointScope)
+
+	code, stdout, _ := runRepoScoped([]string{"update", "breakpoint", "--filters", "k8s.namespace.name:web", "--enabled", "false", "--agent"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Equal(t, "--filters sets the workspace's filters, shared by every breakpoint in it; change --condition, --log-message, or --enabled in a separate call", agentError(t, stdout).Message)
+	require.Empty(t, srv.ops())
 }
 
 // A dry run of delete has to read what it would delete, so it sends the two
