@@ -81,20 +81,22 @@ func runRepoScoped(argv []string, opts RunOptions) (code int, stdout, stderr str
 	var out, errOut bytes.Buffer
 	opts.Stdout, opts.Stderr = &out, &errOut
 	code = Run(argv, opts)
-	return code, withoutTestConfig(out.String()), errOut.String()
+	return code, withoutTestConfig(out.String()), withoutTestConfig(errOut.String())
 }
 
-// withoutTestConfig drops, from the set lines discovery prints, the --config
+// withoutTestConfig drops, from the lines a command suggests running (the
+// set lines of discovery, the lines of the breakpoint commands), the --config
 // that names the test's own config file. A test isolates its config with
 // DTCTL_CONFIG, and a line carries the config that variable chose
-// (TestRepoScopeDiscoverCarriesTheConfigTheEnvironmentChose); the path is a
+// (TestRepoScopeDiscoverCarriesTheConfigTheEnvironmentChose,
+// TestBreakpoint_LinesCarryTheConfigTheEnvironmentChose); the path is a
 // temporary directory's, which no expected line can spell.
-func withoutTestConfig(stdout string) string {
+func withoutTestConfig(printed string) string {
 	path := os.Getenv("DTCTL_CONFIG")
 	if path == "" {
-		return stdout
+		return printed
 	}
-	return strings.ReplaceAll(stdout, "--config "+exec.ShellQuote(path)+" ", "")
+	return strings.ReplaceAll(printed, "--config "+exec.ShellQuote(path)+" ", "")
 }
 
 func agentEnvelope(t *testing.T, stdout string) output.Response {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -150,7 +151,7 @@ func runSuggested(t *testing.T, line string, extra ...string) int {
 // The lines a failed create suggests are run later, in a shell whose current
 // context may be another one, and the same repository names the same
 // workspace in every environment: each line carries the context, and the
-// config --config named, of the run that printed it, every value as one
+// config --config or DTCTL_CONFIG named, of the run that printed it, every value as one
 // shell word. Run as printed, each reaches the environment and the workspace
 // the create changed, and no other.
 func TestCreateBreakpoint_RecoveryLinesKeepTheContext(t *testing.T) {
@@ -239,6 +240,35 @@ func TestCreateBreakpoint_RecoveryLinesKeepTheContext(t *testing.T) {
 			require.Empty(t, prod.ops(), "no line reaches the config's current context")
 		})
 	}
+}
+
+// The config is named on a line also when DTCTL_CONFIG chose it, as on
+// discovery's set line: the variable may be set for the one command, and the
+// line is run in a shell that does not have it.
+func TestBreakpoint_LinesCarryTheConfigTheEnvironmentChose(t *testing.T) {
+	srv := newLiveDebuggerStub(t, "readwrite-all", webSetJSON)
+	srv.fail["CreateRule"] = "rule limit reached"
+	ws := filepath.Base(chdirTestRepo(t, breakpointScope)) + "/checkout"
+	configPath := os.Getenv("DTCTL_CONFIG")
+	require.NotEmpty(t, configPath)
+
+	var out, errOut bytes.Buffer
+	code := Run([]string{"create", "breakpoint", "A.java:1", "--filters", "k8s.namespace.name:payments", "--agent"}, RunOptions{Stdout: &out, Stderr: &errOut})
+	require.NotZero(t, code)
+	suggestions := agentError(t, out.String()).Suggestions
+	require.GreaterOrEqual(t, len(suggestions), 4)
+	selectors := "dtctl --config " + exec.ShellQuote(configPath) + " --context c "
+	require.Equal(t, selectors+"get breakpoints -v", suggestedCommand(t, suggestions[1]))
+	require.Equal(t, selectors+"update breakpoint --filters k8s.namespace.name:web", suggestedCommand(t, suggestions[2]))
+	require.Equal(t, selectors+"create breakpoint A.java:1", suggestedCommand(t, suggestions[3]))
+
+	// In a shell without the variable the restoring line still reaches the
+	// environment and the workspace the create changed.
+	t.Setenv("DTCTL_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	srv.reset()
+	require.Zero(t, runSuggested(t, suggestedCommand(t, suggestions[2]), "--agent", "--yes"))
+	require.Equal(t, []string{"UpdateWorkspaceV2"}, srv.mutations())
+	require.Equal(t, []string{ws}, srv.workedIn())
 }
 
 // decodeFilterSets decodes a JSON list of filter sets for comparison.

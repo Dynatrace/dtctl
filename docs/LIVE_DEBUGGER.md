@@ -149,7 +149,7 @@ repo scope checkout sets service.name, which is not verified as a workspace labe
     ```
 
     The line names the context the create ran in (and the config, when
-    `--config` named it), so it reaches the same environment when it is run
+    `--config` or `DTCTL_CONFIG` named it), so it reaches the same environment when it is run
     later, under another current context.
 
   `DTCTL_NO_REPO_SCOPE=1` turns both off, and the commands then say what they
