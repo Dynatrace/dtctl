@@ -261,6 +261,9 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 		defer cancelTimeout()
 		began := time.Now()
 		report, err := reposcope.Discover(runCtx, runner, plan, host)
+		if report == nil {
+			return nil, 0, err // the plan was refused, and nothing was sent
+		}
 		for i := range report.Queries {
 			// Refused here, so never sent: the report must not count it
 			// among the queries that ran.
@@ -292,7 +295,9 @@ func runDiscovery(cmd *cobra.Command, plans []*reposcope.Plan) error {
 	proposals := make([]repoScopeProposal, len(plans))
 	for i, plan := range plans {
 		var elapsed time.Duration
-		reports[i], elapsed, err = discover(plan)
+		if reports[i], elapsed, err = discover(plan); reports[i] == nil {
+			return err
+		}
 		proposals[i] = newRepoScopeProposal(reports[i], selectors, names)
 		if table {
 			if i > 0 {

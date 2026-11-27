@@ -567,10 +567,19 @@ type DiscoveryReport struct {
 }
 
 // Discover runs p's queries through runner and ranks what came back. It only
-// reads. A cancelled run returns the report so far together with ctx.Err(),
+// reads. p is a plan as PlanDiscovery returned it: one rebuilt from its
+// printed form has lost where its values were read, and is refused with an
+// InvalidError and no report before anything is sent. A cancelled run returns the report so far together with ctx.Err(),
 // so a caller can still show what it found after a Ctrl-C; the CLI does in
 // every mode but the agent's, whose envelope is a result or an error.
 func Discover(ctx context.Context, runner inventory.Runner, p *Plan, host string) (*DiscoveryReport, error) {
+	if len(p.Sent) > 0 && len(p.tokens) == 0 && len(p.terms) == 0 {
+		// A plan that was printed and read back, say. With only the values
+		// left, nothing tells the unit's own name from a dependency's.
+		return nil, &InvalidError{Source: "discovery plan",
+			Msg:         "the plan does not say where its values were read, so no candidate they find could be weighed",
+			Suggestions: []string{"run a plan as PlanDiscovery returned it"}}
+	}
 	r := &DiscoveryReport{Environment: host, Dir: p.Dir, Unit: p.Unit,
 		Queries: append([]Query{}, p.Queries...), Sent: []string{}}
 	d := newDiscovery(p)

@@ -176,15 +176,16 @@ type discovery struct {
 }
 
 // newDiscovery prepares the matchers: every variant of every token sent, then
-// every sent value a term spells or no token explains, which came from a
-// term. A term stands beside a token of the same spelling: it is the user's
-// word that the name is this code's, which a file's may not be.
+// every sent value a term spells. A term stands beside a token of the same
+// spelling: it is the user's word that the name is this code's, which a
+// file's may not be. Only what the plan records as a term is one: a sent
+// value that neither a token nor a term explains has no matcher, so a row it
+// finds is one discovery cannot explain (see recordTier).
 func newDiscovery(p *Plan) *discovery {
 	d := &discovery{unit: p.Unit, records: map[recordKey]*Candidate{}, samples: map[string]*Query{}, stopped: map[string]bool{}}
 	if p.Unit == "." && p.Dir != "." {
 		d.dirSource = dirSource(p.Dir)
 	}
-	explained := map[string]bool{}
 	for _, t := range p.tokens {
 		if t.kind == kindNamespace {
 			d.namespaces = append(d.namespaces, t)
@@ -192,7 +193,6 @@ func newDiscovery(p *Plan) *discovery {
 		}
 		for _, v := range t.variants {
 			d.matchers = append(d.matchers, matcher{value: v, token: t})
-			explained[v] = true
 		}
 	}
 	termed := map[string]bool{}
@@ -202,7 +202,7 @@ func newDiscovery(p *Plan) *discovery {
 		}
 	}
 	for _, v := range p.Sent {
-		if !explained[v] || termed[v] {
+		if termed[v] {
 			d.matchers = append(d.matchers, matcher{value: v, token: token{kind: kindTerm, value: v}})
 		}
 	}

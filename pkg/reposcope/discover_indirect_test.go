@@ -2,6 +2,7 @@ package reposcope
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"testing/fstest"
 
@@ -280,4 +281,41 @@ func TestDiscover_IndirectNamesDoNotAddUp(t *testing.T) {
 		assert.Equal(t, VerdictAmbiguous, r.Verdict)
 		assert.NotEmpty(t, r.Candidates[0].Indirect)
 	})
+}
+
+// A plan knows where each value was read, and that is not part of what it
+// prints. One that went through JSON has only the values left, and every one
+// of them would count as the user's own word: the cache a manifest names
+// would be a match. Discover refuses it.
+func TestDiscover_RefusesAPlanWithoutItsSources(t *testing.T) {
+	repo := fstest.MapFS{"go.mod": file("module example.invalid/acme/checkout\n"), "deploy/redis.yaml": file(deployment("redis-cache", "redis:7.2"))}
+	p, err := PlanDiscovery(repo, ".", nil)
+	require.NoError(t, err)
+	data, err := json.Marshal(p)
+	require.NoError(t, err)
+	var decoded Plan
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	runner := &fakeRunner{answers: map[string][]answer{
+		objectSpans: {{records: []map[string]interface{}{{fieldNamespace: "shared-infra", fieldWorkload: "redis-cache", fieldRecords: float64(10)}}}},
+	}}
+	r, err := Discover(context.Background(), runner, &decoded, prodHost)
+	require.ErrorContains(t, err, "the plan does not say where its values were read")
+	assert.Nil(t, r)
+	assert.Empty(t, runner.sent, "nothing is sent for it")
+}
+
+// Only a name the user passed is a term. A value the plan carries that no
+// file and no term explains finds its row and explains nothing.
+func TestDiscover_AnUnexplainedValueIsNoTerm(t *testing.T) {
+	p, err := PlanDiscovery(fstest.MapFS{"go.mod": file("module example.invalid/acme/checkout\n")}, ".", nil)
+	require.NoError(t, err)
+	p.Sent = append(p.Sent, "redis-cache")
+	r, err := Discover(context.Background(), &fakeRunner{answers: map[string][]answer{
+		objectSpans: {{records: []map[string]interface{}{{fieldNamespace: "shared-infra", fieldWorkload: "redis-cache", fieldRecords: float64(10)}}}},
+	}}, p, prodHost)
+	require.NoError(t, err)
+	require.Len(t, r.Candidates, 1)
+	assert.Equal(t, "substring", r.Candidates[0].Tier)
+	assert.Equal(t, VerdictAmbiguous, r.Verdict)
 }
