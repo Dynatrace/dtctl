@@ -64,6 +64,41 @@ func TestProfileAllows(t *testing.T) {
 	}
 }
 
+// TestProfileAllowsOnlyAsAncestor: a parent of an entry is ancestor-only,
+// unless it is listed, below an entry, or always available.
+func TestProfileAllowsOnlyAsAncestor(t *testing.T) {
+	p := &Profile{Name: "p", Commands: []string{
+		"apply extension-config", "exec copilot nl2dql", "get gcp connections principal",
+		"query", "describe", "commands howto",
+	}}
+
+	for path, want := range map[string]bool{
+		"apply":                         true,
+		"exec":                          true,
+		"exec copilot":                  true,
+		"get":                           true,
+		"get gcp":                       true,
+		"get gcp connections":           true,
+		"apply extension-config":        false, // listed
+		"exec copilot nl2dql":           false, // listed
+		"get gcp connections principal": false, // listed
+		"query":                         false, // listed
+		"describe analyzer":             false, // below a listed entry
+		"commands":                      false, // always available
+		"auth":                          false, // not allowed
+		"exec copilot dql2nl":           false, // a sibling, not allowed
+	} {
+		if got := p.AllowsOnlyAsAncestor(path); got != want {
+			t.Errorf("AllowsOnlyAsAncestor(%q) = %v, want %v", path, got, want)
+		}
+	}
+
+	listed := &Profile{Name: "p", Commands: []string{"apply", "apply extension-config"}}
+	if listed.AllowsOnlyAsAncestor("apply") {
+		t.Error("a listed parent is not ancestor-only")
+	}
+}
+
 func TestResolveProfile_Precedence(t *testing.T) {
 	cfg := &Config{
 		CurrentContext: "ctx1",

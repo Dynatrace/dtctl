@@ -101,6 +101,11 @@ func installScopePreflight(cmd *cobra.Command) {
 	if orig == nil {
 		return
 	}
+	// isRefusal can't see through the wrapper, so mark a refusal first. The
+	// command profile checks it later.
+	if isRefusal(cmd) {
+		markRefusalOnly(cmd)
+	}
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		skip, err := scopePreflight(c, args)
 		if err != nil {

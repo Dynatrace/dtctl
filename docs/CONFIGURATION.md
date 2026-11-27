@@ -725,6 +725,10 @@ Matching rules:
   to dtctl never silently widens an existing profile.
 - To allow a parent but only some children, list the specific child paths
   (`commands: [get analyzers, get slos]` rather than `commands: [get]`).
+- The parents of a listed command stay visible so you can reach it, but they
+  do not run on their own. With `commands: [apply extension-config]`,
+  `dtctl apply extension-config ...` works, but `dtctl apply -f file.yaml` is
+  refused. To allow `dtctl apply -f`, list `apply` too.
 
 User-defined profiles take precedence over a built-in preset of the same name.
 

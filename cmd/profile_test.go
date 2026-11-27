@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -181,6 +183,129 @@ func TestHideMaskedCommandKeepsPersistentFlags(t *testing.T) {
 	} {
 		if f.Hidden {
 			t.Errorf("persistent flag --%s was hidden", name)
+		}
+	}
+}
+
+// newAncestorTestTree builds a parent that runs on its own (apply, needs -f), a
+// group that only refuses a missing subcommand (grp), and a child under each.
+// ran records which commands ran.
+func newAncestorTestTree(ran map[string]bool) *cobra.Command {
+	root := &cobra.Command{Use: "dtctl", SilenceErrors: true, SilenceUsage: true}
+	body := func(name string) func(*cobra.Command, []string) error {
+		return func(*cobra.Command, []string) error { ran[name] = true; return nil }
+	}
+
+	apply := &cobra.Command{Use: "apply -f <file>", Args: cobra.NoArgs, RunE: body("apply")}
+	apply.Flags().StringP("file", "f", "", "file")
+	if err := apply.MarkFlagRequired("file"); err != nil {
+		panic(err)
+	}
+	apply.AddCommand(&cobra.Command{Use: "extension-config", RunE: body("apply extension-config")})
+
+	grp := &cobra.Command{Use: "grp", RunE: requireSubcommand}
+	grp.AddCommand(&cobra.Command{Use: "leaf", RunE: body("grp leaf")})
+
+	root.AddCommand(apply, grp)
+	return root
+}
+
+// TestApplyProfile_AncestorRunsNoBody: a parent allowed only to reach its child
+// stays visible but is blocked, even without its required -f. Its flags and
+// arguments are hidden; its help and its child still work.
+func TestApplyProfile_AncestorRunsNoBody(t *testing.T) {
+	ran := map[string]bool{}
+	root := newAncestorTestTree(ran)
+	applyProfile(root, &config.Profile{Name: "p", Commands: []string{"apply extension-config", "grp leaf"}}, false)
+
+	apply := find(root, "apply")
+	if apply.Hidden {
+		t.Error("apply must stay visible to reach apply extension-config")
+	}
+	if !apply.Flags().Lookup("file").Hidden {
+		t.Error("--file of the blocked apply must be hidden")
+	}
+	if apply.Use != "apply" {
+		t.Errorf("Use = %q, want the blocked apply's arguments dropped", apply.Use)
+	}
+
+	for _, args := range [][]string{{"apply", "-f", "d.yaml"}, {"apply"}, {"apply", "stray"}} {
+		root.SetArgs(args)
+		var pe *ProfileError
+		if err := root.Execute(); !errors.As(err, &pe) || pe.Command != "apply" || pe.Profile != "p" {
+			t.Errorf("%v: got %v, want apply blocked by the profile", args, err)
+		}
+	}
+	if ran["apply"] {
+		t.Fatal("the blocked apply ran")
+	}
+
+	var help bytes.Buffer
+	root.SetOut(&help)
+	root.SetArgs([]string{"apply", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("apply --help: %v", err)
+	}
+	if !strings.Contains(help.String(), "extension-config") || strings.Contains(help.String(), "-f <file>") ||
+		strings.Contains(help.String(), "--file") {
+		t.Errorf("apply --help should list extension-config and not -f:\n%s", help.String())
+	}
+
+	root.SetArgs([]string{"apply", "extension-config"})
+	if err := root.Execute(); err != nil || !ran["apply extension-config"] {
+		t.Errorf("apply extension-config: err %v, ran %v; want it to run", err, ran["apply extension-config"])
+	}
+}
+
+// TestApplyProfile_ListedParentAndPureGroupAreUnchanged: a listed parent still
+// runs, and a group still refuses a missing subcommand on its own.
+func TestApplyProfile_ListedParentAndPureGroupAreUnchanged(t *testing.T) {
+	ran := map[string]bool{}
+	root := newAncestorTestTree(ran)
+	applyProfile(root, &config.Profile{Name: "p", Commands: []string{"apply", "grp leaf"}}, false)
+
+	root.SetArgs([]string{"apply", "-f", "d.yaml"})
+	if err := root.Execute(); err != nil || !ran["apply"] {
+		t.Errorf("listed apply: err %v, ran %v; want it to run", err, ran["apply"])
+	}
+
+	grp := find(root, "grp")
+	if !isRefusal(grp) || grp.Hidden {
+		t.Error("grp must keep its refusal and stay visible")
+	}
+	root.SetArgs([]string{"grp"})
+	var pe *ProfileError
+	if err := root.Execute(); err == nil || errors.As(err, &pe) {
+		t.Errorf("grp: got %v, want its own missing-subcommand refusal", err)
+	}
+}
+
+// TestInstallScopePreflightKeepsRefusal: a group wrapped by the scope
+// preflight is still seen as a refusal.
+func TestInstallScopePreflightKeepsRefusal(t *testing.T) {
+	root := newAncestorTestTree(map[string]bool{})
+	installScopePreflight(root)
+	if !isRefusal(find(root, "grp")) {
+		t.Error("the wrapped grp is no longer seen as a refusal")
+	}
+	if isRefusal(find(root, "apply")) {
+		t.Error("apply has a body and is not a refusal")
+	}
+}
+
+func TestHelpRequested(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"--help"}, true},
+		{[]string{"-f", "d.yaml", "-h"}, true},
+		{[]string{"-f", "d.yaml"}, false},
+		{[]string{"--", "--help"}, false}, // after "--" it is positional
+		{nil, false},
+	} {
+		if got := helpRequested(tc.args); got != tc.want {
+			t.Errorf("helpRequested(%v) = %v, want %v", tc.args, got, tc.want)
 		}
 	}
 }

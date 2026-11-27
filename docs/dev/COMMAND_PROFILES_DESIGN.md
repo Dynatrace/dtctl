@@ -385,8 +385,8 @@ catalog metadata. It applies to every `Execute` and `Parse` of the engine.
   unsetting `DTCTL_PROFILE`.
 - **Copied:** the engine keeps its own copy of the definition.
 - **Entries** are canonical paths; a caller's alias resolves to them. An entry
-  also allows its ancestors, and an ancestor that runs on its own runs too:
-  `apply extension-config` also allows `apply -f <any file>`.
+  keeps its parents visible, but they do not run on their own (see
+  [Selector matching](#selector-matching)).
 
 dtctl does not check that each entry names an existing command. A host that
 wants an upgrade to fail on a renamed or removed command compares its list
@@ -420,7 +420,18 @@ type Context struct {
 
 1. If the path is in the always-available set -> **allowed**.
 2. Else if any `commands` entry equals or is a prefix of the path -> **allowed**.
-3. Else -> **masked**.
+3. Else if the path is a prefix of an entry -> **visible, but cannot run on its
+   own** (`AllowsOnlyAsAncestor`).
+4. Else -> **masked**.
+
+Such a parent stays in help, completion and the catalog, so the commands listed
+below it can be reached. If it has a command of its own (`apply`,
+`exec copilot`, `get gcp connections`, `ctx`), that command is blocked with
+`profile_blocked`, like a masked one, and its own flags and arguments are
+hidden. `--help` still works. So listing `apply extension-config` does not
+allow `apply -f <file>`, and listing `ctx current` does not allow
+`ctx <name>`. A group with no command of its own (`get`, `get gcp`) is
+unchanged. To allow a parent's own command, list the parent.
 
 Prefix matching is segment-aware: `get` matches `get workflows` but a bare `get`
 entry does not accidentally match an unrelated `getterm`-style command. Reusing the

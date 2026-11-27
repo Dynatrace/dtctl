@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/Dynatrace/dtctl/pkg/config"
 )
@@ -61,6 +62,10 @@ func (e *ProfileError) Error() string {
 // returns a ProfileError, satisfying hard enforcement (a hidden command is still
 // runnable by name in Cobra).
 //
+// A parent that is visible only to reach a listed command cannot run on its
+// own (see guardAncestorBody): listing "apply extension-config" must not
+// allow "apply -f <file>".
+//
 // A nil profile is the full command tree (no-op), preserving today's behavior.
 // pinned marks a profile the caller cannot change (see ProfileError.Pinned).
 // The filter runs once, after the whole command tree is registered and before
@@ -73,7 +78,12 @@ func applyProfile(root *cobra.Command, p *config.Profile, pinned bool) {
 		if cmd == root {
 			return // never mask the root command itself
 		}
-		if p.Allows(commandPathRelative(cmd, root)) {
+		path := commandPathRelative(cmd, root)
+		if p.AllowsOnlyAsAncestor(path) {
+			guardAncestorBody(cmd, path, p.Name, pinned)
+			return
+		}
+		if p.Allows(path) {
 			return
 		}
 		hideMaskedCommand(cmd)
@@ -86,10 +96,49 @@ func applyProfile(root *cobra.Command, p *config.Profile, pinned bool) {
 			// guard always wins and the block is the only observable outcome.
 			cmd.Args = cobra.ArbitraryArgs
 			cmd.DisableFlagParsing = true
-			cmd.RunE = blockedRunE(commandPathRelative(cmd, root), p.Name, pinned)
+			cmd.RunE = blockedRunE(path, p.Name, pinned)
 			cmd.Run = nil
 		}
 	})
+}
+
+// guardAncestorBody blocks a parent's own command but keeps the parent
+// visible, so its subcommands stay reachable. A group that only refuses a
+// missing subcommand has nothing to block and is left alone.
+//
+// Like a masked command, the parent skips arg and flag checks, so the block
+// always wins: a bare `apply` is blocked, not asked for -f. Cobra then no
+// longer handles --help, so the guard does. The parent's own flags, argument
+// completion and usage are hidden, because nothing can use them.
+func guardAncestorBody(cmd *cobra.Command, path, profileName string, pinned bool) {
+	if (cmd.RunE == nil && cmd.Run == nil) || isRefusal(cmd) {
+		return
+	}
+	hideCommandBody(cmd)
+	cmd.Use = cmd.Name() // drop arguments like "-f <file>" from help and the catalog
+	cmd.Args = cobra.ArbitraryArgs
+	cmd.DisableFlagParsing = true
+	blocked := blockedRunE(path, profileName, pinned)
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		if helpRequested(args) {
+			return pflag.ErrHelp // cobra prints the help
+		}
+		return blocked(c, args)
+	}
+	cmd.Run = nil
+}
+
+// helpRequested reports whether args ask for help (-h or --help) before "--".
+func helpRequested(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--":
+			return false
+		case "-h", "--help":
+			return true
+		}
+	}
+	return false
 }
 
 // blockedRunE returns a RunE that reports the command as unavailable under the

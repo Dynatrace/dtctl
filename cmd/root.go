@@ -453,6 +453,16 @@ var verbSynonyms = map[string]struct{ verb, hint string }{
 // pristine-tree restore undoes it.
 func hideMaskedCommand(c *cobra.Command) {
 	c.Hidden = true
+	hideCommandBody(c)
+	if c.Annotations == nil {
+		c.Annotations = map[string]string{}
+	}
+	c.Annotations[commands.MaskedAnnotation] = "true"
+}
+
+// hideCommandBody hides c's own flags and argument completion. Subcommands and
+// persistent flags stay. The pristine-tree restore undoes it.
+func hideCommandBody(c *cobra.Command) {
 	// Only c's non-persistent flags: a persistent one, c's or an ancestor's,
 	// also serves commands that may stay visible. (Not c.LocalFlags(): it
 	// merges the ancestors' flag sets on every call, which is slow.)
@@ -466,10 +476,6 @@ func hideMaskedCommand(c *cobra.Command) {
 	})
 	c.ValidArgs = nil
 	c.ValidArgsFunction = cobra.NoFileCompletions
-	if c.Annotations == nil {
-		c.Annotations = map[string]string{}
-	}
-	c.Annotations[commands.MaskedAnnotation] = "true"
 }
 
 // prepareHelpCommand creates cobra's help command before the surface stages

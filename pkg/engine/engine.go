@@ -130,9 +130,9 @@ type Request struct {
 // WithProfileDefinition. It works like a profile in a config file: entries are
 // canonical command paths ("get workflows", not "get wf"), a caller's alias
 // resolves to them, and any other command is refused with profile_blocked.
-// An entry allows its subtree and its ancestors; an ancestor that runs on its
-// own (`apply` for "apply extension-config") runs too. `commands` and `help`
-// are always available.
+// An entry allows the commands below it. Its parents stay visible but cannot
+// run on their own: "apply extension-config" does not allow `apply -f
+// <file>`; list "apply" for that. `commands` and `help` are always available.
 type ProfileDefinition struct {
 	// Name identifies the profile in profile_blocked and `dtctl commands`.
 	Name string
