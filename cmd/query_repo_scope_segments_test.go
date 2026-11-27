@@ -370,16 +370,27 @@ func TestQueryRepoScope_SegmentVarForAnEntrysSegment(t *testing.T) {
 
 	code, stdout, stderr := runRepoScoped([]string{"query", repoScopeTypedQuery, "--agent", "--segment-var", "Ab3dEf9hIjk:environment=staging"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Equal(t, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, pass --segment "Ab3dEf9hIjk?environment=staging"`,
+	require.Equal(t, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, name the segment too: add --segment "Ab3dEf9hIjk"`,
 		agentError(t, stdout).Message)
 	require.Empty(t, srv.requests(), "nothing is read or sent")
 	require.Empty(t, stderr)
+
+	// The advice, followed: a value that holds what --segment's own spelling
+	// splits on reaches the request whole.
+	code, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment-var", "Ab3dEf9hIjk:environment=a&b"}, RunOptions{})
+	require.NotZero(t, code)
+	require.Contains(t, stderr, `add --segment "Ab3dEf9hIjk"`)
+	code, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment-var", "Ab3dEf9hIjk:environment=a&b", "--segment", "Ab3dEf9hIjk"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	body, _ := srv.executed(t)
+	require.Contains(t, body, `{"id":"Ab3dEf9hIjk","variables":[{"name":"environment","values":["a\u0026b"]}]}`)
+	srv.reset()
 
 	// Still refused beside a --segment that names another segment.
 	srv.segments["other-2"] = http.StatusOK
 	code, _, stderr = runRepoScoped([]string{"query", repoScopeTypedQuery, "--segment", "other-2", "--segment-var", " Ab3dEf9hIjk : environment=staging"}, RunOptions{})
 	require.NotZero(t, code)
-	require.Contains(t, stderr, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, pass --segment "Ab3dEf9hIjk?environment=staging"`)
+	require.Contains(t, stderr, `--segment-var names segment "Ab3dEf9hIjk", which repo scope checkout references; to give it other variables, name the segment too: add --segment "Ab3dEf9hIjk"`)
 	require.Empty(t, srv.queries())
 }
 

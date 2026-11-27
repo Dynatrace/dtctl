@@ -570,7 +570,9 @@ func (q *repoScopedQuery) requireSegments(refusal string) error {
 // refuseSegmentVars fails a --segment-var aimed at a segment the entry
 // references and the command line does not: the flag binds variables of a
 // segment the user gave, and the entry's values are the entry's. It says how
-// to give the segment other variables, which is to name it.
+// to give the segment other variables, which is to name it. The advice keeps
+// the --segment-var as typed: the "id?name=value" spelling of --segment
+// splits its values at & and , and so cannot hold every value.
 //
 // user is the command line's segments, resolved, and origIDs what each was
 // typed as: a binding may name its segment either way, as applySegmentVars
@@ -581,14 +583,14 @@ func (q *repoScopedQuery) refuseSegmentVars(cmd *cobra.Command, user []exec.Filt
 	}
 	vars, _ := cmd.Flags().GetStringArray("segment-var")
 	for _, v := range vars {
-		id, assignment, _ := strings.Cut(strings.TrimSpace(v), ":")
-		id, assignment = strings.TrimSpace(id), strings.TrimSpace(assignment)
+		id, _, _ := strings.Cut(strings.TrimSpace(v), ":")
+		id = strings.TrimSpace(id)
 		given := slices.ContainsFunc(user, func(u exec.FilterSegmentRef) bool { return u.ID == id || origIDs[u.ID] == id })
 		if given || !slices.ContainsFunc(q.segments, func(s reposcope.Segment) bool { return s.ID == id }) {
 			continue
 		}
-		return fmt.Errorf("--segment-var names segment %q, which repo scope %s references; to give it other variables, pass --segment %q",
-			id, q.scope.Name, id+"?"+assignment)
+		return fmt.Errorf("--segment-var names segment %q, which repo scope %s references; to give it other variables, name the segment too: add --segment %q",
+			id, q.scope.Name, id)
 	}
 	return nil
 }
