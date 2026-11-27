@@ -300,6 +300,8 @@ func TestParse_RequiresInputForConfirmationPrompts(t *testing.T) {
 		"restore -y":              {"restore workflow " + id + " 1 -y", false},
 		"restore trash":           {"restore trash " + id, true},
 		"restore trash --force":   {"restore trash " + id + " --force", false},
+		"restore trash --yes":     {"restore trash " + id + " --yes", false},
+		"restore trash -y":        {"restore trash " + id + " -y", false},
 		// restore trash asks only for a single document.
 		"restore trash, two documents": {"restore trash " + id + " " + id, false},
 		"delete breakpoint":            {"delete breakpoint 123", true},

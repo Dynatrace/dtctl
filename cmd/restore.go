@@ -421,7 +421,10 @@ Examples:
   # Restore with a new name (to avoid conflicts)
   dtctl restore trash <id> --new-name "Recovered Dashboard"
 
-  # Force restore (overwrite if name conflict exists)
+  # Restore without confirmation
+  dtctl restore trash <id> --yes
+
+  # Force restore (overwrite if name conflict exists; also skips confirmation)
   dtctl restore trash <id> --force
 `,
 		Args: cobra.MinimumNArgs(1),
@@ -435,6 +438,7 @@ Examples:
 
 			// Get flags
 			forceRestore, _ := cmd.Flags().GetBool("force")
+			skipConfirm, _ := cmd.Flags().GetBool("yes")
 			newName, _ := cmd.Flags().GetString("new-name")
 
 			if dryRun(cmdContext(cmd)) {
@@ -459,8 +463,8 @@ Examples:
 					continue
 				}
 
-				// Confirm restore unless --force or --plain or restoring multiple
-				if !forceRestore && !plainMode(cmdContext(cmd)) && len(args) == 1 {
+				// Confirm restore unless --yes, --force or --plain or restoring multiple
+				if !skipConfirm && !forceRestore && !plainMode(cmdContext(cmd)) && len(args) == 1 {
 					confirmMsg := fmt.Sprintf("Restore %s %q from trash?", doc.Type, doc.Name)
 					if !prompt.ConfirmWith(currentStdin(cmdContext(cmd)), currentStdout(cmdContext(cmd)), confirmMsg) {
 						fmt.Fprintln(currentStdout(cmdContext(cmd)), "Restore cancelled")
@@ -490,7 +494,9 @@ Examples:
 		},
 	}
 	c.Flags().Bool("force", false, "Restore even if name conflicts exist")
-	markPromptsOneArgument(c, "force", "dry-run")
+	c.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	markPromptsOneArgument(c, "yes", "force", "dry-run")
+	stability.MarkFlagStable(c, "yes")
 	c.Flags().String("new-name", "", "Restore with a new name")
 	stability.MarkStable(c)
 	return c

@@ -86,3 +86,14 @@ func StabilitySinceVersions() map[string][]string {
 		return out
 	})
 }
+
+// WalkCompleteCommandTree calls fn for every command in the complete command
+// tree — every development feature registered, as StabilityManifest sees it.
+// Exported so test/stability can check flag conventions across the whole
+// surface a released binary can expose, including `dtctl serve`.
+func WalkCompleteCommandTree(fn func(c *cobra.Command)) {
+	withCompleteCommandTree(func() struct{} {
+		stability.Walk(rootCmd, fn)
+		return struct{}{}
+	})
+}

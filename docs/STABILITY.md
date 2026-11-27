@@ -212,7 +212,7 @@ deprecation cycle. Nothing stated here is relaxed by reaching 1.0.
 
 - commands: 269 stable, 22 experimental, 16 development
 - global flags (accepted on every command): 11
-- entries below (commands + flags): 979
+- entries below (commands + flags): 980
 
 ## Surface
 
@@ -1002,6 +1002,7 @@ restore trash                        stable
   --dry-run                          stable
   --force                            stable
   --new-name                         stable
+  --yes                              stable  (declared)
 restore workflow                     stable
   --dry-run                          stable
   --yes                              stable  (declared)

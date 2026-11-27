@@ -44,7 +44,7 @@ func TestPromptCallSitesAreKnown(t *testing.T) {
 		"restore.go:newRestoreDashboardCmd":                    "--yes",
 		"restore.go:newRestoreNotebookCmd":                     "--yes",
 		"restore.go:newRestoreDocumentCmd":                     "--yes",
-		"restore.go:newRestoreTrashCmd":                        "--force",
+		"restore.go:newRestoreTrashCmd":                        "--yes or --force",
 	}
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestPromptingCommandsAreDeclared(t *testing.T) {
 		"dtctl restore dashboard":       "yes,dry-run",
 		"dtctl restore document":        "yes,dry-run",
 		"dtctl restore notebook":        "yes,dry-run",
-		"dtctl restore trash":           "force,dry-run+one-argument",
+		"dtctl restore trash":           "yes,force,dry-run+one-argument",
 		"dtctl restore workflow":        "yes,dry-run",
 		"dtctl update breakpoint":       "yes,dry-run",
 		"dtctl usage reset":             "yes",
