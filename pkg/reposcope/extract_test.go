@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -363,9 +364,10 @@ func TestExtract_Limits(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "a/b/c/d/e/f/g", s.unit)
 		assert.Equal(t, []string{
+			"workload below-the-asked-directory a/b/c/d/e/f/g/deeper/deployment.yaml:3",
 			"workload ledger-writer-v2 a/b/c/d/e/f/g/deployment.yaml:3",
 			"module ledger-writer a/b/c/d/e/f/g/go.mod:1",
-		}, tokenLines(s.tokens))
+		}, tokenLines(s.tokens), "and so is what lies below it, while what lies beside it is too deep")
 		assert.False(t, s.capped)
 	})
 	t.Run("too large", func(t *testing.T) {
@@ -452,6 +454,61 @@ func TestExtract_TheCapBoundsWhatIsRead(t *testing.T) {
 		assert.Equal(t, "zz", s.unit, "the directory's own files are read before those above it")
 		assert.Equal(t, maxFiles, sources(fsys))
 	})
+}
+
+// Discovery asked about a directory reads what lies below it, to the same
+// depth it reads below the root, however deep the directory itself is.
+func TestExtract_ReadsBelowADeepDirectory(t *testing.T) {
+	fsys := fstest.MapFS{
+		"a/b/c/d/e/f/go.mod":                      {Data: []byte("module example.invalid/checkout\n")},
+		"a/b/c/d/e/f/deploy/deployment.yaml":      {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-api\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/deployment.yaml": {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-six-below\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/7/job.yaml":      {Data: []byte("kind: Job\nmetadata:\n  name: checkout-seven-below\n")},
+		"a/b/c/d/e/g/h/deployment.yaml":           {Data: []byte("kind: Deployment\nmetadata:\n  name: checkout-beside\n")},
+	}
+	p, err := PlanDiscovery(fsys, "a/b/c/d/e/f", nil)
+	require.NoError(t, err)
+	assert.Contains(t, p.Sent, "checkout-api")
+	assert.Contains(t, p.Sent, "checkout-six-below")
+	assert.NotContains(t, p.Sent, "checkout-seven-below")
+	assert.NotContains(t, p.Sent, "checkout-beside", "what lies beside the directory is still too deep")
+}
+
+// A walk that starts below the repository root counts its depth from where
+// it starts: a Gradle build six directories down is read with its modules.
+func TestListSourcesCountsDepthFromItsRoot(t *testing.T) {
+	fsys := fstest.MapFS{
+		"a/b/c/d/e/f/settings.gradle":                {Data: []byte("include ':app', ':lib'\n")},
+		"a/b/c/d/e/f/app/build.gradle":               {Data: []byte("dependencies {\n    implementation project(':lib')\n}\n")},
+		"a/b/c/d/e/f/lib/build.gradle":               {Data: []byte("plugins { id 'java-library' }\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/build.gradle":       {Data: []byte("\n")},
+		"a/b/c/d/e/f/1/2/3/4/5/6/7/build.gradle":     {Data: []byte("\n")},
+		"a/b/c/d/e/f/lib/1/2/3/4/5/6/7/build.gradle": {Data: []byte("\n")},
+	}
+	files, capped, err := listSources(fsys, "a/b/c/d/e/f", "a/b/c/d/e/f/lib", func(f string) bool { return isGradleFile(path.Base(f)) })
+	require.NoError(t, err)
+	assert.False(t, capped)
+	assert.Equal(t, []string{
+		"a/b/c/d/e/f/1/2/3/4/5/6/build.gradle",
+		"a/b/c/d/e/f/app/build.gradle",
+		"a/b/c/d/e/f/lib/build.gradle",
+		"a/b/c/d/e/f/settings.gradle",
+	}, files)
+	b := gradleBuildAt(fsys, "a/b/c/d/e/f/lib")
+	require.NotNil(t, b)
+	assert.Equal(t, []string{"a/b/c/d/e/f/lib"}, b.modules["a/b/c/d/e/f/app"])
+}
+
+// A directory is compared in the composed form of its name, as an entry's
+// path is: a volume may hold the name decomposed where the caller composes
+// it.
+func TestListSourcesComparesComposedNames(t *testing.T) {
+	const decomposed, composed = "cafe\u0301", "caf\u00e9"
+	const below = "/1/2/3/4/5/6/7"
+	fsys := fstest.MapFS{decomposed + below + "/go.mod": {Data: []byte("module example.invalid/checkout\n")}}
+	files, _, err := listSources(fsys, ".", composed+below, func(string) bool { return true })
+	require.NoError(t, err)
+	assert.Equal(t, []string{decomposed + below + "/go.mod"}, files, "the directories on the way are entered however deep")
 }
 
 func TestExtract_TestContentIsNotRead(t *testing.T) {

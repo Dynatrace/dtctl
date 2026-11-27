@@ -7,6 +7,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Discovery runs inside a developer's checkout, which can be anything from one
@@ -325,7 +327,7 @@ func dirSource(dir string) string {
 // dir, and reports whether it stopped at maxFiles; only kept files count
 // toward that. The directories on the way to dir are entered whatever their
 // depth or name, short of skippedDirs: discovery asked about a directory
-// reads it.
+// reads it. Depth is counted from root, and below dir from dir (see depth).
 func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []string, capped bool, err error) {
 	err = fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, walkErr error) error {
 		switch {
@@ -336,7 +338,7 @@ func listSources(fsys fs.FS, root, dir string, keep func(string) bool) (files []
 			return nil
 		case d.IsDir():
 			if p != root && (skippedDirs[d.Name()] || (!onPath(p, dir) &&
-				(strings.Count(p, "/")+1 > maxDepth || excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))]))) {
+				(depth(p, root, dir) > maxDepth || excludedDirs[strings.ToLower(strings.TrimPrefix(d.Name(), "."))]))) {
 				return fs.SkipDir
 			}
 			return nil
@@ -391,9 +393,39 @@ func inSkippedDir(dir string) bool {
 // onPath reports whether p is dir or one of its ancestors. Discovery asked
 // about a directory reads it whatever it is called: a repository that keeps
 // its deployables under examples/<name> still discovers from
-// examples/checkout.
+// examples/checkout. Names are compared composed, as an entry's path is: a
+// volume may spell a name decomposed that a caller composes.
 func onPath(p, dir string) bool {
-	return p == dir || strings.HasPrefix(dir, p+"/")
+	_, ok := below(dir, p)
+	return ok
+}
+
+// below reports whether p is base or lies below it, and how many directories
+// below, comparing names in their composed form.
+func below(p, base string) (levels int, ok bool) {
+	p, base = norm.NFC.String(p), norm.NFC.String(base)
+	switch {
+	case base == "." && p != ".":
+		return strings.Count(p, "/") + 1, true
+	case p == base:
+		return 0, true
+	case strings.HasPrefix(p, base+"/"):
+		return strings.Count(p[len(base):], "/"), true
+	}
+	return 0, false
+}
+
+// depth is how many directories p lies below where the reading of it
+// starts: the walk's root, or dir for what lies below the directory
+// discovery was asked about. The bound is on how far a walk descends, not on
+// where in the repository it happens: a build six directories down is read
+// with its modules, and a deep directory with what it holds.
+func depth(p, root, dir string) int {
+	levels, _ := below(p, root)
+	if under, ok := below(p, dir); ok {
+		levels = min(levels, under)
+	}
+	return levels
 }
 
 // testFile reports whether a file is a test's own: a word of its name, split
