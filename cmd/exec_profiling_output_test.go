@@ -670,3 +670,30 @@ func TestExecProfiling_AppOnlyNoteNamesWhatItCounts(t *testing.T) {
 	require.Zero(t, code, stderr)
 	require.Contains(t, stdout, "# 2 of 2 functions, by self running samples (100 running samples in the window)\n")
 }
+
+// The envelope keeps the warning the printer raised for a format it cannot
+// carry when the command adds one of its own.
+func TestExecProfiling_AgentKeepsTheFormatWarning(t *testing.T) {
+	const csv = "-o csv is not supported inside the agent envelope"
+	cases := []struct {
+		name, body string
+		args       []string
+		own        string
+	}{
+		{"stacks", profilingTree, []string{"hotspots", testProcess, "--limit", "1"}, "showing 1 of 5 stacks"},
+		{"functions", profilingTree, []string{"hotspots", testProcess, "--view", "functions", "--limit", "1"}, "showing 1 of 4 functions"},
+		{"empty", `{"dataRootNodeId":"0","dataNodes":[]}`, []string{"hotspots", testProcess}, "no stacks for"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			newProfilingAPI(t, http.StatusOK, tc.body)
+			code, stdout, stderr := runProfilingStreams(t, append(tc.args, "--agent", "-o", "csv")...)
+			require.Zero(t, code, stderr)
+			var env profilingEnvelope
+			require.NoError(t, json.Unmarshal([]byte(stdout), &env), stdout)
+			require.Len(t, env.Context.Warnings, 2, stdout)
+			require.Contains(t, env.Context.Warnings[0], csv)
+			require.Contains(t, env.Context.Warnings[1], tc.own)
+		})
+	}
+}

@@ -588,7 +588,7 @@ func printProfilingStacks(ctx context.Context, run *profilingRun, o profilingSta
 			ap.SetTotal(o.total)
 			if truncated != "" {
 				ap.SetHasMore(true)
-				ap.SetWarnings([]string{truncated})
+				addProfilingWarnings(ap, truncated)
 			}
 			ap.SetSuggestions([]string{o.suggestion})
 		}
@@ -605,6 +605,13 @@ func printProfilingStacks(ctx context.Context, run *profilingRun, o profilingSta
 		return nil
 	}
 	return newProfilingPrinter(ctx).PrintList(o.rows)
+}
+
+// addProfilingWarnings adds the command's warnings to the envelope after any
+// the printer already raised, such as the one for a -o format the envelope
+// cannot carry. SetWarnings alone would replace that one.
+func addProfilingWarnings(ap *output.AgentPrinter, warnings ...string) {
+	ap.SetWarnings(append(ap.Context().Warnings, warnings...))
 }
 
 func capProfilingRows[T any](rows []T, limit int) []T {
@@ -747,7 +754,7 @@ func printProfilingRows(ctx context.Context, run *profilingRun, view, state stri
 		ap.SetTotal(total)
 		if len(warnings) > 0 {
 			ap.SetHasMore(true)
-			ap.SetWarnings(warnings)
+			addProfilingWarnings(ap, warnings...)
 		}
 		ap.SetSuggestions(hints)
 	}
@@ -778,7 +785,7 @@ func printProfilingEmpty(ctx context.Context, run *profilingRun, view, state str
 		if ap := enrichAgent(p, "exec", "profiling"); ap != nil {
 			run.annotate(ap, view, state)
 			ap.SetTotal(0)
-			ap.SetWarnings([]string{note})
+			addProfilingWarnings(ap, note)
 		}
 		return p.PrintList(empty)
 	}
