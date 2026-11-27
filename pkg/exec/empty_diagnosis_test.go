@@ -164,6 +164,101 @@ func TestEmptyResultAdvice_DiagnosesTheTypedQuery(t *testing.T) {
 	}
 }
 
+// The head of the scoped sample is cut from the sent text by the scan that
+// placed the inserted stage, not by counting stages: a block comment that
+// holds a pipe is one stage to Grail and two to splitStages, and a head
+// rebuilt from that count ends before the inserted filter.
+func TestEmptyResultAdvice_ScopedSampleKeepsTheInsertedStage(t *testing.T) {
+	const inserted = `| filter (k8s.workload.name == "checkout")`
+	for _, tc := range []struct{ name, typed, sent, probe string }{
+		{
+			name:  "a block comment that holds a pipe",
+			typed: `fetch logs, from:now()-1h /* | filter x */ | filter mesage == "example"`,
+			sent:  "fetch logs, from:now()-1h /* | filter x */ " + inserted + "\n" + `| filter mesage == "example"`,
+			probe: "fetch logs, from:now()-1h /* | filter x */ " + inserted + " | limit 100",
+		},
+		{
+			name:  "a line comment after the fetch stage",
+			typed: "fetch logs // newest first\n| filter mesage == \"example\"",
+			sent:  "fetch logs // newest first\n" + inserted + "\n| filter mesage == \"example\"",
+			probe: "fetch logs // newest first\n" + inserted + " | limit 100",
+		},
+		{
+			name:  "a pipe inside a triple-quoted string",
+			typed: `fetch logs | filter mesage == """a "|" b"""`,
+			sent:  "fetch logs " + inserted + "\n" + `| filter mesage == """a "|" b"""`,
+			probe: "fetch logs " + inserted + " | limit 100",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return logSample(), nil }}
+			e := &DQLExecutor{probe: p.run}
+			e.emptyResultAdvice(tc.sent, recordsResponse(), nil, DQLExecuteOptions{TypedQuery: tc.typed})
+			if len(p.calls) != 1 || p.calls[0] != tc.probe {
+				t.Errorf("probe calls = %q, want %q", p.calls, tc.probe)
+			}
+		})
+	}
+}
+
+// A sent text that is not the typed one plus a stage after its fetch stage
+// has no head the sample could be vouched for, so no sample is taken.
+func TestEmptyResultAdvice_UnreadableRewriteIsNotSampled(t *testing.T) {
+	for name, sent := range map[string]string{
+		"does not scan":           `fetch logs | filter (k8s.workload.name == "checkout"` + "\n" + `| filter mesage == "x"`,
+		"another fetch stage":     `fetch spans | filter (k8s.workload.name == "checkout")` + "\n" + `| filter mesage == "x"`,
+		"no stage more":           `fetch logs | filter message == "x"`,
+		"two stages more":         `fetch logs | filter (a == 1) | filter (b == 2)` + "\n" + `| filter mesage == "x"`,
+		"more in the fetch stage": `fetch logs samplingRatio:10 | filter (k8s.workload.name == "checkout")` + "\n" + `| filter mesage == "x"`,
+		"a stage at the far end":  `fetch logs | filter mesage == "x" | filter (k8s.workload.name == "checkout")`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return logSample(), nil }}
+			e := &DQLExecutor{probe: p.run}
+			reason, _ := e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{TypedQuery: `fetch logs | filter mesage == "x"`})
+			if len(p.calls) != 0 || reason != nil {
+				t.Errorf("probe calls = %q, reason = %+v, want neither", p.calls, reason)
+			}
+		})
+	}
+}
+
+// The sample under an inserted stage filters before its limit, so it reads
+// until 100 records match. A scanLimitGBytes on the fetch stage would be
+// copied into it and replace the probe's own 1 GB cap, so no sample is taken.
+// The unscoped sample stops at its first 100 records and is left as it was.
+func TestEmptyResultAdvice_ScopedSampleNeedsTheProbesScanCap(t *testing.T) {
+	const typed = `fetch logs, scanLimitGBytes:-1 | filter mesage == "x"`
+	const sent = `fetch logs, scanLimitGBytes:-1 | filter (k8s.workload.name == "checkout")` + "\n" + `| filter mesage == "x"`
+
+	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return logSample(), nil }}
+	e := &DQLExecutor{probe: p.run}
+	reason, sugg := e.emptyResultAdvice(sent, recordsResponse(), nil, DQLExecuteOptions{TypedQuery: typed})
+	if len(p.calls) != 0 || reason != nil {
+		t.Errorf("probe calls = %q, reason = %+v, want neither", p.calls, reason)
+	}
+	if !hasSuggestion(sugg, "DEFAULT query window") {
+		t.Errorf("the window advice stays: %v", sugg)
+	}
+
+	// The word in a comment or a string sets nothing.
+	for _, fetch := range []string{"fetch logs // scanLimitGBytes:-1\n", `fetch logs, from:toTimestamp("scanLimitGBytes")`} {
+		p.calls = nil
+		e.emptyResultAdvice(fetch+` | filter (k8s.workload.name == "checkout")`+"\n"+`| filter mesage == "x"`, recordsResponse(), nil,
+			DQLExecuteOptions{TypedQuery: fetch + ` | filter mesage == "x"`})
+		if len(p.calls) != 1 {
+			t.Errorf("%s: probe calls = %q, want one", fetch, p.calls)
+		}
+	}
+
+	// Control: the same text sent as typed is sampled as on main.
+	p.calls = nil
+	e.emptyResultAdvice(typed, recordsResponse(), nil, DQLExecuteOptions{})
+	if len(p.calls) != 1 || p.calls[0] != "fetch logs, scanLimitGBytes:-1 | limit 100" {
+		t.Errorf("control: probe calls = %q", p.calls)
+	}
+}
+
 func TestEmptyResultAdvice_FieldProbeKeepsUserWindow(t *testing.T) {
 	p := &fakeProbe{respond: func(string) (*DQLQueryResponse, error) { return logSample(), nil }}
 	e := &DQLExecutor{probe: p.run}

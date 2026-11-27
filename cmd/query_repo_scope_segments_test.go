@@ -558,6 +558,35 @@ func TestQueryRepoScope_EmptyResultSampleStaysInScope(t *testing.T) {
 	}
 	require.Contains(t, posts[1], filter+` | limit 100"`)
 
+	// A block comment that holds a pipe does not move the sample out of the
+	// scope: its head is cut where the scan placed the inserted stage.
+	const commented = `fetch logs, from:now()-1h /* | filter x */ | filter loglevl == "ERROR"`
+	srv = segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
+	code, _, stderr = runRepoScoped([]string{"query", commented, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	posts = nil
+	for _, r := range srv.requests() {
+		if strings.Contains(r, "/query:execute") {
+			posts = append(posts, r)
+		}
+	}
+	require.Len(t, posts, 2, "the query and its sample")
+	require.Contains(t, posts[1], `/* | filter x */ | `+filter+` | limit 100"`)
+	require.Contains(t, posts[1], sentSegments)
+
+	// A fetch stage with its own scan limit would carry it into the sample,
+	// over the sample's 1 GB cap, so a scoped query takes none.
+	srv = segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
+	code, _, stderr = runRepoScoped([]string{"query", `fetch logs, scanLimitGBytes:-1 | filter loglevl == "ERROR"`, "--agent"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	posts = nil
+	for _, r := range srv.requests() {
+		if strings.Contains(r, "/query:execute") {
+			posts = append(posts, r)
+		}
+	}
+	require.Len(t, posts, 1, "the query alone")
+
 	// Unscoped, the sample is main's: the fetch stage alone, and no segment
 	// the query was given.
 	srv = segmentRecorder(t, answer(http.StatusOK, `{"state":"SUCCEEDED","result":{"records":[]}}`))
