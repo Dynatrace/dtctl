@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Dynatrace/dtctl/pkg/client"
@@ -226,5 +228,43 @@ func TestRepoScopeOnDiskDirFoldsCaseAfterComposing(t *testing.T) {
 		dir, err := repoScopeOnDiskDir(repo, typed)
 		require.NoError(t, err, "%+q", typed)
 		require.True(t, strings.HasPrefix(dir, "Café"), "%+q", dir)
+	}
+}
+
+// --plain keeps what each command prints for a person: rows become JSON,
+// like every list of dtctl, and the one entry of current and describe stays
+// the lines a terminal reads. Pinned so that a change to it is a decision.
+func TestRepoScopePlainOutput(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, monorepoScope)
+	chdirSubdir(t, "services/checkout")
+	code, stdout, stderr := runRepoScoped([]string{"repo-scope", "list", "--plain"}, RunOptions{})
+	require.Zero(t, code, stderr)
+	var entries []reposcope.Entry
+	require.NoError(t, json.Unmarshal([]byte(stdout), &entries), stdout)
+	require.Len(t, entries, 2)
+	for _, verb := range []string{"current", "describe"} {
+		_, terminal, _ := runRepoScoped([]string{"repo-scope", verb}, RunOptions{})
+		code, stdout, stderr := runRepoScoped([]string{"repo-scope", verb, "--plain"}, RunOptions{})
+		require.Zero(t, code, stderr)
+		require.Equal(t, terminal, stdout, verb)
+		require.Contains(t, stdout, "checkout", verb)
+		require.False(t, strings.HasPrefix(stdout, "{"), stdout)
+	}
+}
+
+// Completion offers the names the file defines for the context's
+// environment, for the one argument each command takes.
+func TestRepoScopeCompletesEntryNames(t *testing.T) {
+	localRepoScopeConfig(t)
+	chdirTestRepo(t, monorepoScope)
+	for _, verb := range []string{"set", "describe", "delete"} {
+		c := find(rootCmd, "repo-scope", verb)
+		require.NotNil(t, c.ValidArgsFunction, verb)
+		names, directive := c.ValidArgsFunction(c, nil, "")
+		require.Equal(t, []string{"checkout", "ledger"}, names, verb)
+		require.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive, verb)
+		names, _ = c.ValidArgsFunction(c, []string{"checkout"}, "")
+		require.Empty(t, names, verb)
 	}
 }

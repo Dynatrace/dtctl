@@ -302,6 +302,10 @@ func TestResolve_StatusIsACopy(t *testing.T) {
 	require.NoError(t, err)
 	r.Entry.ServiceNames[0] = "cart"
 	r.Entry.Workloads[0].Name = "cart"
+	require.NotEmpty(t, r.Entry.ProcessGroups)
+	require.NotEmpty(t, r.Entry.Services)
+	r.Entry.ProcessGroups[0] = "PROCESS_GROUP-0000000000000000"
+	r.Entry.Services[0] = "SERVICE-0000000000000000"
 	r.Entry.Segments[0].Variables["env"][0] = "stage"
 	r.Entry.Segments[0].Variables["more"] = []string{"x"}
 	want := exampleFile()
@@ -311,6 +315,8 @@ func TestResolve_StatusIsACopy(t *testing.T) {
 	// Entries hands out a copy too.
 	entries := f.Entries(prodHost)
 	entries[0].ServiceNames[0] = "cart"
+	entries[0].ProcessGroups[0] = "PROCESS_GROUP-0000000000000000"
+	entries[0].Services[0] = "SERVICE-0000000000000000"
 	entries[1] = Entry{}
 	assert.Equal(t, want, f)
 	assert.Nil(t, f.Entries(stgHost+".invalid"))
