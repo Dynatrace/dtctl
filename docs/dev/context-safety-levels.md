@@ -228,8 +228,10 @@ The rules live in `loginSafetyLevels` in `cmd/auth.go`:
 
 The scopes follow the level dtctl *enforces*, which in an auto-discovered
 project config is the declared level clamped to the global binding of the token
-the login writes (`Config.EffectiveSafetyLevelFor`). The declared level is what
-gets saved; the file is not rewritten to the clamped one.
+the login writes (`Config.EffectiveSafetyLevelFor`). What is saved follows the
+three rules above; the clamped level is never written. When several global
+contexts bind the token, the binding is the most restrictive of their levels by
+rank, and a level that is not valid in any of them stops the login.
 
 The clamp is by rank, and the scope sets are not nested (`readonly` requests six
 read scopes `readwrite-mine` does not), so in a project config the login requests
@@ -239,9 +241,11 @@ scopes that way; a context clamped to the binding's level requests all of it.
 
 A login replaces the stored token, which is keyed by OAuth tier and token name.
 Before the browser opens, the login names every other context on the same tier
-and token name, in the loaded config and in the global one, whose level requests
-a scope the login does not. The client credentials grant does not request the
-level's scopes, so there the login only says that the shared token is replaced.
+and token name, in the loaded config and in the global one, whose own login
+would request a scope this one does not, and every such context on another
+environment, whatever its scopes. The client credentials grant does not request
+the level's scopes, so there the login only says that the shared token is
+replaced.
 
 ## Implementation Notes
 

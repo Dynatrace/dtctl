@@ -922,15 +922,16 @@ Safety level:
   value that is not a safety level is refused until it has one
   (dtctl ctx set <name> --safety-level <level>, or --safety-level here).
 
-  In a directory with a .dtctl.yaml, dtctl enforces no more for a context than
-  the global config grants its token. The login requests the scopes of that
-  level, for a new context and with --safety-level too, and says so. It
-  leaves out any scope of that level the granted one does not request
-  (readonly under a readwrite-mine grant).
+  For an auto-discovered .dtctl.yaml, dtctl enforces no more for a context
+  than the global config grants its token. The browser login requests the
+  scopes of that level, for a new context and with --safety-level too, and
+  says so when that is less than was asked for. It leaves out any scope of
+  that level the granted one does not request (readonly under a
+  readwrite-mine grant).
 
   A login replaces the stored token. If another context uses the same token
-  and its level needs scopes this login does not request, the login names it
-  before the browser opens.
+  and its level needs scopes this login does not request, or it is on another
+  environment, the browser login names it before the browser opens.
 
 Token storage:
   By default, OAuth tokens are stored in the OS keyring (macOS Keychain, Windows
