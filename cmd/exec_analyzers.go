@@ -38,7 +38,7 @@ Examples:
   # Execute and wait for completion (default)
   dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json
 
-  # Start the analyzer and return immediately without waiting for the result
+  # Do not poll for completion; return the initial response (result or request token)
   dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json --no-wait
 
   # Output as JSON
@@ -93,7 +93,7 @@ Examples:
 		},
 	}
 	c.Flags().Bool("validate", false, "validate input without executing")
-	c.Flags().Bool("no-wait", false, "return immediately instead of waiting for analyzer execution to complete")
+	c.Flags().Bool("no-wait", false, "do not poll for completion: return after the initial request (the API call itself waits up to 30s), with a request token if the analyzer is still running")
 	stability.MarkFlagStable(c, "no-wait")
 	c.Flags().Int("timeout", 300, "timeout in seconds when waiting for completion")
 	stability.MarkFlag(c, "timeout", stability.Experimental, pre10Since)

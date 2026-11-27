@@ -92,7 +92,7 @@ dtctl exec analyzer dt.statistics.GenericForecastAnalyzer \
   --input '{"query":"timeseries avg(dt.host.cpu.usage)"}'
 dtctl exec analyzer dt.statistics.GenericForecastAnalyzer -f input.json
 
-# Execute and wait for completion (default; --no-wait returns immediately)
+# Execute and wait for completion (default; --no-wait skips polling and returns the initial response, which waits up to 30s server-side and carries a request token if the analyzer is still running)
 dtctl exec analyzer dt.statistics.GenericForecastAnalyzer \
   -f input.json --timeout 300
 ```
