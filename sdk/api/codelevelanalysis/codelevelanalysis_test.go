@@ -489,20 +489,69 @@ func TestRunRejectsUnknownKind(t *testing.T) {
 
 // Every kind constant names its endpoint.
 func TestKindsBuildTheirPaths(t *testing.T) {
+	const base = "/platform-reserved/codelevelanalysis/v0.1"
+	// Every parameter set, so that each kind shows which ones it sends. The
+	// query is in the order url.Values encodes it, by key.
+	all := Payload{EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2, Type: "t", Method: "m", ProblemID: "P-1",
+		ServiceFilter: "sf", ShowWaiting: true, SurvivorsOnly: true, TypeFilter: "tf", APIFilter: "af", MethodFQNFilter: "mf"}
 	cases := map[Kind]string{
-		KindHotspots:          "/methodhotspots/PROCESS_GROUP-ABC?",
-		KindThreads:           "/threadanalysis/PROCESS_GROUP-ABC?",
-		KindAllocations:       "/memoryallocation/PROCESS_GROUP-ABC?",
-		KindAllocationDetails: "/memoryallocationdetails/PROCESS_GROUP-ABC?",
+		KindHotspots:          base + "/methodhotspots/PROCESS_GROUP-ABC?from=1&servicefilter=sf&showWaiting=true&to=2",
+		KindThreads:           base + "/threadanalysis/PROCESS_GROUP-ABC?from=1&servicefilter=sf&showWaiting=true&to=2",
+		KindAllocations:       base + "/memoryallocation/PROCESS_GROUP-ABC?apiFilter=af&from=1&methodFqnFilter=mf&problemId=P-1&survivorsOnly=true&to=2&typeFilter=tf",
+		KindAllocationDetails: base + "/memoryallocationdetails/PROCESS_GROUP-ABC?apiFilter=af&from=1&method=m&methodFqnFilter=mf&problemId=P-1&survivorsOnly=true&to=2&type=t&typeFilter=tf",
 	}
 	for kind, want := range cases {
-		p := Payload{Kind: kind, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2, Type: "t", Method: "m"}
+		p := all
+		p.Kind = kind
 		if err := validate(p); err != nil {
 			t.Errorf("validate(kind=%q): %v", kind, err)
 		}
-		if path := buildSubmitPath(p); !strings.Contains(path, want) {
-			t.Errorf("kind %q: path %q does not contain %q", kind, path, want)
+		if path := buildSubmitPath(p); path != want {
+			t.Errorf("kind %q: path %q\nwant         %q", kind, path, want)
 		}
+	}
+	// Nothing optional set: only the window.
+	bare := Payload{Kind: KindAllocationDetails, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2, Type: "t", Method: "m"}
+	if got, want := buildSubmitPath(bare), base+"/memoryallocationdetails/PROCESS_GROUP-ABC?from=1&method=m&to=2&type=t"; got != want {
+		t.Errorf("path %q\nwant %q", got, want)
+	}
+}
+
+// A context cancelled while the analysis is polled ends the run with the
+// context's error in the poll phase, and no further poll is sent.
+func TestRunCancelledWhilePolling(t *testing.T) {
+	old := pollInterval
+	pollInterval = time.Millisecond
+	t.Cleanup(func() { pollInterval = old })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var polls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/result") && polls.Add(1) == 2 {
+			cancel()
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"token":"tok-cancel"}`))
+	}))
+	defer srv.Close()
+	c, err := httpclient.New(srv.URL, httpclient.WithToken("dt0c01.test"), httpclient.WithRetry(0, 0, 0))
+	if err != nil {
+		t.Fatalf("httpclient.New: %v", err)
+	}
+
+	_, err = NewHandler(c).Run(ctx, Payload{Kind: KindHotspots, EntityID: "PROCESS_GROUP-ABC", From: 1, To: 2})
+	var runErr *Error
+	// The context's error itself, not a poll failure that happens to wrap it
+	// after the polls that a cancelled context fails were counted out.
+	if !errors.As(err, &runErr) || runErr.Phase != PhasePoll || runErr.Err != context.Canceled {
+		t.Fatalf("err = %v (%T), want context.Canceled in the poll phase", err, err)
+	}
+	if errors.Is(err, ErrNotCompleted) {
+		t.Errorf("a cancelled run is reported as one that did not complete: %v", err)
+	}
+	if n := polls.Load(); n < 2 || n > 3 {
+		t.Errorf("%d polls were sent, want the run to end at the second", n)
 	}
 }
 
@@ -651,6 +700,8 @@ func TestThrottleWait(t *testing.T) {
 		{"-99999999999999999999", 1, 5 * time.Second},
 		{"-1", 1, 5 * time.Second},
 		{"soon", 2, 10 * time.Second},
+		// An HTTP date that has passed is no wait at all.
+		{"Wed, 21 Oct 2015 07:28:00 GMT", 3, 0},
 	}
 	for _, tc := range cases {
 		raw := &http.Response{Header: http.Header{}}
@@ -660,6 +711,19 @@ func TestThrottleWait(t *testing.T) {
 		if got := throttleWait(&resty.Response{RawResponse: raw}, tc.attempt); got != tc.want {
 			t.Errorf("throttleWait(Retry-After %q, attempt %d) = %s, want %s", tc.retryAfter, tc.attempt, got, tc.want)
 		}
+	}
+
+	// An HTTP date ahead is waited for, up to the cap.
+	date := func(in time.Duration) *resty.Response {
+		raw := &http.Response{Header: http.Header{}}
+		raw.Header.Set("Retry-After", time.Now().Add(in).UTC().Format(http.TimeFormat))
+		return &resty.Response{RawResponse: raw}
+	}
+	if got := throttleWait(date(30*time.Second), 1); got < 25*time.Second || got > 30*time.Second {
+		t.Errorf("throttleWait(a date 30s ahead) = %s, want about 30s", got)
+	}
+	if got := throttleWait(date(time.Hour), 1); got != 60*time.Second {
+		t.Errorf("throttleWait(a date an hour ahead) = %s, want the cap of 60s", got)
 	}
 }
 
