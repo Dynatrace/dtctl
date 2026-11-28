@@ -190,6 +190,32 @@ func TestCentralEnrichmentAndDtLabelsJSON(t *testing.T) {
 	}
 }
 
+// A stored credential without serviceAccount must round-trip without one: the
+// schema rejects "serviceAccount": "" with a 400, which made every update,
+// enable, disable and apply of such a config fail.
+func TestCredentialWithoutServiceAccountOmitsIt(t *testing.T) {
+	stored := `{"description":"c","enabled":false,"connectionId":"conn-1"}`
+	var credential Credential
+	if err := json.Unmarshal([]byte(stored), &credential); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(encoded), "serviceAccount") {
+		t.Errorf("encoded credential %s contains serviceAccount, want it omitted", encoded)
+	}
+
+	encoded, err = json.Marshal(Credential{ConnectionID: "conn-1", ServiceAccount: "sa@example.invalid"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(encoded), `"serviceAccount":"sa@example.invalid"`) {
+		t.Errorf("encoded credential %s lost its serviceAccount", encoded)
+	}
+}
+
 // Both enrichment properties are nullable and modificationPolicy NEVER in the
 // extension schema: an update must echo the stored value back unchanged. That
 // only works if an explicit false survives the round trip instead of being

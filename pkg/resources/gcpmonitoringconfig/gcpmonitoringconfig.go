@@ -148,10 +148,14 @@ type Metric struct {
 }
 
 type Credential struct {
-	Description    string `json:"description"`
-	Enabled        bool   `json:"enabled"`
-	ConnectionID   string `json:"connectionId"`
-	ServiceAccount string `json:"serviceAccount"`
+	Description  string `json:"description"`
+	Enabled      bool   `json:"enabled"`
+	ConnectionID string `json:"connectionId"`
+	// The schema rejects an empty serviceAccount (size 1..500), but a
+	// credential may legitimately carry none, e.g. one created in the UI or
+	// linked to a connection whose service account is set later. Omitting it
+	// keeps such configs writable.
+	ServiceAccount string `json:"serviceAccount,omitempty"`
 
 	// Extra keeps the members this struct does not model (unknown_fields.go).
 	Extra map[string]json.RawMessage `json:"-" yaml:"-" table:"-"`
