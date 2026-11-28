@@ -791,6 +791,63 @@ func TestPadBreakpointID(t *testing.T) {
 	}
 }
 
+func TestSnapshotBreakpointID(t *testing.T) {
+	uuid := "01a188a5" + strings.Repeat("0", 20) + "6a7b"
+	tests := []struct {
+		name string
+		rule livedebugger.BreakpointRule
+		want string
+	}{
+		{name: "revisionUuid wins", rule: livedebugger.BreakpointRule{ImmutableID: "120884", RevisionUUID: uuid}, want: uuid},
+		{name: "legacy rule (empty revisionUuid) falls back to padded immutableId", rule: livedebugger.BreakpointRule{ImmutableID: "120884", RevisionUUID: ""}, want: strings.Repeat("0", 26) + "120884"},
+		{name: "old facade (no revisionUuid) falls back to padded immutableId", rule: livedebugger.BreakpointRule{ImmutableID: "7"}, want: strings.Repeat("0", 31) + "7"},
+		{name: "nothing available", rule: livedebugger.BreakpointRule{}, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := snapshotBreakpointID(tt.rule); got != tt.want {
+				t.Fatalf("snapshotBreakpointID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildSnapshotsDQL(t *testing.T) {
+	id := strings.Repeat("0", 31) + "7"
+	tests := []struct {
+		name        string
+		workspaceID string
+		limit       int
+		want        string
+	}{
+		{
+			name:        "no limit",
+			workspaceID: "9000000000000000001",
+			want:        `fetch application.snapshots | filter breakpoint.id == toUid("` + id + `") and session.id == "9000000000000000001"`,
+		},
+		{
+			name:        "with limit",
+			workspaceID: "9000000000000000001",
+			limit:       50,
+			want:        `fetch application.snapshots | filter breakpoint.id == toUid("` + id + `") and session.id == "9000000000000000001" | limit 50`,
+		},
+		{
+			name:        "workspace id is escaped",
+			workspaceID: `a"b\c`,
+			want:        `fetch application.snapshots | filter breakpoint.id == toUid("` + id + `") and session.id == "a\"b\\c"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildSnapshotsDQL(id, tt.workspaceID, tt.limit); got != tt.want {
+				t.Fatalf("buildSnapshotsDQL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBreakpointRowFromRule_LinenoTypesAndFallbacks(t *testing.T) {
 	tests := []struct {
 		name     string

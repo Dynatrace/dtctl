@@ -21,6 +21,15 @@ func NewHandler(c *client.Client, environmentURL string) (*Handler, error) {
 	return &Handler{sdk: sdkHandler}, nil
 }
 
+// SetRetryNotice registers a callback invoked when GetWorkspaceRules falls back
+// to a query without revisionUuid (older facade). Retries are silent by default.
+func (h *Handler) SetRetryNotice(fn func(err error)) {
+	if h == nil || h.sdk == nil {
+		return
+	}
+	h.sdk.SetRetryNotice(fn)
+}
+
 func (h *Handler) GetOrCreateWorkspace(projectPath string) (map[string]interface{}, string, error) {
 	return h.sdk.GetOrCreateWorkspace(context.Background(), projectPath)
 }

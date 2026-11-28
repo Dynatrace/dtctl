@@ -102,6 +102,7 @@ func runDescribeBreakpointWithDeps(cmd *cobra.Command, identifier string, deps l
 	if err != nil {
 		return err
 	}
+	attachWorkspaceRulesRetryNotice(cmdContext(cmd), handler)
 
 	workspaceResp, workspaceID, err := deps.getOrCreateWorkspace(handler, currentProjectPath())
 	if err != nil {

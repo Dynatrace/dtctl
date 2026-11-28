@@ -18,6 +18,16 @@ type Handler struct {
 	client     *httpclient.Client
 	graphqlURL string
 	orgID      string
+
+	// retryNotice, when set, is called with the error that made
+	// GetWorkspaceRules fall back to a query without revisionUuid.
+	retryNotice func(err error)
+}
+
+// SetRetryNotice registers a callback invoked when GetWorkspaceRules retries
+// without revisionUuid. Pass nil to keep retries silent (the default).
+func (h *Handler) SetRetryNotice(fn func(err error)) {
+	h.retryNotice = fn
 }
 
 func NewHandler(c *httpclient.Client, environmentURL string) (*Handler, error) {
@@ -178,14 +188,54 @@ func (h *Handler) CreateBreakpoint(ctx context.Context, workspaceID, fileName st
 	return h.executeGraphQL(ctx, mutation, variables)
 }
 
+// revisionUuidPlaceholder marks where workspaceRulesQuery selects revisionUuid.
+const revisionUuidPlaceholder = "{{REVISION_UUID}}"
+
+// GetWorkspaceRules fetches the workspace's rules, including revisionUuid.
+// Facade versions that predate revisionUuid fail the query, so on any error it
+// retries once without that field. This is safe because the call is read-only.
+// The retry is silent unless a notice callback was set via SetRetryNotice.
 func (h *Handler) GetWorkspaceRules(ctx context.Context, workspaceID string) (map[string]interface{}, error) {
-	query := `query GetWorkspaceRules($orgId: ID!, $workspaceId: ID!) {
+	resp, err := h.getWorkspaceRules(ctx, workspaceID, true)
+	if err == nil {
+		return resp, nil
+	}
+	if ctx.Err() != nil {
+		return resp, err
+	}
+	if h.retryNotice != nil {
+		h.retryNotice(err)
+	}
+	return h.getWorkspaceRules(ctx, workspaceID, false)
+}
+
+func (h *Handler) getWorkspaceRules(ctx context.Context, workspaceID string, includeRevisionUuid bool) (map[string]interface{}, error) {
+	query := workspaceRulesQuery(includeRevisionUuid)
+
+	variables := map[string]interface{}{
+		"orgId":       h.orgID,
+		"workspaceId": workspaceID,
+	}
+
+	return h.executeGraphQL(ctx, query, variables)
+}
+
+func workspaceRulesQuery(includeRevisionUuid bool) string {
+	revisionField := ""
+	if includeRevisionUuid {
+		revisionField = "revisionUuid"
+	}
+	return strings.Replace(workspaceRulesQueryTemplate, revisionUuidPlaceholder, revisionField, 1)
+}
+
+const workspaceRulesQueryTemplate = `query GetWorkspaceRules($orgId: ID!, $workspaceId: ID!) {
 	org(id: $orgId) {
 		id
 		workspace(id: $workspaceId) {
 			rules {
 				id
 				immutableId
+				` + revisionUuidPlaceholder + `
 				template_id
 				template_type
 				selector
@@ -230,14 +280,6 @@ func (h *Handler) GetWorkspaceRules(ctx context.Context, workspaceID string) (ma
 		}
 	}
 }`
-
-	variables := map[string]interface{}{
-		"orgId":       h.orgID,
-		"workspaceId": workspaceID,
-	}
-
-	return h.executeGraphQL(ctx, query, variables)
-}
 
 func (h *Handler) DeleteBreakpoint(ctx context.Context, workspaceID, ruleID string) (map[string]interface{}, error) {
 	mutation := `mutation DeleteRule($orgId: ID!, $workspaceId: ID!, $ruleId: ID!) {
