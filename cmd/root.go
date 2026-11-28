@@ -889,8 +889,8 @@ func errorToDetail(ctx context.Context, err error) *output.ErrorDetail {
 		}
 	}
 
-	// HeaderRefusedError — the embedding caller's header policy refused an
-	// `exec api -H` header.
+	// HeaderRefusedError — an `exec api -H` header was refused by the embedding
+	// caller's header policy or repeats a session header.
 	var headerErr *HeaderRefusedError
 	if errors.As(err, &headerErr) {
 		return &output.ErrorDetail{
@@ -1791,6 +1791,11 @@ func newClientFromConfig(ctx context.Context, cfg *config.Config) (*client.Clien
 	// only; see Session.Transport.
 	if s := currentSession(ctx); s != nil && s.Transport != nil {
 		c.HTTP().SetTransport(s.Transport)
+	}
+	// The session's headers ride on every request this client sends. They
+	// cannot name one of dtctl's own; see Session.Headers.
+	if s := currentSession(ctx); s != nil && len(s.Headers) > 0 {
+		applySessionHeaders(c, s.Headers)
 	}
 	// If --debug flag is set, force verbosity to 2 (full debug mode)
 	if debugMode(ctx) {

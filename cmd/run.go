@@ -64,11 +64,13 @@ type RunOptions struct {
 	BlockedCommands map[string]string
 
 	// HeaderPolicy lets the embedding caller refuse request headers passed to
-	// `exec api -H`. It receives the normalized header name (canonicalized,
-	// "_" folded to "-") and returns why the header is refused, or "" to allow
-	// it. A refusal is a HeaderRefusedError (agent-mode code "header_refused"),
-	// returned before any request is sent and before --dry-run prints one. nil
-	// applies only the CLI's own refusals (Authorization, Proxy-Authorization).
+	// `exec api -H`, and the session's own Headers. It receives the normalized
+	// header name (canonicalized, "_" folded to "-") and returns why the header
+	// is refused, or "" to allow it. A refusal is a HeaderRefusedError
+	// (agent-mode code "header_refused"), returned before any request is sent
+	// and before --dry-run prints one. nil applies only the CLI's own refusals
+	// (Authorization, Proxy-Authorization, and for Session.Headers the rest of
+	// ValidateSessionHeaders).
 	HeaderPolicy func(name string) string
 
 	// Context carries the request's context into the Cobra command tree so

@@ -129,22 +129,22 @@ func TestSessionValidatesStability(t *testing.T) {
 
 	s := base()
 	s.MinStability = "beta"
-	require.ErrorContains(t, s.validate(), "session:")
+	require.ErrorContains(t, s.validate(nil), "session:")
 
 	// The development tier is not a floor value: there is no way to reach that
 	// surface from a session, by design.
 	s = base()
 	s.MinStability = "development"
-	require.ErrorContains(t, s.validate(), "session:")
+	require.ErrorContains(t, s.validate(nil), "session:")
 
 	s = base()
 	s.StabilityExceptions = []string{"query --decode-snapshots --extra"}
-	require.ErrorContains(t, s.validate(), "session:")
+	require.ErrorContains(t, s.validate(nil), "session:")
 
 	s = base()
 	s.MinStability = config.StabilityExperimental
 	s.StabilityExceptions = []string{"get breakpoints", "query --decode-snapshots"}
-	require.NoError(t, s.validate())
+	require.NoError(t, s.validate(nil))
 }
 
 // TestSessionScrubsSurfaceShapingEnvVars: which commands exist for a request
@@ -384,7 +384,7 @@ func TestSessionRejectsInvalidProfileDefinition(t *testing.T) {
 		{Name: "p", Commands: []string{"dtctl query"}},
 	} {
 		s := &Session{EnvironmentURL: "https://x.example.invalid", Token: "t", Profile: p}
-		require.Error(t, s.validate(), "profile %+v", p)
+		require.Error(t, s.validate(nil), "profile %+v", p)
 	}
 }
 
